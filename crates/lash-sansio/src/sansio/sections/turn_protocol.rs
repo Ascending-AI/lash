@@ -112,6 +112,12 @@ fn render_message_origin(origin: &MessageOrigin) -> String {
             Some(input_id) => format!("turn input {input_id} on turn {turn_id}"),
             None => format!("turn input on turn {turn_id}"),
         },
+        MessageOrigin::TurnOutput { turn_id, source } => match source {
+            crate::TurnOutputSource::Runtime => format!("turn output on turn {turn_id}"),
+            crate::TurnOutputSource::Plugin { plugin_id } => {
+                format!("turn output from plugin {plugin_id} on turn {turn_id}")
+            }
+        },
     }
 }
 

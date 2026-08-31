@@ -752,6 +752,36 @@ fn turn_input_origin_wire_shape_is_tagged_and_omits_an_absent_input_id() {
 }
 
 #[test]
+fn turn_output_origin_wire_shape_preserves_typed_source() {
+    let origin = MessageOrigin::TurnOutput {
+        turn_id: "queued-drain-1".to_string(),
+        source: TurnOutputSource::Plugin {
+            plugin_id: "lash.rlm".to_string(),
+        },
+    };
+    assert_eq!(
+        serde_json::to_value(&origin).expect("serialize turn output origin"),
+        serde_json::json!({
+            "kind": "turn_output",
+            "turn_id": "queued-drain-1",
+            "source": { "kind": "plugin", "plugin_id": "lash.rlm" },
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<MessageOrigin>(
+            serde_json::to_value(origin).expect("serialize turn output origin")
+        )
+        .expect("deserialize turn output origin"),
+        MessageOrigin::TurnOutput {
+            turn_id: "queued-drain-1".to_string(),
+            source: TurnOutputSource::Plugin {
+                plugin_id: "lash.rlm".to_string(),
+            },
+        }
+    );
+}
+
+#[test]
 fn message_origins_written_before_turn_input_provenance_still_deserialize() {
     // Snapshots written before FIG-972 have no turn-input origin: a user
     // message carried no origin at all, and plugin/process origins are

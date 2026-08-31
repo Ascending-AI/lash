@@ -483,7 +483,7 @@ pub mod messages {
     /// Read-side session-tree values exposed through integrator session views.
     pub use lash_core::session_graph::{SessionMessageTreeNode, SharedJsonValue};
     pub use lash_core::{
-        Message, MessageOrigin, MessageRole, Part, PartKind, PruneState,
+        Message, MessageOrigin, MessageRole, Part, PartKind, PruneState, TurnOutputSource,
         facade_support::MessageSequence, session_model::message::PartAttachment,
     };
 }

@@ -33,9 +33,11 @@ use super::cell::{
     CellExtraction, CellExtractionError, extract_cell, malformed_cell_fence,
     project_visible_assistant_prose_with_tags,
 };
+#[cfg(feature = "testing")]
+use super::finish::internal_assistant_prose_message;
 use super::finish::{
     finish_required_reminder_message, finish_schema_mismatch_message,
-    internal_assistant_prose_message, invalid_cell_message, no_progress_stop_message,
+    internal_assistant_prose_message_for_turn, invalid_cell_message, no_progress_stop_message,
     output_limit_retry_message, turn_limit_final_message, validate_finish_value,
 };
 use super::stall::{
@@ -198,15 +200,18 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 let mut retry_events = Vec::new();
                 let retry_prose = visible_prose;
                 if !retry_prose.trim().is_empty() || !reasoning.is_empty() {
-                    retry_events.push(conversation_event(internal_assistant_prose_message(
-                        rlm_message_id(
+                    retry_events.push(conversation_event(
+                        internal_assistant_prose_message_for_turn(
                             ctx.turn_id(),
-                            ctx.protocol_iteration(),
-                            "assistant_response",
+                            rlm_message_id(
+                                ctx.turn_id(),
+                                ctx.protocol_iteration(),
+                                "assistant_response",
+                            ),
+                            retry_prose,
+                            &reasoning,
                         ),
-                        retry_prose,
-                        &reasoning,
-                    )));
+                    ));
                 }
                 retry_events.push(conversation_event(invalid_cell_message(
                     self.dialect.as_ref(),
@@ -247,15 +252,18 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 )]));
                 let mut retry_events = Vec::new();
                 if !visible_prose.trim().is_empty() || !reasoning.is_empty() {
-                    retry_events.push(conversation_event(internal_assistant_prose_message(
-                        rlm_message_id(
+                    retry_events.push(conversation_event(
+                        internal_assistant_prose_message_for_turn(
                             ctx.turn_id(),
-                            ctx.protocol_iteration(),
-                            "assistant_response",
+                            rlm_message_id(
+                                ctx.turn_id(),
+                                ctx.protocol_iteration(),
+                                "assistant_response",
+                            ),
+                            visible_prose,
+                            &reasoning,
                         ),
-                        visible_prose,
-                        &reasoning,
-                    )));
+                    ));
                 }
                 retry_events.push(conversation_event(invalid_cell_message(
                     self.dialect.as_ref(),
@@ -291,15 +299,18 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 )]));
                 let mut retry_events = Vec::new();
                 if !assistant_text.trim().is_empty() || !reasoning.is_empty() {
-                    retry_events.push(conversation_event(internal_assistant_prose_message(
-                        rlm_message_id(
+                    retry_events.push(conversation_event(
+                        internal_assistant_prose_message_for_turn(
                             ctx.turn_id(),
-                            ctx.protocol_iteration(),
-                            "truncated_assistant_response",
+                            rlm_message_id(
+                                ctx.turn_id(),
+                                ctx.protocol_iteration(),
+                                "truncated_assistant_response",
+                            ),
+                            assistant_text,
+                            &reasoning,
                         ),
-                        assistant_text,
-                        &reasoning,
-                    )));
+                    ));
                 }
                 retry_events.push(conversation_event(output_limit_retry_message(
                     self.dialect.prompt_vocabulary(),
@@ -351,15 +362,18 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 )]));
                 let mut retry_events = Vec::new();
                 if !visible_prose.trim().is_empty() || !reasoning.is_empty() {
-                    retry_events.push(conversation_event(internal_assistant_prose_message(
-                        rlm_message_id(
+                    retry_events.push(conversation_event(
+                        internal_assistant_prose_message_for_turn(
                             ctx.turn_id(),
-                            ctx.protocol_iteration(),
-                            "assistant_response",
+                            rlm_message_id(
+                                ctx.turn_id(),
+                                ctx.protocol_iteration(),
+                                "assistant_response",
+                            ),
+                            visible_prose,
+                            &reasoning,
                         ),
-                        visible_prose,
-                        &reasoning,
-                    )));
+                    ));
                 }
                 retry_events.push(conversation_event(invalid_cell_message(
                     self.dialect.as_ref(),
@@ -395,7 +409,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 )]));
                 if !reasoning.is_empty() {
                     actions.push(DriverAction::AppendEvents(vec![conversation_event(
-                        internal_assistant_prose_message(
+                        internal_assistant_prose_message_for_turn(
+                            ctx.turn_id(),
                             rlm_message_id(
                                 ctx.turn_id(),
                                 ctx.protocol_iteration(),
@@ -431,21 +446,27 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             )]));
             let mut events = Vec::new();
             if !assistant_text.trim().is_empty() {
-                events.push(conversation_event(internal_assistant_prose_message(
-                    rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "assistant_prose"),
-                    assistant_text,
-                    &reasoning,
-                )));
-            } else if !reasoning.is_empty() {
-                events.push(conversation_event(internal_assistant_prose_message(
-                    rlm_message_id(
+                events.push(conversation_event(
+                    internal_assistant_prose_message_for_turn(
                         ctx.turn_id(),
-                        ctx.protocol_iteration(),
-                        "assistant_reasoning",
+                        rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "assistant_prose"),
+                        assistant_text,
+                        &reasoning,
                     ),
-                    String::new(),
-                    &reasoning,
-                )));
+                ));
+            } else if !reasoning.is_empty() {
+                events.push(conversation_event(
+                    internal_assistant_prose_message_for_turn(
+                        ctx.turn_id(),
+                        rlm_message_id(
+                            ctx.turn_id(),
+                            ctx.protocol_iteration(),
+                            "assistant_reasoning",
+                        ),
+                        String::new(),
+                        &reasoning,
+                    ),
+                ));
             }
             events.push(conversation_event(finish_required_reminder_message(
                 self.dialect.as_ref(),
@@ -1186,7 +1207,8 @@ fn assistant_content_event(
     let id = rlm_message_id(turn_id, protocol_iteration, "assistant_content");
     let prose = prose.trim();
     (!reasoning.is_empty() || !prose.is_empty()).then(|| {
-        conversation_event(internal_assistant_prose_message(
+        conversation_event(internal_assistant_prose_message_for_turn(
+            turn_id,
             id,
             prose.to_string(),
             reasoning,

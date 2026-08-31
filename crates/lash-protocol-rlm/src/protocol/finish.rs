@@ -23,6 +23,7 @@ pub(crate) fn turn_limit_final_message(
     }
 }
 
+#[cfg(feature = "testing")]
 pub(super) fn internal_assistant_prose_message(
     message_id: String,
     content: String,
@@ -35,6 +36,25 @@ pub(super) fn internal_assistant_prose_message(
         Some(lash_core::MessageOrigin::Plugin {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
+        }),
+    )
+}
+
+pub(super) fn internal_assistant_prose_message_for_turn(
+    turn_id: &str,
+    message_id: String,
+    content: String,
+    reasoning: &[RlmReasoningPart],
+) -> Message {
+    prose_message(
+        message_id,
+        content,
+        reasoning,
+        Some(lash_core::MessageOrigin::TurnOutput {
+            turn_id: turn_id.to_string(),
+            source: lash_core::TurnOutputSource::Plugin {
+                plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            },
         }),
     )
 }

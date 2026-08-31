@@ -168,6 +168,12 @@ fn is_internal_rlm_assistant(message: &Message) -> bool {
             plugin_id,
             transient: false,
         }) if plugin_id == crate::plugin::RLM_PROTOCOL_PLUGIN_ID
+    ) || matches!(
+        message.origin.as_ref(),
+        Some(lash_core::MessageOrigin::TurnOutput {
+            source: lash_core::TurnOutputSource::Plugin { plugin_id },
+            ..
+        }) if plugin_id == crate::plugin::RLM_PROTOCOL_PLUGIN_ID
     )
 }
 

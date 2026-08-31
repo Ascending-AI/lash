@@ -374,6 +374,12 @@ fn is_rlm_protocol_message(
             plugin_id,
             transient: false,
         }) if plugin_id == crate::plugin::RLM_PROTOCOL_PLUGIN_ID
+    ) || matches!(
+        message.origin,
+        Some(lash_core::MessageOrigin::TurnOutput {
+            source: lash_core::TurnOutputSource::Plugin { plugin_id },
+            ..
+        }) if plugin_id == crate::plugin::RLM_PROTOCOL_PLUGIN_ID
     )
 }
 

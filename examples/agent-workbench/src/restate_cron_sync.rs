@@ -267,3 +267,147 @@ where
         .insert(session_id.to_string(), active);
     Ok(())
 }
+/// Idempotency key for one cron tick's trigger occurrence.
+fn cron_occurrence_key(job_key: &str, fired_at: &str) -> String {
+    format!("workbench-cron:{job_key}:{fired_at}")
+}
+
+async fn emit_cron_occurrence(
+    state: AppState,
+    request: WorkbenchCronRequest,
+    fired_at: String,
+    controller: &lash_restate::RestateRuntimeEffectController<'_, ObjectContext<'_>>,
+) -> HandlerResult<Json<CronEmitReport>> {
+    let scoped_effect_controller = controller
+        .scoped_effect_controller(lash::runtime::ExecutionScope::runtime_operation(format!(
+            "cron:{}:{fired_at}",
+            controller.context().key()
+        )))
+        .map_err(|err| HandlerError::from(TerminalError::new(err.to_string())))?;
+    emit_cron_occurrence_with_effect_controller(
+        state,
+        request,
+        fired_at,
+        controller.context().key(),
+        scoped_effect_controller,
+    )
+    .await
+}
+
+async fn emit_cron_occurrence_with_effect_controller(
+    state: AppState,
+    request: WorkbenchCronRequest,
+    fired_at: String,
+    job_key: &str,
+    scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
+) -> HandlerResult<Json<CronEmitReport>> {
+    let report = state
+        .core
+        .triggers()
+        .emit(
+            lash::triggers::TriggerOccurrenceRequest::new(
+                CRON_SCHEDULE_SOURCE_TYPE,
+                request.source_key.clone(),
+                json!({"fired_at": fired_at}),
+                cron_occurrence_key(job_key, &fired_at),
+            )
+            .with_source(json!({"expr": request.expr, "tz": request.tz})),
+            scoped_effect_controller,
+        )
+        .await
+        .map_err(classified_embed_handler_error)?;
+    Ok(Json(CronEmitReport {
+        started_process_ids: report.started_process_ids(),
+    }))
+}
+
+async fn schedule_next(
+    ctx: &ObjectContext<'_>,
+    request: WorkbenchCronRequest,
+    now: DateTime<Utc>,
+    last_fired_at: Option<String>,
+) -> HandlerResult<WorkbenchCronState> {
+    let next = next_cron_time(&request.expr, request.tz.as_deref(), now)
+        .map_err(|err| HandlerError::from(TerminalError::new(err)))?;
+    let delay = next
+        .signed_duration_since(now)
+        .to_std()
+        .unwrap_or_else(|_| Duration::from_secs(0));
+    let handle = ctx.object_client::<WorkbenchCronJobClient>(ctx.key()).run().send_after(delay);
+    let next_execution_id = handle.await?.invocation_id().to_owned();
+    let state = WorkbenchCronState {
+        request,
+        next_execution_time: next.to_rfc3339(),
+        next_execution_id,
+        last_fired_at,
+    };
+    ctx.set(CRON_STATE_KEY, Json(state.clone()));
+    Ok(state)
+}
+
+async fn cancel_stored_execution(ctx: &ObjectContext<'_>) -> HandlerResult<()> {
+    if let Some(Json(existing)) = ctx.get::<Json<WorkbenchCronState>>(CRON_STATE_KEY).await? {
+        ctx.invocation_handle(existing.next_execution_id).cancel();
+    }
+    Ok(())
+}
+
+async fn journaled_now(
+    ctx: &ObjectContext<'_>,
+    name: &'static str,
+) -> HandlerResult<DateTime<Utc>> {
+    let now = ctx
+        .run(|| async { Ok::<_, HandlerError>(Utc::now().to_rfc3339()) })
+        .name(name)
+        .await?;
+    DateTime::parse_from_rfc3339(&now)
+        .map(|value| value.with_timezone(&Utc))
+        .map_err(|err| TerminalError::new(err.to_string()).into())
+}
+
+async fn journaled_workbench_trace(
+    ctx: &ObjectContext<'_>,
+    state: AppState,
+    session_id: String,
+    name: &'static str,
+    payload: Value,
+    effect_name: &'static str,
+) -> HandlerResult<()> {
+    ctx.run(move || {
+        let state = state.clone();
+        let session_id = session_id.clone();
+        let payload = payload.clone();
+        async move {
+            state.trace_for_session(&session_id, name, payload);
+            Ok::<(), HandlerError>(())
+        }
+    })
+    .name(effect_name)
+    .await?;
+    Ok(())
+}
+
+fn next_cron_time(
+    expr: &str,
+    tz: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<DateTime<Utc>, String> {
+    let timezone: Tz = tz
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("UTC")
+        .parse()
+        .map_err(|err| format!("invalid timezone: {err}"))?;
+    let cron = CronParser::builder()
+        .seconds(Seconds::Optional)
+        .build()
+        .parse(expr)
+        .map_err(|err| format!("invalid cron expression `{expr}`: {err}"))?;
+    let zoned_now = now.with_timezone(&timezone);
+    cron.find_next_occurrence(&zoned_now, false)
+        .map(|value| value.with_timezone(&Utc))
+        .map_err(|err| format!("cron expression `{expr}` has no next occurrence: {err}"))
+}
+
+fn cron_job_key(session_id: &str, source_key: &str) -> String {
+    format!("{session_id}:{source_key}")
+}

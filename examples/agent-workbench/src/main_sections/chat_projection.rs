@@ -41,6 +41,7 @@ fn replayed_active_user_rows(
                 .into_iter()
                 .map(ChatAttachment::from_id)
                 .collect(),
+            provenance: None,
         });
     }
     replayed_prompts
@@ -134,7 +135,43 @@ fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage
             .filter_map(|part| part.attachment.as_ref()?.source.stored_ref())
             .map(|attachment| ChatAttachment::from_id(attachment.id.to_string()))
             .collect(),
+        provenance: match message.origin.as_ref() {
+            Some(lash::messages::MessageOrigin::TurnOutput { turn_id, .. }) => {
+                Some(ChatMessageProvenance::TurnOutput {
+                    turn_id: turn_id.clone(),
+                })
+            }
+            _ => None,
+        },
     }
+}
+
+fn committed_turn_output_turn_ids(
+    read_view: &lash::persistence::SessionReadView,
+) -> BTreeSet<String> {
+    read_view
+        .messages()
+        .iter()
+        .filter_map(|message| match message.origin.as_ref() {
+            Some(lash::messages::MessageOrigin::TurnOutput { turn_id, .. }) => {
+                Some(turn_id.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn is_committed_turn_output_copy(
+    message: &ChatMessage,
+    committed_turn_output_turn_ids: &BTreeSet<String>,
+) -> bool {
+    message.role == "assistant"
+        && match message.provenance.as_ref() {
+            Some(ChatMessageProvenance::TurnOutput { turn_id }) => {
+                committed_turn_output_turn_ids.contains(turn_id)
+            }
+            None => false,
+        }
 }
 
 fn committed_chat_text(message: &lash::messages::Message) -> String {
@@ -153,6 +190,12 @@ fn is_durable_internal_rlm_message(message: &lash::messages::Message) -> bool {
         Some(lash::messages::MessageOrigin::Plugin {
             plugin_id,
             transient: false,
+        }) if plugin_id == lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID
+    ) || matches!(
+        message.origin.as_ref(),
+        Some(lash::messages::MessageOrigin::TurnOutput {
+            source: lash::messages::TurnOutputSource::Plugin { plugin_id },
+            ..
         }) if plugin_id == lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID
     )
 }
@@ -409,6 +452,7 @@ fn project_chat(
         .map(|address| address.turn_id.clone())
         .collect::<BTreeSet<_>>();
     let rlm_reply_ids = durable_rlm_reply_message_ids(read_view.messages(), &running_turn_ids);
+    let committed_turn_output_turn_ids = committed_turn_output_turn_ids(read_view);
     let replaced_committed_ids = user_replacements.keys().cloned().collect::<BTreeSet<_>>();
     let historical_ui_rows = product_messages
         .iter()
@@ -447,6 +491,9 @@ fn project_chat(
         .map(|message| message.id.clone())
         .collect::<BTreeSet<_>>();
     for message in product_messages.into_iter().chain(replayed_active_rows) {
+        if is_committed_turn_output_copy(&message, &committed_turn_output_turn_ids) {
+            continue;
+        }
         // A replaced committed message stays replaced however it reached this
         // list: the workbench mirrors committed ingress messages into the
         // product log, and that mirror is the same runtime copy for which the

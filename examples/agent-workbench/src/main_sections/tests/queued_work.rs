@@ -956,7 +956,33 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             committed_agent_replies.len(),
             1,
             "a completed wake turn must commit the agent reply exactly once, \
-             got {committed_agent_replies:?}"
+            got {committed_agent_replies:?}"
+        );
+        let Json(live_snapshot) = app_state(
+            State(state.clone()),
+            Query(SessionQuery::default()),
+        )
+        .await
+        .expect("read live wake single-reply snapshot");
+        let live_rendered_agent_rows = live_snapshot
+            .transcript
+            .iter()
+            .filter_map(|row| match row {
+                TranscriptRow::Message { message }
+                    if message.role == "assistant" && message.text.contains(WAKE_REPLY) =>
+                {
+                    Some(message.id.clone())
+                }
+                TranscriptRow::Message { .. }
+                | TranscriptRow::Reasoning { .. }
+                | TranscriptRow::CodeBlock { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            live_rendered_agent_rows.len(),
+            1,
+            "the live snapshot must render the agent reply exactly once, \
+             got {live_rendered_agent_rows:?}"
         );
         crate::restate::settle_workbench_turn(&state, &session_id, turn_id)
             .await

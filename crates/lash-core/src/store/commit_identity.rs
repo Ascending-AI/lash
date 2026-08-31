@@ -12,7 +12,7 @@ pub struct OperationId {
 }
 
 pub(super) const LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
-pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 2;
+pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 
 /// Shared backend-independent decision for an existing runtime commit receipt.
 ///
@@ -330,6 +330,17 @@ fn push_message_origin(encoded: &mut Vec<u8>, origin: &crate::MessageOrigin) {
             push_optional(encoded, input_id.as_ref(), |encoded, value| {
                 push_string(encoded, value)
             });
+        }
+        crate::MessageOrigin::TurnOutput { turn_id, source } => {
+            encoded.push(3);
+            push_string(encoded, turn_id);
+            match source {
+                crate::TurnOutputSource::Runtime => encoded.push(0),
+                crate::TurnOutputSource::Plugin { plugin_id } => {
+                    encoded.push(1);
+                    push_string(encoded, plugin_id);
+                }
+            }
         }
     }
 }

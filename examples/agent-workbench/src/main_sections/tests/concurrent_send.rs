@@ -1006,6 +1006,7 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
         text: "keep the selected view".to_string(),
         at: "2026-08-30T00:00:00Z".to_string(),
         attachments: Vec::new(),
+        provenance: None,
     });
     append_started_graph(
         &state.lashlang_execution,

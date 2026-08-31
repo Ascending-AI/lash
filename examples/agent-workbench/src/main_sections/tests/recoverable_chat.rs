@@ -1154,6 +1154,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                 text: "settled prompt".to_string(),
                 at: String::new(),
                 attachments: Vec::new(),
+                provenance: None,
             },
         },
     );
@@ -1277,6 +1278,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                 text: "host event".to_string(),
                 at: String::new(),
                 attachments: Vec::new(),
+                provenance: None,
             },
         },
     );
@@ -1314,6 +1316,7 @@ async fn product_event_route_lag_emits_durable_ordered_resync() {
                     text: format!("event {sequence}"),
                     at: String::new(),
                     attachments: Vec::new(),
+                    provenance: None,
                 },
             },
         );

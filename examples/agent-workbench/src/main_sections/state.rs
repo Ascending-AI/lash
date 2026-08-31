@@ -173,6 +173,12 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ChatMessageProvenance {
+    TurnOutput { turn_id: String },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct ChatMessage {
     id: String,
     role: String,
@@ -180,6 +186,8 @@ struct ChatMessage {
     at: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attachments: Vec<ChatAttachment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provenance: Option<ChatMessageProvenance>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -108,6 +108,13 @@ pub enum MessageRole {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TurnOutputSource {
+    Runtime,
+    Plugin { plugin_id: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MessageOrigin {
     Plugin {
         plugin_id: String,
@@ -135,6 +142,15 @@ pub enum MessageOrigin {
         /// turn was driven with its input in hand.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input_id: Option<String>,
+    },
+    /// A durable assistant output belonging to a turn. The source remains
+    /// typed so hosts can suppress their live row without parsing ids while
+    /// still recognizing protocol-owned output.
+    TurnOutput {
+        /// The turn that produced this output.
+        turn_id: String,
+        /// The runtime or plugin that authored the output.
+        source: TurnOutputSource,
     },
 }
 

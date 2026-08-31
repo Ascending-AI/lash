@@ -559,12 +559,51 @@ impl AppState {
         text: impl Into<String>,
         attachments: Vec<ChatAttachment>,
     ) -> ChatMessage {
+        self.push_message_with_id_and_attachments_and_provenance_for_session(
+            session_id,
+            id,
+            role,
+            text,
+            attachments,
+            None,
+        )
+    }
+
+    fn push_assistant_message_for_turn(
+        &self,
+        session_id: &str,
+        id: impl Into<String>,
+        turn_id: &str,
+        text: impl Into<String>,
+    ) -> ChatMessage {
+        self.push_message_with_id_and_attachments_and_provenance_for_session(
+            session_id,
+            id,
+            "assistant",
+            text,
+            Vec::new(),
+            Some(ChatMessageProvenance::TurnOutput {
+                turn_id: turn_id.to_string(),
+            }),
+        )
+    }
+
+    fn push_message_with_id_and_attachments_and_provenance_for_session(
+        &self,
+        session_id: &str,
+        id: impl Into<String>,
+        role: impl Into<String>,
+        text: impl Into<String>,
+        attachments: Vec<ChatAttachment>,
+        provenance: Option<ChatMessageProvenance>,
+    ) -> ChatMessage {
         let message = ChatMessage {
             id: id.into(),
             role: role.into(),
             text: text.into(),
             at: Utc::now().to_rfc3339(),
             attachments,
+            provenance,
         };
         let inserted = self.event_tx.publish_identified(
             session_id,
