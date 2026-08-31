@@ -311,6 +311,19 @@ mod tests {
         assert_eq!(binding.event_type_name(), "mail.Received");
     }
 
+    #[test]
+    fn mail_received_account_contract_uses_slugs() {
+        const ACCOUNT_SLUG_CONTRACT: &str = "`mail.Received.account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries.";
+
+        for dialect in lash::rlm::RlmDialect::ALL {
+            assert!(
+                workbench_prompt(dialect).contains(ACCOUNT_SLUG_CONTRACT),
+                "{} workbench prompt must state the mail account slug contract",
+                dialect.language_id()
+            );
+        }
+    }
+
     include!("tests/facade_homes.rs");
 
     #[test]
