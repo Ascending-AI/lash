@@ -3321,9 +3321,12 @@ fn abandon_turn_input_claims_statement(
     claims: &[&lash_core::TurnInputClaim],
     restored_state: lash_core::TurnInputState,
 ) -> (String, Vec<rusqlite::types::Value>) {
-    let mut sql = "UPDATE pending_turn_inputs
+    let accepted_state =
+        lash_core::store_backend_support::state_sql_literal(lash_core::TurnInputState::Accepted);
+    let mut sql = format!(
+        "UPDATE pending_turn_inputs
              SET state = CASE
-                     WHEN state = 'accepted' THEN ?
+                     WHEN state = {accepted_state} THEN ?
                      ELSE state
                  END,
                  claim_id = NULL,
@@ -3333,7 +3336,7 @@ fn abandon_turn_input_claims_statement(
                  claim_token = NULL,
                  claim_session_lease_generation = 0
              WHERE (session_id, claim_id, claim_token) IN ("
-        .to_string();
+    );
     let mut values: Vec<rusqlite::types::Value> = Vec::with_capacity(claims.len() * 3 + 1);
     values.push(restored_state.as_str().to_string().into());
     for (index, claim) in claims.iter().enumerate() {
@@ -3539,6 +3542,9 @@ async fn checkpoint_work_pending_sqlite(
                 "json_extract(ingress_json, '$.min_boundary')",
                 checkpoint,
             );
+            let accepted_state = lash_core::store_backend_support::state_sql_literal(
+                lash_core::TurnInputState::Accepted,
+            );
             let sql = format!(
                 "WITH {head_candidate}
                  SELECT (
@@ -3546,7 +3552,7 @@ async fn checkpoint_work_pending_sqlite(
                         SELECT 1
                         FROM pending_turn_inputs
                         WHERE session_id = ?1
-                          AND state IN (?4, 'accepted')
+                          AND state IN (?4, {accepted_state})
                           AND (claim_token IS NULL OR claim_session_lease_generation <> ?3)
                           AND json_extract(ingress_json, '$.scope') = 'active_turn'
                           AND json_extract(ingress_json, '$.turn_id') = ?5
@@ -3802,18 +3808,22 @@ fn claim_pending_turn_inputs_sqlite_conn(
         lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
     };
     let candidate_rows = {
-        let mut sql = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
+        let accepted_state = lash_core::store_backend_support::state_sql_literal(
+            lash_core::TurnInputState::Accepted,
+        );
+        let mut sql = format!(
+            "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                         state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                         claim_owner_id, claim_owner_incarnation_id,
                         claim_owner_liveness_json, claim_token, claim_session_lease_generation
                  FROM pending_turn_inputs
                  WHERE session_id = ?
-                   AND (state = ? OR (? AND state = 'accepted'))
+                   AND (state = ? OR (? AND state = {accepted_state}))
                    AND (
                         claim_token IS NULL
                         OR claim_session_lease_generation <> ?
                    )"
-        .to_string();
+        );
         let mut values: Vec<rusqlite::types::Value> = vec![
             session_id.to_string().into(),
             wanted_state.as_str().to_string().into(),
@@ -3950,18 +3960,22 @@ async fn claim_pending_turn_inputs_sqlite(
                 }
             };
             let candidate_rows = {
-                let mut sql = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
+                let accepted_state = lash_core::store_backend_support::state_sql_literal(
+                    lash_core::TurnInputState::Accepted,
+                );
+                let mut sql = format!(
+                    "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                             state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                             claim_owner_id, claim_owner_incarnation_id,
                             claim_owner_liveness_json, claim_token, claim_session_lease_generation
                      FROM pending_turn_inputs
                      WHERE session_id = ?
-                       AND (state = ? OR (? AND state = 'accepted'))
+                       AND (state = ? OR (? AND state = {accepted_state}))
                        AND (
                             claim_token IS NULL
                             OR claim_session_lease_generation <> ?
                        )"
-                .to_string();
+                );
                 let mut values: Vec<rusqlite::types::Value> = vec![
                     session_id.clone().into(),
                     wanted_state.as_str().to_string().into(),

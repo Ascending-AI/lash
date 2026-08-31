@@ -3012,11 +3012,15 @@ impl TurnInputStore for PostgresSessionStore {
             if batch.is_empty() {
                 continue;
             }
+            let accepted_state = lash_core::store_backend_support::state_sql_literal(
+                lash_core::TurnInputState::Accepted,
+            );
             let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
                 "UPDATE lash_pending_turn_inputs
                  SET state = CASE
-                         WHEN state = 'accepted' THEN ",
+                         WHEN state = ",
             );
+            query.push(accepted_state).push(" THEN ");
             query.push_bind(restored_state.as_str());
             query.push(
                 "     ELSE state
@@ -3305,6 +3309,10 @@ async fn checkpoint_work_pending_postgres(
         "ingress_json::jsonb ->> 'min_boundary'",
         checkpoint,
     );
+    let admitted_states = lash_core::store_backend_support::state_sql_literal_list(&[
+        lash_core::TurnInputState::PendingActive,
+        lash_core::TurnInputState::Accepted,
+    ]);
     let sql = format!(
         "WITH {head_candidate}
          SELECT (
@@ -3312,7 +3320,7 @@ async fn checkpoint_work_pending_postgres(
                 SELECT 1
                 FROM lash_pending_turn_inputs
                 WHERE session_id = $1
-                  AND state IN ('pending_active', 'accepted')
+                  AND state IN ({admitted_states})
                   AND (claim_token IS NULL OR claim_session_lease_generation <> $2)
                   AND ingress_json::jsonb ->> 'scope' = 'active_turn'
                   AND ingress_json::jsonb ->> 'turn_id' = $3
@@ -3817,13 +3825,17 @@ async fn claim_pending_turn_inputs_postgres_tx(
          FROM lash_pending_turn_inputs
          WHERE session_id = ",
     );
+    let accepted_state =
+        lash_core::store_backend_support::state_sql_literal(lash_core::TurnInputState::Accepted);
     query
         .push_bind(session_id)
         .push(" AND (state = ")
         .push_bind(wanted_state.as_str())
         .push(" OR (")
         .push_bind(active_turn)
-        .push(" AND state = 'accepted'))")
+        .push(" AND state = ")
+        .push(accepted_state)
+        .push("))")
         .push(
             "
            AND (
@@ -3960,6 +3972,8 @@ async fn claim_pending_turn_inputs_postgres(
         }
         lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
     };
+    let accepted_state =
+        lash_core::store_backend_support::state_sql_literal(lash_core::TurnInputState::Accepted);
     let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
         "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                 state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
@@ -3974,7 +3988,9 @@ async fn claim_pending_turn_inputs_postgres(
         .push_bind(wanted_state.as_str())
         .push(" OR (")
         .push_bind(active_turn)
-        .push(" AND state = 'accepted'))")
+        .push(" AND state = ")
+        .push(accepted_state)
+        .push("))")
         .push(
             "
            AND (

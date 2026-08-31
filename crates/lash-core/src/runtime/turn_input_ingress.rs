@@ -94,32 +94,41 @@ impl TurnInputCheckpointBoundary {
     }
 }
 
-/// Generates the boundary enumeration and its wire spelling from one variant list.
+/// Generates a turn-input wire vocabulary and its complete variant list from one declaration.
 ///
-/// The generated `as_wire_str` match is exhaustive, so a new
-/// [`TurnInputCheckpointBoundary`] variant fails to compile until it is added here, and adding it
-/// here necessarily extends `ALL`. That is what keeps the SQL admission list
-/// ([`crate::store_backend_support::admitted_min_boundary_sql`]) complete: the list cannot silently
-/// omit a boundary the type can hold.
-macro_rules! turn_input_checkpoint_boundary_wire {
-    ($($variant:ident => $wire:literal),+ $(,)?) => {
-        impl TurnInputCheckpointBoundary {
+/// The generated encoder and decoder matches are exhaustive, so adding a variant requires its
+/// persisted spelling here and necessarily extends `ALL`.
+macro_rules! turn_input_wire {
+    ($type:ident, $visibility:vis, $encoder:ident, $decoder:ident {
+        $($variant:ident => $wire:literal),+ $(,)?
+    }) => {
+        impl $type {
+            #[allow(dead_code)]
             pub(crate) const ALL: &'static [Self] = &[$(Self::$variant),+];
 
-            /// The stable snake-case value persisted in `ingress_json.min_boundary`.
-            pub(crate) fn as_wire_str(self) -> &'static str {
+            /// Returns the stable wire spelling persisted by turn-input stores.
+            $visibility fn $encoder(self) -> &'static str {
                 match self {
                     $(Self::$variant => $wire),+
+                }
+            }
+
+            /// Parses a stable wire spelling persisted by turn-input stores.
+            #[allow(dead_code)]
+            $visibility fn $decoder(value: &str) -> Option<Self> {
+                match value {
+                    $($wire => Some(Self::$variant),)+
+                    _ => None,
                 }
             }
         }
     };
 }
 
-turn_input_checkpoint_boundary_wire!(
+turn_input_wire!(TurnInputCheckpointBoundary, pub(crate), as_wire_str, from_wire_str {
     AfterWork => "after_work",
     BeforeCompletion => "before_completion",
-);
+});
 
 /// Generates the checkpoint enumeration a claim can name, from one variant list.
 ///
@@ -155,36 +164,20 @@ pub enum TurnInputState {
 }
 
 impl TurnInputState {
-    /// Exposes the stable snake-case lifecycle value for turn-input store implementors.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::PendingActive => "pending_active",
-            Self::DeferredNextTurn => "deferred_next_turn",
-            Self::Accepted => "accepted",
-            Self::Cancelled => "cancelled",
-            Self::Completed => "completed",
-        }
-    }
-
-    /// Parses the stable snake-case lifecycle value for store implementors, returning `None` for an
-    /// unknown value instead of inventing a state.
-    pub fn from_wire_str(value: &str) -> Option<Self> {
-        match value {
-            "pending_active" => Some(Self::PendingActive),
-            "deferred_next_turn" => Some(Self::DeferredNextTurn),
-            "accepted" => Some(Self::Accepted),
-            "cancelled" => Some(Self::Cancelled),
-            "completed" => Some(Self::Completed),
-            _ => None,
-        }
-    }
-
     /// Lets store, effect-host, and protocol implementors test whether this `TurnInputState` is
     /// next turn pending while materializing, executing, or persisting a session turn.
     pub fn is_next_turn_pending(self) -> bool {
         matches!(self, Self::DeferredNextTurn)
     }
 }
+
+turn_input_wire!(TurnInputState, pub, as_str, from_wire_str {
+    PendingActive => "pending_active",
+    DeferredNextTurn => "deferred_next_turn",
+    Accepted => "accepted",
+    Cancelled => "cancelled",
+    Completed => "completed",
+});
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PendingTurnInputDraft {
@@ -902,6 +895,25 @@ mod tests {
                 "the SQL literal a store filters on must equal the persisted wire value"
             );
         }
+    }
+
+    #[test]
+    fn turn_input_state_wire_round_trips_every_variant() {
+        for state in TurnInputState::ALL.iter().copied() {
+            assert_eq!(TurnInputState::from_wire_str(state.as_str()), Some(state));
+        }
+    }
+
+    #[test]
+    fn turn_input_state_wire_values_match_the_persisted_ingress_encoding() {
+        assert_eq!(TurnInputState::PendingActive.as_str(), "pending_active");
+        assert_eq!(
+            TurnInputState::DeferredNextTurn.as_str(),
+            "deferred_next_turn"
+        );
+        assert_eq!(TurnInputState::Accepted.as_str(), "accepted");
+        assert_eq!(TurnInputState::Cancelled.as_str(), "cancelled");
+        assert_eq!(TurnInputState::Completed.as_str(), "completed");
     }
 
     #[test]
