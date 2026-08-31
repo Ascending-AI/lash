@@ -115,7 +115,7 @@ fn schema_10_retry_attempt_record_is_refused_before_charge_safety_interpretation
 fn schema_11_retry_attempt_record_is_refused_before_attempt_evidence_interpretation() {
     let stored_v11 = r#"{"schema_version":11,"id":"v11-retry","timestamp":"2026-08-30T09:00:00+00:00","context":{},"type":"llm_call_failed","error":{"message":"rate limited","retryable":true},"attempts":[{"ordinal":1,"outcome":"failed","duration_ms":10,"charge_safety":{"outcome":"authorized","tokens_at_stake":42,"attempt_number":1}}]}"#;
     let error = serde_json::from_str::<TraceRecord>(stored_v11)
-        .expect_err("schema-11 trace records must be refused before decoding version 12 evidence");
+        .expect_err("schema-11 trace records must be refused before decoding version 13 evidence");
     assert_eq!(
         error.to_string(),
         "unsupported trace schema version 11; expected 13"
@@ -222,6 +222,7 @@ fn event_samples() -> Vec<TraceEvent> {
             response: TraceLlmResponse {
                 text: "hello".to_string(),
                 duration_ms: 12,
+                served_model: "served-model".to_string(),
                 terminal_reason: Some("stop".to_string()),
                 parts: None,
                 generation_disposition: None,
@@ -1293,6 +1294,7 @@ fn llm_call_completed_full_shape() {
         response: TraceLlmResponse {
             text: "hello".to_string(),
             duration_ms: 12,
+            served_model: "served-model".to_string(),
             terminal_reason: Some("stop".to_string()),
             parts: None,
             generation_disposition: None,
@@ -1307,6 +1309,7 @@ fn llm_call_completed_full_shape() {
         json!({
             "type": "llm_call_completed",
             "response": {
+                "served_model": "served-model",
                 "text": "hello",
                 "duration_ms": 12,
                 "terminal_reason": "stop",

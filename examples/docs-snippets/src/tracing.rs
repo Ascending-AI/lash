@@ -392,6 +392,7 @@ mod asserted_examples {
                 response: TraceLlmResponse {
                     text: "Found one match.".to_string(),
                     duration_ms: 72,
+                    served_model: "reasoning-model".to_string(),
                     terminal_reason: Some("stop".to_string()),
                     parts: None,
                     generation_disposition: None,

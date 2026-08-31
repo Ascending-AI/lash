@@ -295,6 +295,7 @@ impl RuntimeTurnDriver<'_> {
                 );
             }
         };
+        let served_model = request.model.clone();
         let trace_enabled = self.host.core.tracing.trace_sink.is_some();
         let llm_call_id = trace_enabled.then(|| self.llm_call_id(protocol_iteration));
         if let Some(llm_call_id) = llm_call_id.as_ref() {
@@ -705,6 +706,7 @@ impl RuntimeTurnDriver<'_> {
                         crate::trace::trace_context_from_invocation(&invocation)
                             .for_llm_call(llm_call_id),
                         response,
+                        &served_model,
                         debug.elapsed_ms(self.host.core.clock.as_ref()),
                         Some(stream_summary.clone()),
                         call_record.as_ref(),
@@ -783,6 +785,7 @@ impl RuntimeTurnDriver<'_> {
                         response: crate::trace::trace_llm_response(
                             response_text,
                             0,
+                            self.policy.model.id.clone(),
                             None,
                             response_parts,
                             None,
