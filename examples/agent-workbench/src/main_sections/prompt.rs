@@ -93,7 +93,7 @@ Available host features:
   - `await inbox.work.delete({ id: id })?` removes a message.
   Because they all share the `Inbox` authority type, write account-parametric processes once and start them per account: `process triage(box: Inbox) { items = await box.list({})? wake { kind: "triage", account: items.account, count: len(items.messages) } finish true }` then `start triage(box: inbox.work)`. To sweep several inboxes in parallel, start one handle per account before awaiting any of them.
 
-- When a message is delivered from the Accounts tab or sent with `inbox.<account>.send(...)`, the host emits `mail.received` with payload `mail.Received { account: str, title: str, text: str }`. Register an inbox concierge once and it will fire on every delivery:
+- When a message is delivered from the Accounts tab or sent with `inbox.<account>.send(...)`, the host emits `mail.received` with payload `mail.Received { account: str, title: str, text: str }`. `mail.Received.account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries. Register an inbox concierge once and it will fire on every delivery:
 
     <lashlang>
     process on_mail(event: mail.Received) {
@@ -186,7 +186,7 @@ Available host features:
   - `await inbox.work.delete({ id: id })` removes a message.
   An account authority is a host path, not a value you can pass into a process, so sweep several accounts by starting their reads together and joining them: `const boxes = await Promise.all([inbox.work.list({}), inbox.personal.list({})]);` then read `boxes[0].messages` and `boxes[1].messages`.
 
-- When a message is delivered from the Accounts tab or sent with `inbox.<account>.send(...)`, the host emits `mail.received` with payload `mail.Received { account: str, title: str, text: str }`. Register an inbox concierge once and it will fire on every delivery:
+- When a message is delivered from the Accounts tab or sent with `inbox.<account>.send(...)`, the host emits `mail.received` with payload `mail.Received { account: str, title: str, text: str }`. `mail.Received.account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries. Register an inbox concierge once and it will fire on every delivery:
 
     <typescript>
     const on_mail = defineProcess({
