@@ -205,18 +205,14 @@ impl TriggerEmitReport {
 ///
 /// `Fired` is the legacy/default shape and is omitted from serialized records,
 /// preserving the bytes of existing fired occurrences. Non-fired outcomes are
-/// durable audit records and never reserve trigger deliveries.
+/// durable audit records: they never reserve trigger deliveries and are exempt
+/// from delivery-fan-out reclamation.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TriggerOccurrenceOutcome {
     /// The occurrence fired and may reserve matching deliveries.
     #[default]
     Fired,
-    /// The occurrence was folded into the named fired occurrence.
-    CoalescedInto {
-        /// Durable occurrence id of the fired tick that absorbed this one.
-        occurrence_id: String,
-    },
     /// The occurrence was deliberately dropped at an observed decision point.
     Dropped {
         /// Stable host-defined reason code for the drop.

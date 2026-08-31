@@ -470,19 +470,12 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
             CronSessionDisposition::from_journal_value(&journal_value)?
         };
         let controller = lash_restate::RestateRuntimeEffectController::new(ctx);
-        match cron_tick_decision(disposition, &state, controller.context().key()) {
-            CronTick::Cancel { reason, trace } => {
-                Box::pin(cancel_observed_cron_tick(
-                    self.state.clone(),
-                    &state,
-                    reason,
-                    trace,
-                    &controller,
-                ))
-                .await?;
-                return Ok(Json(()));
-            }
-            CronTick::Run => {}
+        let decision = cron_tick_decision(disposition, &state, controller.context().key());
+        let cancel_surface = RestateCronTickCancelSurface::new(self.state.clone(), &controller);
+        if Box::pin(handle_observed_cron_tick(&cancel_surface, &state, decision)).await?
+            == CronTickHandling::Cancelled
+        {
+            return Ok(Json(()));
         }
         let fired_at = journaled_now(controller.context(), "workbench-cron:fired-at").await?;
         let request = state.request.clone();

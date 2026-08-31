@@ -6602,8 +6602,6 @@ lash::remote::triggers::RemoteTriggerListSubscriptionsResponse
 lash::remote::triggers::RemoteTriggerListSubscriptionsResponse::subscriptions
 lash::remote::triggers::RemoteTriggerListSubscriptionsResponse::validate
 lash::remote::triggers::RemoteTriggerOccurrenceOutcome
-lash::remote::triggers::RemoteTriggerOccurrenceOutcome::CoalescedInto
-lash::remote::triggers::RemoteTriggerOccurrenceOutcome::CoalescedInto::occurrence_id
 lash::remote::triggers::RemoteTriggerOccurrenceOutcome::Dropped
 lash::remote::triggers::RemoteTriggerOccurrenceOutcome::Dropped::reason
 lash::remote::triggers::RemoteTriggerOccurrenceOutcome::Fired
@@ -10160,8 +10158,6 @@ lash::triggers::TriggerOccurrenceFilter::occurred_at_start_ms
 lash::triggers::TriggerOccurrenceFilter::source_key
 lash::triggers::TriggerOccurrenceFilter::source_type
 lash::triggers::TriggerOccurrenceOutcome
-lash::triggers::TriggerOccurrenceOutcome::CoalescedInto
-lash::triggers::TriggerOccurrenceOutcome::CoalescedInto::occurrence_id
 lash::triggers::TriggerOccurrenceOutcome::Dropped
 lash::triggers::TriggerOccurrenceOutcome::Dropped::reason
 lash::triggers::TriggerOccurrenceOutcome::Fired

@@ -109,34 +109,120 @@ async fn record_cron_tick_outcome(
     .await
 }
 
-async fn cancel_observed_cron_tick(
+#[async_trait::async_trait]
+trait CronTickCancelSurface: Sync {
+    async fn record_trace(
+        &self,
+        session_id: String,
+        trace: Value,
+    ) -> HandlerResult<()>;
+
+    async fn record_outcome(
+        &self,
+        request: WorkbenchCronRequest,
+        scheduled_for: String,
+        outcome: lash::triggers::TriggerOccurrenceOutcome,
+    ) -> HandlerResult<String>;
+
+    fn clear_cron_state(&self);
+}
+
+struct RestateCronTickCancelSurface<'run, 'ctx> {
     app_state: AppState,
+    controller: &'run lash_restate::RestateRuntimeEffectController<'ctx, ObjectContext<'ctx>>,
+}
+
+impl<'run, 'ctx> RestateCronTickCancelSurface<'run, 'ctx> {
+    fn new(
+        app_state: AppState,
+        controller: &'run lash_restate::RestateRuntimeEffectController<'ctx, ObjectContext<'ctx>>,
+    ) -> Self {
+        Self {
+            app_state,
+            controller,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl CronTickCancelSurface for RestateCronTickCancelSurface<'_, '_> {
+    async fn record_trace(
+        &self,
+        session_id: String,
+        trace: Value,
+    ) -> HandlerResult<()> {
+        journaled_workbench_trace(
+            self.controller.context(),
+            self.app_state.clone(),
+            session_id,
+            "cron.restate.zombie_cancelled",
+            trace,
+            "workbench-cron:trace-cancelled",
+        )
+        .await
+    }
+
+    async fn record_outcome(
+        &self,
+        request: WorkbenchCronRequest,
+        scheduled_for: String,
+        outcome: lash::triggers::TriggerOccurrenceOutcome,
+    ) -> HandlerResult<String> {
+        record_cron_tick_outcome(
+            self.app_state.clone(),
+            request,
+            scheduled_for,
+            outcome,
+            self.controller,
+        )
+        .await
+    }
+
+    fn clear_cron_state(&self) {
+        self.controller.context().clear(CRON_STATE_KEY);
+    }
+}
+
+async fn cancel_observed_cron_tick(
+    surface: &impl CronTickCancelSurface,
     cron_state: &WorkbenchCronState,
     reason: &'static str,
     trace: Value,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, ObjectContext<'_>>,
 ) -> HandlerResult<()> {
-    journaled_workbench_trace(
-        controller.context(),
-        app_state.clone(),
-        cron_state.request.session_id.clone(),
-        "cron.restate.zombie_cancelled",
-        trace,
-        "workbench-cron:trace-cancelled",
-    )
-    .await?;
-    record_cron_tick_outcome(
-        app_state,
-        cron_state.request.clone(),
-        cron_state.next_execution_time.clone(),
-        lash::triggers::TriggerOccurrenceOutcome::Dropped {
-            reason: reason.to_string(),
-        },
-        controller,
-    )
-    .await?;
-    controller.context().clear(CRON_STATE_KEY);
+    surface
+        .record_trace(cron_state.request.session_id.clone(), trace)
+        .await?;
+    surface
+        .record_outcome(
+            cron_state.request.clone(),
+            cron_state.next_execution_time.clone(),
+            lash::triggers::TriggerOccurrenceOutcome::Dropped {
+                reason: reason.to_string(),
+            },
+        )
+        .await?;
+    surface.clear_cron_state();
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CronTickHandling {
+    Cancelled,
+    Run,
+}
+
+async fn handle_observed_cron_tick(
+    surface: &impl CronTickCancelSurface,
+    cron_state: &WorkbenchCronState,
+    decision: CronTick,
+) -> HandlerResult<CronTickHandling> {
+    match decision {
+        CronTick::Cancel { reason, trace } => {
+            cancel_observed_cron_tick(surface, cron_state, reason, trace).await?;
+            Ok(CronTickHandling::Cancelled)
+        }
+        CronTick::Run => Ok(CronTickHandling::Run),
+    }
 }
 
 async fn record_cron_tick_outcome_with_effect_controller(

@@ -765,13 +765,6 @@ pub fn validate_trigger_occurrence_request(
     }
     match &request.outcome {
         TriggerOccurrenceOutcome::Fired => {}
-        TriggerOccurrenceOutcome::CoalescedInto { occurrence_id } => {
-            if occurrence_id.trim().is_empty() {
-                return Err(PluginError::Session(
-                    "coalesced trigger occurrence requires occurrence_id".to_string(),
-                ));
-            }
-        }
         TriggerOccurrenceOutcome::Dropped { reason } => {
             if reason.trim().is_empty() {
                 return Err(PluginError::Session(

@@ -16,9 +16,6 @@ use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 pub enum RemoteTriggerOccurrenceOutcome {
     #[default]
     Fired,
-    CoalescedInto {
-        occurrence_id: String,
-    },
     Dropped {
         reason: String,
     },
@@ -102,13 +99,6 @@ impl RemoteTriggerOccurrenceRequest {
         }
         match &self.outcome {
             RemoteTriggerOccurrenceOutcome::Fired => {}
-            RemoteTriggerOccurrenceOutcome::CoalescedInto { occurrence_id } => {
-                require_non_empty(
-                    "RemoteTriggerOccurrenceRequest",
-                    "outcome.occurrence_id",
-                    occurrence_id,
-                )?;
-            }
             RemoteTriggerOccurrenceOutcome::Dropped { reason } => {
                 require_non_empty("RemoteTriggerOccurrenceRequest", "outcome.reason", reason)?;
             }

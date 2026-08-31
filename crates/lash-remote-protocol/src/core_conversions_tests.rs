@@ -418,14 +418,14 @@ fn trigger_dtos_round_trip_core_values() {
     let core = lash_core::TriggerOccurrenceRequest::try_from(remote).expect("core request");
     assert_eq!(core, request);
 
-    let request = request.with_outcome(lash_core::TriggerOccurrenceOutcome::CoalescedInto {
-        occurrence_id: "trigger:fired-tick".to_string(),
+    let request = request.with_outcome(lash_core::TriggerOccurrenceOutcome::Dropped {
+        reason: "session_retired".to_string(),
     });
     let remote = RemoteTriggerOccurrenceRequest::from(request.clone());
     assert_eq!(
         remote.outcome,
-        RemoteTriggerOccurrenceOutcome::CoalescedInto {
-            occurrence_id: "trigger:fired-tick".to_string(),
+        RemoteTriggerOccurrenceOutcome::Dropped {
+            reason: "session_retired".to_string(),
         }
     );
     let core = lash_core::TriggerOccurrenceRequest::try_from(remote).expect("core request");

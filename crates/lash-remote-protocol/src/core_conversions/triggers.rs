@@ -2,9 +2,6 @@ impl From<RemoteTriggerOccurrenceOutcome> for lash_core::TriggerOccurrenceOutcom
     fn from(value: RemoteTriggerOccurrenceOutcome) -> Self {
         match value {
             RemoteTriggerOccurrenceOutcome::Fired => Self::Fired,
-            RemoteTriggerOccurrenceOutcome::CoalescedInto { occurrence_id } => {
-                Self::CoalescedInto { occurrence_id }
-            }
             RemoteTriggerOccurrenceOutcome::Dropped { reason } => Self::Dropped { reason },
         }
     }
@@ -14,9 +11,6 @@ impl From<lash_core::TriggerOccurrenceOutcome> for RemoteTriggerOccurrenceOutcom
     fn from(value: lash_core::TriggerOccurrenceOutcome) -> Self {
         match value {
             lash_core::TriggerOccurrenceOutcome::Fired => Self::Fired,
-            lash_core::TriggerOccurrenceOutcome::CoalescedInto { occurrence_id } => {
-                Self::CoalescedInto { occurrence_id }
-            }
             lash_core::TriggerOccurrenceOutcome::Dropped { reason } => Self::Dropped { reason },
         }
     }

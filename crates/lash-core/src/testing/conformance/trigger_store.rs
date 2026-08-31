@@ -1616,35 +1616,57 @@ async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crat
         "replaying a dropped tick cannot discover a delivery"
     );
 
-    let coalesced = store
-        .ingest_occurrence(
-            button_occurrence("tick-outcome-source", "tick-coalesced").with_outcome(
-                crate::TriggerOccurrenceOutcome::CoalescedInto {
-                    occurrence_id: fired.occurrence.occurrence_id.clone(),
-                },
-            ),
-        )
-        .await
-        .expect("record coalesced tick");
-    assert!(
-        coalesced.reservations.is_empty(),
-        "a coalesced tick is an audit record, not a second delivery"
-    );
-    assert_eq!(
-        coalesced.occurrence.outcome,
-        crate::TriggerOccurrenceOutcome::CoalescedInto {
-            occurrence_id: fired.occurrence.occurrence_id,
-        }
-    );
     assert_eq!(
         store
             .list_occurrences(crate::TriggerOccurrenceFilter::default())
             .await
             .expect("list tick outcomes")
             .len(),
-        3,
-        "each fired, dropped, and coalesced tick has exactly one durable occurrence row"
+        2,
+        "each fired and dropped tick has exactly one durable occurrence row"
     );
+
+    let cutoff = store
+        .reclaim_trigger_occurrences(u64::MAX)
+        .await
+        .expect("apply the host occurrence-retention cutoff");
+    assert_eq!(
+        cutoff.reclaimed_occurrence_count, 0,
+        "the host cutoff cannot reclaim outcome-bearing audit history"
+    );
+    assert_eq!(
+        store
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("list tick outcomes after the host cutoff")
+            .len(),
+        2,
+        "the fired and dropped audit rows must survive the host cutoff"
+    );
+
+    let retention = store
+        .reconcile_trigger_retention(&[], &["tick-outcome-session".to_string()])
+        .await
+        .expect("reconcile after the tick-outcome session is gone");
+    assert_eq!(
+        retention.reclaimed_occurrence_count, 0,
+        "outcome-bearing non-fired occurrences are durable audit history, not delivery-free garbage"
+    );
+    let retained = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("list tick outcomes after retention");
+    assert_eq!(
+        retained.len(),
+        2,
+        "fired and dropped audit rows must survive retention after the scoped session is gone; records={retained:?}"
+    );
+    assert!(retained.iter().any(|record| {
+        record.outcome
+            == crate::TriggerOccurrenceOutcome::Dropped {
+                reason: "session_retired".to_string(),
+            }
+    }));
 }
 
 async fn null_source_occurrence_replay_is_idempotent(store: Arc<dyn crate::TriggerStore>) {

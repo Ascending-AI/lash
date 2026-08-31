@@ -349,7 +349,10 @@ impl TriggerStore for PostgresTriggerStore {
             (false, true) => postgres_delivery_snapshots(&mut tx, &occurrence).await?,
             (_, false) => Vec::new(),
         };
-        if is_new && reservations.is_empty() {
+        if is_new
+            && occurrence.outcome == lash_core::TriggerOccurrenceOutcome::Fired
+            && reservations.is_empty()
+        {
             sqlx::query(
                 "UPDATE lash_trigger_occurrences
                  SET reclaimable_at_ms = $2
@@ -563,7 +566,11 @@ impl TriggerStore for PostgresTriggerStore {
         };
         let reclaimed_occurrence_count = sqlx::query(
             "DELETE FROM lash_trigger_occurrences AS occurrence
-             WHERE NOT EXISTS (
+             WHERE COALESCE(
+                       occurrence.record_json::jsonb #>> '{outcome,kind}',
+                       'fired'
+                   ) = 'fired'
+               AND NOT EXISTS (
                  SELECT 1 FROM lash_trigger_deliveries AS delivery
                  WHERE delivery.occurrence_id = occurrence.occurrence_id
              )",
@@ -685,6 +692,10 @@ impl TriggerStore for PostgresTriggerStore {
             "UPDATE lash_trigger_occurrences AS occurrence
              SET reclaimable_at_ms = $2
              WHERE occurrence.reclaimable_at_ms IS NULL
+               AND COALESCE(
+                       occurrence.record_json::jsonb #>> '{outcome,kind}',
+                       'fired'
+                   ) = 'fired'
                AND occurrence.occurrence_id = ANY($1::TEXT[])
                AND NOT EXISTS (
                    SELECT 1 FROM lash_trigger_deliveries AS delivery
@@ -717,9 +728,21 @@ impl TriggerStore for PostgresTriggerStore {
         let rows = sqlx::query(
             "WITH scope AS (
                  SELECT COUNT(*) AS inspected_count,
-                        COUNT(*) FILTER (WHERE reclaimable_at_ms IS NULL)
+                        COUNT(*) FILTER (
+                            WHERE reclaimable_at_ms IS NULL
+                               OR COALESCE(
+                                      record_json::jsonb #>> '{outcome,kind}',
+                                      'fired'
+                                  ) != 'fired'
+                        )
                             AS live_fan_out_count,
-                        COUNT(*) FILTER (WHERE reclaimable_at_ms > $1)
+                        COUNT(*) FILTER (
+                            WHERE reclaimable_at_ms > $1
+                              AND COALESCE(
+                                      record_json::jsonb #>> '{outcome,kind}',
+                                      'fired'
+                                  ) = 'fired'
+                        )
                             AS grace_deferred_count
                  FROM lash_trigger_occurrences
              ), candidates AS (
@@ -727,6 +750,10 @@ impl TriggerStore for PostgresTriggerStore {
                  FROM lash_trigger_occurrences
                  WHERE reclaimable_at_ms IS NOT NULL
                    AND reclaimable_at_ms <= $1
+                   AND COALESCE(
+                           record_json::jsonb #>> '{outcome,kind}',
+                           'fired'
+                       ) = 'fired'
              )
              SELECT scope.inspected_count,
                     scope.live_fan_out_count,
@@ -762,6 +789,10 @@ impl TriggerStore for PostgresTriggerStore {
                  WHERE occurrence.occurrence_id = $1
                    AND occurrence.reclaimable_at_ms IS NOT NULL
                    AND occurrence.reclaimable_at_ms <= $2
+                   AND COALESCE(
+                           occurrence.record_json::jsonb #>> '{outcome,kind}',
+                           'fired'
+                       ) = 'fired'
                    AND NOT EXISTS (
                        SELECT 1 FROM lash_trigger_deliveries AS delivery
                        WHERE delivery.occurrence_id = occurrence.occurrence_id
