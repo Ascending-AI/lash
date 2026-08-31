@@ -2087,6 +2087,21 @@ async fn standard_runtime_with_transport_and_queue_store(
     (runtime, store)
 }
 
+async fn standard_runtime_with_transport_and_queue_store_for_session(
+    transport: TestProvider,
+    session_id: &str,
+) -> (LashRuntime, Arc<RecordingStore>) {
+    let store = Arc::new(RecordingStore::default());
+    let runtime = TestRuntime::new(transport)
+        .tools(Arc::new(EmptyTools))
+        .host(test_host_config())
+        .store(store.clone())
+        .with_session_id(session_id)
+        .build()
+        .await;
+    (runtime, store)
+}
+
 async fn standard_runtime_with_transport_and_queue_store_clock(
     transport: TestProvider,
     clock: Arc<dyn crate::Clock>,
@@ -3906,6 +3921,11 @@ async fn selected_process_wake_drain_does_not_claim_pending_next_turn_input() {
 
 #[tokio::test]
 async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled() {
+    // Commit admission is process-wide and keyed by session id. Keep this
+    // cancellation rendezvous out of the shared `root` lane so unrelated
+    // libtest cases cannot make its final commit contend with their turn.
+    const SESSION_ID: &str = "process-wake-cancelled";
+
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured_requests = Arc::clone(&requests);
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -3940,15 +3960,16 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
             }
         })
         .build();
-    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    let (mut runtime, store) =
+        standard_runtime_with_transport_and_queue_store_for_session(transport, SESSION_ID).await;
     let queued_input =
-        enqueue_idle_turn_input(store.as_ref(), "root", "cancel with wake pending").await;
+        enqueue_idle_turn_input(store.as_ref(), SESSION_ID, "cancel with wake pending").await;
     let registry = runtime
         .host
         .process_registry()
         .cloned()
         .expect("process registry");
-    let target_scope = crate::SessionScope::new("root");
+    let target_scope = crate::SessionScope::new(SESSION_ID);
     registry
         .register_process(
             crate::ProcessRegistration::new(
@@ -3992,7 +4013,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
         std::time::Duration::from_secs(5),
         runtime.stream_next_queued_work(TurnOptions::new(
             cancel,
-            named_turn_scope("root", "cancel-claimed-wake-drain"),
+            named_turn_scope(SESSION_ID, "cancel-claimed-wake-drain"),
         )),
     )
     .await
@@ -4007,7 +4028,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
         TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
+        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), SESSION_ID)
             .await
             .expect("pending inputs after cancellation")
             .is_empty(),
@@ -4015,7 +4036,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
         queued_input.input_id
     );
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), SESSION_ID)
             .await
             .expect("queued work after cancellation")
             .is_empty(),
@@ -4026,7 +4047,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
         runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "after-cancel-claimed-wake-drain"),
+                named_turn_scope(SESSION_ID, "after-cancel-claimed-wake-drain"),
             ))
             .await
             .expect("post-cancel drain should succeed")

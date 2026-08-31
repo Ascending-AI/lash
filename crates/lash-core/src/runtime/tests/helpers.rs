@@ -554,6 +554,7 @@ pub(crate) struct TestRuntime {
     host: EmbeddedRuntimeHost,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
     process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
+    session_id: Option<String>,
 }
 
 impl TestRuntime {
@@ -565,6 +566,7 @@ impl TestRuntime {
             host: test_host_config(),
             store: None,
             process_registry: Some(Arc::new(crate::TestLocalProcessRegistry::default())),
+            session_id: None,
         }
     }
 
@@ -585,6 +587,11 @@ impl TestRuntime {
 
     pub(crate) fn store(mut self, store: Arc<dyn crate::RuntimePersistence>) -> Self {
         self.store = Some(store);
+        self
+    }
+
+    pub(crate) fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
         self
     }
 
@@ -610,12 +617,18 @@ impl TestRuntime {
         )));
         let plugin_host = crate::PluginHost::new(factories);
         let plugin_session = plugin_host.build_session("root").expect("plugins");
+        let mut initial_state =
+            RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+        if let Some(session_id) = self.session_id {
+            initial_state.session_id = session_id.clone();
+            initial_state.policy.session_id = Some(session_id);
+        }
         let runtime = match (self.store, self.process_registry) {
             (Some(store), None) => LashRuntime::from_persistent_embedded_state(
                 standard_test_policy(),
                 self.host,
                 crate::PersistentRuntimeServices::new(plugin_session, store),
-                RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
+                initial_state.clone(),
                 crate::testing::runtime_lease_owner(),
             )
             .await
@@ -624,7 +637,7 @@ impl TestRuntime {
                 standard_test_policy(),
                 self.host,
                 crate::RuntimeServices::new(plugin_session),
-                RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
+                initial_state.clone(),
                 crate::testing::runtime_lease_owner(),
             )
             .await
@@ -639,9 +652,7 @@ impl TestRuntime {
                     standard_test_policy(),
                     host,
                     crate::PersistentRuntimeServices::new(plugin_session, store),
-                    RuntimeSessionState::new(crate::SessionPolicy::new(
-                        crate::TurnBudget::Unbounded,
-                    )),
+                    initial_state.clone(),
                     crate::testing::runtime_lease_owner(),
                 )
                 .await
@@ -657,9 +668,7 @@ impl TestRuntime {
                     standard_test_policy(),
                     host,
                     crate::RuntimeServices::new(plugin_session),
-                    RuntimeSessionState::new(crate::SessionPolicy::new(
-                        crate::TurnBudget::Unbounded,
-                    )),
+                    initial_state,
                     crate::testing::runtime_lease_owner(),
                 )
                 .await
