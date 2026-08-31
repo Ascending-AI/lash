@@ -1,6 +1,5 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use lash_core::{
     EffectHost, ExecutionScope, RuntimeEffectCommand, RuntimeEffectEnvelope,
@@ -169,16 +168,15 @@ struct ParentEndFaultHost {
 }
 
 impl ParentEndFaultHost {
+    /// The production lease window. Nothing here waits for a lease to lapse —
+    /// the second scanner rendezvouses on the barrier and then queues on a live
+    /// lease — while `finalize` is fenced against the PostgreSQL server clock
+    /// (`lease_expires_at_ms > transaction_timestamp()`). A trimmed TTL only
+    /// buys a wall-clock race in which a stalled scanner loses a lease it still
+    /// owns and reports `postgres_effect_replay_lease_lost` (FIG-2370).
     fn new(storage: &PostgresStorage, state: Arc<ParentEndFaultState>, replay: bool) -> Self {
-        let inner = PostgresEffectHost::with_options(
-            storage,
-            PostgresEffectReplayOptions {
-                lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(
-                    Duration::from_millis(120),
-                )
-                .expect("valid PostgreSQL parent-end lease timings"),
-            },
-        );
+        let inner =
+            PostgresEffectHost::with_options(storage, PostgresEffectReplayOptions::default());
         if replay {
             inner.start_replay();
         }
