@@ -72,6 +72,8 @@ pub(crate) struct NativeQueuedWorkInner {
     pub(super) wake_tasks: TaskTracker,
     pub(super) scheduler: Arc<QueuedWorkExecutionScheduler>,
     pub(super) work_cadence: WorkCadencePolicy,
+    #[cfg(test)]
+    pub(super) test_dispatch: tracing::Dispatch,
 }
 
 pub(crate) struct NativeQueuedWorkLifetime {
@@ -189,8 +191,17 @@ impl NativeQueuedWork {
             slow_wake_threshold,
             ..WorkCadencePolicy::default()
         };
-        Self::from_parts_with_work_cadence(run_handle, shutdown, concurrency, work_cadence)
-            .expect("test work cadence is valid")
+        let mut driver =
+            Self::from_parts_with_work_cadence(run_handle, shutdown, concurrency, work_cadence)
+                .expect("test work cadence is valid");
+        #[cfg(test)]
+        {
+            let dispatch = tracing::dispatcher::get_default(Clone::clone);
+            Arc::get_mut(&mut driver.inner)
+                .expect("test driver inner is uniquely owned")
+                .test_dispatch = dispatch;
+        }
+        driver
     }
 
     pub(crate) fn from_parts_with_work_cadence(
@@ -225,6 +236,8 @@ impl NativeQueuedWork {
                     (None, None) => QueuedWorkExecutionScheduler::unbounded(),
                 }),
                 work_cadence,
+                #[cfg(test)]
+                test_dispatch: tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default()),
             }),
             _lifetime: Arc::new(NativeQueuedWorkLifetime {
                 shutdown,

@@ -499,6 +499,7 @@ async fn public_single_pass_handle_never_eagerly_rehydrates_a_positive_peek() {
 struct ContendedRunHandle {
     peeks: AtomicUsize,
     hydrations: AtomicUsize,
+    blocked: tokio::sync::Notify,
 }
 
 #[async_trait::async_trait]
@@ -525,6 +526,7 @@ impl QueuedWorkRunHandle for ContendedRunHandle {
         reason: &str,
     ) -> Result<QueuedWorkRunProgress, QueuedWorkRunError> {
         self.claim_and_run_pending(session_id, reason).await?;
+        self.blocked.notify_one();
         Ok(QueuedWorkRunProgress::Blocked)
     }
 }
@@ -534,6 +536,7 @@ async fn one_notification_during_live_lease_contention_has_bounded_hydrations() 
     let handle = Arc::new(ContendedRunHandle {
         peeks: AtomicUsize::new(0),
         hydrations: AtomicUsize::new(0),
+        blocked: tokio::sync::Notify::new(),
     });
     let driver =
         NativeQueuedWork::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");

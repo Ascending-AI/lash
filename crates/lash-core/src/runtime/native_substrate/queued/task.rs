@@ -1,4 +1,10 @@
+#[cfg(test)]
+use std::future::Future;
+#[cfg(test)]
+use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(test)]
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use crate::runtime::{WorkerSlotKind, WorkerSlotPermit};
@@ -24,6 +30,30 @@ pub(super) enum QueuedWorkRunAttemptOutcome {
     Contended,
 }
 
+#[cfg(test)]
+struct TestDispatchFuture<F> {
+    dispatch: tracing::Dispatch,
+    future: Pin<Box<F>>,
+}
+
+#[cfg(test)]
+impl<F: Future> Future for TestDispatchFuture<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        tracing::dispatcher::with_default(&this.dispatch, || this.future.as_mut().poll(cx))
+    }
+}
+
+#[cfg(test)]
+fn with_test_dispatch<F: Future>(dispatch: tracing::Dispatch, future: F) -> TestDispatchFuture<F> {
+    TestDispatchFuture {
+        dispatch,
+        future: Box::pin(future),
+    }
+}
+
 impl QueuedWorkTaskDriver {
     pub(super) async fn run_dispatcher(&self) {
         let mut dispatcher_guard =
@@ -39,7 +69,9 @@ impl QueuedWorkTaskDriver {
                     completed: completed_tx.clone(),
                 };
                 let scheduler = Arc::clone(&self.inner.scheduler);
-                self.inner.wake_tasks.spawn(async move {
+                #[cfg(test)]
+                let test_dispatch = driver.inner.test_dispatch.clone();
+                let run = async move {
                     let _completion = completion;
                     match (permit, scheduler.slots.as_ref()) {
                         (Some(permit), Some(slots)) => {
@@ -54,7 +86,10 @@ impl QueuedWorkTaskDriver {
                         (None, None) => driver.run_demand(demand).await,
                         _ => unreachable!("queued-work admission permit matches scheduler mode"),
                     }
-                });
+                };
+                #[cfg(test)]
+                let run = with_test_dispatch(test_dispatch, run);
+                self.inner.wake_tasks.spawn(run);
             }
 
             {

@@ -143,22 +143,42 @@ async fn indefinite_contention_emits_repeating_typed_heartbeats() {
     let handle = Arc::new(ContendedRunHandle {
         peeks: AtomicUsize::new(0),
         hydrations: AtomicUsize::new(0),
+        blocked: tokio::sync::Notify::new(),
     });
     let captured_handle = Arc::clone(&handle);
-    let ((), capture) = crate::runtime::tests::trace_capture::capturing(|| async move {
-        let driver = NativeQueuedWork::from_parts(
-            captured_handle,
-            CancellationToken::new(),
-            Some(QueuedWorkExecutionConcurrency::new(1).expect("valid concurrency")),
-            Duration::from_millis(50),
-        );
-        driver.notify_pending_work(Some("session-contended"), "queued_turn_input");
-        for _ in 0..6 {
-            tokio::task::yield_now().await;
-            tokio::time::advance(default_retry_max()).await;
-        }
-    })
-    .await;
+    let ((), capture) =
+        crate::runtime::tests::trace_capture::capturing_with_capture(|capture| async move {
+            let driver = NativeQueuedWork::from_parts(
+                captured_handle,
+                CancellationToken::new(),
+                Some(QueuedWorkExecutionConcurrency::new(1).expect("valid concurrency")),
+                Duration::from_millis(50),
+            );
+            let mut blocked = handle.blocked.notified();
+            driver.notify_pending_work(Some("session-contended"), "queued_turn_input");
+            // Each blocked pass is the rendezvous that proves the prior virtual
+            // retry window completed. The extra final pass proves the preceding
+            // retry reacquired its queued-work permit before capture is released.
+            for _ in 0..7 {
+                blocked.await;
+                blocked = handle.blocked.notified();
+                tokio::time::advance(default_retry_max()).await;
+            }
+            // The permit emits synchronously when reacquisition is polled, but
+            // keep the observation itself as the final rendezvous before the
+            // capture layer is released.
+            for _ in 0..256 {
+                if capture
+                    .named("queued_work_execution_permit.reacquire")
+                    .len()
+                    >= 2
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
 
     let contended = capture.named("queued_work.wake_contended");
     assert!(
