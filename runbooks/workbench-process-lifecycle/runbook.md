@@ -19,9 +19,10 @@ on surrounding model prose.
 1. **Both processes must be running first.** Do not delete the session until `/api/work`
    and the rendered rail show distinct `FIG425_survivor_<runid>` and
    `FIG425_cancellable_<runid>` process cards with non-terminal status.
-2. **Delete the owner, not the runtime.** Use the workbench reset affordance (the API
-   operation is `DELETE /api/session`; legacy `POST /api/reset` drives the same path).
-   Never stop Restate, the process worker, or the web process during this scenario.
+2. **Delete the owner, not the runtime.** Use the workbench reset/new-session control.
+   Do not issue raw `DELETE /api/session` from the browser context: it bypasses the
+   UI reset flow and is not the operator-facing equivalent. Never stop Restate, the
+   process worker, or the web process during this scenario.
 3. **The process rail is runtime-wide.** After deletion, the rendered session id must
    change while both original process ids remain visible through `/api/work`. A process
    visible only in a stale screenshot does not pass.
@@ -93,8 +94,9 @@ and the relevant database extraction as `01-running-store.json`; screenshot
 
 ## Phase 2 — Delete the originating session
 
-Use the reset/new-session control while capturing its HTTP response, or issue
-`DELETE /api/session` from the browser context. Poll until:
+Use the reset/new-session control while capturing its HTTP response. Do not issue
+`DELETE /api/session` directly from the browser context, because it does not
+synchronously update the page's rendered session label. Poll until:
 
 - the rendered and `/api/state` session id changes;
 - `<data-dir>/lash-sessions/durable-core.db` remains in place, and a query for the old

@@ -2843,6 +2843,16 @@
         const response = await nativeFetch("/api/sessions");
         if (!response.ok) return;
         const listing = await response.json();
+        if (
+          knownSessionLabel &&
+          listing?.current_session_id &&
+          listing.current_session_id !== knownSessionLabel
+        ) {
+          // An out-of-band reset rotates the backend identity without sending a
+          // state event to this page. Reuse the existing bounded state recovery
+          // path when the roster notices that the current session changed.
+          loadState().catch(() => {});
+        }
         // Never rebuild the selector under the operator's cursor.
         if (document.activeElement === sessionSelect) return;
         renderSessions(listing);
