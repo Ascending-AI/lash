@@ -531,6 +531,7 @@ Three mechanisms, each doing one job:
 | `reply_pending` | turn committed, reply text on record, post owed | no |
 | `folded` | absorbed as context (or an empty answer) | yes |
 | `replied` | posted; `reply_ts` recorded | yes |
+| `provider_error` | turn stopped at a typed provider failure, retained for operators | yes |
 | `ignored` | deliberately not acted on, with a reason | yes |
 
 A boolean cannot distinguish "already answered" (drop it) from "accepted and then

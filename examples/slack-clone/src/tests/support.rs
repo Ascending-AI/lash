@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use lash::ModelSpec;
 use lash::direct::LlmOutputPart;
-use lash::provider::{LlmResponse, ProviderHandle};
+use lash::provider::{LlmResponse, ProviderFailureKind, ProviderHandle, TransportRetryVerdict};
 use tokio::task::JoinHandle;
 
 use crate::bot::channel::{BotIdentity, ChannelBot};
@@ -56,6 +56,12 @@ pub enum Step {
     /// queued input and taken the session-execution lease — the state a process
     /// killed mid-turn leaves behind.
     Gated(String),
+    /// Reject the request with a terminal provider failure.
+    ProviderError {
+        message: String,
+        kind: ProviderFailureKind,
+        code: String,
+    },
 }
 
 /// A scripted standard-mode model.
@@ -98,6 +104,15 @@ impl Script {
     /// A script that answers every turn with one line of prose.
     pub fn prose(text: &str) -> Self {
         Self::new([Step::Text(text.to_string())])
+    }
+
+    /// A non-retryable provider rejection with typed classification.
+    pub fn provider_error(message: &str) -> Self {
+        Self::new([Step::ProviderError {
+            message: message.to_string(),
+            kind: ProviderFailureKind::Validation,
+            code: "unsupported_attachment_capability".to_string(),
+        }])
     }
 
     /// How many provider calls happened. One plain turn is one call; a turn with
@@ -165,7 +180,7 @@ impl Script {
                         }
                         other => other,
                     };
-                    Ok(match step {
+                    let response = match step {
                         Step::Gated(_) => unreachable!("gated steps are unwrapped above"),
                         Step::Text(text) => LlmResponse {
                             parts: vec![LlmOutputPart::Text {
@@ -185,7 +200,19 @@ impl Script {
                             response_metadata: Default::default(),
                             ..LlmResponse::default()
                         },
-                    })
+                        Step::ProviderError {
+                            message,
+                            kind,
+                            code,
+                        } => {
+                            let error = lash::provider::LlmTransportError::new(message)
+                                .with_kind(kind)
+                                .with_code(code)
+                                .with_retry_verdict(TransportRetryVerdict::NotRetryable);
+                            return Err(error);
+                        }
+                    };
+                    Ok(response)
                 }
             })
             .build()

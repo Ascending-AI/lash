@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use crate::bot::channel::{Disposition, ReplySource};
-use crate::bot::ledger::Stage;
+use crate::bot::ledger::{ProviderFailure, Stage};
 use crate::bot::runtime::{session_id, thread_session_id};
 use crate::bot::tools::{CHANNEL_HISTORY, LIST_CHANNELS};
 
@@ -1396,4 +1396,59 @@ async fn an_empty_model_answer_is_absorbed_rather_than_posted() {
         "an empty answer must not become an empty message: {disposition:?}"
     );
     assert!(platform.bot_messages(&channel).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_provider_rejection_surfaces_as_typed_provider_error() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let script = Script::provider_error(
+        "cannot materialize attachment MIME `application/x-unknown`; providers accepting this MIME/source: none",
+    );
+    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+
+    let channel = platform.channel("provider-error").await;
+    let user = platform.identify("ada").await;
+    let mention = platform.mention();
+    platform.say(&channel, &user, &format!("{mention} ?")).await;
+    let app_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+
+    let disposition = bot
+        .ingest(app_mention.clone(), None)
+        .await
+        .expect("handle mention");
+    let Disposition::ProviderError { failure, .. } = disposition else {
+        panic!("a provider rejection must surface as ProviderError, got {disposition:?}");
+    };
+    assert_eq!(
+        failure,
+        ProviderFailure {
+            kind: lash::provider::ProviderFailureKind::Validation,
+            code: Some("unsupported_attachment_capability".to_string()),
+            message: "LLM error: cannot materialize attachment MIME `application/x-unknown`; providers accepting this MIME/source: none".to_string(),
+            retryable: false,
+        }
+    );
+    let record = bot
+        .ledger()
+        .get(app_mention.event_id.clone())
+        .await
+        .expect("read provider failure")
+        .expect("provider failure row");
+    assert_eq!(record.stage, Stage::ProviderError);
+    assert_eq!(record.provider_failure, Some(failure));
+    assert!(platform.bot_messages(&channel).await.is_empty());
+
+    let duplicate = bot
+        .ingest(app_mention, Some(1))
+        .await
+        .expect("redeliver provider failure");
+    assert_eq!(
+        duplicate,
+        Disposition::Duplicate {
+            event_id: record.event_id,
+            stage: Stage::ProviderError,
+            reply_ts: None,
+        }
+    );
 }
