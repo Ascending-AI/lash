@@ -470,11 +470,10 @@ jobs:
         if: always()
         run: sccache --show-stats
 
-  # cargo-semver-checks is ADVISORY: it must not be able to fail the workflow —
-  # the job succeeds regardless, with findings in the job log/summary until the
-  # future cutover release. FIG-2089.
+  # The API surface snapshot is ADVISORY: it must not be able to fail the
+  # workflow until the future cutover release. FIG-2095.
   semver-advisory:
-    name: Semver advisory
+    name: API surface advisory
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: plan
@@ -482,14 +481,9 @@ jobs:
     # ruling; reassess after the FIG-2169 test-prune sweep.
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.rust == 'true'
     continue-on-error: true
-    env:
-      # This job owns a private cargo-semver-checks cache and does not consume
-      # the workflow's mold-keyed debug cache, so use the runner's default
-      # linker instead of inheriting a linker that this job does not install.
-      RUSTFLAGS: ""
 
     steps:
-      - name: Check out repository and main baseline
+      - name: Check out repository
         env:
           CHECKOUT_TOKEN: ${{ github.token }}
         run: |
@@ -501,35 +495,42 @@ jobs:
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
           git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git fetch \
-            --no-tags --depth=1 origin main:refs/remotes/origin/main
+            --no-tags --prune --depth=2 origin "${GITHUB_SHA}"
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
-      - name: Install Rust toolchain
-        uses: ./.github/actions/rust-toolchain
-
-      - name: Run cargo-semver-checks
-        id: semver
-        continue-on-error: true
-        uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2
-        with:
-          package: lash-runtime
-          baseline-rev: origin/main
-          feature-group: all-features
-          rust-toolchain: manual
-
-      - name: Summarize semver advisory
+      - name: Summarize API surface snapshot delta
         if: always()
-        env:
-          SEMVER_OUTCOME: ${{ steps.semver.outcome }}
         run: |
+          set -euo pipefail
+          snapshot=docs/api-surface.snapshot
+          baseline_rev="$(git rev-parse "${GITHUB_SHA}^")"
+          if ! git cat-file -e "${baseline_rev}:${snapshot}"; then
+            echo "Baseline ${baseline_rev} does not contain ${snapshot}." >&2
+            exit 1
+          fi
+
+          diff_output="$(git diff --no-ext-diff --unified=0 "${baseline_rev}" -- "${snapshot}" || true)"
+          added="$(printf '%s\n' "${diff_output}" | awk '/^\+[^+]/ { count += 1 } END { print count + 0 }')"
+          removed="$(printf '%s\n' "${diff_output}" | awk '/^-[^-]/ { count += 1 } END { print count + 0 }')"
           {
-            echo "## cargo-semver-checks advisory"
+            echo "## API surface snapshot advisory"
             echo
-            echo "Outcome: \`${SEMVER_OUTCOME:-not-run}\`."
-            echo "Findings are advisory until the FIG-2089 cutover; see the cargo-semver-checks step log for details."
+            echo "Baseline: \`${baseline_rev}\` (first parent of \`${GITHUB_SHA}\`)."
+            echo "Delta: \`${added}\` added, \`${removed}\` removed."
+            if [[ "${added}" == 0 && "${removed}" == 0 ]]; then
+              echo "No API surface snapshot changes."
+            else
+              echo
+              echo '```diff'
+              printf '%s\n' "${diff_output}" | sed -n '1,240p'
+              if [[ "$(printf '%s\n' "${diff_output}" | wc -l)" -gt 240 ]]; then
+                echo '... diff truncated after 240 lines.'
+              fi
+              echo '```'
+            fi
+            echo
+            echo "The snapshot delta is advisory until the FIG-2095 cutover."
           } >> "${GITHUB_STEP_SUMMARY}"
 
   # A dependency workspace's [patch] table is invisible to its consumers.
