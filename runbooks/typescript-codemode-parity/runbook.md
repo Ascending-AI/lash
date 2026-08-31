@@ -30,14 +30,27 @@ and a fresh persistent data directory. Gate `/healthz`, `/api/state`, the
 rendered session id, and the prompt/trace language id. Save `00-ready.png`,
 `00-state.json`, and `00-models.json`.
 
-## Phase 1 — First-settled `Promise.all`
+## Phase 1 — Aggregate rejection through the shipped web authorities
 
-Expose two test tools through the normal host catalog: input row A rejects
-after five seconds with marker `A`; input row B rejects after ten milliseconds
-with marker `B`. Ask the model to run both in one `Promise.all`, catch the
-failure, and finish with the observed marker. Require `B`, two completed tool
-attempts, and one aggregate execution. Save `01-promise-{dom,state,trace}.json`
-and `01-promise.png`.
+The assigned Agent Workbench host registers the real `search_web` and
+`fetch_url` providers as the `web.search` and `web.fetch` authorities in
+`examples/agent-workbench/src/main_sections/plugins.rs:142-157` (the
+manifests and bindings are defined in
+`crates/lash-tools/src/web/web_search.rs:119-169` and
+`crates/lash-tools/src/web/fetch_url.rs:124-157`). It also registers
+`tools.search` for deferred discovery in
+`examples/agent-workbench/src/deferred_tools.rs:422-461`.
+There are no delayed-rejecting A/B test tools in this shipped catalogue, so
+the row must not require an operator to add them.
+
+Ask the model to call `web.search({ query: "" })` and
+`web.fetch({ url: "" })` in one `Promise.all`, catch the aggregate failure,
+and finish with the fixed marker `aggregate-rejected`. Both are real host
+authorities and reject their invalid arguments before making a network request.
+Require one aggregate execution, two completed tool attempts, two structured
+`invalid_tool_args` failures, and the fixed marker. Do not assert a wall-clock
+winner or an A/B marker. Save `01-promise-{dom,state,trace}.json` and
+`01-promise.png`.
 
 ## Phase 2 — `for...of` agent loop
 
@@ -74,9 +87,14 @@ Stop everything started by this row. Write `fluency-hits.json` even when empty.
 | Gate | Result | Evidence |
 | --- | --- | --- |
 | Production session pinned to TypeScript | | `00-state.json`, trace |
-| First-settled rejection is `B` | | `01-promise-*` |
+| Shipped-host aggregate rejection is handled | | `01-promise-*` |
 | `for...of` agent loop completes in order | | `02-for-of-*` |
 | Process artifact and suspended engine are TypeScript | | `03-suspended-*` |
 | Worker restart preserves process id and dialect | | `04-resumed-*` |
 | Full resumed judged turn finishes correctly | | `04-resumed-judge.json` |
 | Missing-method/rejection hit list recorded | | `fluency-hits.json` |
+
+The exact first-settled rejection ordering remains covered by the TypeScript
+conformance test in `crates/lash-typescript/tests/agent_surface.rs:1406-1481`;
+this live row covers the host-level aggregate rejection semantics available
+through the shipped catalogue.
