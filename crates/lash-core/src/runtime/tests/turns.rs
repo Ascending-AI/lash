@@ -4475,6 +4475,8 @@ async fn committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_
 
 #[tokio::test]
 async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_settles_handoff() {
+    const SESSION_ID: &str = "mid-chain-cancellation";
+
     let store = Arc::new(RecordingStore::default());
     let captured_store = Arc::clone(&store);
     let cancel = CancellationToken::new();
@@ -4501,27 +4503,26 @@ async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_settles_hando
         })
         .build();
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
-        Arc::new(TerminalControlTool {
+    let mut runtime = TestRuntime::new(transport)
+        .tools(Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
                 frame_key: crate::FrameKey::from_caller_material("cancelled-frame")
                     .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
                 task: Some("cancel before running".to_string()),
             }],
-        }),
-        transport,
-        test_host_config(),
-        runtime_store,
-    )
-    .await;
-    enqueue_idle_turn_input(store.as_ref(), "root", "start cancellable switch").await;
+        }))
+        .host(test_host_config())
+        .store(runtime_store)
+        .with_session_id(SESSION_ID)
+        .build()
+        .await;
+    enqueue_idle_turn_input(store.as_ref(), SESSION_ID, "start cancellable switch").await;
 
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             cancel,
-            named_turn_scope("root", "mid-chain-cancel"),
+            named_turn_scope(SESSION_ID, "mid-chain-cancel"),
         ))
         .await
         .expect("cancelled chain assembles")
@@ -4532,7 +4533,7 @@ async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_settles_hando
         TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), SESSION_ID)
             .await
             .expect("queue after cancellation")
             .is_empty()
@@ -8245,6 +8246,8 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_cancelled() {
+    const SESSION_ID: &str = "cancellation-sealed-renewal";
+
     let lease_ttl = std::time::Duration::from_millis(120);
     let store = Arc::new(RecordingStore::default());
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
@@ -8273,14 +8276,13 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
         transport.clone().into_handle(),
     ));
     let turn_driver = crate::TurnWorkDriver::new(Arc::clone(&config.control.effect_host));
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
-        Arc::new(EmptyTools),
-        transport,
-        crate::EmbeddedRuntimeHost::new(config),
-        runtime_store,
-    )
-    .await;
+    let mut runtime = TestRuntime::new(transport)
+        .tools(Arc::new(EmptyTools))
+        .host(crate::EmbeddedRuntimeHost::new(config))
+        .store(runtime_store)
+        .with_session_id(SESSION_ID)
+        .build()
+        .await;
     let effect_loop_ended = Arc::new(AtomicBool::new(false));
     let release_effect_loop = Arc::new(AtomicBool::new(false));
     runtime.set_turn_phase_probe(Arc::new(PauseAfterEffectLoop {
