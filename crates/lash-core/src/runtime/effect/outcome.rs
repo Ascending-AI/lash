@@ -49,7 +49,7 @@ pub(crate) fn emit_llm_trace_completed(
     base_context: &lash_trace::TraceContext,
     context: lash_trace::TraceContext,
     response: &LlmResponse,
-    served_model: &str,
+    request_model: &str,
     duration_ms: u64,
     stream_summary: Option<serde_json::Value>,
     call_record: Option<&crate::LlmCallRecord>,
@@ -64,7 +64,7 @@ pub(crate) fn emit_llm_trace_completed(
             response: crate::trace::trace_llm_response(
                 response.full_text(),
                 duration_ms,
-                served_model.to_string(),
+                request_model.to_string(),
                 Some(response.terminal_reason),
                 crate::trace::trace_output_parts(&response.parts),
                 response.generation_disposition,
@@ -328,7 +328,7 @@ fn emit_direct_llm_trace_completed(
     llm_call_id: Option<&str>,
     caused_by: Option<&CausalRef>,
     response: &LlmResponse,
-    served_model: &str,
+    request_model: &str,
     call_record: Option<&crate::LlmCallRecord>,
 ) {
     let Some(llm_call_id) = llm_call_id else {
@@ -339,7 +339,7 @@ fn emit_direct_llm_trace_completed(
         &current.host.core.tracing.trace_context,
         direct_trace_context(&current.session_id, Some(llm_call_id), caused_by),
         response,
-        served_model,
+        request_model,
         0,
         None,
         call_record,

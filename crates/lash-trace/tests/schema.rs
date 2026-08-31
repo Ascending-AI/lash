@@ -133,6 +133,17 @@ fn schema_12_record_is_refused_before_attachment_event_interpretation() {
     );
 }
 
+#[test]
+fn schema_12_llm_completion_record_is_refused_before_response_interpretation() {
+    let stored_v12 = r#"{"schema_version":12,"id":"v12-completion","timestamp":"2026-08-31T09:00:00+00:00","context":{},"type":"llm_call_completed","response":{"text":"hello","duration_ms":12},"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":0,"cache_write_input_tokens":0,"reasoning_output_tokens":0}}"#;
+    let error = serde_json::from_str::<TraceRecord>(stored_v12)
+        .expect_err("schema-12 trace records must be refused before decoding the response");
+    assert_eq!(
+        error.to_string(),
+        "unsupported trace schema version 12; expected 13"
+    );
+}
+
 fn token_usage_sample() -> TraceTokenUsage {
     TraceTokenUsage {
         input_tokens: 10,
@@ -222,7 +233,7 @@ fn event_samples() -> Vec<TraceEvent> {
             response: TraceLlmResponse {
                 text: "hello".to_string(),
                 duration_ms: 12,
-                served_model: "served-model".to_string(),
+                request_model: "request-model".to_string(),
                 terminal_reason: Some("stop".to_string()),
                 parts: None,
                 generation_disposition: None,
@@ -1294,7 +1305,7 @@ fn llm_call_completed_full_shape() {
         response: TraceLlmResponse {
             text: "hello".to_string(),
             duration_ms: 12,
-            served_model: "served-model".to_string(),
+            request_model: "request-model".to_string(),
             terminal_reason: Some("stop".to_string()),
             parts: None,
             generation_disposition: None,
@@ -1309,7 +1320,7 @@ fn llm_call_completed_full_shape() {
         json!({
             "type": "llm_call_completed",
             "response": {
-                "served_model": "served-model",
+                "request_model": "request-model",
                 "text": "hello",
                 "duration_ms": 12,
                 "terminal_reason": "stop",

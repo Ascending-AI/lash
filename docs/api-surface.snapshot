@@ -9912,7 +9912,7 @@ lash::tracing::TraceLlmResponse
 lash::tracing::TraceLlmResponse::duration_ms
 lash::tracing::TraceLlmResponse::generation_disposition
 lash::tracing::TraceLlmResponse::parts
-lash::tracing::TraceLlmResponse::served_model
+lash::tracing::TraceLlmResponse::request_model
 lash::tracing::TraceLlmResponse::terminal_reason
 lash::tracing::TraceLlmResponse::text
 lash::tracing::TracePromptComponent

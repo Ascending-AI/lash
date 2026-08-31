@@ -81,8 +81,8 @@ pub use lashlang_graph::{
 /// Version 11 adds typed charge-safety decisions to retry attempts. Version 12
 /// types retry-attempt outcomes and adds generation disposition and
 /// provider-reported usage to each LLM attempt projection. Version 13 adds the
-/// typed `attachment_degraded` continuation event and served model identifier
-/// to completed LLM responses.
+/// typed `attachment_degraded` continuation event and requested model
+/// identifier to completed LLM responses.
 pub const TRACE_SCHEMA_VERSION: u32 = 13;
 
 /// A durable trace record was written under a schema this reader does not support.
@@ -845,8 +845,8 @@ pub struct TraceToolSpec {
 pub struct TraceLlmResponse {
     pub text: String,
     pub duration_ms: u64,
-    /// The model identifier used for the corresponding LLM call.
-    pub served_model: String,
+    /// The model identifier requested for the corresponding LLM call.
+    pub request_model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -225,7 +225,7 @@ impl DirectLlmClient {
         let output_for_validation = request.output.clone();
         let model = request.model.clone();
         let llm_request = build_llm_request(&self.provider, request, model);
-        let served_model = llm_request.model.clone();
+        let request_model = llm_request.model.clone();
         let llm_call_id = if self.trace_sink.is_some() {
             let id = uuid::Uuid::new_v4().to_string();
             crate::runtime::effect::emit_llm_trace_started(
@@ -277,7 +277,7 @@ impl DirectLlmClient {
                         &self.trace_context,
                         TraceContext::default().for_llm_call(llm_call_id),
                         &result.response,
-                        &served_model,
+                        &request_model,
                         0,
                         None,
                         Some(&result.llm_call),
@@ -649,7 +649,7 @@ mod tests {
         let expected = [
                 r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace success"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":13,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
                     .to_string(),
-                r#"{"attempts":[{"duration_ms":0,"ordinal":1,"outcome":"completed"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","response":{"duration_ms":0,"parts":[{"text":"direct success","type":"text"}],"served_model":"trace-model","terminal_reason":"stop","text":"direct success"},"schema_version":13,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_completed","usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}"#
+                r#"{"attempts":[{"duration_ms":0,"ordinal":1,"outcome":"completed"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","response":{"duration_ms":0,"parts":[{"text":"direct success","type":"text"}],"request_model":"trace-model","terminal_reason":"stop","text":"direct success"},"schema_version":13,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_completed","usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}"#
                     .to_string(),
                 r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace failure"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":13,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
                     .to_string(),

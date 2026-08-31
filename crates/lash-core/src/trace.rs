@@ -541,7 +541,7 @@ fn trace_output_spec(spec: &LlmOutputSpec) -> serde_json::Value {
 pub(crate) fn trace_llm_response(
     text: String,
     duration_ms: u64,
-    served_model: String,
+    request_model: String,
     terminal_reason: Option<crate::LlmTerminalReason>,
     parts: Option<serde_json::Value>,
     generation_disposition: Option<crate::GenerationReceipt>,
@@ -549,7 +549,7 @@ pub(crate) fn trace_llm_response(
     TraceLlmResponse {
         text,
         duration_ms,
-        served_model,
+        request_model,
         terminal_reason: terminal_reason.map(|reason| reason.code().to_string()),
         parts,
         generation_disposition: generation_disposition
