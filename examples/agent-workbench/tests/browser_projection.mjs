@@ -2134,7 +2134,9 @@ test("a failed /api/state is a visibly different render from an empty session", 
 test("a drop after hydration reconnects over the last known content", () => {
   const shell = shellModule();
   const availability = shell.markShellChannel(
-    shell.markShellHydrated(shell.createShellAvailability()),
+    shell.markShellHydrated(
+      shell.markShellChannel(shell.createShellAvailability(), "product", true),
+    ),
     "product",
     false,
     "transcript stream disconnected",
@@ -2175,6 +2177,49 @@ test("a drop after hydration reconnects over the last known content", () => {
   const stateDownRender = shellRender(shell.shellStatusModel(stateDown, { session: "workbench-a" }));
   assert.match(stateDownRender.banner, /last known state/);
   assert.equal(stateDownRender.bannerDetail, "state request failed (503)");
+});
+
+test("a first connection during an active turn is running, but an established stream drop reconnects", () => {
+  const shell = shellModule();
+  const availability = shell.markShellChannel(
+    shell.createShellAvailability(),
+    "state",
+    true,
+  );
+  shell.markShellChannel(
+    availability,
+    "observation",
+    false,
+    "the live turn stream disconnected before the page attached",
+  );
+  shell.markShellHydrated(availability);
+
+  const firstConnection = shellRender(
+    shell.shellStatusModel(availability, {
+      session: "workbench-a",
+      web: "ready",
+      busy: true,
+    }),
+  );
+  assert.equal(firstConnection.pill, "running");
+  assert.equal(firstConnection.subtitle, "turn running");
+
+  shell.markShellChannel(availability, "observation", true);
+  shell.markShellChannel(
+    availability,
+    "observation",
+    false,
+    "the live turn stream disconnected after attachment",
+  );
+  const establishedDrop = shellRender(
+    shell.shellStatusModel(availability, {
+      session: "workbench-a",
+      web: "ready",
+      busy: true,
+    }),
+  );
+  assert.equal(establishedDrop.pill, "reconnecting");
+  assert.match(establishedDrop.subtitle, /a turn was running/);
 });
 
 test("a successful response is what promotes the shell to session claims", () => {
@@ -2277,7 +2322,7 @@ test("an unattached stream is neither a live channel nor an outage", () => {
     false,
     "the transcript stream is not connecting",
   );
-  assert.equal(shell.shellPhase(stuck), "reconnecting");
+  assert.equal(shell.shellPhase(stuck), "connecting");
   const render = shellRender(shell.shellStatusModel(stuck, { session: "workbench-a" }));
   assert.notEqual(render.pill, "idle");
   assert.equal(render.bannerDetail, "the transcript stream is not connecting");
