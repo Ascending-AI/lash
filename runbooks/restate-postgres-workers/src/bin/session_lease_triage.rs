@@ -731,23 +731,18 @@ async fn commit_cas_livelock(
     capture.reset();
     let session_id = session_id("livelock", backend, run_id);
     let shared = owner("triage-shared-worker", "triage-shared-worker:boot-1");
-    let store = backend
-        .factory
-        .create_store(&request(&session_id))
-        .await
-        .map_err(anyhow::Error::msg)
-        .context("create the CAS-livelock session store")?;
-    let initial = lash_core::RuntimeSessionState {
-        session_id: session_id.clone(),
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-        ))
-    };
-    store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&initial, &[]))
+    let seed_core = backend.core(scripted_provider(), shared.clone(), quiet_timings())?;
+    let seed_session = seed_core.open(&session_id).await?;
+    seed_session
+        .turn(lash::TurnInput::text(TURN_PROMPT))
+        .turn_id("lease-triage-livelock-seed".to_string())
+        .run()
         .await
         .map_err(anyhow::Error::msg)
         .context("materialize the CAS-livelock session")?;
+    drop(seed_session);
+    drop(seed_core);
+    let store = backend.store(&session_id).await?;
     capture.reset();
     let mut rounds = Vec::new();
 
@@ -760,6 +755,12 @@ async fn commit_cas_livelock(
             .map_err(anyhow::Error::msg)?
             .context("the materialized CAS-livelock session has a head")?;
         let holder_executor_id = format!("lease-triage-livelock-{round}-holder");
+        // Open the public contender before the fixture claims the lane. Opening
+        // a persistent session performs its own admission commit, which should
+        // observe the uncontended head; the state append below is the operation
+        // that must take the Busy/lane-less product path.
+        let busy_core = backend.core(scripted_provider(), shared.clone(), quiet_timings())?;
+        let busy_session = busy_core.open(&session_id).await?;
         let holder = store
             .try_claim_session_execution_lease(
                 &session_id,
@@ -772,7 +773,7 @@ async fn commit_cas_livelock(
             .acquired()
             .context("the livelock holder acquires an unheld lane")?;
         let contender_executor_id = format!("lease-triage-livelock-{round}-contender");
-        let busy_holder = match store
+        let _busy_holder = match store
             .try_claim_session_execution_lease(
                 &session_id,
                 &shared,
@@ -785,14 +786,22 @@ async fn commit_cas_livelock(
             lash::persistence::SessionExecutionLeaseClaimOutcome::Busy { holder } => holder,
             unexpected => bail!("round {round}: the peer did not observe Busy: {unexpected:?}"),
         };
-        tracing::info!(
-            session_id = %session_id,
-            holder_fencing_token = busy_holder.fencing_token,
-            consulted = "session_execution_lease",
-            outcome = "proceeding_under_commit_cas",
-            event = "session_execution_lease.commit_busy_advisory",
-            "live lease holder observed: proceeding under the commit CAS fence"
-        );
+
+        // Exercise the product's lane-less persistence path while the holder is
+        // live. `append_plugin_body` reaches
+        // `commit_runtime_state_with_fresh_session_execution_lease`, which emits
+        // `trace_commit_busy_advisory` from the real runtime. Keep this event in
+        // the captured trace; the harness must not recreate its evidence shape.
+        busy_session
+            .admin()
+            .state()
+            .append_plugin_body(
+                "session-lease-triage",
+                json!({ "round": round, "writer": "busy-contender" }),
+            )
+            .await
+            .map_err(anyhow::Error::msg)
+            .with_context(|| format!("round {round}: the lane-less peer did not publish"))?;
 
         let operation = |writer: &str| {
             OperationId::new(
@@ -802,21 +811,12 @@ async fn commit_cas_livelock(
                 "commit",
             )
         };
-        let winner = RuntimeCommit::persisted_state_for_test(&state, &[])
-            .with_operation(operation("winner"))
-            .map_err(anyhow::Error::msg)?
-            .0;
         let loser = RuntimeCommit::persisted_state_for_test(&state, &[])
             .with_operation(operation("loser"))
             .map_err(anyhow::Error::msg)?
             .0
             .borrowing_session_execution_lease(holder.fence());
 
-        store
-            .commit_runtime_state(winner)
-            .await
-            .map_err(anyhow::Error::msg)
-            .with_context(|| format!("round {round}: the lane-less peer did not publish"))?;
         let loser = store.commit_runtime_state(loser).await;
         if let Err(StoreError::HeadRevisionConflict { expected, actual }) = &loser {
             tracing::warn!(

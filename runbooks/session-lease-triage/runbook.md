@@ -159,15 +159,14 @@ the loser was alive, so the run silently substituted the easy case for the one u
 ## Phase 3 — Livelock: sustained misrouting, repeated rejections
 
 **Setup.** `04-commit-cas-livelock.jsonl`. Three rounds of the misconfiguration the docs
-name, induced directly at the persistence seam. ADR 0077 state admission correctly refuses a
-second public turn while the execution lane is held, so a pair of public runtime opens can no
-longer manufacture the CAS-only shape. Instead, the fixture starts below turn admission: one
-writer holds a real lease fence, a peer observes that holder as Busy and publishes lane-less
-under the authoritative head CAS, then the holder submits the stale snapshot under its
-borrowed fence. `commit_busy_advisory` records
-`outcome = proceeding_under_commit_cas`; neither writer enters the durable queued-drain
-wait/give-up policy. Each round uses a fresh pair of commit operations, which is what a
-retry-on-conflict substrate does after losing.
+name, induced at the persistence seam through the product's public state-append path. ADR
+0077 state admission correctly refuses a second public turn while the execution lane is held,
+so the fixture holds a real lease fence, then has a public lane-less state append observe that
+holder as Busy and publish under the authoritative head CAS. The holder then submits a stale
+snapshot under its borrowed fence. `commit_busy_advisory` is captured from the product trace,
+with the holder identity represented by three SHA-256 fields; neither writer enters the
+durable queued-drain wait/give-up policy. Each round uses a fresh pair of commit operations,
+which is what a retry-on-conflict substrate does after losing.
 
 **Action.** Read `rounds_attempted`, `rounds_with_a_rejection`, the per-round records, every
 `commit_busy_advisory`, the `busy_wait`/`busy_gave_up` counts, and every
@@ -177,8 +176,11 @@ retry-on-conflict substrate does after losing.
 commit, so `rounds_with_a_rejection` equals `rounds_attempted` and the rejection count is at
 least one per round. Each rejection is `WARN` and carries session id, owner id, incarnation
 id, executor id, `lease_lost = false`, `lane_held = true`, and an `actual_head_revision`
-strictly above `expected_head_revision`. No `session_execution_lease.lost` and no `taken_over`
-appear, so the situation is unambiguously a recurring race rather than a handoff.
+strictly above `expected_head_revision`. Each real `commit_busy_advisory` is `INFO`, carries
+`session_id`, `holder_owner_id_sha256`, `holder_incarnation_id_sha256`, and
+`holder_executor_id_sha256`, and carries no `generation`, `fencing_token`, or
+`holder_fencing_token`. No `session_execution_lease.lost` and no `taken_over` appear, so the
+situation is unambiguously a recurring race rather than a handoff.
 
 **`lane_held = true` is the truthful outcome on `commit_cas_rejected`.** The rejection is
 emitted by the lease-winning parked executor whose committed head was beaten by the lane-less
@@ -238,7 +240,6 @@ rendered section text as `06-docs-claims.txt`.
 | One rejection is contention; *repeated* rejections with `lease_lost = false` are livelock, and the fix is worker identity | `04-commit-cas-livelock.jsonl` (per-round records) |
 | Only `commit_cas_rejected` proves a turn did not publish | `03-lease-takeover.jsonl` versus `04-commit-cas-livelock.jsonl` |
 | A turn accepted by a worker that then dies is finished by its peer, whichever ingress admitted it | `08-direct-turn-recovery.jsonl` (`claimable_while_parked`, `drain_ran`, `recovered_application_turn_id`) |
-| Lease churn is trace telemetry, not durable session history | absence of any lease entry in session events; the events exist only in the captured timeline |
 
 A page that promises a reading the companion never produced, or a companion observation the
 page omits, is a **contract violation** between docs and behavior: report it as a finding.
