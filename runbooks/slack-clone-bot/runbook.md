@@ -71,10 +71,12 @@ three are correct. The answer key is **counts, typed dispositions, and typed pro
    provenance and through the reply's own Slack `metadata.event_payload.event_id` — never by
    parsing `m_turn_…`, `Ev…` or `C…` strings. The example itself is careful about this; a
    runbook that cheats undoes the lesson.
-2. **Assert the typed disposition, not the absence of a reply.** The bot reports
-   `Folded` / `Replied { source }` / `Duplicate { stage }` / `Ignored { reason }` /
-   `ReplyLost`. "Nothing appeared in the channel" is satisfied by a bot that crashed. Require
-   the disposition *and* the durable evidence behind it.
+2. **Assert the typed disposition, not the absence of a reply.** The bot reports one of
+   `Rejected { reason }` / `Duplicate { stage }` / `Ignored { reason }` / `Folded` /
+   `Replied { source }` / `Deferred { reason }` / `RecoverableFailure { reason }` /
+   `Silent { reason }` / `ReplyLost`. "Nothing appeared in the channel" is satisfied by a bot
+   that crashed. Require the disposition *and* the durable evidence behind it. This is the full
+   `Disposition` vocabulary from [`examples/slack-clone/src/bot/channel.rs`](../../examples/slack-clone/src/bot/channel.rs).
 3. **Ambient must cost nothing.** For every ambient message: a `pending_turn_inputs` row
    exists in the bot's session store, no new `turn_completed` appears in `trace.jsonl`, and
    the usage total is unchanged. A bot that answers ambient traffic and a bot that silently
@@ -428,7 +430,9 @@ turn's admission is still fenced and recovery reports
 **non-terminal**. A background retry then re-attempts on an interval until the lease lapses.
 So gate on the *settled* outcome, and allow at least one lease TTL (30s by default) plus the
 retry interval before declaring anything — a render gate of a few seconds fails a correct bot.
-Expect roughly 30-40s from kill to answer.
+Do not gate on a tight wall-clock band: require the ordered sequence kill → bot down with no row
+→ restart and `/healthz` → any `Deferred` retry(s) → one settled `Replied`. Under load, a correct
+recovery took 66.6s from kill to answer; allow that lease/retry sequence and load-related delay.
 
 **Read the final disposition from the settle line.** Three log shapes carry a disposition, and
 a deferred event's outcome only appears in the third:
@@ -491,9 +495,9 @@ thread requirements:
 - the ledger retains the original `thread_ts` through `accepted`, any `Deferred`,
   `reply_pending`, and `replied`, and the posted reply metadata names the original event id.
 
-Allow the same 30-40s lease window and accept `Turn`, `Transcript`, or `Ledger` only when the
-four-layer evidence matches the kill point. `ReplyLost`, a terminal row without a reply, a
-channel-scoped recovery turn, or a reply in the channel surface is a **FAIL**. Save
+Allow the same lease/retry sequence and load-related delay, and accept `Turn`, `Transcript`, or
+`Ledger` only when the four-layer evidence matches the kill point. `ReplyLost`, a terminal row
+without a reply, a channel-scoped recovery turn, or a reply in the channel surface is a **FAIL**. Save
 `05T-thread-bot-down-both-tabs.png` and `05T-thread-recovered-both-tabs.png`.
 
 ## Phase 6 — Platform restart: the durable outbox converges
