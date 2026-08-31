@@ -9,7 +9,7 @@ use super::super::host::{
 };
 use super::super::{
     CompiledAggregateAwaitShape, ExecutionHost, RuntimeError, Value, error_value,
-    is_process_handle_record, record_with_capacity, success, unwrap_tool_result,
+    is_process_handle, record_with_capacity, success, unwrap_tool_result,
 };
 use super::control::VmOutcome;
 use super::{ActiveLashlangExecutionNode, Vm};
@@ -432,7 +432,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     }
                     Value::List(values.into())
                 }
-                Value::Record(handles) if is_process_handle_record(&handles) => {
+                Value::Record(handles) if is_process_handle(&handles) => {
                     match self
                         .host
                         .perform(AbilityOp::Await(Value::Record(handles)))
@@ -473,7 +473,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     async fn await_value_unwrap(&self, handle: Value) -> Result<Value, RuntimeError> {
         match handle {
-            Value::Record(handles) if is_process_handle_record(&handles) => self
+            Value::Record(handles) if is_process_handle(&handles) => self
                 .host
                 .perform(AbilityOp::Await(Value::Record(handles)))
                 .await

@@ -54,7 +54,12 @@ pub(crate) fn unwrap_tool_result(value: Value) -> Result<Value, RuntimeError> {
     }
 }
 
-pub(crate) fn is_process_handle_record(record: &Record) -> bool {
+/// Returns whether a record is handled by the process-await path.
+///
+/// This is the runtime's single process-handle authority. Callers that derive
+/// process-handle metadata must use this predicate so the parser and VM keep
+/// the same representation contract.
+pub fn is_process_handle(record: &Record) -> bool {
     record.get("__handle__").is_some() || record.get("handle").is_some()
 }
 

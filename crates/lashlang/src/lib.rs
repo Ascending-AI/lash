@@ -82,7 +82,7 @@ pub use runtime::{
     VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome, compile, compile_ast,
     compile_ast_with_dialect, compile_linked, compile_linked_process, compile_linked_with_dialect,
     compile_module_artifact_process, compile_process, compile_process_with_dialect, execute,
-    from_json, prewarm, unwrap_type_value,
+    from_json, is_process_handle, prewarm, unwrap_type_value,
 };
 #[doc(hidden)]
 pub use runtime::{
