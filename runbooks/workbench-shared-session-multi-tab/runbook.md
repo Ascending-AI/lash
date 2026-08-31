@@ -129,9 +129,10 @@ its initial snapshot.
 
 Phase 3 gates the result rather than an event edge: both tabs must show `running` while
 `/api/state.active_turns` contains the turn, both must clear after settlement, and neither
-may change busy without an accepted state snapshot. Phase 6 still gates concurrent
-submission separately: `/api/turn` may admit a second viewer's send as next-turn input,
-while the server lease and head CAS remain the execution authority.
+may change busy without an accepted state snapshot. Phase 4 gates the browser-reachable
+next-turn admission and drain. The direct `/api/turn` admission contract and the lease/CAS
+identity rules belong to the deterministic route and session-lease companions, not to a
+browser phase that cannot press a disabled send control.
 
 **What downstream multi-viewer hosts should expect.** The event streams tell clients when
 to refresh; `/api/state` tells them whether the session is running. Copy both halves. An
@@ -170,10 +171,12 @@ order.
   per-tab DOM answers "how many each client rendered". Cross-check each tab against that
   one truth, then the two DOMs against each other.
 - Mid-turn phases need a turn that stays in flight long enough to act on. A short marker
-  echo settles in under ten seconds and collapses the window; use a deliberately long
-  generation (e.g. *"write out the numbers 1 through 45, each on its own line, with one
-  short sentence after each"*, ~20–30 s) for Phases 3–6. A collapsed window is a harness
-  gap, not a finding: it silently converts a mid-turn assertion into a post-turn one.
+  echo settles in under ten seconds and collapses the window; use this deliberately long
+  generation for Phases 3–6: *"Write out the numbers 1 through 45, each on its own line,
+  with one short sentence after each. Do not finish early."* Before any mid-turn action,
+  verify that `/api/state.active_turns` is non-empty and that the named control is enabled.
+  A collapsed window is a harness gap, not a finding: rerun with a fresh session rather
+  than converting a mid-turn assertion into a post-turn one.
 
 Save every named artifact under the run's artifact directory, suffixed `-a` / `-b` per
 tab.
@@ -357,79 +360,40 @@ appearing **only** before it localizes to the live path; either is as much a fai
 one in both. Screenshot `05-converged-both.png`; save `05-multiset-a-{before,after}.json`,
 `05-multiset-b-{before,after}.json`, `05-b-after-reload.json`.
 
-## Phase 6 — Concurrent-submission admission gate
+## Phase 6 — Final browser-reachable queue-next convergence
 
-Run this **last**: it deliberately submits a second turn against a session that already
-has one, so its side effects must not contaminate the convergence phases.
+Run this **last**. It closes the shared-session scenario with the same browser-reachable
+mid-turn premise as Phase 4, on a fresh long turn, without direct HTTP calls, graph writes,
+or host-side probes.
 
-Start a long turn from A. While `active_turns` is non-empty, submit a second `POST
-/api/turn` for the same session from B. B's own composer is disabled by then (Phase 3b),
-so this is an **API-level probe of layer 2**, and the runbook says so plainly rather than
-pretending it is a browser gesture: the point is to gate the server contract the browser
-guard stands in for. Record the status, the body, and `active_turns` before and after.
+Start the exact long generation named in Working material from A. Wait until B's pill is
+`running`, `/api/state.active_turns` contains exactly one turn, and B's **queue next**
+control is enabled. If the turn settles before those gates hold, record a harness gap and
+restart this phase with a fresh session; do not manufacture a mid-turn state with an API
+request. Click **queue next** in B with a unique marker and capture the request generated
+by that browser gesture. The response must be `accepted: true` with a `next_turn` receipt;
+the page must show `queued next` and must not show the marker as an optimistic user row.
 
-**This is a hard gate, not a characterisation.** FIG-1000 fixed the contract: a session
-runs one turn at a time, the lease and the commit CAS enforce that durably, and `/api/turn`
-now reports what it actually did with the send instead of accepting a doomed second turn.
-Require all of:
+While A's turn is active, require one active turn, the marker in
+`pending_turn_inputs`, and no second workflow. Then click nothing else. After A settles,
+require exactly one drained queued turn: B's marker is one committed user row and one
+assistant row in both tabs, with no pending input left. Reconcile the per-role DOM counts
+in A and B against the shared API, graph, product events, and trace, and require the two
+ordered row multisets to be identical. Save `06-rows-a.json`, `06-rows-b.json`,
+`06-truth.json`, `06-queue-path.json`, and `06-dom-vs-dom.json`; screenshot
+`06-queued-midturn-{a,b,both}.png` and `06-after-queued-{a,b,both}.png`.
 
-- the response is `200` with `queued: true` and a `queued_input` receipt whose `ingress` is
-  `next_turn` and whose `text` is B's marker — an `{"accepted":true}` body with no `queued`
-  field, or `queued: false`, is a **FAIL** (the old, lying contract);
-- `active_turns` still holds exactly **one** turn — the queued send must not register a
-  second one — and no second turn workflow is submitted;
-- `/api/state.pending_turn_inputs` carries B's marker as a `deferred_next_turn` input, and
-  **no** user row for it appears in either tab: the queued send renders as an
-  `.ingress-receipt` (`queued next`), never as an optimistic `.message.user`;
-- after A's turn settles, the queued input is drained as **exactly one** further turn whose
-  committed user message carries B's marker and which produces **exactly one** assistant
-  row, in **both** tabs — the same shape Phase 4 gates for `queue next`. A queued input
-  that never runs is a lost-input **FAIL**, as is a second drained turn.
-
-The pair of turns must never both be lost, and no tab may end on a phantom row: the DOM
-multiset must equal durable truth exactly, with no row the graph does not have.
-
-**The concurrent-append outcome is the hard replacement gate.** Against the same idle
-session head, submit two uniquely marked graph appends concurrently and retain the typed
-result of each operation.
-
-Know what the two writers *are* before scoring the outcome: one workbench process, one
-host owner identity, one boot incarnation — and **two runtime opens, so two distinct
-executor ids**. The session execution lease reenters only on an exact
-owner + incarnation + **executor** match, so tab 2's open is a foreign claimant and
-observes `Busy`. That is designed: `Busy` costs it the advisory lane, not the right to
-publish, because the head CAS is the sole publication authority (ADR 0029). So the
-executor distinction is exactly what makes the acceptable outcomes below reachable —
-if instead one open had *reentered* the other's live lane (identical triples), that is a
-runtime/store contract violation, not a pass. Exactly one of these outcomes is
-acceptable:
-
-- both appends return `Appended`, and a fresh store-backed graph read contains both markers
-  exactly once on one active path in the order reported by their durable node ordinals; or
-- one append returns `Appended` and the other returns the typed
-  `StoreError::HeadRevisionConflict { expected, actual }`, with `actual > expected`; the
-  durable graph contains the winner exactly once and contains no node or projection fragment
-  from the loser.
-
-`Ok` without both durable markers, an untyped string error, a busy-lease refusal (the
-second executor observing `Busy` must not turn into a refusal to append), reversed
-durable ordering, a lost winner, or any partial loser state is a **FAIL**. Save both typed
-results, the active-path node ids/ordinals, marker counts, and each writer's
-`owner_id`/`incarnation_id`/`executor_id` in `06-concurrent-append.json` — the two
-executor ids must differ and the two owner/incarnation pairs must match. This assertion is intentionally stronger than "no error
-occurred": removing either append from the probe must make the marker/count gate fail.
-
-If the head CAS rejects one turn in the API race, require that rejection to be *visible*:
-the failed turn publishes a `turn:<id>:failed` product row with the fixed public copy
-`turn could not be completed`, its `done` event carries `outcome: "failed"`, and every tab
-drops the losing turn's optimistic user row. A loser that leaves a rendered row durable
-truth does not have, or returns both pills to `idle` with nothing said, is a **FAIL**.
-
-Then gate what this scenario exists for: after everything settles, require **both tabs
-still converge** — multisets equal, and each tab's per-role counts reconciled against the
-shared API and graph counts. Tab-vs-tab **divergence** is a genuine FAIL: an overlapping
-submission must not fork the two clients' transcripts. Screenshot `06-concurrent-both.png`;
-save `06-concurrent-submit.json`, `06-truth.json`, `06-dom-vs-dom.json`.
+This phase proves only what the browser can produce: a second viewer's visible queue-next
+intent, shared pending state, automatic drain, and two-tab convergence. The direct
+`/api/turn` busy-send response and its no-second-workflow guarantee are covered by
+`a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input` in
+`examples/agent-workbench/src/main_sections/tests/concurrent_send.rs`; the rendered
+receipt and failed-turn retirement are covered by its
+`workbench_ui_renders_queued_sends_and_failed_turn_reconciliation` test. The owner /
+incarnation / executor identity, typed head-CAS result, and concurrent append ordering
+are covered by `two_live_writers_rebase_appends_into_durable_graph_order` in that same
+deterministic suite and by Phase 3 of `runbooks/session-lease-triage/runbook.md`.
+Those are companion coverage, not judged browser gates.
 
 ## Phase 7 — Teardown and score
 
@@ -452,19 +416,19 @@ port-derived Restate container are gone.
 | Wake start uses the same path | both tabs accept a running snapshot then a settled snapshot; neither records a non-snapshot busy write | | `03d-wake.json`, `03d-wake-both.png` |
 | Cross-tab queue-next | B's queued marker runs in exactly one drained turn and renders in both tabs | | `04-*.json`, `04-after-queued-both.png` |
 | Reload convergence | post-reload B multiset equals A's; pre-reload rows all survive; A unaffected | | `05-multiset-*.json`, `05-converged-both.png` |
-| Concurrent submission queued | `/api/turn` answers `queued: true` with a `next_turn` receipt; `active_turns` stays at 1; no second workflow; B's marker pending as `deferred_next_turn`; no optimistic user row for it in either tab | | `06-concurrent-submit.json`, `06-truth.json` |
-| Queued send answered | the queued marker runs as exactly one drained turn: 1 committed user row + 1 assistant row, in **both** tabs; nothing lost | | `06-truth.json`, `06-concurrent-both.png` |
-| Refused turn is visible | any fence-refused turn renders `turn could not be completed`, its `done` carries `outcome: "failed"`, and its optimistic row is gone from **every** tab | | `06-concurrent-submit.json`, `06-dom-vs-dom.json` |
-| Concurrent submission: no fork | the two tabs agree exactly, and neither holds a row durable truth lacks | | `06-dom-vs-dom.json`, `06-concurrent-both.png` |
+| Final browser queue admission | B's enabled **queue next** control produces a `next_turn` receipt; `active_turns` stays at 1; no second workflow; B's marker is pending; no optimistic user row appears | | `06-queue-path.json`, `06-queued-midturn-both.png` |
+| Final queued send answered | the browser-queued marker runs as exactly one drained turn: 1 committed user row + 1 assistant row in **both** tabs; nothing is lost | | `06-truth.json`, `06-after-queued-both.png` |
+| Final convergence | the two tabs agree exactly, and neither holds a row durable truth lacks | | `06-dom-vs-dom.json`, `06-after-queued-both.png` |
+| Companion admission/CAS coverage | direct busy-send admission, failed-turn retirement, typed head-CAS results, and owner/incarnation/executor identity are covered by the named deterministic tests and lease runbook, not this browser row | | source tests, `runbooks/session-lease-triage` |
 | Three-layer cross-check | every conversation-changing step reconciles each tab's DOM vs the shared durable state vs the trace, pairwise | | all `*-truth.json` |
 | Divergence attribution | on any mismatch, both tabs' rows, the shared durable counts, and the dissenting tab are recorded | | `*-dom-vs-dom.json` |
 
 **Aggregate:** with two independent browser clients attached to one session, did every
 unit of conversational work — a send from A, a trigger press from B, a queue-next from B,
-a reload of B mid-stream, and a pair of overlapping turns — reach **both** clients exactly
-once, leaving the two transcripts identical and both consistent with the single durable
-conversation; and does the busy pill behave exactly as the busy-state contract says, by
-exactly the mechanism it names?
+a reload of B mid-stream, and the final browser-queued turn — reach **both** clients
+exactly once, leaving the two transcripts identical and both consistent with the single
+durable conversation; and does the busy pill behave exactly as the busy-state contract
+says, by exactly the mechanism it names?
 
 ---
 
