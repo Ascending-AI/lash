@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import ast
 import datetime as dt
 import json
 import os
@@ -99,6 +100,17 @@ def shell_function_body(script: str, function_name: str) -> str:
     return script[start_match.end() : start_match.end() + next_function.start()]
 
 
+def shell_function_definition(script: str, function_name: str) -> str:
+    match = re.search(
+        rf"^{re.escape(function_name)}\(\) \{{\n.*?^\}}\n",
+        script,
+        re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError(f"missing shell function {function_name}")
+    return match.group(0)
+
+
 def shell_logical_commands(script: str) -> list[str]:
     commands: list[str] = []
     current = ""
@@ -117,6 +129,178 @@ def shell_logical_commands(script: str) -> list[str]:
 
 
 class ConfidenceGateCiContractTest(unittest.TestCase):
+    def test_confidence_schedule_matrix_declared_artifacts_have_writers(self) -> None:
+        gate = GATE.read_text(encoding="utf-8")
+        marker = "confidence_schedule_table=(\n"
+        self.assertIn(marker, gate, "confidence schedule table is missing")
+        table_body = gate.split(marker, 1)[1].split("\n)\n", 1)[0]
+        rows = [
+            ast.literal_eval(line.strip())
+            for line in table_body.splitlines()
+            if line.strip().startswith('"')
+        ]
+        self.assertTrue(rows, "confidence schedule table is empty")
+
+        expected_selectors = {
+            "fast:all",
+            *(f"fast:{shard}" for shard in FAST_SHARDS),
+            "fast:summary",
+            "default",
+            "broad",
+            "full",
+            "sim-search",
+        }
+        self.assertEqual(
+            expected_selectors,
+            {row.split("|", 1)[0] for row in rows},
+        )
+        areas = ("store", "process", "trigger", "effect-host", "protocol", "provider", "sim")
+        matrix = {
+            (row.split("|", 4)[0], row.split("|", 4)[1])
+            for row in rows
+        }
+        for selector in expected_selectors:
+            for area in areas:
+                if (selector, area) not in matrix:
+                    continue
+                self.assertTrue(
+                    any(
+                        row.split("|", 4)[0] == selector
+                        and row.split("|", 4)[1] == area
+                        for row in rows
+                    ),
+                    (selector, area),
+                )
+
+        artifact_paths = {
+            "sim_summary": "sim/summary.json",
+            "sim_search_run": "sim/search.json",
+            "provider_transport_exclusions": "sim/provider-transport-exclusions.json",
+            "env_gated_lanes": "sim/env-gated-lanes.json",
+            "full_lane_prerequisites": "sim/full-lane-prerequisites.json",
+            "postgres_effect_history_status": "sim/postgres-effect-history-status.json",
+            "restate_postgres_workers_e2e": "sim/restate-postgres-workers-e2e.json",
+            "failing_minimizer_fixtures": "sim/failing-minimizer-fixtures.json",
+            "sqlite_substrate_faults": "sim/sqlite-substrate-faults/sqlite-faults.json",
+            "focused_sqlite_seed_tail_repro": "sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json",
+            "backend_contention": "sim/backend-contention/backend-contention.json",
+            "postgres_current_trace_replay": "sim/postgres-current/status.json",
+            "postgres_current_trace_replay_report": "sim/postgres-replay/postgres-replay.json",
+            "generated_postgres_dynamic_replay": "sim/postgres-generated-rerun/summary.json",
+            "model_replay_evidence": "sim/model-replay/summary.json",
+            "coverage_summary": "coverage/summary.json",
+            "mutation_evidence": "mutation-evidence.json",
+        }
+        declaration_keys = set(
+            re.findall(
+                r'^\s+"([a-z0-9_]+)": .*?(?:sim/|coverage/|mutation-evidence)',
+                gate,
+                re.MULTILINE,
+            )
+        )
+        scheduled_keys = {
+            declaration.split("=", 1)[0]
+            for row in rows
+            for declaration in filter(None, row.split("|", 4)[4].split(","))
+        }
+        writer_text = "\n".join(
+            shell_function_body(gate, function)
+            for function in (
+                "write_sim_lane_declarations",
+                "write_fast_shard_summary",
+                "write_confidence_summary",
+            )
+        )
+        for key in artifact_paths:
+            if f'"{key}":' in writer_text:
+                self.assertIn(key, scheduled_keys, key)
+        for raw_row in rows:
+            fields = raw_row.split("|", 4)
+            self.assertEqual(5, len(fields), raw_row)
+            selector, area, suite, description, raw_artifacts = fields
+            self.assertTrue(area, raw_row)
+            self.assertTrue(suite, raw_row)
+            self.assertTrue(description, raw_row)
+            for declaration in filter(None, raw_artifacts.split(",")):
+                key, path = declaration.split("=", 1)
+                self.assertIn(key, artifact_paths, raw_row)
+                self.assertEqual(artifact_paths[key], path, raw_row)
+                self.assertIn(key, declaration_keys, key)
+                self.assertIn(path, gate, path)
+
+    def test_area_scoping_filters_execution_predicates_like_the_plan(self) -> None:
+        gate = GATE.read_text(encoding="utf-8")
+        marker = "confidence_schedule_table=(\n"
+        table_body = gate.split(marker, 1)[1].split("\n)\n", 1)[0]
+        rows = [
+            ast.literal_eval(line.strip())
+            for line in table_body.splitlines()
+            if line.strip().startswith('"')
+        ]
+        areas = ("store", "process", "trigger", "effect-host", "protocol", "provider", "sim")
+        cases = (
+            ("default+area:store", "default", "all", "store"),
+            ("broad+area:store", "broad", "all", "store"),
+            ("fast:fault-matrix+area:trigger", "fast", "fault-matrix", "trigger"),
+            ("fast:sim-generated", "fast", "sim-generated", "all"),
+        )
+
+        schedule_selector = shell_function_definition(gate, "schedule_selector")
+        schedule_row_matches_area = shell_function_definition(
+            gate, "schedule_row_matches_area"
+        )
+        schedule_has_area = shell_function_definition(gate, "schedule_has_area")
+        area_selected = shell_function_definition(gate, "area_selected")
+
+        for selector, lane, fast_shard, requested_area in cases:
+            effective_selector = (
+                f"fast:{fast_shard}" if lane == "fast" else lane
+            )
+            expected = {
+                candidate: any(
+                    row.split("|", 4)[0] == effective_selector
+                    and row.split("|", 4)[1] == candidate
+                    and (
+                        requested_area == "all"
+                        or row.split("|", 4)[1] == requested_area
+                    )
+                    for row in rows
+                )
+                for candidate in areas
+            }
+            harness = "\n".join(
+                (
+                    "set -eu",
+                    f'lane={lane!r}',
+                    f'fast_shard={fast_shard!r}',
+                    'sim_search_shard=""',
+                    f'area={requested_area!r}',
+                    marker.rstrip("\\n"),
+                    table_body,
+                    ")",
+                    schedule_selector,
+                    schedule_row_matches_area,
+                    schedule_has_area,
+                    area_selected,
+                    "for candidate in " + " ".join(areas) + "; do",
+                    '  if area_selected "$candidate"; then printf "%s\\n" "$candidate"; fi',
+                    "done",
+                )
+            )
+            completed = subprocess.run(
+                ["bash", "-c", harness],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            actual = set(filter(None, completed.stdout.splitlines()))
+            self.assertEqual(
+                {candidate for candidate, selected in expected.items() if selected},
+                actual,
+                f"execution area predicate drifted for {selector}",
+            )
+
     def test_heavy_suites_are_split_between_shard_and_heavy_profiles(self) -> None:
         """The shard/heavy split lives in nextest profiles, not job scripts.
 
@@ -1081,7 +1265,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             '"mutation_evidence": "$(mutation_evidence_path)"',
             '"mutation_evidence_status": "$(mutation_evidence_status)"',
             '"full_mutation_status": "$(full_mutation_status)"',
-            '"required_restate_postgres_workers_e2e": "$(area_selected process',
+            '"required_restate_postgres_workers_e2e": "$(scheduled_artifact_path restate_postgres_workers_e2e',
             '"restate_postgres_workers_e2e_status": "$(restate_postgres_workers_e2e_status)"',
             "run_restate_postgres_workers_e2e",
             '"status": "not_run"',
@@ -1100,7 +1284,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             'step "Focused generated SQLite seed-tail repro"',
             'scripts/lash-sim-focused-sqlite-repro.sh "$repro_dir"',
             "run_focused_sqlite_seed_tail_repro",
-            '"focused_sqlite_seed_tail_repro": "$([ -f "${out_dir}/sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json" ]',
+            '"focused_sqlite_seed_tail_repro": "$(scheduled_existing_artifact_path focused_sqlite_seed_tail_repro',
         ]
         for snippet in required_gate_snippets:
             self.assertIn(snippet, gate)
@@ -1444,7 +1628,7 @@ derive_mutation_jobs() {{
             'LASH_POSTGRES_GENERATED_PROFILE:-full-random',
             'LASH_POSTGRES_GENERATED_MAX_BOUNDARIES:-128',
             '"confidence_lane": "generated_dynamic_postgres_backend_rerun"',
-            '"generated_postgres_dynamic_replay": "$([ -f "${out_dir}/sim/postgres-generated-rerun/summary.json" ]',
+            '"generated_postgres_dynamic_replay": "$(scheduled_existing_artifact_path generated_postgres_dynamic_replay',
         ]
         for snippet in required_snippets:
             self.assertIn(snippet, gate)

@@ -310,14 +310,132 @@ USAGE
 }
 
 area_selected() {
-  [ "$area" = "all" ] || [ "$area" = "$1" ]
+  schedule_has_area "$1" && schedule_row_matches_area "$1"
 }
 
-plan_item() {
-  local item_area="$1"
-  shift
-  if area_selected "$item_area"; then
-    printf '  %-11s %s\n' "${item_area}" "$*"
+# Each row is selector|area|suite|plan description|artifact_key=relative_path,...
+# The selector is the effective lane plus fast shard; `all` is the unscoped
+# area. Consumers below deliberately query this table instead of maintaining
+# another lane/area membership list.
+confidence_schedule_table=(
+  "fast:all|store|scenario-harnesses|store contracts and SQLite substrate conformance|"
+  "fast:all|process|scenario-harnesses|runtime persistence, session graph, runtime, and agent scenarios|"
+  "fast:all|protocol|scenario-harnesses|Standard and RLM protocol scenarios|"
+  "fast:all|process|fault-matrix|runtime state machine and durable process fault matrix|"
+  "fast:all|trigger|fault-matrix|trigger delivery fault matrix|"
+  "fast:all|effect-host|fault-matrix|inline await-event cancellation conformance|"
+  "fast:all|protocol|fault-matrix|Lashlang property suite|"
+  "fast:all|provider|fault-matrix|transport properties and provider failure evidence|"
+  "fast:all|store|fault-matrix|SQLite backend fault-matrix conformance|"
+  "fast:all|sim|sim-unit-perf-guards|simulation unit/oracle and performance-guard identity suites|"
+  "fast:all|sim|sim-generated|generated deterministic simulation and minimizer evidence|sim_summary=sim/summary.json,provider_transport_exclusions=sim/provider-transport-exclusions.json,failing_minimizer_fixtures=sim/failing-minimizer-fixtures.json"
+  "fast:all|sim|minimizer-fixtures|simulation minimizer fixtures|"
+  "fast:scenario-harnesses|store|scenario-harnesses|store contracts and SQLite substrate conformance|sqlite_substrate_faults=sim/sqlite-substrate-faults/sqlite-faults.json"
+  "fast:scenario-harnesses|process|scenario-harnesses|runtime persistence, session graph, runtime, and agent scenarios|"
+  "fast:scenario-harnesses|protocol|scenario-harnesses|Standard and RLM protocol scenarios|"
+  "fast:fault-matrix|process|fault-matrix|runtime state machine and durable process fault matrix|"
+  "fast:fault-matrix|trigger|fault-matrix|trigger delivery fault matrix|"
+  "fast:fault-matrix|effect-host|fault-matrix|inline await-event cancellation conformance|"
+  "fast:fault-matrix|protocol|fault-matrix|Lashlang property suite|"
+  "fast:fault-matrix|provider|fault-matrix|transport properties and provider failure evidence|"
+  "fast:fault-matrix|store|fault-matrix|SQLite backend fault-matrix conformance|"
+  "fast:sim-unit-perf-guards|sim|sim-unit-perf-guards|simulation unit/oracle and performance-guard identity suites|"
+  "fast:sim-generated|sim|sim-generated|generated deterministic simulation lane|sim_summary=sim/summary.json,provider_transport_exclusions=sim/provider-transport-exclusions.json,env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,restate_postgres_workers_e2e=sim/restate-postgres-workers-e2e.json"
+  "fast:minimizer-fixtures|sim|minimizer-fixtures|simulation minimizer fixtures|failing_minimizer_fixtures=sim/failing-minimizer-fixtures.json"
+  "fast:summary|all|summary|validate all unscoped fast shard summaries|"
+  "sim-search|sim|sim-search|deterministic simulation search shard at full budgets|"
+  "default|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres replay|focused_sqlite_seed_tail_repro=sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json,backend_contention=sim/backend-contention/backend-contention.json,postgres_current_trace_replay=sim/postgres-current/status.json,postgres_current_trace_replay_report=sim/postgres-replay/postgres-replay.json,env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "default|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,restate_postgres_workers_e2e=sim/restate-postgres-workers-e2e.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "default|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "default|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "default|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "default|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "default|sim|simulation|simulation unit, generated, search, minimizer, and replay evidence|sim_summary=sim/summary.json,sim_search_run=sim/search.json,provider_transport_exclusions=sim/provider-transport-exclusions.json,failing_minimizer_fixtures=sim/failing-minimizer-fixtures.json,env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "broad|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres replay|focused_sqlite_seed_tail_repro=sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json,backend_contention=sim/backend-contention/backend-contention.json,generated_postgres_dynamic_replay=sim/postgres-generated-rerun/summary.json,env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "broad|store|postgres-conformance|bounded Postgres conformance and dynamic backend differential|generated_postgres_dynamic_replay=sim/postgres-generated-rerun/summary.json"
+  "broad|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,restate_postgres_workers_e2e=sim/restate-postgres-workers-e2e.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "broad|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "broad|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "broad|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "broad|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "broad|sim|simulation|simulation unit, generated, search, minimizer, and replay evidence|sim_summary=sim/summary.json,sim_search_run=sim/search.json,provider_transport_exclusions=sim/provider-transport-exclusions.json,failing_minimizer_fixtures=sim/failing-minimizer-fixtures.json,env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "broad|all|model-replay|model replay evidence|model_replay_evidence=sim/model-replay/summary.json"
+  "full|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres replay|focused_sqlite_seed_tail_repro=sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json,backend_contention=sim/backend-contention/backend-contention.json,generated_postgres_dynamic_replay=sim/postgres-generated-rerun/summary.json,env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "full|store|postgres-conformance|full Postgres conformance and dynamic backend differential|generated_postgres_dynamic_replay=sim/postgres-generated-rerun/summary.json"
+  "full|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,restate_postgres_workers_e2e=sim/restate-postgres-workers-e2e.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "full|process|restate-workers|Restate/Postgres/MinIO worker e2e|restate_postgres_workers_e2e=sim/restate-postgres-workers-e2e.json"
+  "full|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "full|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "full|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "full|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "full|sim|simulation|simulation unit, generated, search, minimizer, and replay evidence|sim_summary=sim/summary.json,sim_search_run=sim/search.json,provider_transport_exclusions=sim/provider-transport-exclusions.json,failing_minimizer_fixtures=sim/failing-minimizer-fixtures.json,env_gated_lanes=sim/env-gated-lanes.json,full_lane_prerequisites=sim/full-lane-prerequisites.json,postgres_effect_history_status=sim/postgres-effect-history-status.json,coverage_summary=coverage/summary.json,mutation_evidence=mutation-evidence.json"
+  "full|all|model-replay|model replay evidence|model_replay_evidence=sim/model-replay/summary.json"
+)
+
+schedule_selector() {
+  if [ -n "$sim_search_shard" ]; then
+    printf 'sim-search\n'
+  elif [ "$lane" = "fast" ]; then
+    printf 'fast:%s\n' "$fast_shard"
+  else
+    printf '%s\n' "$lane"
+  fi
+}
+
+schedule_row_matches_area() {
+  local row_area="$1"
+  [ "$area" = "all" ] || [ "$row_area" = "$area" ]
+}
+
+schedule_has_area() {
+  local wanted_area="$1" selector row row_area suite description artifacts
+  selector="$(schedule_selector)"
+  for row in "${confidence_schedule_table[@]}"; do
+    IFS='|' read -r row_selector row_area suite description artifacts <<<"$row"
+    if [ "$row_selector" = "$selector" ] && [ "$row_area" = "$wanted_area" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+schedule_lane_fallback_reason() {
+  if [ "$area" = "all" ]; then
+    printf 'not_in_%s_lane\n' "$lane"
+  else
+    printf 'not_in_%s_lane_or_area\n' "$lane"
+  fi
+}
+
+schedule_has_artifact() {
+  local key="$1" selector row row_selector row_area suite description artifacts declaration
+  selector="$(schedule_selector)"
+  for row in "${confidence_schedule_table[@]}"; do
+    IFS='|' read -r row_selector row_area suite description artifacts <<<"$row"
+    [ "$row_selector" = "$selector" ] || continue
+    schedule_row_matches_area "$row_area" || continue
+    for declaration in ${artifacts//,/ }; do
+      [ "${declaration%%=*}" = "$key" ] && return 0
+    done
+  done
+  return 1
+}
+
+scheduled_artifact_path() {
+  local key="$1" path="$2" fallback="$3"
+  if schedule_has_artifact "$key"; then
+    printf '%s\n' "$path"
+  else
+    printf '%s\n' "$fallback"
+  fi
+}
+
+scheduled_existing_artifact_path() {
+  local key="$1" path="$2" fallback="$3"
+  if schedule_has_artifact "$key" && [ -f "${out_dir}/${path}" ]; then
+    printf '%s\n' "$path"
+  else
+    printf '%s\n' "$fallback"
   fi
 }
 
@@ -393,31 +511,10 @@ elif [ "$fast_shard" != "all" ]; then
 fi
 
 if [ "$lane" = "fast" ] && [ "$area" != "all" ]; then
-  case "$fast_shard" in
-    all) ;;
-    scenario-harnesses)
-      [[ "$area" =~ ^(store|process|protocol)$ ]] || {
-        echo "fast:scenario-harnesses has no area:${area} work." >&2
-        exit 2
-      }
-      ;;
-    fault-matrix)
-      [[ "$area" =~ ^(store|process|trigger|effect-host|protocol|provider)$ ]] || {
-        echo "fast:fault-matrix has no area:${area} work." >&2
-        exit 2
-      }
-      ;;
-    sim-unit-perf-guards|sim-generated|minimizer-fixtures)
-      [ "$area" = "sim" ] || {
-        echo "fast:${fast_shard} may only compose with area:sim." >&2
-        exit 2
-      }
-      ;;
-    summary)
-      echo "fast:summary cannot be area-qualified; summarize the unscoped CI shard matrix." >&2
-      exit 2
-      ;;
-  esac
+  if ! schedule_has_area "$area"; then
+    echo "${requested_lane} has no area:${area} work." >&2
+    exit 2
+  fi
 fi
 
 if [ "$dry_run" -eq 0 ] && [ "$lane" != "fast" ]; then
@@ -1241,13 +1338,13 @@ write_sim_lane_declarations() {
   "operational_cases": "queueing_inputs,triggers,cancellation,observer_reconnects,provider_failures_mutations,process_wakes,tool_exec,durable_effects,worker_lease_failover,backend_choices,retries,duplicates",
   "scenario_contract_manifests": "included_in_lash_sim_summary",
   "scenario_contract_slices": "included_in_lash_sim_summary_with_generated_shape_transition_kind_and_negative_fixture",
-  "sim_search_run": "$([ -f "${out_dir}/sim/search.json" ] && echo "sim/search.json" || echo "not_in_${lane}_lane")",
-  "focused_sqlite_seed_tail_repro": "$([ -f "${out_dir}/sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json" ] && echo "sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json" || echo "not_written")",
-  "generated_postgres_dynamic_replay": "$([[ "$lane" = "broad" || "$lane" = "full" ]] && echo "sim/postgres-generated-rerun/summary.json" || echo "not_in_${lane}_lane")",
+  "sim_search_run": "$(scheduled_existing_artifact_path sim_search_run sim/search.json "$(schedule_lane_fallback_reason)")",
+  "focused_sqlite_seed_tail_repro": "$(scheduled_existing_artifact_path focused_sqlite_seed_tail_repro sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json not_written)",
+  "generated_postgres_dynamic_replay": "$(scheduled_artifact_path generated_postgres_dynamic_replay sim/postgres-generated-rerun/summary.json "$(schedule_lane_fallback_reason)")",
   "model_only_boundary_reviews": "included_in_lash_sim_summary",
-  "provider_transport_exclusions": "sim/provider-transport-exclusions.json",
-  "backend_contention": "$([[ "$lane" = "default" || "$lane" = "broad" || "$lane" = "full" ]] && echo "sim/backend-contention/backend-contention.json" || echo "not_in_${lane}_lane")",
-  "model_replay_evidence": "$([[ "$lane" = "broad" || "$lane" = "full" ]] && echo "sim/model-replay/summary.json" || echo "not_in_${lane}_lane")",
+  "provider_transport_exclusions": "$(scheduled_artifact_path provider_transport_exclusions sim/provider-transport-exclusions.json not_in_selected_schedule)",
+  "backend_contention": "$(scheduled_artifact_path backend_contention sim/backend-contention/backend-contention.json "$(schedule_lane_fallback_reason)")",
+  "model_replay_evidence": "$(scheduled_artifact_path model_replay_evidence sim/model-replay/summary.json "$(schedule_lane_fallback_reason)")",
   "postgres_backend_conformance": "${postgres_status}",
   "postgres_trace_replay": "${postgres_status}",
   "postgres_native_effect_history_replay": "native_postgres_runtime_effect_controller",
@@ -2391,31 +2488,31 @@ write_confidence_summary() {
   "selector": "${requested_selector}",
   "area": "${area}",
   "status": "${status}",
-  "sim_summary": "sim/summary.json",
-  "env_gated_lanes": "sim/env-gated-lanes.json",
-  "full_lane_prerequisites": "sim/full-lane-prerequisites.json",
-  "failing_minimizer_fixtures": "sim/failing-minimizer-fixtures.json",
+  "sim_summary": "$(scheduled_artifact_path sim_summary sim/summary.json not_in_selected_schedule)",
+  "env_gated_lanes": "$(scheduled_artifact_path env_gated_lanes sim/env-gated-lanes.json not_in_selected_schedule)",
+  "full_lane_prerequisites": "$(scheduled_artifact_path full_lane_prerequisites sim/full-lane-prerequisites.json not_in_selected_schedule)",
+  "failing_minimizer_fixtures": "$(scheduled_artifact_path failing_minimizer_fixtures sim/failing-minimizer-fixtures.json not_in_selected_schedule)",
   "confidence_class": "$(confidence_class)",
   "global_full_confidence_claim": "$([ "$lane" = "full" ] && [ "$area" = "all" ] && echo "true" || echo "false")",
-  "coverage_summary": "$([ -f "${out_dir}/coverage/summary.json" ] && echo "coverage/summary.json" || echo "not_run")",
+  "coverage_summary": "$(scheduled_existing_artifact_path coverage_summary coverage/summary.json not_run)",
   "coverage_scope": "${coverage_scope}",
   "coverage_evidence_status": "$(coverage_evidence_status)",
-  "sim_search_run": "$([ -f "${out_dir}/sim/search.json" ] && echo "sim/search.json" || echo "not_run")",
-  "focused_sqlite_seed_tail_repro": "$([ -f "${out_dir}/sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json" ] && echo "sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json" || echo "not_run")",
+  "sim_search_run": "$(scheduled_existing_artifact_path sim_search_run sim/search.json not_run)",
+  "focused_sqlite_seed_tail_repro": "$(scheduled_existing_artifact_path focused_sqlite_seed_tail_repro sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json not_run)",
   "mutation_evidence": "$(mutation_evidence_path)",
   "mutation_evidence_status": "$(mutation_evidence_status)",
   "mutation_scope": "${mutation_scope}",
   "full_mutation_status": "$(full_mutation_status)",
-  "postgres_backend_conformance": "$([[ "$lane" = "broad" || "$lane" = "full" ]] && area_selected store && echo "included_or_explicitly_skipped_in_postgres_conformance_artifact" || echo "not_in_selected_lane_or_area")",
-  "postgres_current_trace_replay": "$([ "$lane" = "default" ] && echo "sim/postgres-current/status.json" || echo "not_in_lane")",
-  "postgres_current_trace_replay_report": "$([ -f "${out_dir}/sim/postgres-replay/postgres-replay.json" ] && echo "sim/postgres-replay/postgres-replay.json" || echo "not_run")",
-  "generated_postgres_dynamic_replay": "$([ -f "${out_dir}/sim/postgres-generated-rerun/summary.json" ] && echo "sim/postgres-generated-rerun/summary.json" || echo "not_run")",
-  "backend_contention": "$([ -f "${out_dir}/sim/backend-contention/backend-contention.json" ] && echo "sim/backend-contention/backend-contention.json" || echo "not_run")",
-  "model_replay_evidence": "$([ -f "${out_dir}/sim/model-replay/summary.json" ] && echo "sim/model-replay/summary.json" || echo "not_run")",
-  "restate_postgres_workers_e2e": "$([ -f "${out_dir}/sim/restate-postgres-workers-e2e.json" ] && echo "sim/restate-postgres-workers-e2e.json" || echo "not_written")",
-  "provider_transport_exclusions": "$([ -f "${out_dir}/sim/provider-transport-exclusions.json" ] && echo "sim/provider-transport-exclusions.json" || echo "not_written")",
+  "postgres_backend_conformance": "$(if schedule_has_artifact generated_postgres_dynamic_replay; then echo "included_or_explicitly_skipped_in_postgres_conformance_artifact"; else echo "not_in_selected_lane_or_area"; fi)",
+  "postgres_current_trace_replay": "$(scheduled_artifact_path postgres_current_trace_replay sim/postgres-current/status.json not_in_selected_lane_or_area)",
+  "postgres_current_trace_replay_report": "$(scheduled_existing_artifact_path postgres_current_trace_replay_report sim/postgres-replay/postgres-replay.json not_run)",
+  "generated_postgres_dynamic_replay": "$(scheduled_existing_artifact_path generated_postgres_dynamic_replay sim/postgres-generated-rerun/summary.json not_run)",
+  "backend_contention": "$(scheduled_existing_artifact_path backend_contention sim/backend-contention/backend-contention.json not_run)",
+  "model_replay_evidence": "$(scheduled_existing_artifact_path model_replay_evidence sim/model-replay/summary.json not_run)",
+  "restate_postgres_workers_e2e": "$(scheduled_existing_artifact_path restate_postgres_workers_e2e sim/restate-postgres-workers-e2e.json not_written)",
+  "provider_transport_exclusions": "$(scheduled_existing_artifact_path provider_transport_exclusions sim/provider-transport-exclusions.json not_written)",
   "postgres_native_effect_history_replay": "native_postgres_runtime_effect_controller",
-  "postgres_effect_history_status": "$([ -f "${out_dir}/sim/postgres-effect-history-status.json" ] && echo "sim/postgres-effect-history-status.json" || echo "not_written")",
+  "postgres_effect_history_status": "$(scheduled_existing_artifact_path postgres_effect_history_status sim/postgres-effect-history-status.json not_written)",
   "artifact_contract": {
     "schema": "lash.confidence.summary-artifact-contract.v1",
     "full_lane": {
@@ -2430,7 +2527,7 @@ write_confidence_summary() {
       "mutation_evidence": "$(mutation_evidence_path)",
       "mutation_evidence_status": "$(mutation_evidence_status)",
       "full_mutation_status": "$(full_mutation_status)",
-      "required_restate_postgres_workers_e2e": "$(area_selected process && echo "sim/restate-postgres-workers-e2e.json" || echo "not_in_selected_area")",
+      "required_restate_postgres_workers_e2e": "$(scheduled_artifact_path restate_postgres_workers_e2e sim/restate-postgres-workers-e2e.json not_in_selected_area)",
       "restate_postgres_workers_e2e_status": "$(restate_postgres_workers_e2e_status)"
     },
     "bounded_broad_confidence": {
@@ -2464,7 +2561,7 @@ write_fast_shard_summary() {
   "shard": "${shard}",
   "status": "passed",
   "duration_seconds": $((SECONDS - script_started_at)),
-  "sqlite_substrate_faults": "$([ -f "${out_dir}/sim/sqlite-substrate-faults/sqlite-faults.json" ] && echo "sim/sqlite-substrate-faults/sqlite-faults.json" || echo "not_in_${shard}_shard")",
+  "sqlite_substrate_faults": "$(scheduled_existing_artifact_path sqlite_substrate_faults sim/sqlite-substrate-faults/sqlite-faults.json "not_in_${shard}_shard")",
   "artifacts_root": "${out_dir}"
 }
 EOF
@@ -2550,7 +2647,7 @@ run_fast_shard() {
       ;;
     sim-generated)
       run_sim_generated_lane
-      if area_selected store; then
+      if [ "$area" = "all" ] || area_selected store; then
         run_focused_sqlite_seed_tail_repro
       fi
       write_provider_transport_exclusion_evidence
@@ -2591,48 +2688,22 @@ print_plan() {
   printf 'Artifacts: %s\n' "$out_dir"
   printf 'Would run:\n'
 
-  if [ -n "$sim_search_shard" ]; then
-    plan_item sim "deterministic simulation search shard ${sim_search_shard} at full budgets"
-    return
-  fi
-
-  if [ "$lane" = "fast" ]; then
-    case "$fast_shard" in
-      all|scenario-harnesses)
-        plan_item store "store contracts and SQLite substrate conformance"
-        plan_item process "runtime persistence, session graph, runtime, and agent scenarios"
-        plan_item protocol "Standard and RLM protocol scenarios"
-        ;;
-    esac
-    case "$fast_shard" in
-      all|fault-matrix)
-        plan_item process "runtime state machine and durable process fault matrix"
-        plan_item trigger "trigger delivery fault matrix"
-        plan_item effect-host "inline await-event cancellation conformance"
-        plan_item protocol "Lashlang property suite"
-        plan_item provider "transport properties and provider failure evidence"
-        plan_item store "SQLite backend fault-matrix conformance"
-        ;;
-    esac
-    case "$fast_shard" in
-      all|sim-unit-perf-guards) plan_item sim "simulation unit/oracle and performance-guard identity suites" ;;
-      sim-generated) plan_item sim "generated deterministic simulation lane" ;;
-      minimizer-fixtures) plan_item sim "simulation minimizer fixtures" ;;
-      summary) printf '  matrix      validate all unscoped fast shard summaries\n' ;;
-    esac
-    if [ "$fast_shard" = "all" ]; then
-      plan_item sim "generated deterministic simulation and minimizer evidence"
+  local selector row row_selector row_area suite description artifacts
+  selector="$(schedule_selector)"
+  for row in "${confidence_schedule_table[@]}"; do
+    IFS='|' read -r row_selector row_area suite description artifacts <<<"$row"
+    [ "$row_selector" = "$selector" ] || continue
+    schedule_row_matches_area "$row_area" || continue
+    [ "$suite" = "metadata" ] && continue
+    if [ "$suite" = "sim-search" ]; then
+      description="deterministic simulation search shard ${sim_search_shard} at full budgets"
     fi
-    return
-  fi
+    printf '  %-11s %s\n' "$row_area" "$description"
+  done
 
-  plan_item store "store contracts, SQLite faults, local backend conformance, contention, and Postgres replay"
-  plan_item process "runtime persistence, session graph, runtime scenarios, and process fault matrix"
-  plan_item trigger "trigger delivery fault matrix"
-  plan_item effect-host "inline await-event cancellation conformance"
-  plan_item protocol "protocol scenarios and property suites"
-  plan_item provider "provider transport, failure, and exclusion evidence"
-  plan_item sim "simulation unit, generated, search, minimizer, and replay evidence"
+  [ -n "$sim_search_shard" ] && return
+
+  if [ "$lane" != "fast" ]; then
   if [ "$coverage_scope" = "run" ]; then
     printf '  coverage    packages: %s\n' "${selected_packages[*]}"
   else
@@ -2648,12 +2719,9 @@ print_plan() {
       fi
     fi
   fi
-  if [ "$lane" = "broad" ]; then
-    plan_item store "bounded Postgres conformance and dynamic backend differential"
-  elif [ "$lane" = "full" ]; then
-    plan_item store "full Postgres conformance and dynamic backend differential"
-    plan_item process "Restate/Postgres/MinIO worker e2e"
+  if [ "$lane" = "full" ]; then
     printf '  mutation    full suites for: %s\n' "${selected_packages[*]}"
+  fi
   fi
 }
 
