@@ -42,11 +42,11 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 
 /// Version of the durable Lashlang segment-handover envelope.
 ///
-/// v4 requires the program identity on the engine-owned handover and removes
-/// the duplicate persisted-envelope copy. A segment parked by another version
-/// is refused rather than decoded (ADR 0055). Re-exported by the facade's
-/// `formats` manifest so a host can read it before wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 5;
+/// v6 carries run-local child possession across execution segments. A segment
+/// parked by another version is refused rather than decoded (ADR 0055).
+/// Re-exported by the facade's `formats` manifest so a host can read it before
+/// wiring a store.
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 6;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -76,6 +76,7 @@ struct LashlangSegmentState {
     signal_send_sequence: u64,
     signal_wait_ordinals: BTreeMap<String, u64>,
     parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
+    started_process_ids: Vec<String>,
 }
 
 fn decode_lashlang_segment_state(
@@ -325,6 +326,7 @@ pub async fn run_lashlang_process(
     };
     if let Some(segment_state) = segment_state.as_ref() {
         ctx.restore_parent_end_actions(&segment_state.parent_end_actions);
+        ctx.restore_started_process_ids(&segment_state.started_process_ids);
     }
     let sleep_sequence = segment_state
         .as_ref()
@@ -489,6 +491,7 @@ async fn execute_lashlang(
                             signal_send_sequence: host.signal_send_sequence.load(Ordering::Relaxed),
                             signal_wait_ordinals: host.signal_wait_ordinals.lock().await.clone(),
                             parent_end_actions: host.ctx.parent_end_actions(),
+                            started_process_ids: host.ctx.started_process_ids(),
                         };
                         match serde_json::to_vec(&segment_state) {
                             Ok(engine_state) => {
