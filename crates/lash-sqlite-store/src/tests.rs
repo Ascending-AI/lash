@@ -12,6 +12,27 @@ fn public_session_schema_version_tracks_the_internal_schema_version() {
     assert_eq!(SESSION_SCHEMA_VERSION, crate::schema::SCHEMA_VERSION);
 }
 
+#[test]
+fn session_execution_lease_identity_check_rejects_a_partial_write() {
+    let connection = rusqlite::Connection::open_in_memory().expect("open SQLite CHECK witness");
+    connection
+        .execute_batch(crate::schema::SCHEMA)
+        .expect("apply SQLite schema to CHECK witness");
+    let error = connection
+        .execute(
+            "INSERT INTO session_execution_leases (session_id, lease_token)
+             VALUES (?1, ?2)",
+            rusqlite::params!["partial-identity", "token-without-executor"],
+        )
+        .expect_err("a mixed lease identity must violate its schema CHECK");
+    assert!(
+        error
+            .to_string()
+            .contains("ck_session_execution_leases_identity_all_or_none"),
+        "SQLite reported the wrong CHECK: {error}"
+    );
+}
+
 #[tokio::test]
 async fn store_options_apply_connection_policy_on_connection_thread() {
     let dir = tempfile::tempdir().expect("tempdir");

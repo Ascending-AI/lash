@@ -272,12 +272,12 @@ CREATE TABLE IF NOT EXISTS session_execution_leases (
     lease_owner_id           TEXT,
     lease_owner_incarnation_id TEXT,
     lease_executor_id        TEXT,
-    lease_owner_liveness_json TEXT,
     lease_token              TEXT,
     lease_fencing_token      INTEGER NOT NULL DEFAULT 0,
     lease_claimed_at_ms      INTEGER NOT NULL DEFAULT 0,
     lease_term_ms            INTEGER NOT NULL DEFAULT 0,
-    lease_expires_at_ms      INTEGER NOT NULL DEFAULT 0
+    lease_expires_at_ms      INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT ck_session_execution_leases_identity_all_or_none CHECK ((lease_owner_id IS NULL AND lease_owner_incarnation_id IS NULL AND lease_executor_id IS NULL AND lease_token IS NULL) OR (lease_owner_id IS NOT NULL AND lease_owner_incarnation_id IS NOT NULL AND lease_executor_id IS NOT NULL AND lease_token IS NOT NULL))
 );
 
 CREATE TABLE IF NOT EXISTS queued_work_batches (
@@ -528,7 +528,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// Version 46 adds DDL-enforced session relation, causal-reference, and observer-
 /// inheritance vocabularies. Existing durable-core catalogs are rejected rather
 /// than migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 46;
+/// Version 47 makes session-execution-lease identity all-or-none and removes the
+/// unused owner-liveness column. Existing catalogs are rejected rather than
+/// migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 47;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -1050,7 +1053,7 @@ fn prepare_versioned_schema_at_version<'connection>(
         return Ok(tx);
     }
     // Deliberately historical: tests pin the 43-to-44 migration, but the arm is
-    // unreachable for production opens now that SCHEMA_VERSION is 46.
+    // unreachable for production opens now that SCHEMA_VERSION is 47.
     if database == SqliteDatabase::DurableCore && user_version == 43 && schema_version == 44 {
         tx.execute_batch(SESSION_43_TO_44_MIGRATION)?;
         tx.execute_batch(database.schema())?;

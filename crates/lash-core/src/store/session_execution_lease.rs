@@ -326,6 +326,68 @@ pub struct SessionExecutionLeaseClaimIdentity<'a> {
     pub lease_token: &'a str,
 }
 
+/// Raw durable session-execution-lease facts shared by every SQL backend.
+///
+/// Released rows carry no owner, executor, or lease token while retaining their
+/// fencing generation. A live row carries all three. The conversion into
+/// [`SessionExecutionLease`] rejects every partial identity.
+#[doc(hidden)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionExecutionLeaseRow {
+    pub owner: Option<LeaseOwnerIdentity>,
+    pub executor_id: Option<String>,
+    pub lease_token: Option<String>,
+    pub fencing_token: u64,
+    pub claimed_at_ms: u64,
+    pub lease_term_ms: u64,
+    pub expires_at_ms: u64,
+}
+
+/// Decode the strictly paired columns that identify a lease owner.
+#[doc(hidden)]
+pub fn lease_owner_from_columns(
+    owner_id: Option<String>,
+    incarnation_id: Option<String>,
+) -> Result<Option<LeaseOwnerIdentity>, StoreError> {
+    match (owner_id, incarnation_id) {
+        (None, None) => Ok(None),
+        (Some(owner_id), Some(incarnation_id)) => Ok(Some(LeaseOwnerIdentity {
+            owner_id,
+            incarnation_id,
+        })),
+        fields => Err(StoreError::StoredDataCorrupt {
+            record_kind: "LeaseOwnerIdentity",
+            message: format!(
+                "owner id and incarnation id must both be NULL or both be present, got {fields:?}"
+            ),
+        }),
+    }
+}
+
+/// Convert a raw durable row into the live lease it represents.
+#[doc(hidden)]
+pub fn row_to_session_execution_lease(
+    session_id: &str,
+    row: SessionExecutionLeaseRow,
+) -> Result<SessionExecutionLease, StoreError> {
+    let corrupt = |field| StoreError::StoredDataCorrupt {
+        record_kind: "SessionExecutionLease",
+        message: format!("live row has NULL `{field}`"),
+    };
+    Ok(SessionExecutionLease {
+        session_id: session_id.to_string(),
+        owner: row.owner.ok_or_else(|| corrupt("lease_owner_id"))?,
+        executor_id: row
+            .executor_id
+            .ok_or_else(|| corrupt("lease_executor_id"))?,
+        lease_token: row.lease_token.ok_or_else(|| corrupt("lease_token"))?,
+        fencing_token: row.fencing_token,
+        claimed_at_epoch_ms: row.claimed_at_ms,
+        lease_term_ms: row.lease_term_ms,
+        expires_at_epoch_ms: row.expires_at_ms,
+    })
+}
+
 /// The lease-row facts every backend loads before deciding whether a retained
 /// execution guard still has authority.
 ///
@@ -508,6 +570,40 @@ impl SessionExecutionLeaseClaimOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lease_row_conversion_rejects_partial_identity() {
+        let owner_error = lease_owner_from_columns(Some("owner".to_string()), None)
+            .expect_err("an owner without an incarnation must be corrupt");
+        assert!(matches!(
+            owner_error,
+            StoreError::StoredDataCorrupt {
+                record_kind: "LeaseOwnerIdentity",
+                ..
+            }
+        ));
+
+        let row_error = row_to_session_execution_lease(
+            "session",
+            SessionExecutionLeaseRow {
+                owner: Some(LeaseOwnerIdentity::opaque("owner", "incarnation")),
+                executor_id: None,
+                lease_token: Some("token".to_string()),
+                fencing_token: 1,
+                claimed_at_ms: 2,
+                lease_term_ms: 3,
+                expires_at_ms: 5,
+            },
+        )
+        .expect_err("a partial live identity must be corrupt");
+        assert!(matches!(
+            row_error,
+            StoreError::StoredDataCorrupt {
+                record_kind: "SessionExecutionLease",
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn shared_authority_json_keeps_the_fence_and_completion_shape() {

@@ -6,13 +6,13 @@ fn current_destructive_cutover_has_no_migration_arm() {
         SCHEMA_MIGRATIONS
             .iter()
             .all(|migration| migration.to != SCHEMA_VERSION),
-        "component 66 must reject every pre-CHECK schema rather than migrate it"
+        "component 67 must reject every pre-CHECK schema rather than migrate it"
     );
 
     let declared = SCHEMA_MIGRATIONS
         .iter()
-        .find(|migration| migration.from == 64 && migration.to == 65)
-        .expect("the historical component 64 to 65 creation-only migration must remain declared");
+        .find(|migration| migration.from == 64 && migration.to == 66)
+        .expect("the historical component 64 to 66 creation-only migration must remain declared");
 
     assert_eq!(
         declared.introduced_relations,
@@ -34,7 +34,7 @@ fn component_63_remains_a_recreate_boundary_at_the_blake3_cutover() {
 
     assert!(
         declared.is_recreate_boundary(),
-        "component 63 must not migrate SHA-256 identities into component 65"
+        "component 63 must not migrate SHA-256 identities into component 66"
     );
 }
 
@@ -60,7 +60,7 @@ fn component_61_is_a_recreate_boundary_without_its_divergence_witness() {
     );
 }
 
-/// The declared 53 -> 65 migration, which every case below perturbs.
+/// The declared 53 -> 66 migration, which every case below perturbs.
 fn migration() -> &'static SchemaMigration {
     SCHEMA_MIGRATIONS
         .iter()
@@ -111,7 +111,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
     });
     SchemaReport {
         schema: Some("public".to_string()),
-        expected_version: 65,
+        expected_version: 66,
         found_version: Some(53),
         findings,
     }
@@ -122,7 +122,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
 fn published_53_findings() -> Vec<SchemaFinding> {
     vec![
         SchemaFinding::VersionMismatch {
-            expected: 65,
+            expected: 66,
             found: Some(53),
         },
         SchemaFinding::UnexpectedColumn {

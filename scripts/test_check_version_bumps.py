@@ -157,7 +157,6 @@ CREATE TABLE IF NOT EXISTS lash_session_execution_leases (
     lease_owner_id TEXT,
     lease_owner_incarnation_id TEXT,
     lease_executor_id TEXT,
-    lease_owner_liveness_json TEXT,
     lease_token TEXT,
     lease_fencing_token BIGINT NOT NULL DEFAULT 0,
     lease_claimed_at_ms BIGINT NOT NULL DEFAULT 0,

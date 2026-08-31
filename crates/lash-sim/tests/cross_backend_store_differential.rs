@@ -834,7 +834,6 @@ type LeaseRow = (
     Option<String>,
     Option<String>,
     Option<String>,
-    Option<String>,
     i64,
     i64,
     i64,
@@ -1153,7 +1152,7 @@ async fn read_sqlite_durable_state(
         let mut statement = connection
             .prepare(
                 "SELECT lease_owner_id, lease_owner_incarnation_id,
-                        lease_owner_liveness_json, lease_executor_id, lease_token,
+                        lease_executor_id, lease_token,
                         lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms,
                         lease_term_ms
                  FROM session_execution_leases
@@ -1164,15 +1163,18 @@ async fn read_sqlite_durable_state(
             .query_map([session_id], |row| {
                 let owner_id = row.get::<_, Option<String>>(0)?;
                 let incarnation_id = row.get::<_, Option<String>>(1)?;
-                let liveness_json = row.get::<_, Option<String>>(2)?;
                 Ok(SessionExecutionLeaseObservation {
-                    owner: decode_lease_owner(owner_id, incarnation_id, liveness_json),
-                    executor_id: row.get::<_, Option<String>>(3)?,
-                    lease_token: row.get::<_, Option<String>>(4)?,
-                    fencing_token: row.get::<_, i64>(5)? as u64,
-                    claimed: row.get::<_, i64>(6)? != 0,
-                    lease_term_ms: (row.get::<_, i64>(6)? != 0)
-                        .then_some(row.get::<_, i64>(8)? as u64),
+                    owner: lash_core::store_backend_support::lease_owner_from_columns(
+                        owner_id,
+                        incarnation_id,
+                    )
+                    .expect("decode SQLite session lease owner"),
+                    executor_id: row.get::<_, Option<String>>(2)?,
+                    lease_token: row.get::<_, Option<String>>(3)?,
+                    fencing_token: row.get::<_, i64>(4)? as u64,
+                    claimed: row.get::<_, i64>(5)? != 0,
+                    lease_term_ms: (row.get::<_, i64>(5)? != 0)
+                        .then_some(row.get::<_, i64>(7)? as u64),
                 })
             })
             .expect("read SQLite session-execution lease")

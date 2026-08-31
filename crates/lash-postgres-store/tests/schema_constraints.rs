@@ -62,6 +62,14 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
 
     assert_check_rejects(
         &mut connection,
+        "INSERT INTO lash_session_execution_leases (session_id, lease_token)
+         VALUES ('partial-identity', 'token-without-executor')",
+        "ck_session_execution_leases_identity_all_or_none",
+    )
+    .await;
+
+    assert_check_rejects(
+        &mut connection,
         "INSERT INTO lash_session_meta (session_id, relation_kind)
          VALUES ('bad-relation', 'sibling')",
         "ck_session_meta_relation_kind",

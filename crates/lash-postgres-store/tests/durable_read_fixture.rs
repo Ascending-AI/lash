@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 66);
+    assert_eq!(PostgresStorage::schema_version(), 67);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -146,73 +146,6 @@ async fn regenerate_postgres_durable_fixture() {
     .expect("write Postgres fixture version");
     std::fs::write(destination.join("fixture.sql"), pg_dump(&database_url))
         .expect("write Postgres fixture dump");
-    drop_fixture_schema(&database_url).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "refreshes only the refusal fixture catalog; preserves its component-v1 checkpoint"]
-async fn regenerate_postgres_prior_component_fixture_catalog() {
-    assert_eq!(
-        std::env::var(REGENERATE_ENV).as_deref(),
-        Ok("1"),
-        "set {REGENERATE_ENV}=1 to acknowledge refreshing the refusal fixture catalog"
-    );
-    let database_url = support::database_url()
-        .expect("set LASH_POSTGRES_DATABASE_URL to an owned throwaway database");
-    let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
-    restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    let fixture_database_url = fixture_database_url(&database_url);
-    let pool = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&fixture_database_url)
-        .await
-        .expect("connect to refresh refusal fixture CHECK catalog");
-    sqlx::raw_sql(
-        "ALTER TABLE lash_session_meta
-             ADD CONSTRAINT ck_session_meta_relation_kind
-                 CHECK (relation_kind IN ('root', 'child', 'fork')),
-             ADD CONSTRAINT ck_session_meta_caused_by_kind
-                 CHECK (caused_by_kind IN ('turn', 'effect', 'tool_call', 'process',
-                                            'process_event', 'trigger_occurrence', 'session_node')),
-             ADD CONSTRAINT ck_session_meta_observer_inheritance_kind
-                 CHECK (observer_inheritance_kind IN ('all', 'none', 'only'));
-         ALTER TABLE lash_processes
-             ADD CONSTRAINT ck_processes_status
-                 CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled',
-                                   'abandoned', 'caller_departed'));
-         ALTER TABLE lash_process_wake_deliveries
-             ADD CONSTRAINT ck_process_wake_deliveries_state
-                 CHECK (state IN ('pending', 'enqueuing', 'enqueued', 'discarded')),
-             ADD CONSTRAINT ck_process_wake_deliveries_discard_reason
-                 CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted',
-                                            'sequence_rewound'));
-         ALTER TABLE lash_tool_intent_submissions
-             ADD CONSTRAINT ck_tool_intent_submissions_kind
-                 CHECK (kind IN ('start_process', 'signal_process', 'cancel_process',
-                                 'emit_process_event', 'emit_trigger'));
-         ALTER TABLE lash_trigger_subscriptions
-             ADD CONSTRAINT ck_trigger_subscriptions_live_enabled
-                 CHECK (NOT (enabled AND tombstoned));
-         ALTER TABLE lash_runtime_effect_replay
-             ADD CONSTRAINT ck_runtime_effect_replay_status
-                 CHECK (status IN ('in_progress', 'completed', 'failed'));
-         UPDATE lash_schema_versions
-            SET version = 66
-          WHERE component = 'lash-postgres-store';",
-    )
-    .execute(&pool)
-    .await
-    .expect("refresh refusal fixture CHECK catalog");
-    pool.close().await;
-    let storage = PostgresStorage::connect(&fixture_database_url)
-        .await
-        .expect("open the refreshed refusal fixture catalog");
-    storage.pool().close().await;
-    std::fs::write(
-        prior_component_fixture_dir().join("fixture.sql"),
-        pg_dump(&database_url),
-    )
-    .expect("write refreshed Postgres refusal fixture catalog");
     drop_fixture_schema(&database_url).await;
 }
 

@@ -173,7 +173,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         (
             RUNTIME_PERSISTENCE_SOURCE,
             "async fn claim_pending_turn_inputs_postgres(",
-            "struct SessionExecutionLeaseRow",
+            "pub(crate) async fn read_session_execution_lease_unlocked(",
         ),
         (
             PROCESS_REGISTRY_SOURCE,
@@ -696,7 +696,7 @@ async fn diagnostic_lease_read_neither_locks_the_row_nor_waits_for_a_holder() {
         "EXPLAIN (FORMAT TEXT)
          SELECT lease_owner_id, lease_token, lease_fencing_token,
                 lease_claimed_at_ms, lease_expires_at_ms,
-                lease_owner_incarnation_id, lease_owner_liveness_json
+                lease_owner_incarnation_id
          FROM lash_session_execution_leases
          WHERE session_id = $1",
     )

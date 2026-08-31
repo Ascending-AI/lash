@@ -48,6 +48,9 @@ use lash_core::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
     RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
+use lash_core::store_backend_support::{
+    SessionExecutionLeaseRow, lease_owner_from_columns, row_to_session_execution_lease,
+};
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, AwaitEventResolver, BlobRef, DeliveryPolicy, EffectHost, ExecutionScope,
@@ -257,7 +260,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // wake delivery, effect replay, and tool intents, plus the trigger live/enabled
 // invariant. This is a destructive semantic cutover: component-65 databases
 // are rejected at open and there is deliberately no migration arm.
-const SCHEMA_VERSION: i32 = 66;
+// Version 67 makes session-execution-lease identity all-or-none and removes the
+// unused owner-liveness column. Component-66 databases are rejected at open;
+// there is deliberately no migration arm.
+const SCHEMA_VERSION: i32 = 67;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

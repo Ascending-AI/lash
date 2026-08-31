@@ -41,6 +41,11 @@ struct ExpectedConstraint {
 
 const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     expected_constraint(
+        "session_execution_leases",
+        "ck_session_execution_leases_identity_all_or_none",
+        "(lease_owner_id IS NULL AND lease_owner_incarnation_id IS NULL AND lease_executor_id IS NULL AND lease_token IS NULL) OR (lease_owner_id IS NOT NULL AND lease_owner_incarnation_id IS NOT NULL AND lease_executor_id IS NOT NULL AND lease_token IS NOT NULL)",
+    ),
+    expected_constraint(
         "session_meta",
         "ck_session_meta_relation_kind",
         "relation_kind IN ('root', 'child', 'fork')",
@@ -88,6 +93,11 @@ const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
 ];
 
 const POSTGRES_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
+    expected_constraint(
+        "lash_session_execution_leases",
+        "ck_session_execution_leases_identity_all_or_none",
+        "(lease_owner_id IS NULL AND lease_owner_incarnation_id IS NULL AND lease_executor_id IS NULL AND lease_token IS NULL) OR (lease_owner_id IS NOT NULL AND lease_owner_incarnation_id IS NOT NULL AND lease_executor_id IS NOT NULL AND lease_token IS NOT NULL)",
+    ),
     expected_constraint(
         "lash_session_meta",
         "ck_session_meta_relation_kind",
