@@ -435,7 +435,7 @@ fn graph_kind(graph: &TraceLashlangGraph) -> String {
 fn graph_title(graph: &TraceLashlangGraph) -> String {
     match &graph.subject {
         TraceRuntimeSubject::Effect { .. } if graph.entry_name == "main" => {
-            "foreground Lashlang".to_string()
+            "foreground execution".to_string()
         }
         TraceRuntimeSubject::Effect { .. } => graph.entry_name.clone(),
         TraceRuntimeSubject::Process { process_id } => {
@@ -528,6 +528,21 @@ mod tests {
             edges: Vec::new(),
             children,
         }
+    }
+
+    #[test]
+    fn foreground_graph_title_is_dialect_neutral() {
+        let graph = test_graph(
+            "effect:session:turn:exec",
+            "session",
+            TraceRuntimeSubject::Effect {
+                effect_id: "exec".to_string(),
+                kind: "exec_code".to_string(),
+            },
+            Vec::new(),
+        );
+
+        assert_eq!(graph_title(&graph), "foreground execution");
     }
 
     #[tokio::test]

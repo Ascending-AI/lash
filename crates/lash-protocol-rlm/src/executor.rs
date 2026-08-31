@@ -508,6 +508,7 @@ async fn execute_code_inner(
     };
     let host = HostBridge::new(HostBridgeConfig {
         ctx: ctx.clone(),
+        language_id: source_dialect.language_id(),
         print_projector,
         tool_result_projectors,
         lashlang_execution_trace: lashlang_execution_trace.clone(),

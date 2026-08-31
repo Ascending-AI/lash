@@ -38,9 +38,13 @@ pub(super) const NO_PROGRESS_BUDGET_PHASE: &str = "no_progress_budget";
 /// decides an effect later — and a count that reads only committed history
 /// would be one short on exactly one of them.
 ///
-pub(super) fn stalled_attempts(ctx: &DriverContextView<'_>, actions: &[DriverAction]) -> usize {
+pub(super) fn stalled_attempts(
+    ctx: &DriverContextView<'_>,
+    actions: &[DriverAction],
+    language_id: &str,
+) -> usize {
     let turn_id = ctx.turn_id();
-    let trajectory_prefix = trajectory_entry_turn_prefix(turn_id);
+    let trajectory_prefix = trajectory_entry_turn_prefix(language_id, turn_id);
     let mut attempts = 0;
     for record in ctx.events().iter().rev() {
         let SessionHistoryRecord::Protocol(event) = record else {
@@ -102,8 +106,8 @@ fn count_pending_attempts(actions: &[DriverAction], trajectory_prefix: &str, att
     }
 }
 
-fn trajectory_entry_turn_prefix(turn_id: &str) -> String {
-    format!("lashlang_step_{turn_id}_")
+fn trajectory_entry_turn_prefix(language_id: &str, turn_id: &str) -> String {
+    format!("{language_id}_step_{turn_id}_")
 }
 
 /// A stable short digest of one model reply's assistant text.

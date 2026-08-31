@@ -190,6 +190,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
+                        self.dialect.language_id(),
                         decision,
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -240,6 +241,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
+                        self.dialect.language_id(),
                         "retry_foreign_dialect_cell",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -284,6 +286,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
+                        self.dialect.language_id(),
                         "retry_output_limit_prose",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -344,6 +347,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
+                        self.dialect.language_id(),
                         "retry_malformed_cell_fence",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -388,6 +392,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
+                        self.dialect.language_id(),
                         "finish_prose",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -424,6 +429,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 llm_extraction_payload(
                     ctx.turn_id(),
                     &fingerprint,
+                    self.dialect.language_id(),
                     "request_finish",
                     &termination,
                     LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -470,6 +476,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             llm_extraction_payload(
                 ctx.turn_id(),
                 &fingerprint,
+                self.dialect.language_id(),
                 self.dialect.execution_diagnostic_name(),
                 &termination,
                 LlmExtractionCounts::cell(&assistant_text, &reasoning, &cell),
@@ -591,6 +598,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 }
                 if let Some(outcome) = terminal_outcome {
                     actions.push(DriverAction::AppendEvents(trajectory_events(
+                        self.dialect.language_id(),
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
@@ -627,6 +635,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     &ctx,
                     &mut actions,
                     trajectory_events(
+                        self.dialect.language_id(),
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
@@ -645,6 +654,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             }
 
             actions.push(DriverAction::AppendEvents(trajectory_events(
+                self.dialect.language_id(),
                 ctx.turn_id(),
                 ctx.protocol_iteration(),
                 &state,
@@ -666,7 +676,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             self.dialect.as_ref(),
             &ctx,
             &mut actions,
-            trajectory_events(ctx.turn_id(), ctx.protocol_iteration(), &state, None, None),
+            trajectory_events(
+                self.dialect.language_id(),
+                ctx.turn_id(),
+                ctx.protocol_iteration(),
+                &state,
+                None,
+                None,
+            ),
             Vec::new(),
             if state.exec_error.is_some() {
                 AttemptProgress::Stalled
@@ -875,7 +892,7 @@ fn continue_or_stop_after_nonterminal(
     }
 
     if progress == AttemptProgress::Stalled {
-        let attempts = stalled_attempts(ctx, actions);
+        let attempts = stalled_attempts(ctx, actions, dialect.language_id());
         let budget = ctx.no_progress_budget();
         if budget.is_exhausted_by(attempts) {
             actions.push(DriverAction::AppendEvents(vec![
@@ -1130,6 +1147,7 @@ fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::Attachment
 }
 
 fn trajectory_entry(
+    language_id: &str,
     turn_id: &str,
     protocol_iteration: usize,
     state: &RlmDriverState,
@@ -1138,7 +1156,7 @@ fn trajectory_entry(
 ) -> RlmTrajectoryEntry {
     let error = validation_error.or_else(|| state.exec_error.clone());
     RlmTrajectoryEntry {
-        id: format!("lashlang_step_{turn_id}_{protocol_iteration}"),
+        id: format!("{language_id}_step_{turn_id}_{protocol_iteration}"),
         protocol_iteration,
         code: state.executed_code.clone().unwrap_or_default(),
         output: state.output.clone(),
@@ -1155,6 +1173,7 @@ fn rlm_message_id(turn_id: &str, protocol_iteration: usize, purpose: &str) -> St
 }
 
 fn trajectory_events(
+    language_id: &str,
     turn_id: &str,
     protocol_iteration: usize,
     state: &RlmDriverState,
@@ -1168,6 +1187,7 @@ fn trajectory_events(
         events.push(event);
     }
     events.push(trajectory_event(trajectory_entry(
+        language_id,
         turn_id,
         protocol_iteration,
         state,
@@ -1218,7 +1238,7 @@ struct LlmExtractionCounts {
     prose_chars: usize,
     code_chars: usize,
     reasoning_chars: usize,
-    lashlang_cell_count: usize,
+    cell_count: usize,
 }
 
 impl LlmExtractionCounts {
@@ -1228,7 +1248,7 @@ impl LlmExtractionCounts {
             prose_chars: assistant_text.chars().count(),
             code_chars: 0,
             reasoning_chars: reasoning_diagnostic_chars(reasoning),
-            lashlang_cell_count: 0,
+            cell_count: 0,
         }
     }
 
@@ -1238,7 +1258,7 @@ impl LlmExtractionCounts {
             prose_chars: cell.prose.chars().count(),
             code_chars: cell.code.chars().count(),
             reasoning_chars: reasoning_diagnostic_chars(reasoning),
-            lashlang_cell_count: cell.lashlang_cell_count,
+            cell_count: cell.cell_count,
         }
     }
 }
@@ -1273,22 +1293,30 @@ fn reasoning_diagnostic_chars(reasoning: &[RlmReasoningPart]) -> usize {
 fn llm_extraction_payload(
     turn_id: &str,
     reply_fingerprint: &str,
+    language_id: &str,
     decision: &str,
     termination: &RlmTermination,
     counts: LlmExtractionCounts,
 ) -> Value {
+    let mut count_payload = serde_json::json!({
+        "full_text_chars": counts.full_text_chars,
+        "prose_chars": counts.prose_chars,
+        "code_chars": counts.code_chars,
+        "reasoning_chars": counts.reasoning_chars,
+    });
+    count_payload
+        .as_object_mut()
+        .expect("extraction counts are an object")
+        .insert(
+            format!("{language_id}_cell_count"),
+            serde_json::json!(counts.cell_count),
+        );
     serde_json::json!({
         "turn_id": turn_id,
         "decision": decision,
         "reply_fingerprint": reply_fingerprint,
         "termination": termination_diagnostic_name(termination),
-        "counts": {
-            "full_text_chars": counts.full_text_chars,
-            "prose_chars": counts.prose_chars,
-            "code_chars": counts.code_chars,
-            "reasoning_chars": counts.reasoning_chars,
-            "lashlang_cell_count": counts.lashlang_cell_count,
-        },
+        "counts": count_payload,
     })
 }
 
@@ -1530,10 +1558,33 @@ mod tests {
             ..RlmDriverState::default()
         };
 
-        let entry = trajectory_entry("turn", 0, &state, None, None);
+        let entry = trajectory_entry("lashlang", "turn", 0, &state, None, None);
         let error = entry.error.expect("captured public error");
 
         assert_eq!(error, raw_error);
+    }
+
+    #[test]
+    fn trajectory_identity_uses_the_source_language() {
+        let lashlang = trajectory_entry(
+            "lashlang",
+            "turn",
+            0,
+            &RlmDriverState::default(),
+            None,
+            None,
+        );
+        let typescript = trajectory_entry(
+            "typescript",
+            "turn",
+            0,
+            &RlmDriverState::default(),
+            None,
+            None,
+        );
+
+        assert_eq!(lashlang.id, "lashlang_step_turn_0");
+        assert_eq!(typescript.id, "typescript_step_turn_0");
     }
 
     #[test]

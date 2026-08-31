@@ -1147,7 +1147,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
 ///
 /// This is the mechanism behind the hang the battery found. Extraction only
 /// knows the active dialect's tags, so a `<typescript>` cell in a Lashlang
-/// session (or the reverse) matched nothing: `lashlang_cell_count` stayed 0,
+/// session (or the reverse) matched nothing: the dialect-specific cell count stayed 0,
 /// the whole reply counted as prose, and a `FinishRequired` turn asked the
 /// model to finish — forever, because the model kept answering with the cell it
 /// had been told to write. The execution fence never fires because extraction
@@ -1217,6 +1217,9 @@ fn a_lashlang_cell_in_a_typescript_session_is_named_the_same_way() {
     });
 
     let effects = drain_effects(&mut machine);
+    let payload = single_llm_extraction_payload(&machine);
+    assert_eq!(payload["counts"]["typescript_cell_count"], 0);
+    assert!(payload["counts"].get("lashlang_cell_count").is_none());
     assert!(
         !effects
             .iter()
