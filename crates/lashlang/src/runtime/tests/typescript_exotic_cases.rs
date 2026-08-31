@@ -460,6 +460,75 @@ async fn regexp_string_coercion_matches_node() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn regexp_match_value_of_preserves_receiver_identity() {
+    let program = Program::block(vec![
+        ts_assign(
+            "regexp",
+            heap_new(
+                "RegExp",
+                vec![Expr::String("b".into()), Expr::String(String::new().into())],
+            ),
+        ),
+        ts_assign(
+            "matched",
+            private_builtin(
+                "__typescript_regexp",
+                vec![
+                    Expr::String("match".into()),
+                    Expr::String("abc".into()),
+                    Expr::Variable("regexp".into()),
+                ],
+            ),
+        ),
+        Expr::Finish(Box::new(private_builtin(
+            "__typescript_stdlib",
+            vec![
+                Expr::String("Object.is".into()),
+                Expr::Variable("matched".into()),
+                heap_method("valueOf", "matched", Vec::new()),
+            ],
+        ))),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::Bool(true))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn global_regexp_match_value_of_preserves_identity() {
+    let program = Program::block(vec![
+        ts_assign(
+            "regexp",
+            heap_new(
+                "RegExp",
+                vec![Expr::String("b".into()), Expr::String("g".into())],
+            ),
+        ),
+        ts_assign(
+            "matched",
+            private_builtin(
+                "__typescript_regexp",
+                vec![
+                    Expr::String("match".into()),
+                    Expr::String("abc".into()),
+                    Expr::Variable("regexp".into()),
+                ],
+            ),
+        ),
+        Expr::Finish(Box::new(Expr::JavaScriptBinary {
+            left: Box::new(heap_method("valueOf", "matched", Vec::new())),
+            op: crate::JavaScriptBinaryOp::StrictEqual,
+            right: Box::new(Expr::Variable("matched".into())),
+        })),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::Bool(true))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn date_to_string_uses_the_pending_string_coercion_error() {
     let program = Program::block(vec![
         ts_assign("date", heap_new("Date", vec![Expr::Number(42.0)])),

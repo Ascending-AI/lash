@@ -2,6 +2,35 @@ use super::super::javascript::javascript_to_number;
 use super::javascript::js_stdlib_error;
 use super::*;
 
+pub(super) fn javascript_array_method_for_value(
+    method: &str,
+    target: &Value,
+    items: &[Value],
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    if method == "valueOf" && args.is_empty() {
+        // Defensive arm for non-heap dispatch paths; currently unreachable via
+        // guest code.
+        return Ok(target.clone());
+    }
+    super::javascript::javascript_array_method(method, items, args)
+}
+
+/// A regexp match is array-shaped to JavaScript, so its method dispatch lives
+/// beside ordinary array methods while this helper preserves heap identity for
+/// `valueOf`.
+pub(super) fn javascript_regexp_match_method(
+    method: &str,
+    receiver: HeapId,
+    items: &[Value],
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    if method == "valueOf" && args.is_empty() {
+        return Ok(Value::Ref(receiver));
+    }
+    super::javascript::javascript_array_method(method, items, args)
+}
+
 impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn execute_javascript_array_heap_method(
         &mut self,
