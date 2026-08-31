@@ -217,16 +217,18 @@ struct ParentEndFaultHost {
 }
 
 impl ParentEndFaultHost {
+    /// Fault hosts run on the production lease window. An effect-replay lease
+    /// is fenced against the PostgreSQL server clock — `finalize` requires
+    /// `lease_expires_at_ms > transaction_timestamp()` — so a TTL trimmed to
+    /// make a crashed worker's lease lapse quickly also turns every ordinary
+    /// effect in this scenario into a wall-clock race: one scheduler or
+    /// round-trip stall between the last renewal and the finalize commit and
+    /// the driver reports `postgres_effect_replay_lease_lost` (FIG-2370).
+    /// Lapsing an abandoned lease is expressed as a fact instead — see
+    /// [`lapse_abandoned_effect_leases`].
     fn new(storage: &PostgresStorage, state: Arc<ParentEndFaultState>, replay: bool) -> Self {
-        let inner = PostgresEffectHost::with_options(
-            storage,
-            PostgresEffectReplayOptions {
-                lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(
-                    Duration::from_millis(120),
-                )
-                .expect("valid PostgreSQL parent-end lease timings"),
-            },
-        );
+        let inner =
+            PostgresEffectHost::with_options(storage, PostgresEffectReplayOptions::default());
         if replay {
             inner.start_replay();
         }
@@ -527,6 +529,30 @@ async fn reset(storage: &PostgresStorage) {
     .expect("reset PostgreSQL process change clock");
 }
 
+/// Lapse the effect-replay leases an injected crash abandoned.
+///
+/// A crashed worker's leases lapse when their TTL runs out; nothing in the
+/// substrate hurries that along. Waiting for it is what forced this scenario
+/// onto a sub-second lease window, so the scenario states the outcome instead:
+/// after a crash, every row still `in_progress` belongs to a worker that is
+/// gone, and its lease is expired as of now. The next claimant then takes the
+/// row over on the first attempt, with no timing left in the path.
+///
+/// Returns the number of leases lapsed so callers assert what the crash
+/// actually abandoned rather than trusting a statement that may have matched
+/// nothing.
+async fn lapse_abandoned_effect_leases(storage: &PostgresStorage) -> u64 {
+    sqlx::query(
+        "UPDATE lash_runtime_effect_replay
+         SET lease_expires_at_ms = 0
+         WHERE status = 'in_progress'",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("lapse abandoned PostgreSQL effect-replay leases")
+    .rows_affected()
+}
+
 async fn wait_for_count(counter: &AtomicUsize, expected: usize, label: &str) {
     tokio::time::timeout(Duration::from_secs(10), async {
         while counter.load(Ordering::SeqCst) < expected {
@@ -663,6 +689,11 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
     .await
     .expect("read interrupted PostgreSQL ParentEnd row");
     assert_eq!(incomplete, ("in_progress".to_string(), None, None));
+    assert_eq!(
+        lapse_abandoned_effect_leases(&storage).await,
+        1,
+        "the crash abandons exactly the interrupted ParentEnd lease"
+    );
 
     let already_cancelled = &literal_segmented_plan.actions[1].parent_end.process_id;
     registry
@@ -784,6 +815,15 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
             .expect("read pre-clear PostgreSQL plan")
             .expect("pre-clear crash retains the plan"),
         literal_segmented_plan
+    );
+
+    // The second crash lands after the ParentEnd outcome is finalized and
+    // propagates out of the drive, so it abandons no lease and the concurrent
+    // redrive below claims the remaining action fresh.
+    assert_eq!(
+        lapse_abandoned_effect_leases(&storage).await,
+        0,
+        "a crash after the recorded outcome leaves no lease in progress"
     );
 
     let final_state_a = Arc::new(ParentEndFaultState::default());
