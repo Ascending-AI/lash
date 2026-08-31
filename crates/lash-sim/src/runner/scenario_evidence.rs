@@ -735,13 +735,6 @@ fn scenario_negative_fixture_for_contract(
         return scenario_negative_fixture("backend_retry_runtime_completion_missing");
     }
     if has("provider_mutation") {
-        if contract.suite == "standard"
-            && contract
-                .semantic_oracle
-                .contains("provider_error_without_checkpoint")
-        {
-            return scenario_negative_fixture("standard_provider_error_missing_parser_matrix");
-        }
         return scenario_negative_fixture("provider_mutation_runtime_completion_missing");
     }
     if has("worker_stale_completion") {
