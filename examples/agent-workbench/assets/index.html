@@ -3092,12 +3092,14 @@
       return {
         hydrated: false,
         channels: { state: null, product: null, observation: null },
+        established: { state: false, product: false, observation: false },
         reasons: { state: "", product: "", observation: "" }
       };
     }
 
     function markShellChannel(availability, channel, reachable, reason = "") {
       availability.channels[channel] = reachable;
+      if (reachable) availability.established[channel] = true;
       availability.reasons[channel] = reachable ? "" : (reason || availability.reasons[channel]);
       return availability;
     }
@@ -3123,9 +3125,20 @@
         || channels.observation === false;
     }
 
+    function establishedChannelDown(availability) {
+      const channels = availability.channels;
+      const established = availability.established;
+      return established.state && channels.state === false
+        || established.product && channels.product === false
+        || established.observation && channels.observation === false;
+    }
+
     function shellPhase(availability) {
       const down = shellChannelDown(availability);
-      if (availability.hydrated) return down ? "reconnecting" : "live";
+      if (availability.hydrated) {
+        if (establishedChannelDown(availability)) return "reconnecting";
+        return down ? "connecting" : "live";
+      }
       return down ? "unavailable" : "connecting";
     }
 
@@ -3173,6 +3186,13 @@
         placeholderTone: phase === "live" ? "" : (phase === "connecting" ? "pending" : "degraded"),
         banner: { hidden: true, text: "", detail: shellReason(availability) }
       };
+      if (phase === "connecting" && availability.hydrated) {
+        model.pillText = busy ? "running" : "connecting";
+        model.pillTone = busy ? "run" : "pending";
+        model.subtitle = busy ? (view.busyLabel || "turn running") : "connecting…";
+        model.session = view.session || "—";
+        return model;
+      }
       if (phase === "live") {
         model.pillText = busy ? "running" : "idle";
         model.pillTone = busy ? "run" : "";
