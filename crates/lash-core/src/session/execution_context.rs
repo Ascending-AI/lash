@@ -529,6 +529,16 @@ impl<'run> RuntimeExecutionContext<'run> {
             })
     }
 
+    fn child_process_observers(&self) -> Vec<crate::SessionId> {
+        match self.process_execution.as_ref() {
+            Some(exec) => match &exec.originator {
+                crate::ProcessOriginator::Host { .. } => Vec::new(),
+                crate::ProcessOriginator::Session { session_id, .. } => vec![session_id.clone()],
+            },
+            None => vec![self.session_id.clone()],
+        }
+    }
+
     pub(crate) async fn attach_captured_process_execution_env(
         &self,
         registration: crate::ProcessRegistration,
@@ -585,8 +595,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             }
         };
         let process_id = registration.id.clone();
-        let mut options =
-            crate::ProcessStartOptions::new().with_initial_observer(self.session_id.clone());
+        let mut options = crate::ProcessStartOptions::new()
+            .with_initial_observers(self.child_process_observers());
         if let Some(spawn) = self.process_spawn_provenance() {
             options = options.with_spawn_provenance(spawn);
         }

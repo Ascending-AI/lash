@@ -511,6 +511,7 @@ finish result"#,
             .completed_process("parent")
             .completed_process("child")
             .observer_visible_process("lashlang", "parent")
+            .observer_visible_process("lashlang", "child")
             .min_completed_process_graphs(2),
         )
         .await?;
