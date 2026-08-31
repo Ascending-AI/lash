@@ -293,6 +293,20 @@ pub struct SessionExecutionLease {
     pub expires_at_epoch_ms: u64,
 }
 
+/// One diagnostic observation of a session-execution-lease row.
+///
+/// `observed_at_epoch_ms` is sampled from the same clock domain that authored
+/// the lease timestamps. PostgreSQL reads it from the transaction clock in the
+/// same transaction as `lease`; embedded stores return their injected clock.
+/// Callers can therefore compare the two without mixing host and store clocks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionExecutionLeaseObservation {
+    /// Store-clock instant paired with the row read.
+    pub observed_at_epoch_ms: u64,
+    /// Held lease facts, or `None` for an absent, unleased, or released row.
+    pub lease: Option<SessionExecutionLease>,
+}
+
 /// Shared evidence presented at every session-execution-lease seam.
 ///
 /// Fence checks and release used to accept field-identical record types. That

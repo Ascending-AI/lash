@@ -528,7 +528,8 @@ async fn busy_claimants_race_only_at_head_cas_without_touching_holder_lane() {
             store
                 .get_session_execution_lease(session_id)
                 .await
-                .expect("read predecessor after winning commit"),
+                .expect("read predecessor after winning commit")
+                .lease,
             Some(predecessor_row.clone()),
             "the advisory winner must leave the predecessor row byte-identical"
         );
@@ -578,7 +579,8 @@ async fn busy_claimants_race_only_at_head_cas_without_touching_holder_lane() {
             store
                 .get_session_execution_lease(session_id)
                 .await
-                .expect("read predecessor after all contenders"),
+                .expect("read predecessor after all contenders")
+                .lease,
             Some(predecessor_row.clone()),
             "no contender may take over, rotate, renew, or release the predecessor row"
         );
@@ -675,6 +677,7 @@ async fn publish_on_one_side_of_ttl(
                 .get_session_execution_lease(session_id)
                 .await
                 .expect("read released post-TTL lane")
+                .lease
                 .is_none(),
             "post-TTL acquisition commits with an ordinary atomic release"
         );
@@ -683,7 +686,8 @@ async fn publish_on_one_side_of_ttl(
             store
                 .get_session_execution_lease(session_id)
                 .await
-                .expect("read live pre-TTL lane"),
+                .expect("read live pre-TTL lane")
+                .lease,
             Some(predecessor_row),
             "pre-TTL advisory publication leaves the predecessor untouched"
         );

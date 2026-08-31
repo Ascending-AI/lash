@@ -309,7 +309,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
     async fn get_session_execution_lease(
         &self,
         session_id: &str,
-    ) -> Result<Option<SessionExecutionLease>, StoreError> {
+    ) -> Result<crate::SessionExecutionLeaseObservation, StoreError> {
         self.inner().get_session_execution_lease(session_id).await
     }
 
@@ -813,7 +813,7 @@ where
     async fn get_session_execution_lease(
         &self,
         session_id: &str,
-    ) -> Result<Option<SessionExecutionLease>, StoreError> {
+    ) -> Result<crate::SessionExecutionLeaseObservation, StoreError> {
         RuntimePersistenceDecorator::get_session_execution_lease(self, session_id).await
     }
 }

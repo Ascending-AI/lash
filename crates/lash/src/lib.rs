@@ -328,11 +328,12 @@ pub mod persistence {
         SessionBinding, SessionBlobReclaimReport, SessionCommitStore, SessionExecutionLease,
         SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
         SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
-        SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionGraph,
-        SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionReadView,
-        SessionRelation, SessionStateAdmission, StoreBackend, StoreError, StoreMaintenance,
-        StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-        StoreSchemaVerdict, TurnId, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
+        SessionExecutionLeaseObservation, SessionExecutionLeaseRenewalInstallMismatch,
+        SessionExecutionLeaseStore, SessionGraph, SessionHistoryRecord, SessionMeta,
+        SessionNodePayload, SessionNodeRecord, SessionReadView, SessionRelation,
+        SessionStateAdmission, StoreBackend, StoreError, StoreMaintenance, StorePreflight,
+        StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnId,
+        TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
         facade_support::SessionNodeProjection,
     };
     /// Committed session history flattened into presentation order, as returned

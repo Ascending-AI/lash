@@ -71,7 +71,7 @@ pub use runtime_commit_plan::{
 pub use session_execution_lease::{
     LeaseClaimNonce, LeaseOwnerIdentity, SessionExecutionLease, SessionExecutionLeaseAcquisition,
     SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseDisplacement,
+    SessionExecutionLeaseDisplacement, SessionExecutionLeaseObservation,
 };
 pub use state_version::{
     CURRENT_SESSION_STATE_VERSION, OLDEST_SUPPORTED_SESSION_STATE_VERSION, SessionStateAdmission,
@@ -1311,12 +1311,14 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
 
     /// Read the current session-execution-lease row without claiming it.
     ///
-    /// Returns the persisted lease when an owner holds the row, or `None` when
-    /// the row is absent, unleased, or released. The returned lease may already
-    /// be expired: expiry is a raw fact exposed read-side, mirroring
+    /// Returns the store-clock instant sampled alongside the optional persisted
+    /// lease. The lease is `None` when the row is absent, unleased, or released.
+    /// A returned lease may already be expired: expiry is a raw fact exposed
+    /// read-side, mirroring
     /// [`ProcessRegistry::get_process_lease`](crate::ProcessRegistry::get_process_lease),
     /// so callers classify staleness themselves. This never mutates the lease
-    /// and never advances a generation. Unknown session ids return `None`.
+    /// and never advances a generation. Unknown session ids return an
+    /// observation whose lease is `None`.
     ///
     /// This read is diagnostics only. The commit CAS is the single authority on
     /// who may publish (ADR 0029); a backend must never let a caller substitute
@@ -1324,7 +1326,7 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
     async fn get_session_execution_lease(
         &self,
         session_id: &str,
-    ) -> Result<Option<SessionExecutionLease>, StoreError>;
+    ) -> Result<SessionExecutionLeaseObservation, StoreError>;
 }
 
 /// Durable queued-work capability: ingress, ordered claiming, and claim leases

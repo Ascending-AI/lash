@@ -318,6 +318,7 @@ mod tests {
             .get_session_execution_lease(SESSION_ID)
             .await
             .expect("store-level diagnostic read")
+            .lease
             .expect("a held lane reports its row");
         assert_eq!(holder.owner, row.owner);
         assert_eq!(holder.generation, row.fencing_token);

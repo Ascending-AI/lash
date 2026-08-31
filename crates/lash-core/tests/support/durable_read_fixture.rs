@@ -666,6 +666,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .get_session_execution_lease(SESSION_ID)
         .await
         .expect("durable fixture drift: session lease read failed")
+        .lease
         .expect("durable fixture drift: retained session lease disappeared");
     assert_eq!(
         session_lease.owner,

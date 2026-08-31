@@ -2418,6 +2418,9 @@ lash::persistence::SessionExecutionLeaseDisplacement::executor_id
 lash::persistence::SessionExecutionLeaseDisplacement::expired_at_epoch_ms
 lash::persistence::SessionExecutionLeaseDisplacement::fencing_token
 lash::persistence::SessionExecutionLeaseDisplacement::owner
+lash::persistence::SessionExecutionLeaseObservation
+lash::persistence::SessionExecutionLeaseObservation::lease
+lash::persistence::SessionExecutionLeaseObservation::observed_at_epoch_ms
 lash::persistence::SessionExecutionLeaseRenewalInstallMismatch
 lash::persistence::SessionExecutionLeaseRenewalInstallMismatch::Executor
 lash::persistence::SessionExecutionLeaseRenewalInstallMismatch::ExpiryRegressed

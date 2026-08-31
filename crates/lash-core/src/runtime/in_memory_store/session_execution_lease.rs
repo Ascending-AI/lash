@@ -224,16 +224,21 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
     async fn get_session_execution_lease(
         &self,
         session_id: &str,
-    ) -> Result<Option<crate::SessionExecutionLease>, crate::store::StoreError> {
+    ) -> Result<crate::SessionExecutionLeaseObservation, crate::store::StoreError> {
         #[cfg(test)]
         self.refuse_injected_counter_defect("session_lease_fencing_token")?;
+        let observed_at_epoch_ms = self.clock.timestamp_ms();
         let leases = self.session_execution_leases.lock_recover();
-        Ok(leases.get(session_id).and_then(|current| {
+        let lease = leases.get(session_id).and_then(|current| {
             // An unleased or released row keeps its generation but drops owner
             // and token; only a held row is reported. Expiry is not filtered:
             // a lapsed holder is the fact a triage read needs.
             (current.owner.is_some() && current.lease_token.is_some())
                 .then(|| Self::in_memory_session_execution_lease(session_id, current))
-        }))
+        });
+        Ok(crate::SessionExecutionLeaseObservation {
+            observed_at_epoch_ms,
+            lease,
+        })
     }
 }

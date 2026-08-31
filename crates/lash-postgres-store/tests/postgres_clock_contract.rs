@@ -668,7 +668,12 @@ async fn diagnostic_lease_read_neither_locks_the_row_nor_waits_for_a_holder() {
         .await
         .expect("connect PostgreSQL storage");
     let session_id = unique_id("diagnostic-read-lock");
-    let factory = storage.session_store_factory_with_shared_process_registry();
+    let host_clock = Arc::new(TestClock::new(
+        db_now_ms(&storage).await.saturating_add(CLOCK_SKEW_MS),
+    ));
+    let factory = storage
+        .session_store_factory_with_shared_process_registry()
+        .with_clock(host_clock as Arc<dyn Clock>);
     let store = factory
         .create_store(&SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
@@ -733,14 +738,21 @@ async fn diagnostic_lease_read_neither_locks_the_row_nor_waits_for_a_holder() {
         "the locking transaction must actually hold this session's lease row"
     );
 
-    let observed = tokio::time::timeout(
+    let server_before_read = db_now_ms(&storage).await;
+    let observation = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         store.get_session_execution_lease(&session_id),
     )
     .await
     .expect("the diagnostic read must not wait for the row lock")
-    .expect("diagnostic read succeeds")
-    .expect("a held lane is reported");
+    .expect("diagnostic read succeeds");
+    let server_after_read = db_now_ms(&storage).await;
+    assert!(
+        (server_before_read..=server_after_read).contains(&observation.observed_at_epoch_ms),
+        "diagnostic observation must use the PostgreSQL transaction clock: \
+         server={server_before_read}..={server_after_read}, observation={observation:?}"
+    );
+    let observed = observation.lease.expect("a held lane is reported");
     assert_eq!(observed.fencing_token, held.fencing_token);
     assert_eq!(observed.owner, held.owner);
 

@@ -1673,8 +1673,9 @@ impl SessionExecutionLeaseStore for Store {
     async fn get_session_execution_lease(
         &self,
         session_id: &str,
-    ) -> Result<Option<SessionExecutionLease>, StoreError> {
+    ) -> Result<lash_core::SessionExecutionLeaseObservation, StoreError> {
         let session_id = session_id.to_string();
+        let observed_at_epoch_ms = self.clock.timestamp_ms();
         self.conn
             .call(move |conn| {
                 let outcome: Result<Option<SessionExecutionLease>, StoreError> = (|| {
@@ -1690,7 +1691,12 @@ impl SessionExecutionLeaseStore for Store {
                     Ok(Some(row_to_session_execution_lease(&session_id, row)?))
                 })(
                 );
-                Ok(outcome)
+                Ok(
+                    outcome.map(|lease| lash_core::SessionExecutionLeaseObservation {
+                        observed_at_epoch_ms,
+                        lease,
+                    }),
+                )
             })
             .await
             .map_err(sqlite_error)?

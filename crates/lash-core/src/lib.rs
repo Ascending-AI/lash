@@ -1184,10 +1184,10 @@ pub use store::{
     SessionBinding, SessionBlobReclaimReport, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
-    SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
-    SessionStateAdmission, StoreBackend, StoreError, StoreMaintenance, StorePreflight,
-    StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnId,
-    TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
+    SessionExecutionLeaseObservation, SessionExecutionLeaseRenewalInstallMismatch,
+    SessionExecutionLeaseStore, SessionMeta, SessionStateAdmission, StoreBackend, StoreError,
+    StoreMaintenance, StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
+    StoreSchemaVerdict, TurnId, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

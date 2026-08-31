@@ -7,11 +7,11 @@ use lash_sansio::sync::MutexExt;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_core::LlmOutputPart;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{
     LlmContentBlock, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, ResponseTextMeta,
 };
+use lash_core::{LlmOutputPart, SessionExecutionLeaseObservation, StoreError};
 #[cfg(feature = "rlm")]
 use lash_lashlang_runtime::ToolDefinitionBindingExt;
 use tokio::sync::{Mutex as TokioMutex, oneshot};
@@ -551,13 +551,16 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
     async fn get_session_execution_lease(
         &self,
         session_id: &str,
-    ) -> std::result::Result<Option<lash_core::SessionExecutionLease>, lash_core::store::StoreError>
-    {
-        Ok(self
+    ) -> std::result::Result<SessionExecutionLeaseObservation, StoreError> {
+        let lease = self
             .session_execution_leases
             .lock_recover()
             .get(session_id)
-            .cloned())
+            .cloned();
+        Ok(SessionExecutionLeaseObservation {
+            observed_at_epoch_ms: now_epoch_ms(),
+            lease,
+        })
     }
 }
 
@@ -1069,9 +1072,11 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
     async fn get_session_execution_lease(
         &self,
         _session_id: &str,
-    ) -> std::result::Result<Option<lash_core::SessionExecutionLease>, lash_core::store::StoreError>
-    {
-        Ok(None)
+    ) -> std::result::Result<SessionExecutionLeaseObservation, StoreError> {
+        Ok(SessionExecutionLeaseObservation {
+            observed_at_epoch_ms: now_epoch_ms(),
+            lease: None,
+        })
     }
 }
 
