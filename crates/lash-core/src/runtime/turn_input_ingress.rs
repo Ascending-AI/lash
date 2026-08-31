@@ -905,6 +905,18 @@ mod tests {
     }
 
     #[test]
+    fn turn_input_state_wire_values_match_the_persisted_ingress_encoding() {
+        assert_eq!(TurnInputState::PendingActive.as_str(), "pending_active");
+        assert_eq!(
+            TurnInputState::DeferredNextTurn.as_str(),
+            "deferred_next_turn"
+        );
+        assert_eq!(TurnInputState::Accepted.as_str(), "accepted");
+        assert_eq!(TurnInputState::Cancelled.as_str(), "cancelled");
+        assert_eq!(TurnInputState::Completed.as_str(), "completed");
+    }
+
+    #[test]
     fn every_checkpoint_admits_at_least_the_default_boundary() {
         for checkpoint in CLAIM_CHECKPOINTS.iter().copied() {
             let admitted = TurnInputCheckpointBoundary::ALL
