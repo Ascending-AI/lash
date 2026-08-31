@@ -4105,16 +4105,6 @@ async fn claim_pending_turn_inputs_postgres(
     }))
 }
 
-pub(crate) struct SessionExecutionLeaseRow {
-    owner: Option<LeaseOwnerIdentity>,
-    executor_id: Option<String>,
-    pub(crate) lease_token: Option<String>,
-    pub(crate) fencing_token: u64,
-    claimed_at_ms: u64,
-    lease_term_ms: u64,
-    pub(crate) expires_at_ms: u64,
-}
-
 /// Read the lease row without locking it, for diagnostics.
 ///
 /// The mutation paths deliberately take a `FOR UPDATE` row lock (see
@@ -4132,8 +4122,7 @@ pub(crate) async fn read_session_execution_lease_unlocked(
     let row = sqlx::query(
         "SELECT lease_owner_id, lease_token, lease_fencing_token,
                 lease_claimed_at_ms, lease_expires_at_ms,
-                lease_owner_incarnation_id, lease_owner_liveness_json,
-                lease_executor_id, lease_term_ms
+                lease_owner_incarnation_id, lease_executor_id, lease_term_ms
          FROM lash_session_execution_leases
          WHERE session_id = $1",
     )
@@ -4152,8 +4141,7 @@ pub(crate) async fn load_session_execution_lease_tx(
     let row = sqlx::query(
         "SELECT lease_owner_id, lease_token, lease_fencing_token,
                 lease_claimed_at_ms, lease_expires_at_ms,
-                lease_owner_incarnation_id, lease_owner_liveness_json,
-                lease_executor_id, lease_term_ms
+                lease_owner_incarnation_id, lease_executor_id, lease_term_ms
          FROM lash_session_execution_leases
          WHERE session_id = $1
          FOR UPDATE",
@@ -4170,46 +4158,13 @@ fn session_execution_lease_row_from_columns(
     row: sqlx::postgres::PgRow,
 ) -> Result<SessionExecutionLeaseRow, StoreError> {
     Ok(SessionExecutionLeaseRow {
-        owner: lease_owner_from_columns(row.get(0), row.get(5), row.get(6)),
-        executor_id: row.get(7),
+        owner: lease_owner_from_columns(row.get(0), row.get(5))?,
+        executor_id: row.get(6),
         lease_token: row.get(1),
         fencing_token: u64_from_sql("SessionExecutionLease", "fencing_token", row.get(2))?,
         claimed_at_ms: u64_from_sql("SessionExecutionLease", "claimed_at_ms", row.get(3))?,
-        lease_term_ms: u64_from_sql("SessionExecutionLease", "lease_term_ms", row.get(8))?,
+        lease_term_ms: u64_from_sql("SessionExecutionLease", "lease_term_ms", row.get(7))?,
         expires_at_ms: u64_from_sql("SessionExecutionLease", "expires_at_ms", row.get(4))?,
-    })
-}
-
-pub(crate) fn lease_owner_from_columns(
-    owner_id: Option<String>,
-    incarnation_id: Option<String>,
-    _liveness_json: Option<String>,
-) -> Option<LeaseOwnerIdentity> {
-    owner_id.map(|owner_id| LeaseOwnerIdentity {
-        incarnation_id: incarnation_id.unwrap_or_else(|| owner_id.clone()),
-        owner_id,
-    })
-}
-
-fn row_to_session_execution_lease(
-    session_id: &str,
-    row: SessionExecutionLeaseRow,
-) -> Result<SessionExecutionLease, StoreError> {
-    Ok(SessionExecutionLease {
-        session_id: session_id.to_string(),
-        owner: row
-            .owner
-            .ok_or_else(|| StoreError::Backend("live session lease missing owner".to_string()))?,
-        executor_id: row.executor_id.ok_or_else(|| {
-            StoreError::Backend("live session lease missing executor id".to_string())
-        })?,
-        lease_token: row.lease_token.ok_or_else(|| {
-            StoreError::Backend("live session lease missing lease token".to_string())
-        })?,
-        fencing_token: row.fencing_token,
-        claimed_at_epoch_ms: row.claimed_at_ms,
-        lease_term_ms: row.lease_term_ms,
-        expires_at_epoch_ms: row.expires_at_ms,
     })
 }
 
@@ -4263,15 +4218,14 @@ async fn acquire_session_execution_lease_tx(
     sqlx::query(
         "INSERT INTO lash_session_execution_leases (
             session_id, lease_owner_id, lease_owner_incarnation_id, lease_executor_id,
-            lease_owner_liveness_json, lease_token, lease_fencing_token,
+            lease_token, lease_fencing_token,
             lease_claimed_at_ms, lease_expires_at_ms, lease_term_ms
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (session_id) DO UPDATE SET
             lease_owner_id = EXCLUDED.lease_owner_id,
             lease_owner_incarnation_id = EXCLUDED.lease_owner_incarnation_id,
             lease_executor_id = EXCLUDED.lease_executor_id,
-            lease_owner_liveness_json = EXCLUDED.lease_owner_liveness_json,
             lease_token = EXCLUDED.lease_token,
             lease_fencing_token = EXCLUDED.lease_fencing_token,
             lease_claimed_at_ms = EXCLUDED.lease_claimed_at_ms,
@@ -4282,7 +4236,6 @@ async fn acquire_session_execution_lease_tx(
     .bind(&owner.owner_id)
     .bind(&owner.incarnation_id)
     .bind(executor_id)
-    .bind(Option::<&str>::None)
     .bind(lease_token)
     .bind(sql_fencing_token)
     .bind(now as i64)
@@ -4335,7 +4288,6 @@ async fn release_session_execution_lease_tx(
          SET lease_owner_id = NULL,
              lease_owner_incarnation_id = NULL,
              lease_executor_id = NULL,
-             lease_owner_liveness_json = NULL,
              lease_token = NULL,
              lease_claimed_at_ms = 0,
              lease_term_ms = 0,

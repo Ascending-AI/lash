@@ -1410,8 +1410,7 @@ pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, 
         claim_owner: lease_owner_from_columns(
             row.get("claim_owner_id"),
             row.get("claim_owner_incarnation_id"),
-            row.get("claim_owner_liveness_json"),
-        ),
+        )?,
         claim_token: row.get("claim_token"),
         claim_session_lease_generation: u64_from_sql(
             "PendingTurnInput",

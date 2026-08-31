@@ -1152,7 +1152,8 @@ pub fn process_runtime_session_ids(process_id: &str) -> [String; 2] {
 /// its persisted liveness metadata is what lets a sweeping worker prove a
 /// busy holder is *definitely dead* and reclaim the lease before the TTL
 /// through [`ProcessRegistry::reclaim_process_lease`](super::ProcessRegistry::reclaim_process_lease),
-/// mirroring the session execution lane.
+/// unlike the TTL-fenced session execution lane, which does not persist owner
+/// liveness metadata.
 ///
 /// **This is not single-process theatre.** The owner / fencing-token /
 /// lease-token triple is the public contract that lets any backend detect and

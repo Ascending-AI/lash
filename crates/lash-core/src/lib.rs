@@ -202,7 +202,9 @@ pub mod store_backend_support {
     pub use crate::store::session_execution_lease::{
         SessionExecutionLeaseClaimIdentity, SessionExecutionLeaseFenceFacts,
         SessionExecutionLeaseRefusalFacts, SessionExecutionLeaseRefusalOperation,
-        require_current_session_execution_lease, trace_session_execution_lease_refusal,
+        SessionExecutionLeaseRow, lease_owner_from_columns,
+        require_current_session_execution_lease, row_to_session_execution_lease,
+        trace_session_execution_lease_refusal,
     };
 }
 

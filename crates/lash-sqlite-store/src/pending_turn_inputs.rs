@@ -1,16 +1,5 @@
 use super::*;
 
-fn lease_owner_from_columns(
-    owner_id: Option<String>,
-    incarnation_id: Option<String>,
-    _liveness_json: Option<String>,
-) -> Option<LeaseOwnerIdentity> {
-    owner_id.map(|owner_id| LeaseOwnerIdentity {
-        incarnation_id: incarnation_id.unwrap_or_else(|| owner_id.clone()),
-        owner_id,
-    })
-}
-
 pub(crate) fn decode_turn_input_ingress(
     value: String,
 ) -> Result<lash_core::TurnInputIngress, StoreError> {
@@ -61,7 +50,13 @@ pub(crate) fn pending_turn_input_row_from_sql(
         enqueued_at_ms: u64_from_sql("PendingTurnInput", "enqueued_at_ms", row.get(7)?)?,
         claim_id: row.get(8)?,
         claim_fencing_token: u64_from_sql("PendingTurnInput", "claim_fencing_token", row.get(9)?)?,
-        claim_owner: lease_owner_from_columns(row.get(10)?, row.get(11)?, row.get(12)?),
+        claim_owner: lease_owner_from_columns(row.get(10)?, row.get(11)?).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                10,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
         claim_token: row.get(13)?,
         claim_session_lease_generation: u64_from_sql(
             "PendingTurnInput",

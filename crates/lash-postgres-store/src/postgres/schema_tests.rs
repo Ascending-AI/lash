@@ -6,7 +6,7 @@ fn current_destructive_cutover_has_no_migration_arm() {
         SCHEMA_MIGRATIONS
             .iter()
             .all(|migration| migration.to != SCHEMA_VERSION),
-        "component 66 must reject every pre-CHECK schema rather than migrate it"
+        "component 67 must reject every pre-CHECK schema rather than migrate it"
     );
 
     let declared = SCHEMA_MIGRATIONS

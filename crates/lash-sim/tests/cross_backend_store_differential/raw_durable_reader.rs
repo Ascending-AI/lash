@@ -321,7 +321,7 @@ impl RawDurableReader {
                     .map(session_meta_observation);
                 let lease_rows: Vec<LeaseRow> = sqlx::query_as(
                     "SELECT lease_owner_id, lease_owner_incarnation_id,
-                            lease_owner_liveness_json, lease_executor_id, lease_token,
+                            lease_executor_id, lease_token,
                             lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms,
                             lease_term_ms
                      FROM lash_session_execution_leases
@@ -337,7 +337,6 @@ impl RawDurableReader {
                         |(
                             owner_id,
                             incarnation_id,
-                            liveness_json,
                             executor_id,
                             lease_token,
                             fencing_token,
@@ -345,7 +344,11 @@ impl RawDurableReader {
                             _expires_at_epoch_ms,
                             lease_term_ms,
                         )| SessionExecutionLeaseObservation {
-                            owner: decode_lease_owner(owner_id, incarnation_id, liveness_json),
+                            owner: lash_core::store_backend_support::lease_owner_from_columns(
+                                owner_id,
+                                incarnation_id,
+                            )
+                            .expect("decode Postgres session lease owner"),
                             executor_id,
                             lease_token,
                             fencing_token: fencing_token as u64,

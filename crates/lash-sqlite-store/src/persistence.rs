@@ -4099,16 +4099,6 @@ async fn claim_pending_turn_inputs_sqlite(
     .map_err(sqlite_error)?
 }
 
-struct SessionExecutionLeaseRow {
-    owner: Option<LeaseOwnerIdentity>,
-    executor_id: Option<String>,
-    lease_token: Option<String>,
-    fencing_token: u64,
-    claimed_at_ms: u64,
-    lease_term_ms: u64,
-    expires_at_ms: u64,
-}
-
 fn load_session_execution_lease_row_conn(
     conn: &Connection,
     session_id: &str,
@@ -4117,18 +4107,22 @@ fn load_session_execution_lease_row_conn(
         .query_row(
             "SELECT lease_owner_id, lease_token, lease_fencing_token,
                     lease_claimed_at_ms, lease_expires_at_ms,
-                    lease_owner_incarnation_id, lease_owner_liveness_json,
-                    lease_executor_id, lease_term_ms
+                    lease_owner_incarnation_id, lease_executor_id, lease_term_ms
              FROM session_execution_leases
              WHERE session_id = ?1",
             params![session_id],
             |row| {
                 let owner_id: Option<String> = row.get(0)?;
                 let incarnation_id: Option<String> = row.get(5)?;
-                let liveness_json: Option<String> = row.get(6)?;
                 Ok(SessionExecutionLeaseRow {
-                    owner: lease_owner_from_columns(owner_id, incarnation_id, liveness_json),
-                    executor_id: row.get(7)?,
+                    owner: lease_owner_from_columns(owner_id, incarnation_id).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?,
+                    executor_id: row.get(6)?,
                     lease_token: row.get(1)?,
                     fencing_token: u64_from_sql(
                         "SessionExecutionLease",
@@ -4143,7 +4137,7 @@ fn load_session_execution_lease_row_conn(
                     lease_term_ms: u64_from_sql(
                         "SessionExecutionLease",
                         "lease_term_ms",
-                        row.get(8)?,
+                        row.get(7)?,
                     )?,
                     expires_at_ms: u64_from_sql(
                         "SessionExecutionLease",
@@ -4156,39 +4150,6 @@ fn load_session_execution_lease_row_conn(
         .optional()
         .map_err(sqlite_error)?;
     Ok(row)
-}
-
-fn lease_owner_from_columns(
-    owner_id: Option<String>,
-    incarnation_id: Option<String>,
-    _liveness_json: Option<String>,
-) -> Option<LeaseOwnerIdentity> {
-    owner_id.map(|owner_id| LeaseOwnerIdentity {
-        incarnation_id: incarnation_id.unwrap_or_else(|| owner_id.clone()),
-        owner_id,
-    })
-}
-
-fn row_to_session_execution_lease(
-    session_id: &str,
-    row: SessionExecutionLeaseRow,
-) -> Result<SessionExecutionLease, StoreError> {
-    Ok(SessionExecutionLease {
-        session_id: session_id.to_string(),
-        owner: row
-            .owner
-            .ok_or_else(|| StoreError::Backend("live session lease missing owner".to_string()))?,
-        executor_id: row.executor_id.ok_or_else(|| {
-            StoreError::Backend("live session lease missing executor id".to_string())
-        })?,
-        lease_token: row.lease_token.ok_or_else(|| {
-            StoreError::Backend("live session lease missing lease token".to_string())
-        })?,
-        fencing_token: row.fencing_token,
-        claimed_at_epoch_ms: row.claimed_at_ms,
-        lease_term_ms: row.lease_term_ms,
-        expires_at_epoch_ms: row.expires_at_ms,
-    })
 }
 
 fn acquire_session_execution_lease_conn(
@@ -4219,15 +4180,14 @@ fn acquire_session_execution_lease_conn(
     conn.execute(
         "INSERT INTO session_execution_leases (
             session_id, lease_owner_id, lease_owner_incarnation_id, lease_executor_id,
-            lease_owner_liveness_json, lease_token, lease_fencing_token,
+            lease_token, lease_fencing_token,
             lease_claimed_at_ms, lease_expires_at_ms, lease_term_ms
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(session_id) DO UPDATE SET
             lease_owner_id = excluded.lease_owner_id,
             lease_owner_incarnation_id = excluded.lease_owner_incarnation_id,
             lease_executor_id = excluded.lease_executor_id,
-            lease_owner_liveness_json = excluded.lease_owner_liveness_json,
             lease_token = excluded.lease_token,
             lease_fencing_token = excluded.lease_fencing_token,
             lease_claimed_at_ms = excluded.lease_claimed_at_ms,
@@ -4238,7 +4198,6 @@ fn acquire_session_execution_lease_conn(
             owner.owner_id,
             owner.incarnation_id,
             executor_id,
-            Option::<&str>::None,
             lease_token,
             sql_fencing_token,
             now as i64,
@@ -4495,7 +4454,6 @@ fn release_session_execution_lease_conn(
          SET lease_owner_id = NULL,
              lease_owner_incarnation_id = NULL,
              lease_executor_id = NULL,
-             lease_owner_liveness_json = NULL,
              lease_token = NULL,
              lease_claimed_at_ms = 0,
              lease_term_ms = 0,
