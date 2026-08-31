@@ -57,7 +57,7 @@ pub fn workflow_graph_from_source_with_facets(
     let canonical_program = parse(&canonical)?;
     let analysis =
         environment.map(|environment| analyze_workflow_program(&canonical_program, environment));
-    Ok(GraphProjector::new(&canonical, &canonical_program, analysis.as_ref()).project())
+    Ok(GraphProjector::new(&canonical, &canonical_program, analysis.as_ref(), false).project())
 }
 
 pub(super) fn projected_node_type_facets(

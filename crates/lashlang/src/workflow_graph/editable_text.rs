@@ -4,9 +4,14 @@ use crate::source::{canonical_assign_target_source, canonical_expression_source}
 
 use super::{GraphRenderError, WorkflowListComprehensionClause, WorkflowNode};
 
-pub(super) fn expression_text(expression: &Expr) -> String {
-    canonical_expression_source(expression)
-        .expect("an expression parsed from canonical source must remain sourceable")
+pub(super) fn expression_text(expression: &Expr, allow_non_sourceable: bool) -> String {
+    match canonical_expression_source(expression) {
+        Ok(text) => text,
+        Err(error) if allow_non_sourceable => format!("<non-sourceable expression: {error}>"),
+        Err(error) => {
+            panic!("an expression parsed from canonical source must remain sourceable: {error}")
+        }
+    }
 }
 
 pub(super) fn assign_target_text(target: &AssignTarget) -> String {
@@ -14,16 +19,19 @@ pub(super) fn assign_target_text(target: &AssignTarget) -> String {
         .expect("an assignment target parsed from canonical source must remain sourceable")
 }
 
-pub(super) fn workflow_clause(clause: &ListComprehensionClause) -> WorkflowListComprehensionClause {
+pub(super) fn workflow_clause(
+    clause: &ListComprehensionClause,
+    allow_non_sourceable: bool,
+) -> WorkflowListComprehensionClause {
     match clause {
         ListComprehensionClause::For { binding, iterable } => {
             WorkflowListComprehensionClause::For {
                 binding: binding.to_string(),
-                iterable: expression_text(iterable),
+                iterable: expression_text(iterable, allow_non_sourceable),
             }
         }
         ListComprehensionClause::If { condition } => WorkflowListComprehensionClause::If {
-            condition: expression_text(condition),
+            condition: expression_text(condition, allow_non_sourceable),
         },
     }
 }

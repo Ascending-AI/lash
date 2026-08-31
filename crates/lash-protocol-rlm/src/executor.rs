@@ -936,6 +936,50 @@ mod tests {
     }
 
     #[test]
+    fn execution_started_map_predeclares_nodes_for_both_dialects() {
+        block_on(async {
+            for (language, source, dialect) in [
+                ("lashlang", "print 1\nfinish 1", SourceDialect::Lashlang),
+                (
+                    "typescript",
+                    "console.log(1); finish(1);",
+                    SourceDialect::Typescript,
+                ),
+            ] {
+                let program = match dialect {
+                    SourceDialect::Lashlang => lashlang::parse(source).expect("source parses"),
+                    SourceDialect::Typescript => {
+                        lash_typescript::parse(source).expect("source parses")
+                    }
+                };
+                let linked = lashlang::LinkedModule::link_with_dialect(
+                    program,
+                    lash_lashlang_runtime::LashlangSurface::default()
+                        .host_environment(&lash_core::ToolCatalog::default())
+                        .expect("host environment builds"),
+                    match dialect {
+                        SourceDialect::Lashlang => lashlang::CompilationDialect::Lashlang,
+                        SourceDialect::Typescript => lashlang::CompilationDialect::Typescript,
+                    },
+                )
+                .expect("source links");
+
+                let map = trace_main_map(&linked.artifact);
+                let node_kinds_and_labels = map
+                    .nodes
+                    .iter()
+                    .map(|node| (node.kind.as_str(), node.label.as_str()))
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    node_kinds_and_labels,
+                    [("terminal", "result")],
+                    "{language}: execution_started must predeclare the node inventory"
+                );
+            }
+        });
+    }
+
+    #[test]
     fn cancelled_execution_reaches_the_stop_classifier_in_both_dialects() {
         block_on(async {
             for (language, successful_code, code, cancelled_binding, source_dialect) in [

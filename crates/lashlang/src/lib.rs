@@ -132,7 +132,8 @@ pub use workflow_graph::{
     WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodeTypeFacets, WorkflowProcess,
     WorkflowSubgraph, WorkflowTerminalKind, WorkflowTypeDiagnostic, WorkflowTypedVariable,
     node_id_for_execution_site, runtime_execution_site_for_workflow_site,
-    workflow_graph_from_source, workflow_graph_from_source_with_facets, workflow_graph_to_source,
+    workflow_graph_from_program, workflow_graph_from_source,
+    workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
 
 pub fn format_parse_diagnostic(source: &str, error: &ParseError) -> String {
