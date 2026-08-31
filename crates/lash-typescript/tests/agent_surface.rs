@@ -1709,7 +1709,7 @@ fn for_of_bodies_still_reject_reaching_the_iterable() {
         ),
         (
             "const xs = [1, 2]; for (const x of xs) { xs?.pop(); } finish('done');",
-            "optional",
+            "calls an optional member through `xs`",
         ),
         (
             "const xs = [1, 2]; for (const x of xs) { delete xs[0]; } finish('done');",
@@ -1771,29 +1771,74 @@ fn for_of_bodies_still_reject_reaching_the_iterable() {
 #[test]
 fn for_of_bodies_reject_mutation_in_patterns_without_rejecting_legal_patterns() {
     let environment = two_leaf_web_environment();
-    for (shape, rejected, accepted) in [
+    for (shape, rejected, accepted, needle) in [
         (
             "destructuring default",
             "const urls = ['a', 'b']; const xs = []; for (const u of urls) { const [a = urls.pop()] = xs; } finish('done');",
             "const urls = ['a', 'b']; const xs = []; for (const u of urls) { const [a = u] = xs; } finish('done');",
+            "calls `urls.pop()`",
         ),
         (
             "parameter default",
             "const urls = ['a', 'b']; for (const u of urls) { function choose(a = urls.pop()) { return a; } } finish('done');",
             "const urls = ['a', 'b']; for (const u of urls) { function choose(a = u) { return a; } } finish('done');",
+            "calls `urls.pop()`",
         ),
         (
             "computed pattern key",
             "const urls = ['a', 'b']; for (const u of urls) { const { [urls.pop()]: value } = {}; } finish('done');",
             "const urls = ['a', 'b']; for (const u of urls) { const { [u]: value } = {}; } finish('done');",
+            "calls `urls.pop()`",
+        ),
+        (
+            "expression-function parameter default alias",
+            "const xs = [1, 2]; for (const x of xs) { const f = (a = xs) => { a.pop(); }; f(); } finish('done');",
+            "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { const f = (a = ys) => { a.pop(); }; f(); } finish('done');",
+            "binds `xs`",
+        ),
+        (
+            "function-expression parameter default alias",
+            "const xs = [1, 2]; for (const x of xs) { const f = function(a = xs) { a.pop(); }; f(); } finish('done');",
+            "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { const f = function(a = ys) { a.pop(); }; f(); } finish('done');",
+            "binds `xs`",
+        ),
+        (
+            "array declaration default alias",
+            "const xs = [1, 2]; const ys = []; for (const x of xs) { const [a = xs] = ys; a.pop(); } finish('done');",
+            "const xs = [1, 2]; const ys = [3, 4]; const zs = []; for (const x of xs) { const [a = ys] = zs; a.pop(); } finish('done');",
+            "binds `xs`",
+        ),
+        (
+            "object declaration default alias",
+            "const xs = [1, 2]; const o = {}; for (const x of xs) { const { a = xs } = o; a.pop(); } finish('done');",
+            "const xs = [1, 2]; const ys = [3, 4]; const o = {}; for (const x of xs) { const { a = ys } = o; a.pop(); } finish('done');",
+            "binds `xs`",
+        ),
+        (
+            "inner for-of declaration default alias",
+            "const xs = [1, 2]; const ys = [[]]; for (const x of xs) { for (const [a = xs] of ys) { a.pop(); } } finish('done');",
+            "const xs = [1, 2]; const ys = [3, 4]; const zs = [[]]; for (const x of xs) { for (const [a = ys] of zs) { a.pop(); } } finish('done');",
+            "binds `xs`",
+        ),
+        (
+            "inner for-of assignment target mutation",
+            "const xs = [1, 2]; for (const x of xs) { for (xs[1] of [9]) { } } finish('done');",
+            "const xs = [1, 2]; const other = [3, 4]; for (const x of xs) { for (other[0] of [9]) { } } finish('done');",
+            "assigns through `xs`",
+        ),
+        (
+            "inner for-in assignment target mutation",
+            "const xs = [1, 2]; const o = { a: 1 }; for (const x of xs) { for (xs[0] in o) { } } finish('done');",
+            "const xs = [1, 2]; const other = [3, 4]; const o = { a: 1 }; for (const x of xs) { for (other[0] in o) { } } finish('done');",
+            "assigns through `xs`",
         ),
     ] {
         let error = lash_typescript::link(rejected, &environment)
             .expect_err("pattern-carried iterable mutation must reject");
         assert_eq!(error.code.as_str(), "TS_FOR_OF_UNSUPPORTED", "{shape}");
         assert!(
-            error.to_string().contains("calls `urls.pop()`"),
-            "{shape} names the newly reached mutating call: {error}"
+            error.to_string().contains(needle),
+            "{shape} names how the iterable was reached: {error}"
         );
 
         lash_typescript::link(accepted, &environment)
