@@ -66,7 +66,7 @@ impl RawDurableReader {
                             (
                                 batch,
                                 claim_id,
-                                claim_owner,
+                                _claim_owner,
                                 claim_token_present,
                                 claim_fencing_token,
                                 claim_session_lease_generation,
@@ -76,7 +76,6 @@ impl RawDurableReader {
                                 ordinal,
                                 batch,
                                 claim_id,
-                                claim_owner,
                                 claim_token_present,
                                 claim_fencing_token,
                                 claim_session_lease_generation,
@@ -401,8 +400,7 @@ impl RawDurableReader {
                     .collect();
                 let queued_work_batches: Vec<QueuedWorkBatchRow> = sqlx::query_as(
                     "SELECT enqueue_seq, batch_id, source_key, delivery_policy, work_kind,
-                            authority_json, merge_key, available_at_ms, claim_id, claim_owner_id,
-                            claim_owner_incarnation_id, claim_owner_liveness_json, claim_token,
+                            authority_json, merge_key, available_at_ms, claim_id, claim_token,
                             claim_fencing_token, claim_session_lease_generation
                      FROM lash_queued_work_batches
                      WHERE session_id = $1

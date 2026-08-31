@@ -975,7 +975,7 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
         let rendered = error.to_string();
         assert!(
             rendered.contains("has version 43")
-                && rendered.contains("expected 67")
+                && rendered.contains("expected 68")
                 && rendered.contains("does not relax it"),
             "the version boundary must dominate the incompatible queued-work shape: {rendered}"
         );
@@ -984,7 +984,7 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
 }
 
 /// Component 65 predates the durable vocabulary CHECKs. The destructive
-/// component-66 cutover must refuse it before either Lash-managed DDL or the
+/// component-68 cutover must refuse it before either Lash-managed DDL or the
 /// schema-check valve can mutate or admit the database.
 #[tokio::test]
 async fn component_65_is_rejected_without_adding_check_constraints() {
@@ -1035,7 +1035,7 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
             let rendered = error.to_string();
             assert!(
                 rendered.contains("has version 65")
-                    && rendered.contains("expected 67")
+                    && rendered.contains("expected 68")
                     && rendered.contains("no applicable migration")
                     && rendered.contains("does not relax it"),
                 "the destructive version boundary was lost for {provisioning:?} + {check:?}: \
@@ -1316,7 +1316,7 @@ async fn report_remedies_match_the_finding_class() {
 
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 67 WHERE component = 'lash-postgres-store';
+            "UPDATE lash_schema_versions SET version = 68 WHERE component = 'lash-postgres-store';
              DROP INDEX idx_lash_process_events_key",
         )
         .await;
@@ -1447,7 +1447,7 @@ async fn the_schema_gate_emits_its_decision_basis() {
         capture,
         &scratch.name,
         "allowed",
-        &["found_version=Some(67)", "finding_total=0"],
+        &["found_version=Some(68)", "finding_total=0"],
     );
 
     // (b) denied on shape.
@@ -1619,7 +1619,7 @@ fn assert_evidence_with_provisioning(
             )
         });
     let provisioning = format!("provisioning={provisioning}");
-    for field in ["component=lash-postgres-store", "expected_version=67"]
+    for field in ["component=lash-postgres-store", "expected_version=68"]
         .iter()
         .chain(std::iter::once(&provisioning.as_str()))
         .chain(extra)

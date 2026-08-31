@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 67.
+-- lash-postgres-store schema, component version 68.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -206,13 +206,13 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     merge_key TEXT,
     available_at_ms BIGINT NOT NULL,
     enqueued_at_ms BIGINT NOT NULL,
-    claim_id TEXT,
-    claim_owner_id TEXT,
-    claim_owner_incarnation_id TEXT,
-    claim_owner_liveness_json TEXT,
-    claim_token TEXT,
+    claim_id TEXT, -- With claim_token, names a live claim for a nonzero generation.
+    claim_token TEXT, -- At generation zero, the pair is an abandon-restored predecessor.
     claim_fencing_token BIGINT NOT NULL DEFAULT 0,
-    claim_session_lease_generation BIGINT NOT NULL DEFAULT 0,
+    claim_session_lease_generation BIGINT NOT NULL DEFAULT 0, -- Zero disambiguates the predecessor record from a live claim.
+    CONSTRAINT ck_queued_work_batches_work_kind CHECK (work_kind IN ('turn', 'control')),
+    CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
+    CONSTRAINT ck_queued_work_batches_claim_id_token_all_or_none CHECK ((claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)),
     UNIQUE (session_id, source_key)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_ready
@@ -576,7 +576,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 67)
+VALUES ('lash-postgres-store', 68)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (singleton, current_seq)

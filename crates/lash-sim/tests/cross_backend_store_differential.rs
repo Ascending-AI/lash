@@ -850,9 +850,6 @@ type QueuedWorkBatchRow = (
     i64,
     Option<String>,
     Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
     i64,
     i64,
 );
@@ -1239,8 +1236,7 @@ async fn read_sqlite_durable_state(
         let mut statement = connection
             .prepare(
                 "SELECT enqueue_seq, batch_id, source_key, delivery_policy, work_kind,
-                        authority_json, merge_key, available_at_ms, claim_id, claim_owner_id,
-                        claim_owner_incarnation_id, claim_owner_liveness_json, claim_token,
+                        authority_json, merge_key, available_at_ms, claim_id, claim_token,
                         claim_fencing_token, claim_session_lease_generation
                  FROM queued_work_batches
                  WHERE session_id = ?1
@@ -1262,9 +1258,6 @@ async fn read_sqlite_durable_state(
                     row.get(9)?,
                     row.get(10)?,
                     row.get(11)?,
-                    row.get(12)?,
-                    row.get(13)?,
-                    row.get(14)?,
                 ))
             })
             .expect("read SQLite queued-work batches")

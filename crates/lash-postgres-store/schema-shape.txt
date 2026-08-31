@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 67
+version 68
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null
@@ -201,9 +201,6 @@ table lash_queued_work_batches
   column batch_id text not-null
   column claim_fencing_token bigint not-null default
   column claim_id text nullable
-  column claim_owner_id text nullable
-  column claim_owner_incarnation_id text nullable
-  column claim_owner_liveness_json text nullable
   column claim_session_lease_generation bigint not-null default
   column claim_token text nullable
   column delivery_policy text not-null

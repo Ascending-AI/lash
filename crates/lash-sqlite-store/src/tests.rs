@@ -33,6 +33,60 @@ fn session_execution_lease_identity_check_rejects_a_partial_write() {
     );
 }
 
+#[test]
+fn queued_work_checks_reject_illegal_vocabulary_and_mixed_claim_correlation() {
+    let connection = rusqlite::Connection::open_in_memory().expect("open SQLite CHECK witness");
+    connection
+        .execute_batch(crate::schema::SCHEMA)
+        .expect("apply SQLite schema to CHECK witness");
+    let assert_rejected = |statement: &str, constraint: &str| {
+        let error = connection
+            .execute(statement, [])
+            .expect_err("an illegal queued-work row must violate its schema CHECK");
+        assert!(
+            error.to_string().contains(constraint),
+            "SQLite reported the wrong CHECK: {error}"
+        );
+    };
+
+    assert_rejected(
+        "INSERT INTO queued_work_batches (
+             batch_id, session_id, delivery_policy, work_kind, authority_json,
+             available_at_ms, enqueued_at_ms
+         ) VALUES (
+             'bad-kind', 'session', 'earliest_safe_boundary', 'cancel', '{}', 0, 0
+         )",
+        "ck_queued_work_batches_work_kind",
+    );
+    assert_rejected(
+        "INSERT INTO queued_work_batches (
+             batch_id, session_id, delivery_policy, work_kind, authority_json,
+             available_at_ms, enqueued_at_ms
+         ) VALUES ('bad-policy', 'session', 'eventually', 'turn', '{}', 0, 0)",
+        "ck_queued_work_batches_delivery_policy",
+    );
+    assert_rejected(
+        "INSERT INTO queued_work_batches (
+             batch_id, session_id, delivery_policy, work_kind, authority_json,
+             available_at_ms, enqueued_at_ms, claim_id
+         ) VALUES (
+             'claim-id-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0, 0,
+             'claim'
+         )",
+        "ck_queued_work_batches_claim_id_token_all_or_none",
+    );
+    assert_rejected(
+        "INSERT INTO queued_work_batches (
+             batch_id, session_id, delivery_policy, work_kind, authority_json,
+             available_at_ms, enqueued_at_ms, claim_token
+         ) VALUES (
+             'claim-token-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0, 0,
+             'token'
+         )",
+        "ck_queued_work_batches_claim_id_token_all_or_none",
+    );
+}
+
 #[tokio::test]
 async fn store_options_apply_connection_policy_on_connection_thread() {
     let dir = tempfile::tempdir().expect("tempdir");

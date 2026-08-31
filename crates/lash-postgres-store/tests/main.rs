@@ -20,8 +20,6 @@ mod pre_frame_key_cutover;
 mod process_parent_atomicity;
 #[path = "process_prune_reclaim.rs"]
 mod process_prune_reclaim;
-#[path = "queued_work_ordering.rs"]
-mod queued_work_ordering;
 #[path = "refcount_benchmark.rs"]
 mod refcount_benchmark;
 #[path = "session_execution_lease_renewal.rs"]

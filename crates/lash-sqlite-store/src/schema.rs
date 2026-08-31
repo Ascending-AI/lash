@@ -291,13 +291,13 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     merge_key         TEXT,
     available_at_ms   INTEGER NOT NULL,
     enqueued_at_ms    INTEGER NOT NULL,
-    claim_id          TEXT,
-    claim_owner_id    TEXT,
-    claim_owner_incarnation_id TEXT,
-    claim_owner_liveness_json TEXT,
-    claim_token       TEXT,
+    claim_id          TEXT, -- With claim_token, names a live claim for a nonzero generation.
+    claim_token       TEXT, -- At generation zero, the pair is an abandon-restored predecessor.
     claim_fencing_token INTEGER NOT NULL DEFAULT 0,
-    claim_session_lease_generation INTEGER NOT NULL DEFAULT 0,
+    claim_session_lease_generation INTEGER NOT NULL DEFAULT 0, -- Zero disambiguates the predecessor record from a live claim.
+    CONSTRAINT ck_queued_work_batches_work_kind CHECK (work_kind IN ('turn', 'control')),
+    CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
+    CONSTRAINT ck_queued_work_batches_claim_id_token_all_or_none CHECK ((claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)),
     UNIQUE (session_id, source_key)
         ON CONFLICT IGNORE
 );
@@ -531,7 +531,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// Version 47 makes session-execution-lease identity all-or-none and removes the
 /// unused owner-liveness column. Existing catalogs are rejected rather than
 /// migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 47;
+/// Version 48 constrains queued-work vocabulary and claim correlation while
+/// removing its unread owner columns. Existing catalogs are rejected rather
+/// than migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 48;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -1053,7 +1056,7 @@ fn prepare_versioned_schema_at_version<'connection>(
         return Ok(tx);
     }
     // Deliberately historical: tests pin the 43-to-44 migration, but the arm is
-    // unreachable for production opens now that SCHEMA_VERSION is 47.
+    // unreachable for production opens now that SCHEMA_VERSION is 48.
     if database == SqliteDatabase::DurableCore && user_version == 43 && schema_version == 44 {
         tx.execute_batch(SESSION_43_TO_44_MIGRATION)?;
         tx.execute_batch(database.schema())?;

@@ -59,6 +59,7 @@ fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> ClaimCandidate {
         enqueue_seq,
         claim_fencing_token: 0,
         prior_claim_id: None,
+        prior_claim_token: None,
         work_class: QueuedWorkClass::TurnWork,
         config_patch_command: false,
         delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
@@ -77,11 +78,7 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
         Just(Some("wake".to_string())),
         Just(Some("other".to_string())),
     ];
-    let kind = prop_oneof![
-        Just(QueuedWorkKind::Turn),
-        Just(QueuedWorkKind::Control),
-        Just(QueuedWorkKind::Cancel),
-    ];
+    let kind = prop_oneof![Just(QueuedWorkKind::Turn), Just(QueuedWorkKind::Control),];
     let work_class = prop_oneof![
         Just(QueuedWorkClass::TurnWork),
         Just(QueuedWorkClass::SessionCommand),
@@ -156,6 +153,7 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
                 enqueue_seq,
                 claim_fencing_token: 0,
                 prior_claim_id: None,
+                prior_claim_token: None,
                 work_class,
                 config_patch_command: false,
                 delivery_policy,
@@ -390,22 +388,20 @@ fn authority_and_elevation_are_independent_compatibility_gates() {
 }
 
 #[test]
-fn control_and_cancel_kinds_never_batch() {
-    for kind in [QueuedWorkKind::Control, QueuedWorkKind::Cancel] {
-        let mut first = candidate(1, Some("wake"));
-        first.kind = kind;
-        let candidates = vec![first, candidate(2, Some("wake"))];
-        assert_eq!(
-            select_turn_work_claim_prefix(
-                &candidates,
-                QueuedWorkClaimBoundary::Idle,
-                &policy(1_000, 100),
-                1_000
-            )
-            .unwrap(),
-            1
-        );
-    }
+fn control_kind_never_batches() {
+    let mut first = candidate(1, Some("wake"));
+    first.kind = QueuedWorkKind::Control;
+    let candidates = vec![first, candidate(2, Some("wake"))];
+    assert_eq!(
+        select_turn_work_claim_prefix(
+            &candidates,
+            QueuedWorkClaimBoundary::Idle,
+            &policy(1_000, 100),
+            1_000
+        )
+        .unwrap(),
+        1
+    );
 }
 
 #[test]
@@ -824,6 +820,7 @@ fn lease_derivation_is_deterministic_and_advances_fencing() {
         enqueue_seq: 7,
         claim_fencing_token: 2,
         prior_claim_id: None,
+        prior_claim_token: None,
         work_class: QueuedWorkClass::TurnWork,
         config_patch_command: false,
         delivery_policy: DeliveryPolicy::EarliestSafeBoundary,

@@ -70,6 +70,51 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
 
     assert_check_rejects(
         &mut connection,
+        "INSERT INTO lash_queued_work_batches (
+             batch_id, session_id, delivery_policy, work_kind, authority_json,
+             available_at_ms, enqueued_at_ms
+         ) VALUES (
+             'bad-kind', 'session', 'earliest_safe_boundary', 'cancel', '{}', 0, 0
+         )",
+        "ck_queued_work_batches_work_kind",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_queued_work_batches (
+             batch_id, session_id, delivery_policy, work_kind, authority_json,
+             available_at_ms, enqueued_at_ms
+         ) VALUES ('bad-policy', 'session', 'eventually', 'turn', '{}', 0, 0)",
+        "ck_queued_work_batches_delivery_policy",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_queued_work_batches (
+             batch_id, session_id, delivery_policy, work_kind, authority_json,
+             available_at_ms, enqueued_at_ms, claim_id
+         ) VALUES (
+             'claim-id-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0, 0,
+             'claim'
+         )",
+        "ck_queued_work_batches_claim_id_token_all_or_none",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_queued_work_batches (
+             batch_id, session_id, delivery_policy, work_kind, authority_json,
+             available_at_ms, enqueued_at_ms, claim_token
+         ) VALUES (
+             'claim-token-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0, 0,
+             'token'
+         )",
+        "ck_queued_work_batches_claim_id_token_all_or_none",
+    )
+    .await;
+
+    assert_check_rejects(
+        &mut connection,
         "INSERT INTO lash_session_meta (session_id, relation_kind)
          VALUES ('bad-relation', 'sibling')",
         "ck_session_meta_relation_kind",

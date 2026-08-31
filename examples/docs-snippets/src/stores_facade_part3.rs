@@ -480,10 +480,6 @@ pub(crate) fn store_area_facade_witnesses() {
     });
     // FIG-2105-WITNESS-0601: lash::persistence::QueuedWorkKind [enum]
     type_witness::<lash::persistence::QueuedWorkKind>();
-    // FIG-2105-WITNESS-0602: lash::persistence::QueuedWorkKind::Cancel [variant]
-    variant_witness(|value: &lash::persistence::QueuedWorkKind| {
-        matches!(value, lash::persistence::QueuedWorkKind::Cancel)
-    });
     // FIG-2105-WITNESS-0603: lash::persistence::QueuedWorkKind::Control [variant]
     variant_witness(|value: &lash::persistence::QueuedWorkKind| {
         matches!(value, lash::persistence::QueuedWorkKind::Control)

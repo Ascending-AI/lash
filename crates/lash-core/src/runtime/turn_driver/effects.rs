@@ -680,6 +680,7 @@ mod claim_authority_tests {
                     .map(|(batch_id, enqueue_seq)| coalesced_batch(batch_id, *enqueue_seq))
                     .collect(),
                 abandon_restore_claim_id: None,
+                abandon_restore_claim_token: None,
             },
         }
     }

@@ -1207,6 +1207,7 @@ pub(crate) fn claim_candidate_from_row(
         batch,
         row.claim_fencing_token,
         row.claim_id.clone(),
+        row.claim_token.clone(),
     ))
 }
 
@@ -1260,8 +1261,7 @@ pub(crate) async fn load_queued_batch(
     let row = sqlx::query(
         "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                 work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
+                claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
          FROM lash_queued_work_batches
          WHERE batch_id = $1",
     )

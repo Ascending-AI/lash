@@ -627,6 +627,10 @@ where
     ))
     .await;
     queued_work_join_groups_by_delivery_policy_and_merge_key(make("queued-join")).await;
+    abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations(make(
+        "abandoned-predecessor-generation",
+    ))
+    .await;
     queued_work_redrive_preserves_interrupted_batch_composition(make("redrive-composition")).await;
     // Ordered ahead of the ready-gap law: that law advances the controlled clock
     // past the shared deferred-row timestamp, after which no row can be deferred.
@@ -6740,6 +6744,165 @@ async fn queued_work_redrive_preserves_interrupted_batch_composition(
     release_session_execution_lease_for_test(&store, &third_lease).await;
 }
 
+async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = "abandoned-predecessor-generation";
+    let batch = store
+        .enqueue_queued_work(queued_draft(
+            session_id,
+            "generation-pinned predecessor",
+            DeliveryPolicy::EarliestSafeBoundary,
+        ))
+        .await
+        .expect("enqueue generation-pinned predecessor");
+
+    let predecessor_owner = lease_owner("abandoned-predecessor-owner");
+    let predecessor_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &predecessor_owner.owner_id)
+            .await;
+    let predecessor_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &predecessor_lease.fence(),
+            &predecessor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .expect("claim predecessor generation")
+        .claim()
+        .expect("predecessor generation claim exists");
+    release_session_execution_lease_for_test(&store, &predecessor_lease).await;
+
+    let successor_owner = lease_owner("abandoned-successor-owner");
+    let successor_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &successor_owner.owner_id).await;
+    assert!(
+        successor_lease.fencing_token > predecessor_lease.fencing_token,
+        "the reclaiming successor must hold a newer lease generation"
+    );
+    let successor_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .expect("reclaim predecessor under successor generation")
+        .claim()
+        .expect("successor generation claim exists");
+    assert_eq!(
+        successor_claim.abandon_restore_claim_id.as_deref(),
+        Some(predecessor_claim.claim_id.as_str())
+    );
+    assert_eq!(
+        successor_claim.abandon_restore_claim_token.as_deref(),
+        Some(predecessor_claim.lease_token.as_str())
+    );
+    store
+        .abandon_queued_work_claim(&successor_claim)
+        .await
+        .expect("abandon successor and restore predecessor pair");
+
+    let reclaimed_restored_pair = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .expect("reclaim restored predecessor under newer generation")
+        .claim()
+        .expect("restored predecessor remains reclaimable across generations");
+    assert_eq!(reclaimed_restored_pair.batches.len(), 1);
+    assert_eq!(reclaimed_restored_pair.batches[0].batch_id, batch.batch_id);
+
+    let same_generation_reclaim = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .expect("probe same-generation reclaim");
+    assert!(
+        same_generation_reclaim.claim().is_none(),
+        "the generation that reclaimed the restored pair must not self-steal it"
+    );
+
+    let state = RuntimeSessionState {
+        session_id: session_id.to_string(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let stale_completion = store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&state, &[])
+                .borrowing_session_execution_lease(successor_lease.fence())
+                .completing_queue_claim(predecessor_claim.completion()),
+        )
+        .await;
+    assert!(
+        matches!(
+            stale_completion,
+            Err(StoreError::QueuedWorkClaimSuperseded { .. })
+        ),
+        "the reclaiming generation must supersede the restored predecessor completion pair: \
+         {stale_completion:?}"
+    );
+    let preserved = store
+        .list_queued_work(session_id)
+        .await
+        .expect("stale predecessor attempts preserve queued work");
+    assert_eq!(preserved.len(), 1);
+    assert_eq!(preserved[0].batch_id, batch.batch_id);
+
+    release_session_execution_lease_for_test(&store, &successor_lease).await;
+    let final_owner = lease_owner("abandoned-final-owner");
+    let final_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &final_owner.owner_id).await;
+    assert!(
+        final_lease.fencing_token > successor_lease.fencing_token,
+        "the final claimant must hold a newer lease generation"
+    );
+    let reclaimed = store
+        .claim_ready_queued_work(
+            session_id,
+            &final_lease.fence(),
+            &final_owner,
+            QueuedWorkClaimBoundary::Idle,
+            crate::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .expect("reclaim successor claim under final generation")
+        .claim()
+        .expect("successor claim remains reclaimable across generations");
+    assert_eq!(reclaimed.batches.len(), 1);
+    assert_eq!(reclaimed.batches[0].batch_id, batch.batch_id);
+    store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&state, &[])
+                .releasing_session_execution_lease(final_lease.completion())
+                .completing_queue_claim(reclaimed.completion()),
+        )
+        .await
+        .expect("newer generation reclaims and completes restored predecessor");
+    assert!(
+        store
+            .list_queued_work(session_id)
+            .await
+            .expect("list completed predecessor queue")
+            .is_empty(),
+        "the newer generation must be able to settle the restored predecessor"
+    );
+}
+
 #[doc(hidden)]
 /// FIG-1575: a lane holding a deferred row is not an exhausted lane.
 ///
@@ -7367,6 +7530,10 @@ async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
     assert_eq!(
         successor_claim.abandon_restore_claim_id.as_deref(),
         Some(claim_a.claim_id.as_str())
+    );
+    assert_eq!(
+        successor_claim.abandon_restore_claim_token.as_deref(),
+        Some(claim_a.lease_token.as_str())
     );
     store
         .abandon_queued_work_claim(&successor_claim)

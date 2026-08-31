@@ -612,6 +612,7 @@ impl InMemorySessionStore {
                     batch,
                     queued[*index].claim_fencing_token,
                     queued[*index].claim_id.clone(),
+                    queued[*index].claim_token.clone(),
                 ))
             })
             .collect::<Result<Vec<_>, crate::store::StoreError>>()?;
@@ -666,6 +667,7 @@ impl InMemorySessionStore {
         let first_index = selected_indices[0];
         let first = queued[first_index].batch.clone();
         let abandon_restore_claim_id = queued[first_index].claim_id.clone();
+        let abandon_restore_claim_token = queued[first_index].claim_token.clone();
         let fencing_token = next_fencing_tokens[0];
         let claim_id = crate::store::queued_work::derive_claim_id(
             crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
@@ -697,6 +699,8 @@ impl InMemorySessionStore {
                 data: crate::QueuedWorkClaimData {
                     batches,
                     abandon_restore_claim_id,
+                    abandon_restore_claim_token: abandon_restore_claim_token
+                        .map(String::into_boxed_str),
                 },
             },
         ))

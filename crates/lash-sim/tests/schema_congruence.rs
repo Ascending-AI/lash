@@ -41,6 +41,21 @@ struct ExpectedConstraint {
 
 const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     expected_constraint(
+        "queued_work_batches",
+        "ck_queued_work_batches_work_kind",
+        "work_kind IN ('turn', 'control')",
+    ),
+    expected_constraint(
+        "queued_work_batches",
+        "ck_queued_work_batches_delivery_policy",
+        "delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')",
+    ),
+    expected_constraint(
+        "queued_work_batches",
+        "ck_queued_work_batches_claim_id_token_all_or_none",
+        "(claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)",
+    ),
+    expected_constraint(
         "session_execution_leases",
         "ck_session_execution_leases_identity_all_or_none",
         "(lease_owner_id IS NULL AND lease_owner_incarnation_id IS NULL AND lease_executor_id IS NULL AND lease_token IS NULL) OR (lease_owner_id IS NOT NULL AND lease_owner_incarnation_id IS NOT NULL AND lease_executor_id IS NOT NULL AND lease_token IS NOT NULL)",
@@ -93,6 +108,21 @@ const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
 ];
 
 const POSTGRES_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
+    expected_constraint(
+        "lash_queued_work_batches",
+        "ck_queued_work_batches_work_kind",
+        "work_kind IN ('turn', 'control')",
+    ),
+    expected_constraint(
+        "lash_queued_work_batches",
+        "ck_queued_work_batches_delivery_policy",
+        "delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')",
+    ),
+    expected_constraint(
+        "lash_queued_work_batches",
+        "ck_queued_work_batches_claim_id_token_all_or_none",
+        "(claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)",
+    ),
     expected_constraint(
         "lash_session_execution_leases",
         "ck_session_execution_leases_identity_all_or_none",
@@ -681,9 +711,22 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     use lash_core::facade_support::effect_replay_driver::EffectRowStatus;
     use lash_core::store_backend_support::SessionMetaCodec;
     use lash_core::{
-        CausalRef, ObserverInheritance, ProcessStatus, SessionMeta, SessionRelation,
-        ToolIntentKind, WakeDeliveryState, WakeDiscardReason,
+        CausalRef, DeliveryPolicy, ObserverInheritance, ProcessStatus, QueuedWorkKind, SessionMeta,
+        SessionRelation, ToolIntentKind, WakeDeliveryState, WakeDiscardReason,
     };
+
+    assert_eq!(
+        [QueuedWorkKind::Turn, QueuedWorkKind::Control].map(QueuedWorkKind::as_str),
+        ["turn", "control"]
+    );
+    assert_eq!(
+        [
+            DeliveryPolicy::EarliestSafeBoundary,
+            DeliveryPolicy::AfterCurrentTurnCommit,
+        ]
+        .map(DeliveryPolicy::as_str),
+        ["earliest_safe_boundary", "after_current_turn_commit"]
+    );
 
     assert_eq!(
         [
@@ -860,6 +903,16 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
             | ProcessStatus::CallerDeparted => {}
         }
     }
+    fn exhaustive_queued_work_kind(kind: QueuedWorkKind) {
+        match kind {
+            QueuedWorkKind::Turn | QueuedWorkKind::Control => {}
+        }
+    }
+    fn exhaustive_delivery_policy(policy: DeliveryPolicy) {
+        match policy {
+            DeliveryPolicy::EarliestSafeBoundary | DeliveryPolicy::AfterCurrentTurnCommit => {}
+        }
+    }
     fn exhaustive_wake_delivery_state(state: WakeDeliveryState) {
         match state {
             WakeDeliveryState::Pending
@@ -907,6 +960,8 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
         }
     }
     exhaustive_process_status(ProcessStatus::Running);
+    exhaustive_queued_work_kind(QueuedWorkKind::Turn);
+    exhaustive_delivery_policy(DeliveryPolicy::EarliestSafeBoundary);
     exhaustive_wake_delivery_state(WakeDeliveryState::Pending);
     exhaustive_tool_intent_kind(ToolIntentKind::StartProcess);
     exhaustive_effect_row_status(EffectRowStatus::InProgress);

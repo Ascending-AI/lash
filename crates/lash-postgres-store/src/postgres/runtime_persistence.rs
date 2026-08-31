@@ -88,6 +88,7 @@ fn postgres_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) ->
          )"
         );
     }
+    let earliest_safe_boundary = DeliveryPolicy::EarliestSafeBoundary.as_str();
     format!(
         "queued_work_unfiltered_head AS (
             SELECT enqueue_seq AS head_enqueue_seq,
@@ -117,10 +118,10 @@ fn postgres_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) ->
                   AND (
                        (
                             candidate.enqueue_seq = unfiltered.head_enqueue_seq
-                            AND unfiltered.head_delivery_policy = 'earliest_safe_boundary'
+                            AND unfiltered.head_delivery_policy = '{earliest_safe_boundary}'
                        )
                        OR (
-                            unfiltered.head_delivery_policy <> 'earliest_safe_boundary'
+                            unfiltered.head_delivery_policy <> '{earliest_safe_boundary}'
                             AND unfiltered.head_claim_id IS NOT NULL
                             AND candidate.claim_id IS DISTINCT FROM unfiltered.head_claim_id
                        )
@@ -128,7 +129,7 @@ fn postgres_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) ->
                 ORDER BY candidate.enqueue_seq ASC
                 LIMIT 1
             ) AS boundary_head
-            WHERE head_delivery_policy = 'earliest_safe_boundary'
+            WHERE head_delivery_policy = '{earliest_safe_boundary}'
          )"
     )
 }
@@ -139,8 +140,7 @@ fn postgres_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) 
         "WITH {head_candidate}
          SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                 work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
+                claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
          FROM lash_queued_work_batches
          CROSS JOIN queued_work_head_candidate
          WHERE {POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
@@ -1823,30 +1823,23 @@ impl QueuedWorkStore for PostgresSessionStore {
                 .take(selected_len)
                 .map(|candidate| candidate.claim_fencing_token),
         )?;
-        let liveness_json: Option<&str> = None;
         for (row, sql_fencing_token) in selected.iter().zip(sql_fencing_tokens.iter().copied()) {
             let changed = sqlx::query(
                 "UPDATE lash_queued_work_batches
                  SET claim_id = $3,
-                     claim_owner_id = $4,
-                     claim_owner_incarnation_id = $5,
-                     claim_owner_liveness_json = $6,
-                     claim_token = $7,
-                     claim_fencing_token = $9,
-                     claim_session_lease_generation = $8
+                     claim_token = $4,
+                     claim_fencing_token = $6,
+                     claim_session_lease_generation = $5
                  WHERE session_id = $1
                    AND batch_id = $2
                    AND (
                         claim_token IS NULL
-                        OR claim_session_lease_generation <> $8
+                        OR claim_session_lease_generation <> $5
                    )",
             )
             .bind(session_id)
             .bind(&row.batch_id)
             .bind(&lease.claim_id)
-            .bind(&owner.owner_id)
-            .bind(&owner.incarnation_id)
-            .bind(liveness_json)
             .bind(&lease.lease_token)
             .bind(sql_session_lease_generation(
                 lease.session_lease_generation,
@@ -1872,6 +1865,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             data: lash_core::store_backend_support::queued_work_claim_data(
                 selected_batches,
                 candidates[0].prior_claim_id.clone(),
+                candidates[0].prior_claim_token.clone(),
             ),
         }))
     }
@@ -1946,30 +1940,23 @@ impl QueuedWorkStore for PostgresSessionStore {
                 .take(selected_len)
                 .map(|candidate| candidate.claim_fencing_token),
         )?;
-        let liveness_json: Option<&str> = None;
         for (row, sql_fencing_token) in selected.iter().zip(sql_fencing_tokens.iter().copied()) {
             let changed = sqlx::query(
                 "UPDATE lash_queued_work_batches
                  SET claim_id = $3,
-                     claim_owner_id = $4,
-                     claim_owner_incarnation_id = $5,
-                     claim_owner_liveness_json = $6,
-                     claim_token = $7,
-                     claim_fencing_token = $9,
-                     claim_session_lease_generation = $8
+                     claim_token = $4,
+                     claim_fencing_token = $6,
+                     claim_session_lease_generation = $5
                  WHERE session_id = $1
                    AND batch_id = $2
                    AND (
                         claim_token IS NULL
-                        OR claim_session_lease_generation <> $8
+                        OR claim_session_lease_generation <> $5
                    )",
             )
             .bind(session_id)
             .bind(&row.batch_id)
             .bind(&lease.claim_id)
-            .bind(&owner.owner_id)
-            .bind(&owner.incarnation_id)
-            .bind(liveness_json)
             .bind(&lease.lease_token)
             .bind(sql_session_lease_generation(
                 lease.session_lease_generation,
@@ -1997,6 +1984,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             data: lash_core::store_backend_support::queued_work_claim_data(
                 selected_batches,
                 candidates[0].prior_claim_id.clone(),
+                candidates[0].prior_claim_token.clone(),
             ),
         }))
     }
@@ -2123,26 +2111,25 @@ impl QueuedWorkStore for PostgresSessionStore {
             ));
         }
         let requested_rows = sqlx::query(
-                "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
+            "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                         work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                        claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                        claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
+                        claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
                  FROM lash_queued_work_batches
                  WHERE session_id = $1 AND available_at_ms <= $2
                    AND (claim_token IS NULL OR claim_session_lease_generation <> $3)
                    AND batch_id = ANY($4)
                  ORDER BY enqueue_seq ASC",
-            )
-            .bind(session_id)
-            .bind(now as i64)
-            .bind(sql_session_lease_generation(generation)?)
-            .bind(batch_ids)
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .into_iter()
-            .map(queued_batch_row)
-            .collect::<Result<Vec<_>, _>>()?;
+        )
+        .bind(session_id)
+        .bind(now as i64)
+        .bind(sql_session_lease_generation(generation)?)
+        .bind(batch_ids)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .into_iter()
+        .map(queued_batch_row)
+        .collect::<Result<Vec<_>, _>>()?;
         if requested_rows.len() != present_ids.len() {
             tx.rollback().await.map_err(store_sqlx_error)?;
             return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
@@ -2162,8 +2149,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                 sqlx::query(
                     "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                             work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                            claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                            claim_owner_liveness_json, claim_token,
+                            claim_fencing_token, claim_token,
                             claim_session_lease_generation, claim_id
                      FROM lash_queued_work_batches
                      WHERE session_id = $1 AND available_at_ms <= $2
@@ -2224,8 +2210,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                 let span_rows = sqlx::query(
                     "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                             work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                            claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                            claim_owner_liveness_json, claim_token,
+                            claim_fencing_token, claim_token,
                             claim_session_lease_generation, claim_id
                      FROM lash_queued_work_batches
                      WHERE session_id = $1 AND available_at_ms <= $2
@@ -2299,23 +2284,17 @@ impl QueuedWorkStore for PostgresSessionStore {
                 .iter()
                 .map(|candidate| candidate.claim_fencing_token),
         )?;
-        let liveness_json: Option<&str> = None;
         for (row, sql_fencing_token) in selected.iter().zip(sql_fencing_tokens.iter().copied()) {
             let changed = sqlx::query(
                 "UPDATE lash_queued_work_batches
-                 SET claim_id = $3, claim_owner_id = $4,
-                     claim_owner_incarnation_id = $5, claim_owner_liveness_json = $6,
-                     claim_token = $7, claim_fencing_token = $9,
-                     claim_session_lease_generation = $8
+                 SET claim_id = $3, claim_token = $4, claim_fencing_token = $6,
+                     claim_session_lease_generation = $5
                  WHERE session_id = $1 AND batch_id = $2
-                   AND (claim_token IS NULL OR claim_session_lease_generation <> $8)",
+                   AND (claim_token IS NULL OR claim_session_lease_generation <> $5)",
             )
             .bind(session_id)
             .bind(&row.batch_id)
             .bind(&lease.claim_id)
-            .bind(&owner.owner_id)
-            .bind(&owner.incarnation_id)
-            .bind(liveness_json)
             .bind(&lease.lease_token)
             .bind(sql_session_lease_generation(
                 lease.session_lease_generation,
@@ -2345,6 +2324,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                 data: lash_core::store_backend_support::queued_work_claim_data(
                     selected_batches,
                     candidates[0].prior_claim_id.clone(),
+                    candidates[0].prior_claim_token.clone(),
                 ),
             }),
             already_satisfied_batch_ids,
@@ -2356,10 +2336,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         sqlx::query(
             "UPDATE lash_queued_work_batches
              SET claim_id = $4,
-                 claim_owner_id = NULL,
-                 claim_owner_incarnation_id = NULL,
-                 claim_owner_liveness_json = NULL,
-                 claim_token = NULL,
+                 claim_token = $5,
                  claim_session_lease_generation = 0
              WHERE session_id = $1 AND claim_id = $2 AND claim_token = $3",
         )
@@ -2367,6 +2344,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         .bind(&claim.claim_id)
         .bind(&claim.lease_token)
         .bind(lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim))
+        .bind(lash_core::store_backend_support::queued_work_abandon_restore_claim_token(claim))
         .execute(&mut *connection)
         .await
         .map_err(store_sqlx_error)?;
@@ -2384,10 +2362,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             "UPDATE lash_queued_work_batches AS batch
              SET claim_id = abandoned.restore_claim_id,
-                 claim_owner_id = NULL,
-                 claim_owner_incarnation_id = NULL,
-                 claim_owner_liveness_json = NULL,
-                 claim_token = NULL,
+                 claim_token = abandoned.restore_claim_token,
                  claim_session_lease_generation = 0
              FROM (",
         );
@@ -2397,10 +2372,15 @@ impl QueuedWorkStore for PostgresSessionStore {
                 .push_bind(&claim.lease_token)
                 .push_bind(
                     lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim),
+                )
+                .push_bind(
+                    lash_core::store_backend_support::queued_work_abandon_restore_claim_token(
+                        claim,
+                    ),
                 );
         });
         query.push(
-            ") AS abandoned(session_id, claim_id, claim_token, restore_claim_id)
+            ") AS abandoned(session_id, claim_id, claim_token, restore_claim_id, restore_claim_token)
              WHERE batch.session_id = abandoned.session_id
                AND batch.claim_id = abandoned.claim_id
                AND batch.claim_token = abandoned.claim_token",
@@ -2424,8 +2404,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let row = sqlx::query(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                    claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
+                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
              FROM lash_queued_work_batches
              WHERE session_id = $1
                AND batch_id = $2
@@ -2487,8 +2466,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let rows = sqlx::query(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                    claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
+                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
              FROM lash_queued_work_batches
              WHERE session_id = $1
              ORDER BY enqueue_seq ASC",
@@ -2522,7 +2500,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                 SELECT enqueued_at_ms, enqueue_seq
                 FROM lash_queued_work_batches AS queued
                 WHERE session_id = $1
-                  AND work_kind = 'control'
+                  AND work_kind = $4
                   AND (claim_token IS NULL OR NOT EXISTS (
                        SELECT 1 FROM lash_session_execution_leases AS lease
                        WHERE lease.session_id = $1
@@ -2558,6 +2536,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         .bind(session_id)
         .bind(now as i64)
         .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
+        .bind(QueuedWorkKind::Control.as_str())
         .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -2588,8 +2567,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let rows = sqlx::query(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                    claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
+                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
              FROM lash_queued_work_batches
              WHERE session_id = $1
                AND (claim_token IS NULL OR NOT EXISTS (
@@ -3376,8 +3354,7 @@ async fn postgres_refusal_for_empty_scan(
     let head_rows = sqlx::query(&format!(
         "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                 work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
+                claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
          FROM lash_queued_work_batches
          WHERE {POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
          ORDER BY enqueue_seq ASC
@@ -3472,30 +3449,23 @@ async fn claim_ready_queued_work_postgres_tx(
             .take(selected_len)
             .map(|candidate| candidate.claim_fencing_token),
     )?;
-    let liveness_json: Option<&str> = None;
     for (row, sql_fencing_token) in selected.iter().zip(sql_fencing_tokens.iter().copied()) {
         let changed = sqlx::query(
             "UPDATE lash_queued_work_batches
              SET claim_id = $3,
-                 claim_owner_id = $4,
-                 claim_owner_incarnation_id = $5,
-                 claim_owner_liveness_json = $6,
-                 claim_token = $7,
-                 claim_fencing_token = $9,
-                 claim_session_lease_generation = $8
+                 claim_token = $4,
+                 claim_fencing_token = $6,
+                 claim_session_lease_generation = $5
              WHERE session_id = $1
                AND batch_id = $2
                AND (
                     claim_token IS NULL
-                    OR claim_session_lease_generation <> $8
+                    OR claim_session_lease_generation <> $5
                )",
         )
         .bind(session_id)
         .bind(&row.batch_id)
         .bind(&lease.claim_id)
-        .bind(&owner.owner_id)
-        .bind(&owner.incarnation_id)
-        .bind(liveness_json)
         .bind(&lease.lease_token)
         .bind(sql_session_lease_generation(
             lease.session_lease_generation,
@@ -3519,6 +3489,7 @@ async fn claim_ready_queued_work_postgres_tx(
         data: lash_core::store_backend_support::queued_work_claim_data(
             selected_batches,
             candidates[0].prior_claim_id.clone(),
+            candidates[0].prior_claim_token.clone(),
         ),
     })))
 }

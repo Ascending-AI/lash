@@ -267,7 +267,6 @@ pub(super) struct QueuedWorkObservation {
     available_at_ms: u64,
     payloads: Vec<serde_json::Value>,
     claim_id_present: bool,
-    claim_owner: Option<LeaseOwnerIdentity>,
     claim_token_present: bool,
     claim_fencing_token: u64,
     claim_session_lease_generation: Option<u64>,
@@ -299,7 +298,6 @@ pub(super) fn queued_work_observation(
     ordinal: usize,
     batch: QueuedWorkBatch,
     claim_id: Option<String>,
-    claim_owner: Option<LeaseOwnerIdentity>,
     claim_token_present: bool,
     claim_fencing_token: u64,
     claim_session_lease_generation: Option<u64>,
@@ -324,7 +322,6 @@ pub(super) fn queued_work_observation(
             .map(|item| serde_json::to_value(item.payload).expect("encode queued-work payload"))
             .collect(),
         claim_id_present: claim_id.is_some(),
-        claim_owner,
         claim_token_present,
         claim_fencing_token,
         claim_session_lease_generation,
@@ -359,9 +356,6 @@ pub(super) fn queued_work_observations_from_sql_rows(
                     merge_key,
                     available_at_ms,
                     claim_id,
-                    claim_owner_id,
-                    claim_owner_incarnation_id,
-                    claim_owner_liveness_json,
                     claim_token,
                     claim_fencing_token,
                     claim_session_lease_generation,
@@ -391,11 +385,6 @@ pub(super) fn queued_work_observations_from_sql_rows(
                         .map(|(_item_index, payload)| payload)
                         .collect(),
                     claim_id_present: claim_id.is_some(),
-                    claim_owner: decode_lease_owner(
-                        claim_owner_id,
-                        claim_owner_incarnation_id,
-                        claim_owner_liveness_json,
-                    ),
                     claim_token_present: claim_token.is_some(),
                     claim_fencing_token: claim_fencing_token as u64,
                     claim_session_lease_generation: claim_token
