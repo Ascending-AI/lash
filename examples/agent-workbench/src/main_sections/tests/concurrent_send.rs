@@ -738,6 +738,101 @@ async fn spawn_ambiguous_session_delete_restate() -> String {
     format!("http://{addr}")
 }
 
+#[derive(Clone, Default)]
+struct SlowSessionDeleteRetentionIngress {
+    attempts: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+async fn spawn_slow_session_delete_retention_restate() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind slow-delete Restate ingress");
+    let addr = listener
+        .local_addr()
+        .expect("slow-delete Restate ingress addr");
+    let app = Router::new()
+        .route("/{*path}", post(slow_session_delete_retention_call))
+        .with_state(SlowSessionDeleteRetentionIngress::default());
+    tokio::spawn(async move {
+        if let Err(error) = axum::serve(listener, app).await {
+            eprintln!("slow-delete Restate ingress stopped: {error}");
+        }
+    });
+    format!("http://{addr}")
+}
+
+async fn slow_session_delete_retention_call(
+    AxumPath(path): AxumPath<String>,
+    State(state): State<SlowSessionDeleteRetentionIngress>,
+    Json(_body): Json<Value>,
+) -> (StatusCode, Json<Value>) {
+    assert!(path.starts_with("WorkbenchSessionDeleteWorkflow/"));
+    assert!(!path.ends_with("/send"));
+    if state
+        .attempts
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        == 0
+    {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+    (StatusCode::OK, Json(Value::Null))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn slow_delete_retention_is_bounded_and_can_be_retried() {
+    let data_dir = tempfile::tempdir().expect("slow delete tempdir");
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-slow-delete")
+        .complete_error("the slow delete test must not call the provider")
+        .build()
+        .into_handle();
+    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    state.restate_ingress_url = spawn_slow_session_delete_retention_restate().await;
+    let old_session_id = state.current_session_id();
+    state
+        .open_session(&old_session_id)
+        .await
+        .expect("materialize the session before the slow delete");
+
+    let started = tokio::time::Instant::now();
+    let delete = crate::restate::session_delete_client::with_session_delete_attach_ceiling(
+        250,
+        reset_chat(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(old_session_id.clone()),
+            }),
+        ),
+    );
+    let error = Box::pin(tokio::time::timeout(Duration::from_secs(2), delete))
+    .await
+    .expect("delete attach exceeded its delete-class deadline")
+    .expect_err("the bounded slow attach must be reported as ambiguous");
+
+    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(error.message.contains("could not be confirmed"));
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert_eq!(state.current_session_id(), old_session_id);
+    assert!(
+        !state
+            .core
+            .session_was_deleted(&old_session_id)
+            .await
+            .expect("read durable deletion fence after timeout")
+    );
+
+    let Json(replacement) = Box::pin(reset_chat(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(old_session_id.clone()),
+        }),
+    ))
+    .await
+    .expect("a later delete attempt can complete");
+    assert_ne!(replacement.settings.session_id, old_session_id);
+    assert_eq!(state.current_session_id(), replacement.settings.session_id);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_ambiguous_delete_attach_failure_never_claims_the_session_remains_live() {
     let data_dir = tempfile::tempdir().expect("ambiguous delete tempdir");
@@ -879,6 +974,84 @@ async fn a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating()
     .await
     .expect_err("POST /api/turn must honor the reconciled tombstone");
     assert_eq!(turn_error.status, StatusCode::CONFLICT);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
+    let data_dir = tempfile::tempdir().expect("non-current delete tempdir");
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-non-current-delete")
+        .complete_error("the non-current delete test must not call the provider")
+        .build()
+        .into_handle();
+    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let retired_session_id = state.current_session_id();
+    state
+        .open_session(&retired_session_id)
+        .await
+        .expect("materialize the session before deleting it");
+    let selected_session_id = "workbench-selected-during-delete";
+    state.sessions.record(
+        selected_session_id.to_string(),
+        "selected".to_string(),
+        lash::rlm::RlmDialect::Lashlang,
+    );
+    state
+        .sessions
+        .select(selected_session_id)
+        .expect("select the competing session");
+    state.messages.lock_recover().push(ChatMessage {
+        id: "selected-message".to_string(),
+        role: "user".to_string(),
+        text: "keep the selected view".to_string(),
+        at: "2026-08-30T00:00:00Z".to_string(),
+        attachments: Vec::new(),
+    });
+    append_started_graph(
+        &state.lashlang_execution,
+        &test_graph(
+            "selected-session-graph",
+            selected_session_id,
+            TraceRuntimeSubject::Effect {
+                effect_id: "selected-session-effect".to_string(),
+                kind: "test".to_string(),
+            },
+            Vec::new(),
+        ),
+    );
+    state
+        .mail_world
+        .add_account("Selected Inbox")
+        .expect("add selected-session mail account");
+    let messages_before = serde_json::to_value(state.messages_snapshot())
+        .expect("serialize selected-session messages");
+    let graphs_before = state.lashlang_execution.graphs();
+    let mail_before = serde_json::to_value(state.mail_world.account_summaries())
+        .expect("serialize selected-session mail accounts");
+    let (restate_ingress_url, _requests) = spawn_restate_ingress_capture().await;
+    state.restate_ingress_url = restate_ingress_url;
+
+    let Json(replacement) = Box::pin(reset_chat(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(retired_session_id.clone()),
+        }),
+    ))
+    .await
+    .expect("delete the non-current session");
+
+    assert_ne!(replacement.settings.session_id, retired_session_id);
+    assert_eq!(state.current_session_id(), selected_session_id);
+    assert_eq!(
+        serde_json::to_value(state.messages_snapshot()).expect("serialize messages after delete"),
+        messages_before
+    );
+    assert_eq!(state.lashlang_execution.graphs(), graphs_before);
+    assert_eq!(
+        serde_json::to_value(state.mail_world.account_summaries())
+            .expect("serialize mail accounts after delete"),
+        mail_before
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

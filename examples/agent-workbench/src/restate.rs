@@ -40,7 +40,7 @@ use crate::{
 };
 
 #[path = "restate_session_delete.rs"]
-mod session_delete_client;
+pub(crate) mod session_delete_client;
 pub(crate) use session_delete_client::call_session_delete;
 
 const CRON_STATE_KEY: &str = "state";

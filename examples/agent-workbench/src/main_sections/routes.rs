@@ -867,9 +867,11 @@ async fn reset_chat(
         // The setter returns only after the model override is durable; queue
         // rejection or settlement failure remains an internal control error.
         .map_err(AppError::internal)?;
-    state.messages.lock_recover().clear();
-    state.lashlang_execution.clear();
-    state.mail_world.clear();
+    if replaced_current {
+        state.messages.lock_recover().clear();
+        state.lashlang_execution.clear();
+        state.mail_world.clear();
+    }
     // The rotated session has committed nothing yet, so it has recorded no
     // dialect: the badge shows the dialect it will be opened with, which the
     // rotation carried over from the session it replaced.
