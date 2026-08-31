@@ -1543,6 +1543,7 @@ finish initial
                 text: "before reset".to_string(),
                 at: "2026-05-27T00:00:00Z".to_string(),
                 attachments: Vec::new(),
+                provenance: None,
             }])),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),

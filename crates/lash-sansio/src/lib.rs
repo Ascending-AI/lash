@@ -57,7 +57,7 @@ pub use session::{
     DegradedBinding, ExecResponse, ExecutedCallOutcome, ExecutedCallRecord, Observation,
     PromptUsage, TextProjectionMetadata,
 };
-pub use session_model::message::MessageOrigin;
+pub use session_model::message::{MessageOrigin, TurnOutputSource};
 pub use session_model::{
     AcceptedInjectedTurnInput, BaseRenderCache, ConversationRecord, ErrorEnvelope,
     MAIN_AGENT_INTRO, Message, MessageRole, MessageSequence, NoProgressBudget, Part,

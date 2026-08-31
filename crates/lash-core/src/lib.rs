@@ -664,7 +664,7 @@ pub use lash_sansio::{
     ToolFailure, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentExecutionOutcome,
     ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd, ToolIntentParentEndAction,
     ToolIntentParentEndOutcome, ToolIntentRefusalReason, ToolManifest, ToolOutputContract,
-    ToolRetryPolicy, ToolRetryStatus, ToolValue, TurnCause,
+    ToolRetryPolicy, ToolRetryStatus, ToolValue, TurnCause, TurnOutputSource,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,

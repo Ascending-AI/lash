@@ -223,6 +223,9 @@ pub struct SessionNodeRecord {
 /// Version 4 persists `RetryDecision.charge_safety` when present; older bodies
 /// omit it and continue to decode through the field's `default`.
 ///
+/// Version 5 persists typed `MessageOrigin::TurnOutput` provenance on durable
+/// assistant messages.
+///
 /// Version 3 removes the duplicated `LlmResponse.full_text` member. The
 /// pre-v3 decode path below projects that legacy value into response parts
 /// before typed decoding when the parts carry no visible assistant prose.
@@ -230,7 +233,7 @@ pub struct SessionNodeRecord {
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as a forward-only fence rather than a
 /// counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 4;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 5;
 
 /// Generation of a body written before the stamp existed.
 ///

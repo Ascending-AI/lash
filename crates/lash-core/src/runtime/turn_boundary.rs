@@ -1,17 +1,15 @@
+use super::turn_graph_editor::ReadProjectionDiagnostic;
+use super::{RuntimeError, RuntimeErrorCode, RuntimeSessionState, TurnCommitDraft};
 use crate::facade_support::SessionGraphFacadeOps;
 #[cfg(test)]
 use crate::facade_support::SessionNodeProjection;
-use std::sync::Arc;
-
 use crate::session_model::SessionHistoryRecord;
 use crate::store::{GraphAppend, RuntimeCommit, RuntimePersistence, StoreError};
 use crate::{
     AssembledTurn, MessageSequence, PluginSession, Session, SessionPolicy, SessionReadView,
     TurnOutcome,
 };
-
-use super::turn_graph_editor::ReadProjectionDiagnostic;
-use super::{RuntimeError, RuntimeErrorCode, RuntimeSessionState, TurnCommitDraft};
+use std::sync::Arc;
 
 mod materialize;
 use materialize::*;
@@ -23,7 +21,6 @@ mod final_commit_input;
 use final_commit_input::FinalCommitInput;
 mod settlement;
 use settlement::*;
-
 type FinalCommitResult = Result<
     (
         Vec<crate::QueuedWorkBatch>,
@@ -422,7 +419,8 @@ impl TurnBoundary {
             session_execution_lease_completion,
         } = input;
         let clock = Arc::clone(&self.clock);
-        let terminal_message_id = format!("m_turn_{}_assistant", self.operation_scope.id());
+        let turn_id = self.operation_scope.id().to_string();
+        let terminal_message_id = format!("m_turn_{turn_id}_assistant");
         let state = self.final_state_mut();
         state.apply_snapshot(returned_state);
         for delta in usage_deltas {
@@ -435,7 +433,13 @@ impl TurnBoundary {
             state.refresh_plugin_snapshots(plugins);
         }
         execution_state_update.apply(state)?;
-        materialize_terminal_output(state, outcome, clock.as_ref(), &terminal_message_id);
+        materialize_terminal_output(
+            state,
+            outcome,
+            clock.as_ref(),
+            &turn_id,
+            &terminal_message_id,
+        );
         materialize_agent_frame_switch(
             state,
             outcome,

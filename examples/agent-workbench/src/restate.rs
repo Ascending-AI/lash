@@ -789,7 +789,10 @@ async fn run_user_turn(
     record_turn_output_for_model(
         &state,
         &session,
-        &request.turn_id,
+        TurnOutputIdentity {
+            turn_id: &request.turn_id,
+            durable_turn_id: &request.turn_id,
+        },
         output,
         turn_state,
         "restate_user_turn.completed",
@@ -1027,6 +1030,10 @@ async fn run_queued_turn(
     request: WorkbenchQueuedTurnWorkflowRequest,
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
+    let turn_output_turn_id = request
+        .drain_id
+        .clone()
+        .unwrap_or_else(|| request.turn_id.clone());
     let session = state
         .open_session(&request.session_id)
         .await
@@ -1079,7 +1086,10 @@ async fn run_queued_turn(
     record_turn_output_for_model(
         &state,
         &session,
-        &request.turn_id,
+        TurnOutputIdentity {
+            turn_id: &request.turn_id,
+            durable_turn_id: &turn_output_turn_id,
+        },
         output,
         turn_state,
         "restate_queued_turn.completed",
@@ -1271,7 +1281,10 @@ pub(crate) async fn record_turn_output(
     record_turn_output_for_model(
         state,
         session,
-        turn_id,
+        TurnOutputIdentity {
+            turn_id,
+            durable_turn_id: turn_id,
+        },
         output,
         turn_state,
         trace_name,
@@ -1280,10 +1293,41 @@ pub(crate) async fn record_turn_output(
     .await
 }
 
-async fn record_turn_output_for_model(
+#[cfg(test)]
+pub(crate) async fn record_turn_output_with_durable_turn_id(
     state: &AppState,
     session: &lash::LashSession,
     turn_id: &str,
+    durable_turn_id: &str,
+    output: lash::TurnReport,
+    turn_state: Arc<Mutex<TurnStreamState>>,
+    trace_name: &str,
+) -> Result<(), AppError> {
+    let selected_model = state.selected_model();
+    record_turn_output_for_model(
+        state,
+        session,
+        TurnOutputIdentity {
+            turn_id,
+            durable_turn_id,
+        },
+        output,
+        turn_state,
+        trace_name,
+        Some(&selected_model.model),
+    )
+    .await
+}
+
+struct TurnOutputIdentity<'a> {
+    turn_id: &'a str,
+    durable_turn_id: &'a str,
+}
+
+async fn record_turn_output_for_model(
+    state: &AppState,
+    session: &lash::LashSession,
+    identity: TurnOutputIdentity<'_>,
     output: lash::TurnReport,
     turn_state: Arc<Mutex<TurnStreamState>>,
     trace_name: &str,
@@ -1337,7 +1381,7 @@ async fn record_turn_output_for_model(
         let remote_record: lash::remote::llm::RemoteLlmCallRecord = record.into();
         state.publish_for_session_identified(
             &session.session_id(),
-            format!("turn:{turn_id}:model-call:{call_id}"),
+            format!("turn:{}:model-call:{call_id}", identity.turn_id),
             crate::StreamItem::ModelCallRecorded {
                 record: remote_record,
             },
@@ -1348,7 +1392,7 @@ async fn record_turn_output_for_model(
             let message = format!("turn stopped · request {}", evidence.request_id);
             state.push_message_with_id_for_session(
                 &session.session_id(),
-                format!("turn:{turn_id}:cancelled"),
+                format!("turn:{}:cancelled", identity.turn_id),
                 "event",
                 message,
             );
@@ -1357,182 +1401,58 @@ async fn record_turn_output_for_model(
             let _ = stop;
             state.push_message_with_id_for_session(
                 &session.session_id(),
-                format!("turn:{turn_id}:failed"),
+                format!("turn:{}:failed", identity.turn_id),
                 "event",
                 crate::PUBLIC_TURN_FAILURE_MESSAGE,
             );
         }
         _ => {
             if workbench_owns_committed_agent_reply(&output) {
-                commit_assistant_transcript(session, turn_id, assistant_text.clone(), model)
-                    .await?;
+                commit_assistant_transcript(
+                    session,
+                    identity.turn_id,
+                    assistant_text.clone(),
+                    model,
+                )
+                .await?;
             }
-            state.push_message_with_id_for_session(
+            let live_turn_id = if output.assistant_message().is_some() {
+                session
+                    .read_view()
+                    .messages()
+                    .iter()
+                    .rev()
+                    .find_map(|message| {
+                        match (message.origin.as_ref(), lash::message_role(message)) {
+                            (
+                                Some(lash::messages::MessageOrigin::TurnOutput {
+                                    turn_id: committed_turn_id,
+                                    ..
+                                }),
+                                "assistant",
+                            ) if committed_turn_id == identity.durable_turn_id => {
+                                Some(committed_turn_id.clone())
+                            }
+                            _ => None,
+                        }
+                    })
+                    .unwrap_or_else(|| identity.durable_turn_id.to_string())
+            } else {
+                identity.turn_id.to_string()
+            };
+            state.push_assistant_message_for_turn(
                 &session.session_id(),
-                workbench_turn_assistant_message_id(turn_id),
-                "assistant",
+                workbench_turn_assistant_message_id(identity.turn_id),
+                &live_turn_id,
                 assistant_text,
             );
         }
     }
-    state.publish_turn_done(&session.session_id(), turn_id);
+    state.publish_turn_done(&session.session_id(), identity.turn_id);
     Ok(())
 }
 
 include!("restate_cron_sync.rs");
-
-/// Idempotency key for one cron tick's trigger occurrence. Must be unique
-/// per (job, tick): `fired_at` is the journaled fire time, so retries of the
-/// same tick dedupe while the next tick gets a fresh occurrence. (A key
-/// without the tick component kills the schedule: the second tick conflicts,
-/// the handler fails before re-arming, and the chain stops.)
-fn cron_occurrence_key(job_key: &str, fired_at: &str) -> String {
-    format!("workbench-cron:{job_key}:{fired_at}")
-}
-
-async fn emit_cron_occurrence(
-    state: AppState,
-    request: WorkbenchCronRequest,
-    fired_at: String,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, ObjectContext<'_>>,
-) -> HandlerResult<Json<CronEmitReport>> {
-    let scoped_effect_controller = controller
-        .scoped_effect_controller(lash::runtime::ExecutionScope::runtime_operation(format!(
-            "cron:{}:{fired_at}",
-            controller.context().key()
-        )))
-        .map_err(|err| HandlerError::from(TerminalError::new(err.to_string())))?;
-    emit_cron_occurrence_with_effect_controller(
-        state,
-        request,
-        fired_at,
-        controller.context().key(),
-        scoped_effect_controller,
-    )
-    .await
-}
-
-async fn emit_cron_occurrence_with_effect_controller(
-    state: AppState,
-    request: WorkbenchCronRequest,
-    fired_at: String,
-    job_key: &str,
-    scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
-) -> HandlerResult<Json<CronEmitReport>> {
-    let report = state
-        .core
-        .triggers()
-        .emit(
-            lash::triggers::TriggerOccurrenceRequest::new(
-                CRON_SCHEDULE_SOURCE_TYPE,
-                request.source_key.clone(),
-                json!({
-                    "fired_at": fired_at,
-                }),
-                cron_occurrence_key(job_key, &fired_at),
-            )
-            .with_source(json!({
-                "expr": request.expr,
-                "tz": request.tz,
-            })),
-            scoped_effect_controller,
-        )
-        .await
-        .map_err(classified_embed_handler_error)?;
-    Ok(Json(CronEmitReport {
-        started_process_ids: report.started_process_ids(),
-    }))
-}
-
-async fn schedule_next(
-    ctx: &ObjectContext<'_>,
-    request: WorkbenchCronRequest,
-    now: DateTime<Utc>,
-    last_fired_at: Option<String>,
-) -> HandlerResult<WorkbenchCronState> {
-    let next = next_cron_time(&request.expr, request.tz.as_deref(), now)
-        .map_err(|err| HandlerError::from(TerminalError::new(err)))?;
-    let delay = next
-        .signed_duration_since(now)
-        .to_std()
-        .unwrap_or_else(|_| Duration::from_secs(0));
-    let handle = ctx
-        .object_client::<WorkbenchCronJobClient>(ctx.key())
-        .run()
-        .send_after(delay);
-    let next_execution_id = handle.await?.invocation_id().to_owned();
-    let state = WorkbenchCronState {
-        request,
-        next_execution_time: next.to_rfc3339(),
-        next_execution_id,
-        last_fired_at,
-    };
-    ctx.set(CRON_STATE_KEY, Json(state.clone()));
-    Ok(state)
-}
-
-async fn cancel_stored_execution(ctx: &ObjectContext<'_>) -> HandlerResult<()> {
-    if let Some(Json(existing)) = ctx.get::<Json<WorkbenchCronState>>(CRON_STATE_KEY).await? {
-        ctx.invocation_handle(existing.next_execution_id).cancel();
-    }
-    Ok(())
-}
-
-async fn journaled_now(
-    ctx: &ObjectContext<'_>,
-    name: &'static str,
-) -> HandlerResult<DateTime<Utc>> {
-    let now = ctx
-        .run(|| async { Ok::<_, HandlerError>(Utc::now().to_rfc3339()) })
-        .name(name)
-        .await?;
-    DateTime::parse_from_rfc3339(&now)
-        .map(|value| value.with_timezone(&Utc))
-        .map_err(|err| TerminalError::new(err.to_string()).into())
-}
-
-async fn journaled_workbench_trace(
-    ctx: &ObjectContext<'_>,
-    state: AppState,
-    session_id: String,
-    name: &'static str,
-    payload: Value,
-    effect_name: &'static str,
-) -> HandlerResult<()> {
-    ctx.run(move || {
-        let state = state.clone();
-        let session_id = session_id.clone();
-        let payload = payload.clone();
-        async move {
-            state.trace_for_session(&session_id, name, payload);
-            Ok::<(), HandlerError>(())
-        }
-    })
-    .name(effect_name)
-    .await?;
-    Ok(())
-}
-
-fn next_cron_time(
-    expr: &str,
-    tz: Option<&str>,
-    now: DateTime<Utc>,
-) -> Result<DateTime<Utc>, String> {
-    let timezone: Tz = tz
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("UTC")
-        .parse()
-        .map_err(|err| format!("invalid timezone: {err}"))?;
-    let cron = CronParser::builder()
-        .seconds(Seconds::Optional)
-        .build()
-        .parse(expr)
-        .map_err(|err| format!("invalid cron expression `{expr}`: {err}"))?;
-    let zoned_now = now.with_timezone(&timezone);
-    cron.find_next_occurrence(&zoned_now, false)
-        .map(|value| value.with_timezone(&Utc))
-        .map_err(|err| format!("cron expression `{expr}` has no next occurrence: {err}"))
-}
 
 fn cron_request_from_registration(
     session_id: &str,
@@ -1561,10 +1481,6 @@ fn cron_request_from_registration(
         name: registration.name.clone(),
     };
     Ok((cron_job_key(session_id, &registration.source_key), request))
-}
-
-fn cron_job_key(session_id: &str, source_key: &str) -> String {
-    format!("{session_id}:{source_key}")
 }
 
 include!("restate_error_helpers.rs");

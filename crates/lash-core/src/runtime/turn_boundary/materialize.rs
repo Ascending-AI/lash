@@ -48,6 +48,7 @@ pub(super) fn materialize_terminal_output(
     state: &mut RuntimeSessionState,
     outcome: &TurnOutcome,
     clock: &dyn crate::Clock,
+    turn_id: &str,
     message_id: &str,
 ) {
     let TurnOutcome::Finished(TurnFinish::AssistantMessage { text }) = outcome else {
@@ -71,7 +72,10 @@ pub(super) fn materialize_terminal_output(
             id: id.clone(),
             role: MessageRole::Assistant,
             parts: shared_parts(vec![Part::prose(format!("{id}.p0"), text.clone(), None)]),
-            origin: None,
+            origin: Some(crate::MessageOrigin::TurnOutput {
+                turn_id: turn_id.to_string(),
+                source: crate::TurnOutputSource::Runtime,
+            }),
         }],
         clock,
     );
