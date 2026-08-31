@@ -2581,6 +2581,130 @@ test("settled transcript rendering consumes durable reasoning and code disclosur
   );
 });
 
+test("pending ingress receipts survive transcript replay until their turn commits", () => {
+  function element(tagName) {
+    const node = {
+      tagName,
+      id: "",
+      className: "",
+      children: [],
+      dataset: {},
+      textContent: "",
+      append(...children) {
+        this.children.push(...children);
+      },
+      appendChild(child) {
+        this.children.push(child);
+        return child;
+      },
+      querySelector(selector) {
+        if (selector === ".ingress-kind") {
+          return this.children.find(child => child.className === "ingress-kind") ?? null;
+        }
+        const inputId = selector.match(/data-input-id="([^"]+)"/)?.[1];
+        return inputId
+          ? (this.children.find(child => child.dataset?.inputId === inputId) ?? null)
+          : null;
+      },
+    };
+    Object.defineProperty(node, "innerHTML", {
+      set() {
+        node.children = [];
+      },
+    });
+    return node;
+  }
+
+  const timeline = element("timeline");
+  const context = {
+    Set,
+    Map,
+    CSS: { escape(value) { return value; } },
+    timeline,
+    renderedMessages: new Set(),
+    renderedIngressInputs: new Set(),
+    appliedTurnInputs: new Map(),
+    assistantDraft: null,
+    assistantDraftTurnId: null,
+    assistantDraftText: "",
+    assistantDraftChunks: [],
+    reasoning: null,
+    reasoningChunks: [],
+    pendingCodeBlock: null,
+    pendingTools: [],
+    document: { createElement: element },
+    clearRetryStatus() {},
+    clearStreamingUsage() {},
+    renderShellStatus() {},
+    scrollToEnd() {},
+    clearEmpty() {
+      timeline.children = timeline.children.filter(child => child.id !== "timelineEmpty");
+    },
+    renderMessage() {},
+    appendReasoning() {},
+    appendCodeBlock() {},
+  };
+  const pending = (inputId, ingress, text) => ({
+    input_id: inputId,
+    ingress,
+    input: { items: [{ Text: { text } }] },
+  });
+
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_INGRESS_RECEIPTS", "WORKBENCH_INGRESS_RECEIPTS")}
+     ${markedSource("WORKBENCH_TRANSCRIPT_CLEAR", "WORKBENCH_TRANSCRIPT_CLEAR")}
+     ${markedSource("WORKBENCH_SETTLED_TRANSCRIPT", "WORKBENCH_SETTLED_TRANSCRIPT")}
+     renderStateTranscript({
+       transcript: [],
+       pending_turn_inputs: [
+         ${JSON.stringify(pending("input-now", "active_turn", "injected now"))},
+         ${JSON.stringify(pending("input-next", "next_turn", "queued next"))}
+       ]
+     });
+     this.initial = timeline.children.map(row => ({
+       inputId: row.dataset.inputId,
+       kind: row.children[0]?.textContent,
+       text: row.children[1]?.textContent
+     }));
+     recordTurnInputApplications([{
+       input_id: "input-now",
+       committed_message_id: "turn-1-user"
+     }]);
+     this.applied = timeline.children.map(row => ({
+       inputId: row.dataset.inputId,
+       kind: row.children[0]?.textContent,
+       text: row.children[1]?.textContent
+     }));
+     clearTranscript();
+     renderStateTranscript({
+       transcript: [],
+       pending_turn_inputs: [${JSON.stringify(pending("input-next", "next_turn", "queued next"))}]
+     });
+     this.afterFirstSettle = timeline.children.map(row => ({
+       inputId: row.dataset.inputId,
+       kind: row.children[0]?.textContent,
+       text: row.children[1]?.textContent
+     }));
+     clearTranscript();
+     renderStateTranscript({ transcript: [], pending_turn_inputs: [] });
+     this.afterSecondSettle = timeline.children.map(row => row.dataset.inputId).filter(Boolean);`,
+    context,
+  );
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.initial)), [
+    { inputId: "input-now", kind: "injected now", text: "injected now" },
+    { inputId: "input-next", kind: "queued next", text: "queued next" },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.applied)), [
+    { inputId: "input-now", kind: "applied to turn", text: "injected now" },
+    { inputId: "input-next", kind: "queued next", text: "queued next" },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.afterFirstSettle)), [
+    { inputId: "input-next", kind: "queued next", text: "queued next" },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.afterSecondSettle)), []);
+});
+
 test("message attachments render as linked images and degrade visibly on load failure", () => {
   function element(tagName) {
     return {
