@@ -1539,6 +1539,9 @@ lash::messages::MessageOrigin::Process::wake_id
 lash::messages::MessageOrigin::TurnInput
 lash::messages::MessageOrigin::TurnInput::input_id
 lash::messages::MessageOrigin::TurnInput::turn_id
+lash::messages::MessageOrigin::TurnOutput
+lash::messages::MessageOrigin::TurnOutput::source
+lash::messages::MessageOrigin::TurnOutput::turn_id
 lash::messages::MessageRole
 lash::messages::MessageRole::Assistant
 lash::messages::MessageRole::Event
@@ -1600,6 +1603,10 @@ lash::messages::SharedJsonValue
 lash::messages::SharedJsonValue::0
 lash::messages::SharedJsonValue::new
 lash::messages::SharedJsonValue::to_owned
+lash::messages::TurnOutputSource
+lash::messages::TurnOutputSource::Plugin
+lash::messages::TurnOutputSource::Plugin::plugin_id
+lash::messages::TurnOutputSource::Runtime
 lash::observe::InMemoryLiveReplayStore
 lash::observe::InMemoryLiveReplayStore::new
 lash::observe::InMemoryLiveReplayStore::reopen_preserving_history
