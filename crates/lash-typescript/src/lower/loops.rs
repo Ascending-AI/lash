@@ -226,28 +226,60 @@ fn assign_target_names_binding(target: &TsAssignTarget, binding: &str) -> bool {
 }
 
 fn pattern_names_binding(pattern: &Pattern, binding: &str) -> bool {
+    pattern_any(
+        pattern,
+        &mut |pattern| matches!(pattern, Pattern::Ident(name) if name == binding),
+    )
+}
+
+fn names_iterable_directly(expr: &Expr, binding: &str) -> bool {
+    // `data.items` roots at `data` exactly as `data` does. The mutation
+    // half of this filter tracks the root, so this half has to as well:
+    // when the two disagree about what "the iterable" is, a member-rooted
+    // iterable can be aliased through the gap between them and the loop
+    // diverges from ECMA in silence.
+    if expression_root_binding(expr) == Some(binding) {
+        return true;
+    }
+    match expr {
+        // Boxing it in a literal keeps a live reference to it.
+        Expr::Array(_) | Expr::Object(_) => expr
+            .children()
+            .any(|child| names_iterable_directly(child, binding)),
+        _ => false,
+    }
+}
+
+fn pattern_default_binds_iterable(pattern: &Pattern, binding: &str) -> bool {
+    pattern_any(
+        pattern,
+        &mut |pattern| matches!(pattern, Pattern::Assign { default, .. } if names_iterable_directly(default, binding)),
+    )
+}
+
+fn pattern_any(pattern: &Pattern, predicate: &mut impl FnMut(&Pattern) -> bool) -> bool {
+    if predicate(pattern) {
+        return true;
+    }
     match pattern {
-        Pattern::Ident(name) => name == binding,
-        Pattern::Rest(target) | Pattern::Assign { target, .. } => {
-            pattern_names_binding(target, binding)
-        }
-        Pattern::Member { .. } => false,
+        Pattern::Ident(_) | Pattern::Member { .. } => false,
+        Pattern::Rest(target) | Pattern::Assign { target, .. } => pattern_any(target, predicate),
         Pattern::Array { elements, rest } => {
             elements
                 .iter()
                 .flatten()
-                .any(|pattern| pattern_names_binding(pattern, binding))
+                .any(|pattern| pattern_any(pattern, predicate))
                 || rest
                     .as_deref()
-                    .is_some_and(|pattern| pattern_names_binding(pattern, binding))
+                    .is_some_and(|pattern| pattern_any(pattern, predicate))
         }
         Pattern::Object { properties, rest } => {
             properties
                 .iter()
-                .any(|property| pattern_names_binding(&property.value, binding))
+                .any(|property| pattern_any(&property.value, predicate))
                 || rest
                     .as_deref()
-                    .is_some_and(|pattern| pattern_names_binding(pattern, binding))
+                    .is_some_and(|pattern| pattern_any(pattern, predicate))
         }
     }
 }
@@ -285,26 +317,42 @@ pub(super) fn body_may_mutate_iterable(iterable: &Expr, body: &Stmt) -> Option<S
 /// Whether the body stores the iterable under another name — a `const alias =
 /// urls`, or boxing it in a structure the loop can reach later.
 fn body_binds_iterable_elsewhere(stmt: &Stmt, binding: &str) -> Option<String> {
-    fn names_iterable_directly(expr: &Expr, binding: &str) -> bool {
-        // `data.items` roots at `data` exactly as `data` does. The mutation
-        // half of this filter tracks the root, so this half has to as well:
-        // when the two disagree about what "the iterable" is, a member-rooted
-        // iterable can be aliased through the gap between them and the loop
-        // diverges from ECMA in silence.
-        if expression_root_binding(expr) == Some(binding) {
-            return true;
-        }
-        match expr {
-            // Boxing it in a literal keeps a live reference to it.
-            Expr::Array(_) | Expr::Object(_) => expr
-                .children()
-                .any(|child| names_iterable_directly(child, binding)),
-            _ => false,
-        }
-    }
-
     stmt.descendants().find_map(|stmt| match stmt {
+        Stmt::ForOf { iterable, .. } if names_iterable_directly(iterable, binding) => {
+            Some(format!(
+                "binds `{binding}`, the iterable this loop is walking, as an inner for-of iterable"
+            ))
+        }
+        Stmt::ForOf { pattern, .. } | Stmt::ForIn { pattern, .. }
+            if pattern_default_binds_iterable(pattern, binding) =>
+        {
+            Some(format!(
+                "binds `{binding}`, the iterable this loop is walking, in a loop-pattern default"
+            ))
+        }
+        Stmt::ForOf { pattern, .. } | Stmt::ForIn { pattern, .. }
+            if pattern_may_mutate_binding(pattern, binding) =>
+        {
+            Some(format!(
+                "assigns through `{binding}`, the iterable this loop is walking, in a loop target"
+            ))
+        }
+        Stmt::Function { function, .. }
+            if function
+                .params
+                .iter()
+                .any(|param| pattern_default_binds_iterable(param, binding)) =>
+        {
+            Some(format!(
+                "binds `{binding}`, the iterable this loop is walking, in a parameter default"
+            ))
+        }
         Stmt::Var { declarations, .. } => declarations.iter().find_map(|declaration| {
+            if pattern_default_binds_iterable(&declaration.pattern, binding) {
+                return Some(format!(
+                    "binds `{binding}`, the iterable this loop is walking, in a declaration-pattern default"
+                ));
+            }
             declaration
                 .init
                 .as_ref()
@@ -316,6 +364,18 @@ fn body_binds_iterable_elsewhere(stmt: &Stmt, binding: &str) -> Option<String> {
                     )
                 })
         }),
+        Stmt::Try {
+            catch: Some(catch),
+            ..
+        } if catch
+            .binding
+            .as_ref()
+            .is_some_and(|pattern| pattern_default_binds_iterable(pattern, binding)) =>
+        {
+            Some(format!(
+                "binds `{binding}`, the iterable this loop is walking, in a catch-pattern default"
+            ))
+        }
         Stmt::Expr(Expr::Assign { value, .. }) if names_iterable_directly(value, binding) => Some(
             format!("assigns `{binding}`, the iterable this loop is walking, to another binding"),
         ),
@@ -330,12 +390,29 @@ fn expression_may_mutate(expr: &Expr, binding: &str) -> Option<String> {
             return;
         }
         match expr {
-            Expr::Assign {
-                target: TsAssignTarget::Member { object, .. },
-                ..
-            } if expression_root_binding(object) == Some(binding) => {
+            Expr::Function(function)
+                if function
+                    .params
+                    .iter()
+                    .any(|param| pattern_default_binds_iterable(param, binding)) =>
+            {
+                found = Some(format!(
+                    "binds `{binding}`, the iterable this loop is walking, in a parameter default"
+                ));
+            }
+            Expr::Assign { target, .. } if assign_target_may_mutate_binding(target, binding) => {
                 found = Some(format!(
                     "assigns through `{binding}`, the iterable this loop is walking"
+                ));
+            }
+            Expr::Update { target, .. } if assign_target_may_mutate_binding(target, binding) => {
+                found = Some(format!(
+                    "updates through `{binding}`, the iterable this loop is walking"
+                ));
+            }
+            Expr::Delete { object, .. } if expression_root_binding(object) == Some(binding) => {
+                found = Some(format!(
+                    "deletes through `{binding}`, the iterable this loop is walking"
                 ));
             }
             Expr::Call { callee, args } => {
@@ -358,10 +435,46 @@ fn expression_may_mutate(expr: &Expr, binding: &str) -> Option<String> {
                     ));
                 }
             }
+            Expr::OptionalChain { base, operations }
+                if expression_root_binding(base) == Some(binding)
+                    && operations
+                        .iter()
+                        .any(|operation| matches!(operation, OptionalOperation::Call { .. })) =>
+            {
+                found = Some(format!(
+                    "calls an optional member through `{binding}`, which may mutate the iterable this loop is walking"
+                ));
+            }
+            Expr::New { args, .. }
+                if args.iter().any(|arg| match arg {
+                    CallArg::Value(value) | CallArg::Spread(value) => {
+                        mentions_binding(value, binding)
+                    }
+                }) =>
+            {
+                found = Some(format!(
+                    "constructs with `{binding}`, the iterable this loop is walking"
+                ));
+            }
             _ => {}
         }
     });
     found
+}
+
+fn assign_target_may_mutate_binding(target: &TsAssignTarget, binding: &str) -> bool {
+    match target {
+        TsAssignTarget::Member { object, .. } => expression_root_binding(object) == Some(binding),
+        TsAssignTarget::Pattern(pattern) => pattern_may_mutate_binding(pattern, binding),
+        TsAssignTarget::Ident(_) => false,
+    }
+}
+
+fn pattern_may_mutate_binding(pattern: &Pattern, binding: &str) -> bool {
+    pattern_any(
+        pattern,
+        &mut |pattern| matches!(pattern, Pattern::Member { object, .. } if expression_root_binding(object) == Some(binding)),
+    )
 }
 
 /// Walk every sub-expression, outermost first.
