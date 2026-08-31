@@ -341,6 +341,20 @@ pub fn workflow_graph_from_source(src: &str) -> Result<WorkflowGraph, WorkflowGr
     workflow_graph_from_source_with_facets(src, None)
 }
 
+/// Project an already-lowered program into the workflow graph used by trace
+/// consumers.
+///
+/// Dialect front-ends may lower into AST forms that deliberately have no
+/// Lashlang source spelling. Keeping the projection on the lowered program
+/// avoids discarding the trace inventory merely because that display-only
+/// source round-trip is unavailable. Such expressions retain their typed
+/// execution sites; their editable display text is a trace-only placeholder.
+pub fn workflow_graph_from_program(program: &Program) -> WorkflowGraph {
+    let hash_input = canonical_program_source(program)
+        .unwrap_or_else(|_| serde_json::to_string(program).expect("program serializes"));
+    GraphProjector::new(&hash_input, program, None, true).project()
+}
+
 /// Validate and render a graph through the canonical Lashlang source printer.
 pub fn workflow_graph_to_source(graph: &WorkflowGraph) -> Result<String, GraphRenderError> {
     validate_graph(graph)?;
@@ -375,6 +389,7 @@ struct GraphProjector<'a> {
     source_hash: String,
     spans: BTreeMap<Vec<u32>, Span>,
     analysis: Option<&'a WorkflowLinkAnalysis>,
+    allow_non_sourceable_expressions: bool,
 }
 
 impl<'a> GraphProjector<'a> {
@@ -382,6 +397,7 @@ impl<'a> GraphProjector<'a> {
         canonical: &'a str,
         program: &'a Program,
         analysis: Option<&'a WorkflowLinkAnalysis>,
+        allow_non_sourceable_expressions: bool,
     ) -> Self {
         Self {
             program,
@@ -392,7 +408,16 @@ impl<'a> GraphProjector<'a> {
                 .map(|source_span| (source_span.path.clone(), source_span.span))
                 .collect(),
             analysis,
+            allow_non_sourceable_expressions,
         }
+    }
+
+    fn expression_text(&self, expression: &Expr) -> String {
+        expression_text(expression, self.allow_non_sourceable_expressions)
+    }
+
+    fn workflow_clause(&self, clause: &ListComprehensionClause) -> WorkflowListComprehensionClause {
+        workflow_clause(clause, self.allow_non_sourceable_expressions)
     }
 
     fn project(&self) -> WorkflowGraph {
@@ -540,7 +565,7 @@ impl<'a> GraphProjector<'a> {
             return (
                 WorkflowNodeKind::StateUpdate {
                     target: assign_target_text(target),
-                    expression: expression_text(expr),
+                    expression: self.expression_text(expr),
                 },
                 format!("update {}", target.root),
                 vec![versions.allocate(target.root.as_str())],
@@ -571,7 +596,7 @@ impl<'a> GraphProjector<'a> {
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::If {
                         binding: binding.as_ref().map(assign_target_text),
-                        condition: expression_text(condition),
+                        condition: self.expression_text(condition),
                         then_is_block: matches!(then_block.as_ref(), Expr::Block(_)),
                         else_is_block: matches!(else_block.as_ref(), Expr::Block(_)),
                         then_graph: Some(Box::new(then_graph)),
@@ -598,7 +623,7 @@ impl<'a> GraphProjector<'a> {
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::For {
                         binding: loop_binding.to_string(),
-                        iterable: expression_text(iterable),
+                        iterable: self.expression_text(iterable),
                         body: Some(Box::new(body_graph)),
                     }),
                     format!("for {loop_binding}"),
@@ -616,7 +641,7 @@ impl<'a> GraphProjector<'a> {
                 let outputs = loop_outputs(body, None, versions);
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::While {
-                        condition: expression_text(condition),
+                        condition: self.expression_text(condition),
                         body: Some(Box::new(body_graph)),
                     }),
                     "while".to_string(),
@@ -640,7 +665,10 @@ impl<'a> GraphProjector<'a> {
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
                         binding: binding.as_ref().map(assign_target_text),
-                        clauses: clauses.iter().map(workflow_clause).collect(),
+                        clauses: clauses
+                            .iter()
+                            .map(|clause| self.workflow_clause(clause))
+                            .collect(),
                         element: Some(Box::new(element_graph)),
                     }),
                     "list comprehension".to_string(),
@@ -650,7 +678,7 @@ impl<'a> GraphProjector<'a> {
             Expr::Finish(_) => (
                 WorkflowNodeKind::Terminal {
                     terminal: WorkflowTerminalKind::Finish,
-                    expression: expression_text(value),
+                    expression: self.expression_text(value),
                 },
                 "finish".to_string(),
                 Vec::new(),
@@ -658,7 +686,7 @@ impl<'a> GraphProjector<'a> {
             Expr::Fail(_) => (
                 WorkflowNodeKind::Terminal {
                     terminal: WorkflowTerminalKind::Fail,
-                    expression: expression_text(value),
+                    expression: self.expression_text(value),
                 },
                 "fail".to_string(),
                 Vec::new(),
@@ -670,7 +698,7 @@ impl<'a> GraphProjector<'a> {
                 (
                     WorkflowNodeKind::Data {
                         binding: binding.as_ref().map(assign_target_text),
-                        expression: expression_text(value),
+                        expression: self.expression_text(value),
                     },
                     data_name(value),
                     outputs,
@@ -683,7 +711,7 @@ impl<'a> GraphProjector<'a> {
                         WorkflowNodeKind::Call {
                             binding: binding.as_ref().map(assign_target_text),
                             operation: operation.to_string(),
-                            expression: expression_text(value),
+                            expression: self.expression_text(value),
                         },
                         operation.to_string(),
                         outputs,
@@ -694,7 +722,7 @@ impl<'a> GraphProjector<'a> {
                         WorkflowNodeKind::Effect {
                             binding: binding.as_ref().map(assign_target_text),
                             effect,
-                            expression: expression_text(value),
+                            expression: self.expression_text(value),
                         },
                         name,
                         outputs,
@@ -703,7 +731,7 @@ impl<'a> GraphProjector<'a> {
                     (
                         WorkflowNodeKind::Computation {
                             binding: binding.as_ref().map(assign_target_text),
-                            expression: expression_text(value),
+                            expression: self.expression_text(value),
                         },
                         computation_name(value),
                         outputs,

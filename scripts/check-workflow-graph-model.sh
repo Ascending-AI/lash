@@ -27,7 +27,7 @@ if ! grep -qE 'lash_lashlang_runtime::trace_lashlang_main_map\(artifact\)' \
   exit 1
 fi
 
-if ! grep -q 'workflow_graph_from_source' crates/lash-lashlang-runtime/src/process.rs; then
+if ! grep -q 'workflow_graph_from_program' crates/lash-lashlang-runtime/src/process.rs; then
   echo "workflow graph model check failed: trace skeleton no longer projects WorkflowGraph" >&2
   exit 1
 fi
