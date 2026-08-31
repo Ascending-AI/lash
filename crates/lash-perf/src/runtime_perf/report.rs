@@ -222,7 +222,6 @@ pub async fn run_cli(
 
 fn runtime_perf_output_json(out_path: &Path, report: &RuntimePerfReport) -> serde_json::Value {
     serde_json::json!({
-        "kind": report.kind,
         "out": out_path,
         "dhat_out": report.dhat_out,
         "worker_stack_bytes": report.worker_stack_bytes,
@@ -1008,6 +1007,7 @@ mod tests {
             report_json["scenario_harness_summary"]
         );
         assert_eq!(output_json["allocation_mode"], crate::ALLOCATION_MODE);
+        assert!(output_json.get("kind").is_none());
 
         let output_golden = serde_json::json!({
             "scenario_harnesses": [

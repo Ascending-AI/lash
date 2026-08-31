@@ -13,13 +13,9 @@ import perfreport
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_KINDS = {
-    "dhat",
     "lashlang-perf",
-    "perf-guard",
-    "runtime-guard",
     "runtime-perf",
     "runtime-stack",
-    "ui-perf",
 }
 
 
@@ -33,8 +29,32 @@ class PerfReportDispatchTest(unittest.TestCase):
         )
         self.assertEqual(kind, "runtime-perf")
 
+    def test_dhat_v2_marker_dispatches_to_dhat_summary(self) -> None:
+        payload = {
+            "dhatFileVersion": 2,
+            "cmd": "lash-perf",
+            "ftbl": ["dhat::Alloc", "app::work"],
+            "pps": [{"tb": 1, "tbk": 1, "mb": 1, "gb": 1, "fs": [0, 1]}],
+        }
+
+        kind, summarize, diff = perfreport.dispatch_entry(payload, Path("PROFILE.dhat.json"))
+
+        self.assertEqual(kind, "dhat")
+        self.assertIsNone(diff)
+        self.assertIn("# dhat heap summary", summarize(payload, 1))
+
+    def test_dead_report_kinds_are_not_dispatchable(self) -> None:
+        for kind in ("ui-perf", "runtime-guard", "perf-guard"):
+            with self.subTest(kind=kind):
+                with self.assertRaisesRegex(ValueError, rf"unknown report kind '{kind}'"):
+                    perfreport.dispatch_entry({"kind": kind}, Path("report.json"))
+
     def test_missing_and_unknown_kinds_name_the_observed_tag(self) -> None:
-        for payload, observed in (({}, "'<missing>'"), ({"kind": "future"}, "'future'")):
+        for payload, observed in (
+            ({}, "'<missing>'"),
+            ({"ftbl": [], "pps": []}, "'<missing>'"),
+            ({"kind": "future"}, "'future'"),
+        ):
             with self.subTest(payload=payload):
                 with self.assertRaisesRegex(ValueError, rf"unknown report kind {observed}"):
                     perfreport.dispatch_entry(payload, Path("report.json"))
