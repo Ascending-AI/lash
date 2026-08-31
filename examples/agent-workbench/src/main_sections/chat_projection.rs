@@ -146,17 +146,18 @@ fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage
     }
 }
 
-fn committed_turn_output_turn_ids(
-    read_view: &lash::persistence::SessionReadView,
-) -> BTreeSet<String> {
-    read_view
-        .messages()
+fn committed_turn_output_turn_ids(messages: &[ChatMessage]) -> BTreeSet<String> {
+    messages
         .iter()
-        .filter_map(|message| match message.origin.as_ref() {
-            Some(lash::messages::MessageOrigin::TurnOutput { turn_id, .. }) => {
-                Some(turn_id.clone())
+        .filter_map(|message| {
+            if message.role != "assistant" {
+                return None;
             }
-            _ => None,
+
+            match message.provenance.as_ref() {
+                Some(ChatMessageProvenance::TurnOutput { turn_id }) => Some(turn_id.clone()),
+                None => None,
+            }
         })
         .collect()
 }
@@ -452,7 +453,6 @@ fn project_chat(
         .map(|address| address.turn_id.clone())
         .collect::<BTreeSet<_>>();
     let rlm_reply_ids = durable_rlm_reply_message_ids(read_view.messages(), &running_turn_ids);
-    let committed_turn_output_turn_ids = committed_turn_output_turn_ids(read_view);
     let replaced_committed_ids = user_replacements.keys().cloned().collect::<BTreeSet<_>>();
     let historical_ui_rows = product_messages
         .iter()
@@ -465,16 +465,22 @@ fn project_chat(
         .cloned()
         .collect::<Vec<_>>();
 
+    let committed_messages = read_view
+        .messages()
+        .iter()
+        .filter_map(|message| {
+            if protocol_state_message_ids.contains(&message.id) {
+                return None;
+            }
+            user_replacements
+                .get(&message.id)
+                .cloned()
+                .or_else(|| project_committed_chat_message(message, &rlm_reply_ids))
+        })
+        .collect::<Vec<_>>();
+    let committed_turn_output_turn_ids = committed_turn_output_turn_ids(&committed_messages);
     let mut messages = historical_ui_rows.clone();
-    messages.extend(read_view.messages().iter().filter_map(|message| {
-        if protocol_state_message_ids.contains(&message.id) {
-            return None;
-        }
-        user_replacements
-            .get(&message.id)
-            .cloned()
-            .or_else(|| project_committed_chat_message(message, &rlm_reply_ids))
-    }));
+    messages.extend(committed_messages);
     let mut transcript = historical_ui_rows
         .into_iter()
         .map(|message| TranscriptRow::Message { message })

@@ -790,6 +790,7 @@ async fn run_user_turn(
         &state,
         &session,
         &request.turn_id,
+        &request.turn_id,
         output,
         turn_state,
         "restate_user_turn.completed",
@@ -1027,6 +1028,10 @@ async fn run_queued_turn(
     request: WorkbenchQueuedTurnWorkflowRequest,
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
+    let turn_output_turn_id = request
+        .drain_id
+        .clone()
+        .unwrap_or_else(|| request.turn_id.clone());
     let session = state
         .open_session(&request.session_id)
         .await
@@ -1080,6 +1085,7 @@ async fn run_queued_turn(
         &state,
         &session,
         &request.turn_id,
+        &turn_output_turn_id,
         output,
         turn_state,
         "restate_queued_turn.completed",
@@ -1272,6 +1278,31 @@ pub(crate) async fn record_turn_output(
         state,
         session,
         turn_id,
+        turn_id,
+        output,
+        turn_state,
+        trace_name,
+        Some(&selected_model.model),
+    )
+    .await
+}
+
+#[cfg(test)]
+pub(crate) async fn record_turn_output_with_durable_turn_id(
+    state: &AppState,
+    session: &lash::LashSession,
+    turn_id: &str,
+    durable_turn_id: &str,
+    output: lash::TurnReport,
+    turn_state: Arc<Mutex<TurnStreamState>>,
+    trace_name: &str,
+) -> Result<(), AppError> {
+    let selected_model = state.selected_model();
+    record_turn_output_for_model(
+        state,
+        session,
+        turn_id,
+        durable_turn_id,
         output,
         turn_state,
         trace_name,
@@ -1284,6 +1315,7 @@ async fn record_turn_output_for_model(
     state: &AppState,
     session: &lash::LashSession,
     turn_id: &str,
+    durable_turn_id: &str,
     output: lash::TurnReport,
     turn_state: Arc<Mutex<TurnStreamState>>,
     trace_name: &str,
@@ -1376,13 +1408,18 @@ async fn record_turn_output_for_model(
                     .find_map(|message| {
                         match (message.origin.as_ref(), lash::message_role(message)) {
                             (
-                                Some(lash::messages::MessageOrigin::TurnOutput { turn_id, .. }),
+                                Some(lash::messages::MessageOrigin::TurnOutput {
+                                    turn_id: committed_turn_id,
+                                    ..
+                                }),
                                 "assistant",
-                            ) => Some(turn_id.clone()),
+                            ) if committed_turn_id == durable_turn_id => {
+                                Some(committed_turn_id.clone())
+                            }
                             _ => None,
                         }
                     })
-                    .unwrap_or_else(|| turn_id.to_string())
+                    .unwrap_or_else(|| durable_turn_id.to_string())
             } else {
                 turn_id.to_string()
             };

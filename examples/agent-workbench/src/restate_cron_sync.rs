@@ -267,7 +267,11 @@ where
         .insert(session_id.to_string(), active);
     Ok(())
 }
-/// Idempotency key for one cron tick's trigger occurrence.
+/// Idempotency key for one cron tick's trigger occurrence. Must be unique
+/// per (job, tick): `fired_at` is the journaled fire time, so retries of the
+/// same tick dedupe while the next tick gets a fresh occurrence. (A key
+/// without the tick component kills the schedule: the second tick conflicts,
+/// the handler fails before re-arming, and the chain stops.)
 fn cron_occurrence_key(job_key: &str, fired_at: &str) -> String {
     format!("workbench-cron:{job_key}:{fired_at}")
 }

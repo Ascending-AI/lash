@@ -932,10 +932,11 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
              message, which is the outcome the runtime materializes: {:?}",
             output.outcome
         );
-        crate::restate::record_turn_output(
+        crate::restate::record_turn_output_with_durable_turn_id(
             &state,
             &session,
             turn_id,
+            &format!("{turn_id}-drain"),
             output,
             turn_state,
             "test.wake_single_reply.completed",
@@ -1176,6 +1177,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             .expect("open wake keeps-previous session");
 
         let send_turn_id = "workbench-turn-reasoned-send";
+        state.track_turn(&session_id, send_turn_id);
         let send_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
         let send_output = session
             .turn(lash::TurnInput::text("answer with reasoning"))
@@ -1195,6 +1197,23 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
         )
         .await
         .expect("record reasoned send output");
+        let Json(live_send_snapshot) =
+            app_state(State(state.clone()), Query(SessionQuery::default()))
+                .await
+                .expect("read live reasoned send snapshot");
+        let live_send_agent_rows = live_send_snapshot
+            .state
+            .messages
+            .iter()
+            .filter(|message| message.role == "assistant" && message.text == REASONED_REPLY)
+            .map(|message| message.id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            live_send_agent_rows.len(),
+            1,
+            "the live snapshot must keep the workbench-owned answer visible while the \
+             RLM-owned durable reply is withheld, got {live_send_agent_rows:?}"
+        );
         crate::restate::settle_workbench_turn(&state, &session_id, send_turn_id)
             .await
             .expect("settle reasoned send turn");
@@ -1274,10 +1293,11 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
         .await
         .expect("run wake keeps-previous turn")
         .expect("the wake batch produced a turn");
-        crate::restate::record_turn_output(
+        crate::restate::record_turn_output_with_durable_turn_id(
             &state,
             &session,
             wake_turn_id,
+            &format!("{wake_turn_id}-drain"),
             wake_output,
             wake_turn_state,
             "test.wake_keeps_previous.wake",
