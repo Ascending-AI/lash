@@ -94,19 +94,8 @@ def _is_docs_path(path: str) -> bool:
             path.startswith("docs/")
             and PurePosixPath(path).suffix.lower()
             in {
-                ".css",
-                ".html",
-                ".ico",
-                ".js",
-                ".json",
                 ".md",
-                ".pagefind",
-                ".pf_fragment",
-                ".pf_index",
-                ".pf_meta",
-                ".png",
                 ".rst",
-                ".svg",
                 ".txt",
             }
         )

@@ -72,15 +72,6 @@ class ReleaseVersionTest(unittest.TestCase):
                 """,
             )
             write(root / "runbooks/private-crate/src/lib.rs", "")
-            for doc_path in [
-                root / "README.md",
-                root / "docs/index.html",
-                root / "docs/quickstart.html",
-                root / "docs/tracing.html",
-            ]:
-                write(doc_path, "\n")
-            write(root / "docs/released-version.txt", "0.1.0-alpha.1\n")
-
             subprocess.run(
                 ["cargo", "metadata", "--format-version", "1"],
                 cwd=root,
@@ -91,26 +82,15 @@ class ReleaseVersionTest(unittest.TestCase):
             original_root = release_version.ROOT
             original_cargo_toml = release_version.CARGO_TOML
             original_cargo_lock = release_version.CARGO_LOCK
-            original_doc_version_files = release_version.DOC_VERSION_FILES
-            original_released_version_file = release_version.RELEASED_VERSION_FILE
             try:
                 release_version.ROOT = root
                 release_version.CARGO_TOML = root / "Cargo.toml"
                 release_version.CARGO_LOCK = root / "Cargo.lock"
-                release_version.DOC_VERSION_FILES = [
-                    root / "README.md",
-                    root / "docs/index.html",
-                    root / "docs/quickstart.html",
-                    root / "docs/tracing.html",
-                ]
-                release_version.RELEASED_VERSION_FILE = root / "docs/released-version.txt"
-                release_version.apply_version_text("0.1.0-alpha.2")
+                release_version.stamp_manifests("0.1.0-alpha.2")
             finally:
                 release_version.ROOT = original_root
                 release_version.CARGO_TOML = original_cargo_toml
                 release_version.CARGO_LOCK = original_cargo_lock
-                release_version.DOC_VERSION_FILES = original_doc_version_files
-                release_version.RELEASED_VERSION_FILE = original_released_version_file
 
             subprocess.run(
                 ["cargo", "metadata", "--format-version", "1", "--locked"],
@@ -131,11 +111,5 @@ class ReleaseVersionTest(unittest.TestCase):
                 'path = "crates/public-crate", version = "=0.1.0-alpha.2" }',
                 (root / "Cargo.toml").read_text(),
             )
-            self.assertEqual(
-                (root / "docs/released-version.txt").read_text(),
-                "0.1.0-alpha.2\n",
-            )
-
-
 if __name__ == "__main__":
     unittest.main()

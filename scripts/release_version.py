@@ -13,8 +13,6 @@ Commands:
   print-next        Print the next release version for the declared channel.
   stamp <version>   Rewrite the workspace manifests + lockfile to <version>
                     (used by the release workflow's ephemeral checkout).
-  stamp-docs <ver>  Rewrite the checked-in doc install snippets to <version>
-                    (used by release automation and maintainers).
 """
 
 from __future__ import annotations
@@ -29,13 +27,6 @@ import tomllib
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CARGO_TOML = ROOT / "Cargo.toml"
 CARGO_LOCK = ROOT / "Cargo.lock"
-DOC_VERSION_FILES = [
-    ROOT / "README.md",
-    ROOT / "docs" / "index.html",
-    ROOT / "docs" / "quickstart.html",
-    ROOT / "docs" / "tracing.html",
-]
-RELEASED_VERSION_FILE = ROOT / "docs" / "released-version.txt"
 VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 # Pre-release versions (e.g. "0.1.0-alpha.1") and the "0.0.0-dev" working-tree
 # placeholder both match this shape.
@@ -51,7 +42,7 @@ def main() -> int:
     if command == "print-next":
         print(compute_next_version())
         return 0
-    if command in ("stamp", "stamp-docs"):
+    if command == "stamp":
         if len(sys.argv) != 3:
             print(f"{command} requires a version argument", file=sys.stderr)
             return 1
@@ -59,10 +50,7 @@ def main() -> int:
         if not (VERSION_RE.fullmatch(value) or PRERELEASE_RE.fullmatch(value)):
             print(f"unsupported version format: {value!r}", file=sys.stderr)
             return 1
-        if command == "stamp":
-            stamp_manifests(value)
-        else:
-            update_doc_example_versions(value)
+        stamp_manifests(value)
         return 0
 
     print(f"unknown command: {command}", file=sys.stderr)
@@ -74,8 +62,7 @@ def print_usage() -> None:
     print(
         "Usage:\n"
         "  scripts/release_version.py print-next\n"
-        "  scripts/release_version.py stamp <version>\n"
-        "  scripts/release_version.py stamp-docs <version>",
+        "  scripts/release_version.py stamp <version>",
         file=sys.stderr,
     )
 
@@ -177,19 +164,11 @@ def format_version(version: tuple[int, int, int]) -> str:
 # --- stamping -----------------------------------------------------------------
 
 
-def apply_version_text(version_text: str) -> None:
-    """Stamp manifests + lockfile + doc snippets (full local stamp)."""
-    stamp_manifests(version_text)
-    update_doc_example_versions(version_text)
-
-
 def stamp_manifests(version_text: str) -> None:
     """Stamp the workspace manifests + lockfile to an exact version.
 
     This is what the release workflow runs on its ephemeral tag checkout so the
     published crates and the built binaries carry the real release version.
-    Doc snippets are intentionally NOT touched here — they are checked-in
-    display text, decoupled from the release cut.
     """
     update_workspace_version(version_text)
     update_workspace_dependency_versions(version_text)
@@ -243,45 +222,6 @@ def update_workspace_dependency_versions(version: str) -> None:
         updated = "\n".join(updated_lines) + "\n"
         if updated != text:
             manifest.write_text(updated)
-
-
-def update_doc_example_versions(version: str) -> None:
-    """Keep checked-in docs snippets in sync with a version.
-
-    The docs are static HTML/Markdown rather than a templated site build. Only
-    lines that mention Lash crates are rewritten; unrelated dependency versions
-    in examples stay untouched. Release automation runs this for its
-    post-publish commit, and maintainers can run it when refreshing the display
-    snippets in a normal PR.
-    """
-    simple_dep_re = re.compile(
-        r'(?P<prefix>\b(?:lash-[A-Za-z0-9_-]+|lashlang)\s*=\s*")'
-        r'=[^"]+'
-        r'(?P<suffix>")'
-    )
-    inline_table_dep_re = re.compile(
-        r'(?P<prefix>\b(?:lash-[A-Za-z0-9_-]+|lashlang)\s*=\s*\{[^}\n]*\bversion\s*=\s*")'
-        r'=[^"]+'
-        r'(?P<suffix>"[^}\n]*\})'
-    )
-
-    for path in DOC_VERSION_FILES:
-        text = path.read_text()
-        updated_lines = []
-        for line in text.splitlines():
-            updated = simple_dep_re.sub(
-                rf'\g<prefix>={version}\g<suffix>',
-                line,
-            )
-            updated = inline_table_dep_re.sub(
-                rf'\g<prefix>={version}\g<suffix>',
-                updated,
-            )
-            updated_lines.append(updated)
-        updated_text = "\n".join(updated_lines) + "\n"
-        if updated_text != text:
-            path.write_text(updated_text)
-    RELEASED_VERSION_FILE.write_text(f"{version}\n")
 
 
 def update_lockfile_versions(version: str) -> None:

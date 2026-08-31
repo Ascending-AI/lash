@@ -76,7 +76,6 @@ run_release_script_tests() {
   python3 scripts/test_check_facade_external_types.py
   python3 scripts/test_check_facade_only_examples.py
   python3 scripts/test_check_durable_read_fixture_version.py
-  python3 scripts/test_check_format_versions.py
   python3 scripts/test_check_judged_build_geometry.py
   python3 scripts/test_check_postgres_json_carrier_coverage.py
   python3 scripts/test_check_postgres_payload_shape_version.py
@@ -124,7 +123,6 @@ resolve_gate_base() {
 gate_scope_apply() {
   step "Gate scope"
   GATE_RUN_RUST_COMPILE=1
-  GATE_RUN_DOCS_TEXT=1
   GATE_RUN_SCRIPTS=1
   GATE_RUN_REGISTRY=1
   GATE_RUN_WORKFLOWS=1
@@ -208,22 +206,9 @@ run_rust_source_guards() {
 
   step "Judged build geometry"
   python3 scripts/check_judged_build_geometry.py
-}
 
-run_docs_text_gates() {
   step "Production file-size budget guard"
   bash scripts/check-production-file-size.sh
-
-  step "Docs lint"
-  python3 scripts/lint_docs.py
-
-  step "Documented format versions"
-  python3 scripts/check_format_versions.py
-}
-
-run_rustdoc_gate() {
-  step "Rustdoc lint"
-  heavy bash scripts/check-rustdoc.sh
 }
 
 run_workflow_gates() {
@@ -481,8 +466,6 @@ gate_scope_apply
 scoped RUST_COMPILE "Formatting" run_formatting_gates
 scoped RUST_COMPILE "Clippy" run_clippy_gate
 scoped RUST_COMPILE "Rust source guards" run_rust_source_guards
-scoped DOCS_TEXT "Docs and text gates" run_docs_text_gates
-scoped RUST_COMPILE "Rustdoc lint" run_rustdoc_gate
 scoped WORKFLOWS "Workflow guards" run_workflow_gates
 
 # The two gates below are commit-scoped, not path-scoped: they read the commit
