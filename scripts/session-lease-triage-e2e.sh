@@ -213,6 +213,19 @@ for backend, record in livelock_records.items():
     if record["busy_wait_count"] or record["busy_gave_up_count"]:
         fail(f"{backend}: an ordinary busy turn must neither wait nor give up: {record}")
     for advisory in record["busy_advisory"]:
+        if advisory["level"] != "INFO":
+            fail(f"{backend}: commit_busy_advisory must be INFO, got {advisory}")
+        for field in (
+            "session_id",
+            "holder_owner_id_sha256",
+            "holder_incarnation_id_sha256",
+            "holder_executor_id_sha256",
+        ):
+            if not advisory.get(field):
+                fail(f"{backend}: real busy advisory omits {field!r}: {advisory}")
+        for field in ("generation", "fencing_token", "holder_fencing_token"):
+            if field in advisory:
+                fail(f"{backend}: real busy advisory must not expose {field!r}: {advisory}")
         if advisory["outcome"] != "proceeding_under_commit_cas":
             fail(f"{backend}: busy claimant recorded the wrong disposition: {advisory}")
     for round_record in record["rounds"]:
