@@ -121,15 +121,59 @@ pub(crate) const RETAINED_RUNS_PER_SERIES: usize = 50;
 
 /// Schema generation of a history record.
 ///
-/// The compatibility policy runs in both directions and is enforced by
-/// construction. Backwards: every field added from here on carries
-/// `#[serde(default)]`, so an older record still parses. Forwards: a record
-/// whose `version` is *newer* than this build's is neither read through a
-/// schema it does not match nor deleted — it is excluded from verdicts and
+/// A schema bump regenerates the local history file with the new record shape;
+/// there is intentionally no migration arm for older local history. Forwards:
+/// a record whose `version` is *newer* than this build's is neither read through
+/// a schema it does not match nor deleted — it is excluded from verdicts and
 /// carried through any rewrite byte-for-byte, because an older binary meets
 /// newer records on any revert or rerun of a pre-bump commit, and it is not
 /// entitled to destroy them.
-pub(crate) const HISTORY_RECORD_VERSION: u32 = 2;
+pub(crate) const HISTORY_RECORD_VERSION: u32 = 3;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum BuildMode {
+    Debug,
+    Release,
+}
+
+impl BuildMode {
+    pub(crate) const fn current() -> Self {
+        if cfg!(debug_assertions) {
+            Self::Debug
+        } else {
+            Self::Release
+        }
+    }
+}
+
+impl fmt::Display for BuildMode {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Debug => "debug",
+            Self::Release => "release",
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct DurationTrendGeometry {
+    pub(crate) runs: usize,
+    pub(crate) warmups: usize,
+    pub(crate) turns: usize,
+    pub(crate) build_mode: BuildMode,
+}
+
+impl DurationTrendGeometry {
+    pub(crate) const fn current(runs: usize, warmups: usize, turns: usize) -> Self {
+        Self {
+            runs,
+            warmups,
+            turns,
+            build_mode: BuildMode::current(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DurationMetricHistoryValue {
@@ -145,15 +189,17 @@ pub(crate) struct DurationMetricHistoryValue {
 /// never describing two different numbers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DurationHistoryRecord {
-    /// See [`HISTORY_RECORD_VERSION`]. Defaulted so records written before the
-    /// field existed still parse as generation 1.
-    #[serde(default = "first_record_version")]
+    /// See [`HISTORY_RECORD_VERSION`].
     pub(crate) version: u32,
     pub(crate) scenario: String,
     /// The benchmark size preset (`quick`, `full`, ...). Durations are only
     /// comparable within one preset, so it is part of the series key rather
     /// than decoration.
     pub(crate) profile: String,
+    pub(crate) runs: usize,
+    pub(crate) warmups: usize,
+    pub(crate) turns: usize,
+    pub(crate) build_mode: BuildMode,
     pub(crate) commit: String,
     pub(crate) run_id: String,
     pub(crate) recorded_at: String,
@@ -166,10 +212,6 @@ pub(crate) struct DurationHistoryRecord {
     /// deliberately stay out of this wall-clock-duration trend contract.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) duration_metrics_ms: BTreeMap<String, DurationMetricHistoryValue>,
-}
-
-fn first_record_version() -> u32 {
-    1
 }
 
 /// A history read leniently: what parsed, what could not, and what this build
@@ -232,6 +274,7 @@ pub(crate) struct DurationTrendRow {
     pub(crate) scenario: String,
     pub(crate) profile: String,
     pub(crate) metric: String,
+    pub(crate) geometry: DurationTrendGeometry,
     pub(crate) current_ms: f64,
     pub(crate) current_p95_ms: Option<f64>,
     pub(crate) baseline_median_ms: Option<f64>,
@@ -243,6 +286,7 @@ pub(crate) struct DurationTrendRow {
 pub(crate) fn records_for_run(
     summaries: &[RuntimePerfScenarioSummary],
     profile: &str,
+    geometry: DurationTrendGeometry,
 ) -> Vec<DurationHistoryRecord> {
     let commit = history_commit();
     let run_id = history_run_id();
@@ -253,6 +297,10 @@ pub(crate) fn records_for_run(
             version: HISTORY_RECORD_VERSION,
             scenario: summary.scenario.clone(),
             profile: profile.to_string(),
+            runs: geometry.runs,
+            warmups: geometry.warmups,
+            turns: geometry.turns,
+            build_mode: geometry.build_mode,
             commit: commit.clone(),
             run_id: run_id.clone(),
             recorded_at: recorded_at.clone(),
@@ -377,13 +425,21 @@ pub(crate) fn load_history_lenient(path: &Path) -> anyhow::Result<LoadedHistory>
 }
 
 /// The trailing [`RETAINED_RUNS_PER_SERIES`] observations of every
-/// `(profile, scenario)` series, in the original chronological order.
+/// `(profile, scenario, geometry)` series, in the original chronological order.
 pub(crate) fn retained_records(records: &[DurationHistoryRecord]) -> Vec<DurationHistoryRecord> {
-    let mut seen_from_newest: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+    let mut seen_from_newest: BTreeMap<(&str, &str, usize, usize, usize, BuildMode), usize> =
+        BTreeMap::new();
     let mut keep = vec![false; records.len()];
     for (index, record) in records.iter().enumerate().rev() {
         let count = seen_from_newest
-            .entry((record.profile.as_str(), record.scenario.as_str()))
+            .entry((
+                record.profile.as_str(),
+                record.scenario.as_str(),
+                record.runs,
+                record.warmups,
+                record.turns,
+                record.build_mode,
+            ))
             .or_default();
         if *count < RETAINED_RUNS_PER_SERIES {
             *count += 1;
@@ -444,13 +500,14 @@ fn rewrite_temp_path(path: &Path) -> std::path::PathBuf {
     path.with_extension("jsonl.rewrite")
 }
 
-/// One trend row per `(profile, scenario, duration metric)` series present in the history,
-/// ordered for stable output.
+/// One trend row per `(profile, scenario, duration metric, geometry)` series
+/// present in the history, ordered for stable output.
 pub(crate) fn trend_rows(
     history: &[DurationHistoryRecord],
     profile_filter: Option<&str>,
 ) -> Vec<DurationTrendRow> {
-    let mut series = BTreeMap::<(String, String, String), Vec<(f64, Option<f64>)>>::new();
+    let mut series =
+        BTreeMap::<(String, String, String, DurationTrendGeometry), Vec<(f64, Option<f64>)>>::new();
     for record in history {
         if profile_filter.is_some_and(|profile| profile != record.profile) {
             continue;
@@ -460,6 +517,12 @@ pub(crate) fn trend_rows(
                 record.profile.clone(),
                 record.scenario.clone(),
                 "total_ms".to_string(),
+                DurationTrendGeometry {
+                    runs: record.runs,
+                    warmups: record.warmups,
+                    turns: record.turns,
+                    build_mode: record.build_mode,
+                },
             ))
             .or_default()
             .push((record.total_ms, record.total_p95_ms));
@@ -469,6 +532,12 @@ pub(crate) fn trend_rows(
                     record.profile.clone(),
                     record.scenario.clone(),
                     metric.clone(),
+                    DurationTrendGeometry {
+                        runs: record.runs,
+                        warmups: record.warmups,
+                        turns: record.turns,
+                        build_mode: record.build_mode,
+                    },
                 ))
                 .or_default()
                 .push((value.median_ms, Some(value.p95_ms)));
@@ -476,7 +545,7 @@ pub(crate) fn trend_rows(
     }
     series
         .into_iter()
-        .filter_map(|((profile, scenario, metric), records)| {
+        .filter_map(|((profile, scenario, metric, geometry), records)| {
             let values = records
                 .iter()
                 .map(|(median, _)| *median)
@@ -487,6 +556,7 @@ pub(crate) fn trend_rows(
                 scenario,
                 profile,
                 metric,
+                geometry,
                 current_ms: round3(current_ms),
                 current_p95_ms: records.last().and_then(|(_, p95)| *p95).map(round3),
                 baseline_median_ms: baseline_median_ms.map(round3),
@@ -561,6 +631,13 @@ fn exceeds_threshold(value: f64, baseline: f64) -> bool {
     value > baseline * (1.0 + DRIFT_THRESHOLD_PCT / 100.0)
 }
 
+fn geometry_label(geometry: DurationTrendGeometry) -> String {
+    format!(
+        "runs={} warmups={} turns={} build={}",
+        geometry.runs, geometry.warmups, geometry.turns, geometry.build_mode
+    )
+}
+
 /// The trend table, as printed by the run path and by the standalone CLI.
 pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
     let mut out = format!(
@@ -589,9 +666,15 @@ pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
         .max()
         .unwrap_or(6)
         .max("metric".len());
+    let geometry_width = rows
+        .iter()
+        .map(|row| geometry_label(row.geometry).len())
+        .max()
+        .unwrap_or(8)
+        .max("geometry".len());
     out.push_str(&format!(
-        "  {:scenario_width$}  {:profile_width$}  {:metric_width$}  {:>12}  {:>12}  {:>12}  {:>9}  {}\n",
-        "scenario", "profile", "metric", "current_ms", "p95_ms", "median_ms", "delta", "verdict"
+        "  {:scenario_width$}  {:profile_width$}  {:metric_width$}  {:geometry_width$}  {:>12}  {:>12}  {:>12}  {:>9}  {}\n",
+        "scenario", "profile", "metric", "geometry", "current_ms", "p95_ms", "median_ms", "delta", "verdict"
     ));
     for row in rows {
         let p95 = row
@@ -606,9 +689,10 @@ pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
             .delta_pct
             .map(|value| format!("{value:+.1}%"))
             .unwrap_or_else(|| "-".to_string());
+        let geometry = geometry_label(row.geometry);
         out.push_str(&format!(
-            "  {:scenario_width$}  {:profile_width$}  {:metric_width$}  {:>12.3}  {:>12}  {:>12}  {:>9}  {}\n",
-            row.scenario, row.profile, row.metric, row.current_ms, p95, median, delta, row.verdict
+            "  {:scenario_width$}  {:profile_width$}  {:metric_width$}  {:geometry_width$}  {:>12.3}  {:>12}  {:>12}  {:>9}  {}\n",
+            row.scenario, row.profile, row.metric, geometry, row.current_ms, p95, median, delta, row.verdict
         ));
     }
     out
@@ -672,9 +756,10 @@ pub(crate) fn report_drift(rows: &[DurationTrendRow]) {
 pub(crate) fn record_and_report(
     path: &Path,
     profile: &str,
+    geometry: DurationTrendGeometry,
     summaries: &[RuntimePerfScenarioSummary],
 ) {
-    if let Err(error) = record_and_render(path, profile, summaries) {
+    if let Err(error) = record_and_render(path, profile, geometry, summaries) {
         eprintln!(
             "warning: runtime perf duration trend unavailable ({error:#}); \
              the drift signal is silent for this run, which is not an all-clear"
@@ -685,6 +770,7 @@ pub(crate) fn record_and_report(
 fn record_and_render(
     path: &Path,
     profile: &str,
+    geometry: DurationTrendGeometry,
     summaries: &[RuntimePerfScenarioSummary],
 ) -> anyhow::Result<()> {
     // Sweep any scratch file a previously killed rewrite left behind. It sits
@@ -692,7 +778,7 @@ fn record_and_render(
     // remove it.
     let _ = std::fs::remove_file(rewrite_temp_path(path));
 
-    append_records(path, &records_for_run(summaries, profile))?;
+    append_records(path, &records_for_run(summaries, profile, geometry))?;
     let loaded = load_history_lenient(path)?;
     if !loaded.skipped.is_empty() {
         eprintln!(
@@ -1013,7 +1099,7 @@ mod tests {
     }
 
     #[test]
-    fn a_record_written_before_the_version_field_still_parses() {
+    fn a_record_missing_geometry_is_rejected_without_a_migration_arm() {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("history.jsonl");
         std::fs::write(
@@ -1023,11 +1109,11 @@ mod tests {
         )
         .expect("write");
 
-        let loaded = load_history(&path).expect("legacy record parses");
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].version, 1);
-        assert_eq!(loaded[0].total_p95_ms, None);
-        assert!(loaded[0].duration_metrics_ms.is_empty());
+        assert!(load_history(&path).is_err());
+        let loaded = load_history_lenient(&path).expect("history scan completes");
+        assert!(loaded.records.is_empty());
+        assert_eq!(loaded.skipped.len(), 1);
+        assert!(loaded.preserved.is_empty());
     }
 
     #[test]
@@ -1072,7 +1158,7 @@ mod tests {
         )
         .expect("write");
 
-        record_and_report(&path, "quick", &[]);
+        record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
 
         let rewritten = std::fs::read_to_string(&path).expect("read back");
         let lines = rewritten.lines().collect::<Vec<_>>();
@@ -1099,7 +1185,7 @@ mod tests {
         append_records(&path, &[record("standard", "quick", 1, 10.0)]).expect("append");
         std::fs::write(rewrite_temp_path(&path), "stale\n").expect("write orphan");
 
-        record_and_report(&path, "quick", &[]);
+        record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
 
         assert!(
             !rewrite_temp_path(&path).exists(),
@@ -1147,7 +1233,7 @@ mod tests {
 
         // The run path must return normally *and* leave a clean file behind,
         // or the bad line rides into every future cache entry.
-        record_and_report(&path, "quick", &[]);
+        record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
 
         let healed = load_history(&path).expect("history is parseable again");
         assert_eq!(healed.len(), 1);
@@ -1162,7 +1248,7 @@ mod tests {
         let path = dir.path().join("history.jsonl");
         std::fs::create_dir(&path).expect("occupy the path");
 
-        record_and_report(&path, "quick", &[]);
+        record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
 
         assert!(run_duration_trend_cli(&path, Some("quick")).is_err());
     }
@@ -1229,7 +1315,7 @@ mod tests {
             .collect::<Vec<_>>();
         append_records(&path, &overlong).expect("append");
 
-        record_and_report(&path, "quick", &[]);
+        record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
 
         let healed = load_history(&path).expect("history loads");
         assert_eq!(healed.len(), RETAINED_RUNS_PER_SERIES);
@@ -1272,11 +1358,47 @@ mod tests {
         assert!(table.contains("no history records"), "{table}");
     }
 
+    #[test]
+    fn same_labels_with_different_geometry_are_distinct_series() {
+        let mut debug = record("standard", "quick", 1, 10.0);
+        debug.runs = 2;
+        debug.warmups = 0;
+        debug.turns = 3;
+        debug.build_mode = BuildMode::Debug;
+
+        let mut release = record("standard", "quick", 2, 20.0);
+        release.runs = 5;
+        release.warmups = 1;
+        release.turns = 12;
+        release.build_mode = BuildMode::Release;
+
+        let rows = trend_rows(&[debug, release], Some("quick"));
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|row| row.geometry
+            == DurationTrendGeometry {
+                runs: 2,
+                warmups: 0,
+                turns: 3,
+                build_mode: BuildMode::Debug,
+            }));
+        assert!(rows.iter().any(|row| row.geometry
+            == DurationTrendGeometry {
+                runs: 5,
+                warmups: 1,
+                turns: 12,
+                build_mode: BuildMode::Release,
+            }));
+    }
+
     fn record(scenario: &str, profile: &str, index: usize, total_ms: f64) -> DurationHistoryRecord {
         DurationHistoryRecord {
             version: HISTORY_RECORD_VERSION,
             scenario: scenario.to_string(),
             profile: profile.to_string(),
+            runs: 2,
+            warmups: 0,
+            turns: 3,
+            build_mode: BuildMode::current(),
             commit: format!("commit{index:04}"),
             run_id: format!("{index}"),
             recorded_at: format!("2026-01-01T{:02}:{:02}:00Z", index / 60, index % 60),

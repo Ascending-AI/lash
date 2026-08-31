@@ -115,9 +115,9 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Append this run's per-scenario median wall clock to an append-only "
             "JSONL history and print the advisory duration trend table. The "
-            "history is keyed by --profile because durations are only "
-            "comparable within one size preset. Drift is reported, never "
-            "enforced."
+            "history is keyed by --profile and the actual runs/warmups/turns "
+            "geometry because durations are only comparable within one run "
+            "shape. Drift is reported, never enforced."
         ),
     )
     parser.add_argument(

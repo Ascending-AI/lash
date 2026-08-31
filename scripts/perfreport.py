@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -86,55 +87,6 @@ def fmt_stack_profile(profile: Any) -> str | None:
     if isinstance(within, bool):
         parts.append(f"within_budget={'yes' if within else 'no'}")
     return "  " + "  ".join(parts) if parts else None
-
-
-def is_dhat(payload: dict[str, Any]) -> bool:
-    return "dhatFileVersion" in payload and "ftbl" in payload
-
-
-def is_lashlang_report(payload: dict[str, Any]) -> bool:
-    return payload.get("kind") == "lashlang-perf"
-
-
-def is_runtime_report(payload: dict[str, Any]) -> bool:
-    return "summary" in payload and any(
-        "phase_summary" in s for s in payload.get("summary", []) if isinstance(s, dict)
-    )
-
-
-def is_runtime_stack_report(payload: dict[str, Any]) -> bool:
-    return (
-        isinstance(payload.get("first_success_stack_bytes"), dict)
-        and isinstance(payload.get("samples"), list)
-        and isinstance(payload.get("stack_budgets"), dict)
-    )
-
-
-def is_runtime_guard_report(payload: dict[str, Any]) -> bool:
-    return (
-        "normal_runtime" in payload
-        and "stack_sensitivity" in payload
-        and isinstance(payload.get("normal_runtime"), dict)
-        and isinstance(payload.get("stack_sensitivity"), dict)
-    )
-
-
-def is_profile_guard_report(payload: dict[str, Any]) -> bool:
-    return (
-        payload.get("kind") == "perf-guard"
-        and isinstance(payload.get("runtime"), dict)
-        and isinstance(payload.get("runtime_stack"), dict)
-        and isinstance(payload.get("ui"), dict)
-        and isinstance(payload.get("lashlang"), dict)
-    )
-
-
-def is_ui_report(payload: dict[str, Any]) -> bool:
-    return (
-        "parameters" in payload
-        and isinstance(payload.get("scenarios"), list)
-        and any("budgets" in s for s in payload.get("scenarios", []) if isinstance(s, dict))
-    )
 
 
 def summarize_runtime(report: dict[str, Any]) -> str:
@@ -1003,6 +955,35 @@ def summarize_dhat(payload: dict[str, Any], top: int) -> str:
     return "\n".join(lines)
 
 
+def summarize_dhat_report(payload: dict[str, Any], top: int) -> str:
+    return summarize_dhat(payload, top)
+
+
+REPORT_DISPATCH: dict[
+    str,
+    tuple[
+        Callable[[dict[str, Any], int], str],
+        Callable[[dict[str, Any], dict[str, Any]], str] | None,
+    ],
+] = {
+    "runtime-perf": (lambda payload, _top: summarize_runtime(payload), diff_runtime),
+    "runtime-stack": (lambda payload, _top: summarize_runtime_stack(payload), None),
+    "runtime-guard": (lambda payload, _top: summarize_runtime_guard(payload), None),
+    "perf-guard": (lambda payload, _top: summarize_profile_guard(payload), None),
+    "ui-perf": (lambda payload, _top: summarize_ui(payload), diff_ui),
+    "lashlang-perf": (lambda payload, _top: summarize_lashlang(payload), diff_lashlang),
+    "dhat": (summarize_dhat_report, None),
+}
+
+
+def dispatch_entry(payload: dict[str, Any], path: Path) -> tuple[str, Callable, Callable | None]:
+    kind = payload.get("kind", "<missing>")
+    entry = REPORT_DISPATCH.get(kind) if isinstance(kind, str) else None
+    if entry is None:
+        raise ValueError(f"unknown report kind {kind!r} in {path}")
+    return kind, entry[0], entry[1]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument(
@@ -1018,42 +999,31 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     payload = json.loads(args.report.read_text())
-    if is_dhat(payload):
-        print(summarize_dhat(payload, args.top))
-        return 0
+    try:
+        kind, summarize, diff = dispatch_entry(payload, args.report)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     if args.diff:
         baseline = json.loads(args.diff.read_text())
-        if is_lashlang_report(payload) and is_lashlang_report(baseline):
-            print(diff_lashlang(baseline, payload))
-            return 0
-        if is_runtime_report(payload) and is_runtime_report(baseline):
-            print(diff_runtime(baseline, payload))
-            return 0
-        if is_ui_report(payload) and is_ui_report(baseline):
-            print(diff_ui(baseline, payload))
-            return 0
-        print("error: --diff expects matching runtime-perf, ui-perf, or lashlang-perf JSON pairs", file=sys.stderr)
-        return 2
-    if is_lashlang_report(payload):
-        print(summarize_lashlang(payload))
+        try:
+            baseline_kind, _baseline_summarize, baseline_diff = dispatch_entry(
+                baseline, args.diff
+            )
+        except ValueError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
+        if baseline_kind != kind or diff is None or baseline_diff is None:
+            print(
+                "error: --diff expects matching report kinds with a diff handler: "
+                f"current={kind!r}, baseline={baseline_kind!r}",
+                file=sys.stderr,
+            )
+            return 2
+        print(diff(baseline, payload))
         return 0
-    if is_profile_guard_report(payload):
-        print(summarize_profile_guard(payload))
-        return 0
-    if is_runtime_guard_report(payload):
-        print(summarize_runtime_guard(payload))
-        return 0
-    if is_runtime_stack_report(payload):
-        print(summarize_runtime_stack(payload))
-        return 0
-    if is_runtime_report(payload):
-        print(summarize_runtime(payload))
-        return 0
-    if is_ui_report(payload):
-        print(summarize_ui(payload))
-        return 0
-    print(f"error: unrecognized report format at {args.report}", file=sys.stderr)
-    return 2
+    print(summarize(payload, args.top))
+    return 0
 
 
 if __name__ == "__main__":
