@@ -19,7 +19,7 @@ pub struct RemoteTurnReport {
     pub turn_id: String,
     /// Derived from `outcome` on encode and checked against it on decode.
     /// Its removal awaits the next coordinated `REMOTE_PROTOCOL_VERSION`
-    /// window (FIG-1801).
+    /// window (FIG-2406).
     pub status: RemoteTurnStatus,
     pub outcome: RemoteTurnOutcome,
     /// Wire projection of the cancellation evidence carried by
