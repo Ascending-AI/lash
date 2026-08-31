@@ -863,6 +863,38 @@ mod tests {
     }
 
     #[test]
+    fn durable_scenario_metadata_matches_representative_turn_family() {
+        let durable_scenarios: Vec<_> = RuntimePerfScenario::METADATA
+            .iter()
+            .filter(|metadata| metadata.durability.is_durable())
+            .map(|metadata| metadata.scenario)
+            .collect();
+        let family = RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS;
+        let missing: Vec<_> = durable_scenarios
+            .iter()
+            .copied()
+            .filter(|scenario| !family.contains(scenario))
+            .collect();
+        let non_durable_family: Vec<_> = family
+            .iter()
+            .copied()
+            .filter(|scenario| !scenario.is_durable())
+            .collect();
+
+        assert!(
+            missing.is_empty() && non_durable_family.is_empty(),
+            "DURABLE_REPRESENTATIVE_TURNS must exactly contain metadata-marked durable scenarios: durable_count={}, family_count={}, missing={missing:?}, non_durable_family={non_durable_family:?}",
+            durable_scenarios.len(),
+            family.len(),
+        );
+        assert_eq!(
+            durable_scenarios.len(),
+            family.len(),
+            "DURABLE_REPRESENTATIVE_TURNS must not contain duplicate scenarios"
+        );
+    }
+
+    #[test]
     fn runtime_perf_report_serializes_scenario_harness_groups() {
         let scenarios = vec![
             RuntimePerfScenario::TurnCheckpoint,
