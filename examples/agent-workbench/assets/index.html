@@ -3774,6 +3774,7 @@
       scrollToEnd();
     }
 
+    // BEGIN WORKBENCH_INGRESS_RECEIPTS
     function ingressScope(ingress) {
       return ingress?.scope || ingress || "next_turn";
     }
@@ -3812,6 +3813,7 @@
         }
       }
     }
+    // END WORKBENCH_INGRESS_RECEIPTS
 
     function ensureAssistantDraft(turnId) {
       if (assistantDraft && assistantDraftTurnId === turnId) return assistantDraft;
@@ -4743,10 +4745,12 @@
       if (!resetInFlight) resetButton.textContent = "reset";
     }
 
+    // BEGIN WORKBENCH_TRANSCRIPT_CLEAR
     function clearTranscript() {
       clearRetryStatus();
       timeline.innerHTML = "";
       renderedMessages.clear();
+      renderedIngressInputs.clear();
       assistantDraft = null;
       assistantDraftTurnId = null;
       assistantDraftText = "";
@@ -4763,6 +4767,7 @@
       timeline.appendChild(empty);
       renderShellStatus();
     }
+    // END WORKBENCH_TRANSCRIPT_CLEAR
 
     // BEGIN WORKBENCH_SETTLED_TRANSCRIPT
     function renderStateTranscript(state) {
@@ -4772,6 +4777,15 @@
         if (row.type === "message") renderMessage(row.message);
         if (row.type === "reasoning") appendReasoning(row.text, row.id, null);
         if (row.type === "code_block") appendCodeBlock(row, row.tools || []);
+      }
+      for (const pending of state.pending_turn_inputs || []) {
+        const textItem = (pending.input?.items || []).find(item => item.Text?.text);
+        renderIngressReceipt({
+          input_id: pending.input_id,
+          ingress: pending.ingress,
+          state: pending.state,
+          text: textItem?.Text?.text || "pending input"
+        });
       }
     }
     // END WORKBENCH_SETTLED_TRANSCRIPT
@@ -5655,15 +5669,6 @@
         state.product_events?.events,
         executionScorecard
       );
-      for (const pending of state.pending_turn_inputs || []) {
-        const textItem = (pending.input?.items || []).find(item => item.Text?.text);
-        renderIngressReceipt({
-          input_id: pending.input_id,
-          ingress: pending.ingress,
-          state: pending.state,
-          text: textItem?.Text?.text || "pending input"
-        });
-      }
       recordTurnInputApplications(state.turn_input_applications);
       return true;
     }
