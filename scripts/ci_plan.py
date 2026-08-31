@@ -240,6 +240,12 @@ def evaluate_conclusion(
                     f" {event_name} event, expected skipped"
                 )
             continue
+        if job == "postgres-store" and event_name in DEFERRED_EVENTS:
+            if result != "success":
+                problems.append(
+                    f"{job} ended with {result!r} on a {event_name} event, expected success"
+                )
+            continue
         if result in {"failure", "cancelled"}:
             problems.append(f"{job} ended with {result}")
             continue

@@ -263,13 +263,36 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             summary,
         )
 
-        # Lean runs test only the primary Postgres major; the full profile
-        # restores the 14/18 catalog byte-identity bracket.
+        # PR-class runs test the oldest supported major; main pushes and the
+        # full profile run the complete catalog byte-identity bracket.
         postgres = workflow_job_block(workflow, "postgres-store")
         self.assertIn(
-            "postgres: ${{ fromJSON(github.event_name == 'workflow_dispatch'"
-            " && '[\"14\", \"16\", \"18\"]' || '[\"16\"]') }}",
+            "postgres: ${{ fromJSON((github.event_name == 'push'"
+            " && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')"
+            " && '[\"14\", \"16\", \"18\"]' || '[\"14\"]') }}",
             postgres,
+        )
+
+        # postgres-store is unconditional on PR-class events, so a skipped
+        # matrix job must fail the single required conclusion even if plan's
+        # stores family would otherwise allow a skip.
+        pr_needs = {
+            job: {**value, "outputs": dict(value.get("outputs", {}))}
+            for job, value in needs.items()
+        }
+        pr_needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "false") | {
+            "docs_only": "true",
+            "fail_open": "false",
+        }
+        for job in trunk_only:
+            pr_needs[job] = {"result": "skipped", "outputs": {}}
+        pr_needs["facade-gates"] = {"result": "skipped", "outputs": {}}
+        for job in ("restate-postgres-workers", "restate-postgres-workers-summary"):
+            pr_needs[job] = {"result": "success", "outputs": {}}
+        pr_needs["postgres-store"] = {"result": "skipped", "outputs": {}}
+        self.assertIn(
+            "postgres-store ended with 'skipped' on a pull_request event, expected success",
+            evaluate(pr_needs, "pull_request"),
         )
 
         # The release gate is what makes the full profile mandatory: a release
