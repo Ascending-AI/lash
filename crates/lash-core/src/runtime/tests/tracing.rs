@@ -662,6 +662,10 @@ async fn standard_runtime_trace_records_stream_event_entries() {
         .find(|entry| entry.get("type").and_then(|v| v.as_str()) == Some("llm_call_completed"))
         .expect("completed llm call entry");
     assert_eq!(
+        response_entry["response"]["request_model"].as_str(),
+        Some("mock-model")
+    );
+    assert_eq!(
         response_entry["attempts"][0]["execution_evidence"]["served_model"].as_str(),
         Some("served-model")
     );

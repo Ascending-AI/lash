@@ -1809,6 +1809,7 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
             response: crate::trace::trace_llm_response(
                 "ok".to_string(),
                 0,
+                "model".to_string(),
                 Some(crate::LlmTerminalReason::Stop),
                 None,
                 None,
