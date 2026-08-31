@@ -385,7 +385,7 @@ impl AppState {
         for address in active {
             let request_id = format!("workbench-stop-{}", uuid::Uuid::new_v4());
             let driver = self.core.turn_work_driver();
-            let receipt = driver
+            let cancel = driver
                 .request_cancel(
                     lash::TurnCancelRequest::new(
                         address.clone(),
@@ -397,32 +397,33 @@ impl AppState {
                 .await
                 // Audited: revoked turn-cancel gates become an UnknownOrRevoked outcome; remaining failures are untyped control errors.
                 .map_err(|err| AppError::internal(err.to_string()))?;
-            let (terminal, terminal_error) = if matches!(
-                &receipt.outcome,
-                lash::TurnCancelOutcome::Requested(_)
-                    | lash::TurnCancelOutcome::AlreadyRequested(_)
-            ) {
-                match driver
-                    .await_terminal_with_timeout(&address, TURN_TERMINAL_ATTACH_TIMEOUT)
-                    .await
-                {
-                    Ok(terminal) => (Some(terminal), None),
-                    Err(err)
-                        if err.code
-                            == lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout =>
-                    {
-                        (None, Some(err))
-                    }
-                    // Audited: terminal attachment lowers Restate transport and revocation failures to RuntimeError without a tombstone cause.
-                    Err(err) => return Err(AppError::internal(err.to_string())),
+            let receipt = match cancel.outcome {
+                lash::TurnCancelOutcome::Requested(evidence) => {
+                    attach_recorded_cancel_terminal(
+                        &driver,
+                        address.clone(),
+                        RecordedTurnCancellation::Requested(evidence),
+                    )
+                    .await?
                 }
-            } else {
-                (None, None)
+                lash::TurnCancelOutcome::AlreadyRequested(evidence) => {
+                    attach_recorded_cancel_terminal(
+                        &driver,
+                        address.clone(),
+                        RecordedTurnCancellation::AlreadyRequested(evidence),
+                    )
+                    .await?
+                }
+                lash::TurnCancelOutcome::CompletionWonRace => {
+                    TurnCancelReceipt::CompletionWonRace {
+                        address: address.clone(),
+                    }
+                }
+                lash::TurnCancelOutcome::UnknownOrRevoked => TurnCancelReceipt::UnknownOrRevoked {
+                    address: address.clone(),
+                },
             };
-            let routing_retained = if terminal.is_none()
-                && terminal_error.as_ref().is_some_and(|err| {
-                    err.code == lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout
-                }) {
+            let routing_retained = if receipt.terminal_is_pending() {
                 match self.restate_turn_is_active(&address).await {
                     Ok(true) => true,
                     Ok(false) => {
@@ -455,24 +456,23 @@ impl AppState {
                     "session_id": address.session_id,
                     "turn_id": address.turn_id,
                     "request_id": request_id,
-                    "outcome": format!("{:?}", receipt.outcome),
-                    "terminal": terminal,
-                    "terminal_error": terminal_error,
+                    "receipt": receipt,
                     "routing_retained": routing_retained,
                 }),
             );
             if !routing_retained {
-                let done_outcome = match &terminal {
-                    Some(lash::TurnTerminal::Committed { .. }) => TurnDoneOutcome::Completed,
-                    Some(lash::TurnTerminal::Failed { .. }) => TurnDoneOutcome::Failed,
-                    None if matches!(
-                        receipt.outcome,
-                        lash::TurnCancelOutcome::CompletionWonRace
-                    ) =>
-                    {
-                        TurnDoneOutcome::Completed
+                let done_outcome = match &receipt {
+                    TurnCancelReceipt::TerminalAttached {
+                        terminal: lash::TurnTerminal::Committed { .. },
+                        ..
                     }
-                    None => TurnDoneOutcome::Failed,
+                    | TurnCancelReceipt::CompletionWonRace { .. } => TurnDoneOutcome::Completed,
+                    TurnCancelReceipt::TerminalAttached {
+                        terminal: lash::TurnTerminal::Failed { .. },
+                        ..
+                    }
+                    | TurnCancelReceipt::CancellationRecordedTerminalPending { .. }
+                    | TurnCancelReceipt::UnknownOrRevoked { .. } => TurnDoneOutcome::Failed,
                 };
                 done_events.push((
                     format!("turn-cancel:{}:{request_id}:done", address.turn_id),
@@ -480,12 +480,7 @@ impl AppState {
                     done_outcome,
                 ));
             }
-            receipts.push(TurnCancelReceipt {
-                address,
-                outcome: receipt.outcome,
-                terminal,
-                terminal_error,
-            });
+            receipts.push(receipt);
         }
         for (event_id, turn_id, outcome) in done_events {
             self.publish_for_session_identified(
@@ -1241,9 +1236,8 @@ fn work_event_from_observed(event: lash::process::ObservedProcessEvent) -> WorkE
 }
 
 #[cfg(test)]
-static SESSION_DELETE_RETENTION_FAULTS: std::sync::LazyLock<
-    Mutex<BTreeMap<String, String>>,
-> = std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
+static SESSION_DELETE_RETENTION_FAULTS: std::sync::LazyLock<Mutex<BTreeMap<String, String>>> =
+    std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 #[cfg(test)]
 fn fail_session_delete_retention_once(session_id: &str, turn_id: &str) {
@@ -1408,9 +1402,7 @@ impl AppError {
 
 fn replay_divergence_abort_message(error: &lash::EmbedError) -> Option<String> {
     let code = match error {
-        lash::EmbedError::Runtime(error) if error.code.is_worker_replacement_abort() => {
-            &error.code
-        }
+        lash::EmbedError::Runtime(error) if error.code.is_worker_replacement_abort() => &error.code,
         lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(error))
             if error.code.is_worker_replacement_abort() =>
         {

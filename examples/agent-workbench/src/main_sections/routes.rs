@@ -797,29 +797,6 @@ async fn inject_message(
     .await?;
     Ok(Json(CommandAccepted { accepted: true }))
 }
-
-async fn cancel_turn(
-    State(state): State<AppState>,
-    Query(query): Query<SessionQuery>,
-) -> Result<Json<TurnCancelResponse>, AppError> {
-    let session_id = query.resolve(&state)?;
-    state
-        .authorization
-        .authorize(WorkbenchAuthorizationAction::CancelTurn {
-            session_id: session_id.clone(),
-        })?;
-    let cancellations = state.cancel_turns_for_session(&session_id).await?;
-    state.trace_for_session(
-        &session_id,
-        "api.turn.cancel",
-        json!({ "session_id": session_id, "cancellations": cancellations }),
-    );
-    Ok(Json(TurnCancelResponse {
-        accepted: !cancellations.is_empty(),
-        cancellations,
-    }))
-}
-
 async fn reset_chat(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
@@ -843,9 +820,8 @@ async fn reset_chat(
     .await?;
     state.event_tx.remove(&old_session_id);
     let retired_dialect = state.requested_dialect(&old_session_id);
-    let (new_session_id, replaced_current) = state
-        .sessions
-        .replace(&old_session_id, retired_dialect);
+    let (new_session_id, replaced_current) =
+        state.sessions.replace(&old_session_id, retired_dialect);
     state.trace_for_session(
         &old_session_id,
         "api.reset",
@@ -907,8 +883,8 @@ async fn list_work(
             .map_err(AppError::internal)?
             .items
     } else {
-        let retired_since_ms = lash::runtime::Clock::timestamp_ms(&lash::runtime::SystemClock)
-            .saturating_sub(10_000);
+        let retired_since_ms =
+            lash::runtime::Clock::timestamp_ms(&lash::runtime::SystemClock).saturating_sub(10_000);
         state
             .process_observer
             .snapshot_all(&lash::process::ProcessListFilter {

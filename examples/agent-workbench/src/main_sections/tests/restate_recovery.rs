@@ -192,9 +192,11 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
     let [receipt] = receipts.as_slice() else {
         panic!("expected one suspended-turn cancellation receipt")
     };
-    let evidence = match &receipt.outcome {
-        lash::TurnCancelOutcome::Requested(evidence)
-        | lash::TurnCancelOutcome::AlreadyRequested(evidence) => evidence.clone(),
+    let evidence = match receipt {
+        TurnCancelReceipt::TerminalAttached { cancellation, .. }
+        | TurnCancelReceipt::CancellationRecordedTerminalPending { cancellation, .. } => {
+            cancellation.evidence().clone()
+        }
         other => panic!("suspended-turn cancellation did not win: {other:?}"),
     };
     let terminal = tokio::time::timeout(
@@ -340,9 +342,11 @@ finish (await handle)?
     let [receipt] = receipts.as_slice() else {
         panic!("expected one suspended-turn cancellation receipt")
     };
-    let evidence = match &receipt.outcome {
-        lash::TurnCancelOutcome::Requested(evidence)
-        | lash::TurnCancelOutcome::AlreadyRequested(evidence) => evidence.clone(),
+    let evidence = match receipt {
+        TurnCancelReceipt::TerminalAttached { cancellation, .. }
+        | TurnCancelReceipt::CancellationRecordedTerminalPending { cancellation, .. } => {
+            cancellation.evidence().clone()
+        }
         other => panic!("suspended-turn cancellation did not win: {other:?}"),
     };
     let terminal = tokio::time::timeout(

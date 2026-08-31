@@ -358,12 +358,10 @@ mod turn_control_timeout_tests {
 
         assert!(matches!(
             receipts.as_slice(),
-            [TurnCancelReceipt {
-                outcome: lash::TurnCancelOutcome::Requested(_),
-                terminal: None,
-                terminal_error: Some(error),
+            [TurnCancelReceipt::CancellationRecordedTerminalPending {
+                cancellation: RecordedTurnCancellation::Requested(_),
                 ..
-            }] if error.code.as_str() == "turn_terminal_await_timeout"
+            }]
         ));
         assert!(state.active_turns.for_session(&session_id).is_empty());
         let done = events.try_recv().expect("receive break-glass Done event");
@@ -375,7 +373,7 @@ mod turn_control_timeout_tests {
                 "outcome": "failed",
             })
         );
-        assert!(ui::INDEX_HTML.contains("turn_terminal_await_timeout"));
+        assert!(ui::INDEX_HTML.contains("cancellation_recorded_terminal_pending"));
         assert!(ui::INDEX_HTML.contains("turn route cleared · terminal outcome unknown"));
         let recovered = ActiveTurns::persistent(data_dir.join("active-turns.json"))
             .expect("reopen active turns");
@@ -402,23 +400,53 @@ mod turn_control_timeout_tests {
         let mut events = state.event_tx.subscribe(&session_id);
         state.track_turn(&session_id, "live-turn");
 
-        let receipts = tokio::time::timeout(
+        let response = tokio::time::timeout(
             Duration::from_secs(1),
-            state.cancel_turns_for_session(&session_id),
+            cancel_turn(
+                State(state.clone()),
+                Query(SessionQuery {
+                    session_id: Some(session_id.clone()),
+                }),
+            ),
         )
         .await
         .expect("Stop must return after the bounded terminal attachment")
-        .expect("cancel live turn");
+        .expect("cancel live turn")
+        .into_response();
 
-        assert!(matches!(
-            receipts.as_slice(),
-            [TurnCancelReceipt {
-                outcome: lash::TurnCancelOutcome::Requested(_),
-                terminal: None,
-                terminal_error: Some(error),
-                ..
-            }] if error.code.as_str() == "turn_terminal_await_timeout"
-        ));
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("read pending Stop receipt");
+        let body = serde_json::from_slice::<Value>(&body).expect("decode pending Stop receipt");
+        let cancellation = &body["cancellations"][0];
+        assert_eq!(
+            cancellation["status"],
+            "cancellation_recorded_terminal_pending"
+        );
+        assert_eq!(cancellation["address"]["session_id"], session_id);
+        assert_eq!(cancellation["address"]["turn_id"], "live-turn");
+        assert_eq!(cancellation["cancellation"]["outcome"], "requested");
+        assert!(
+            cancellation["cancellation"]["cancellation"]["request_id"]
+                .as_str()
+                .is_some_and(|request_id| request_id.starts_with("workbench-stop-"))
+        );
+        assert_eq!(
+            cancellation["cancellation"]["cancellation"]["origin"],
+            "user"
+        );
+        assert_eq!(
+            cancellation["cancellation"]["cancellation"]["reason"],
+            "workbench Stop control"
+        );
+        assert!(
+            cancellation["cancellation"]["cancellation"]
+                .get("undelivered")
+                .is_none()
+        );
+        assert!(cancellation.get("terminal").is_none());
+        assert!(cancellation.get("terminal_error").is_none());
         assert_eq!(
             state.active_turns.for_session(&session_id),
             vec![lash::TurnAddress::new(&session_id, "live-turn")],
@@ -579,7 +607,7 @@ finish (await handle)?
         .await
         .expect("turn must reach a real process await");
 
-        let Json(receipt) = cancel_turn(
+        let (status, Json(receipt)) = cancel_turn(
             State(state.clone()),
             Query(SessionQuery {
                 session_id: Some(session_id.clone()),
@@ -587,6 +615,7 @@ finish (await handle)?
         )
         .await
         .expect("production Stop handler must cancel the process-await turn");
+        assert_eq!(status, StatusCode::OK);
         let turn = turn
             .await
             .expect("Stop-over-process turn joins")
@@ -595,11 +624,11 @@ finish (await handle)?
         assert!(receipt.accepted);
         assert!(matches!(
             receipt.cancellations.as_slice(),
-            [TurnCancelReceipt {
-                terminal: Some(lash::TurnTerminal::Committed {
+            [TurnCancelReceipt::TerminalAttached {
+                terminal: lash::TurnTerminal::Committed {
                     outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. }),
                     ..
-                }),
+                },
                 ..
             }]
         ));

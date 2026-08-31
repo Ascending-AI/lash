@@ -911,8 +911,9 @@ finish "gap source"
                 .turn_id("turn-cancel")
                 .run(),
         );
-        let Json(accepted) = cancelled.expect("cancel turn");
+        let (status, Json(accepted)) = cancelled.expect("cancel turn");
         let turn = turn.expect("cancelled turn commits");
+        assert_eq!(status, StatusCode::OK);
         assert!(accepted.accepted);
         assert!(matches!(
             turn.result.outcome,
@@ -920,12 +921,12 @@ finish "gap source"
         ));
         assert!(matches!(
             accepted.cancellations.as_slice(),
-            [TurnCancelReceipt {
-                outcome: lash::TurnCancelOutcome::AlreadyRequested(_),
-                terminal: Some(lash::TurnTerminal::Committed {
+            [TurnCancelReceipt::TerminalAttached {
+                cancellation: RecordedTurnCancellation::AlreadyRequested(_),
+                terminal: lash::TurnTerminal::Committed {
                     outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { evidence }),
                     ..
-                }),
+                },
                 ..
             }] if evidence.request_id == "original-stop"
                 && evidence.origin.as_deref() == Some("user")

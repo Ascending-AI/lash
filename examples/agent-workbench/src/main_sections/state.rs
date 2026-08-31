@@ -1259,15 +1259,6 @@ struct ProcessCancelAccepted {
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct TurnCancelReceipt {
-    address: lash::TurnAddress,
-    outcome: lash::TurnCancelOutcome,
-    terminal: Option<lash::TurnTerminal>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    terminal_error: Option<lash::runtime::RuntimeError>,
-}
-
-#[derive(Clone, Debug, Serialize)]
 struct TurnCancelResponse {
     accepted: bool,
     cancellations: Vec<TurnCancelReceipt>,
