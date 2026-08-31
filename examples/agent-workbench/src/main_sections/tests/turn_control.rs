@@ -329,6 +329,92 @@ mod turn_control_timeout_tests {
         }
     }
 
+    async fn spawn_durable_turn_terminal(terminal: lash::TurnTerminal) -> String {
+        async fn await_terminal(
+            AxumPath(path): AxumPath<String>,
+            State(terminal): State<lash::TurnTerminal>,
+            Json(_request): Json<Value>,
+        ) -> Json<lash::Resolution> {
+            assert!(
+                path.starts_with("LashDurableWaitWorkflow/") && path.ends_with("/await_resolution"),
+                "unexpected durable terminal attachment path: {path}"
+            );
+            Json(lash::Resolution::Ok(
+                serde_json::to_value(terminal).expect("serialize durable turn terminal"),
+            ))
+        }
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock durable terminal ingress");
+        let addr = listener
+            .local_addr()
+            .expect("mock durable terminal ingress addr");
+        let app = Router::new()
+            .route("/{*path}", post(await_terminal))
+            .with_state(terminal);
+        tokio::spawn(async move {
+            if let Err(err) = axum::serve(listener, app).await {
+                eprintln!("mock durable terminal ingress stopped: {err}");
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[test]
+    fn cancel_after_restart_reattaches_to_durable_terminal() {
+        run_async_test_on_stack_budget("workbench-restart-cancel-reattach-test", || {
+            cancel_after_restart_reattaches_to_durable_terminal_inner()
+        });
+    }
+
+    async fn cancel_after_restart_reattaches_to_durable_terminal_inner() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "agent-workbench-restart-cancel-reattach-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&data_dir).expect("create restart cancel data dir");
+        let admin_url = spawn_restate_admin_with_workflow_status(Some("suspended")).await;
+        let mut state = turn_cancel_test_state(&data_dir, admin_url).await;
+        let session_id = state.current_session_id();
+        let turn_id = "restart-cancel-turn";
+        let evidence = lash::TurnCancellationEvidence {
+            request_id: "durable-restart-cancel".to_string(),
+            origin: Some("user".to_string()),
+            reason: Some("replacement process committed cancellation".to_string()),
+            undelivered: lash::TurnCancelDisposition::Defer,
+        };
+        state.restate_ingress_url = spawn_durable_turn_terminal(lash::TurnTerminal::Committed {
+            outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { evidence }),
+            session_revision: Some(1),
+        })
+        .await;
+        state.track_turn(&session_id, turn_id);
+
+        let Json(receipt) = cancel_turn(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+        )
+        .await
+        .expect("cancel after replacement must read the durable terminal");
+
+        assert!(matches!(
+            receipt.cancellations.as_slice(),
+            [TurnCancelReceipt {
+                terminal: Some(lash::TurnTerminal::Committed {
+                    outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. }),
+                    session_revision: Some(1),
+                }),
+                terminal_error: None,
+                ..
+            }]
+        ));
+        assert!(state.active_turns.for_session(&session_id).is_empty());
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
     #[test]
     fn dangling_routed_turn_does_not_hang_stop_and_is_pruned() {
         run_async_test_on_stack_budget("workbench-dangling-turn-cancel-test", || {

@@ -102,6 +102,7 @@ include!("main_sections/session_routes.rs");
 include!("main_sections/turn_ingress.rs");
 include!("main_sections/admin.rs");
 include!("main_sections/session_open_retry.rs");
+include!("main_sections/turn_control.rs");
 include!("main_sections/app_state.rs");
 include!("main_sections/plugins.rs");
 include!("main_sections/prompt.rs");

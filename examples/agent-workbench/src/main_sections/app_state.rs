@@ -402,10 +402,7 @@ impl AppState {
                 lash::TurnCancelOutcome::Requested(_)
                     | lash::TurnCancelOutcome::AlreadyRequested(_)
             ) {
-                match driver
-                    .await_terminal_with_timeout(&address, TURN_TERMINAL_ATTACH_TIMEOUT)
-                    .await
-                {
+                match self.await_turn_terminal(&driver, &address).await {
                     Ok(terminal) => (Some(terminal), None),
                     Err(err)
                         if err.code
@@ -1241,9 +1238,8 @@ fn work_event_from_observed(event: lash::process::ObservedProcessEvent) -> WorkE
 }
 
 #[cfg(test)]
-static SESSION_DELETE_RETENTION_FAULTS: std::sync::LazyLock<
-    Mutex<BTreeMap<String, String>>,
-> = std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
+static SESSION_DELETE_RETENTION_FAULTS: std::sync::LazyLock<Mutex<BTreeMap<String, String>>> =
+    std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 #[cfg(test)]
 fn fail_session_delete_retention_once(session_id: &str, turn_id: &str) {
@@ -1408,9 +1404,7 @@ impl AppError {
 
 fn replay_divergence_abort_message(error: &lash::EmbedError) -> Option<String> {
     let code = match error {
-        lash::EmbedError::Runtime(error) if error.code.is_worker_replacement_abort() => {
-            &error.code
-        }
+        lash::EmbedError::Runtime(error) if error.code.is_worker_replacement_abort() => &error.code,
         lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(error))
             if error.code.is_worker_replacement_abort() =>
         {
