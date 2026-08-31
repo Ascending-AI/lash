@@ -22,7 +22,7 @@ impl SqliteTriggerStore {
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open(path).await?;
-        ensure_trigger_schema(&conn).await?;
+        ensure_versioned_schema(&conn, SqliteDatabase::Triggers).await?;
         apply_pragmas(&conn, StoreBacking::File).await?;
         Ok(Self {
             conn,
@@ -39,7 +39,7 @@ impl SqliteTriggerStore {
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open_in_memory().await?;
-        ensure_trigger_schema(&conn).await?;
+        ensure_versioned_schema(&conn, SqliteDatabase::Triggers).await?;
         apply_pragmas(&conn, StoreBacking::Memory).await?;
         Ok(Self {
             conn,

@@ -32,7 +32,7 @@ async fn row_store() -> SqliteEffectReplayRowStore {
     let conn = SqliteConnection::open_in_memory()
         .await
         .expect("open the in-memory effect database");
-    ensure_effect_schema(&conn)
+    ensure_versioned_schema(&conn, SqliteDatabase::EffectReplay)
         .await
         .expect("provision the effect schema");
     SqliteEffectReplayRowStore {

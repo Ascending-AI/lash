@@ -222,7 +222,7 @@ async fn a_preflight_connection_refuses_to_write_even_if_asked() {
 }
 
 #[test]
-fn every_database_kind_publishes_the_version_its_open_enforces() {
+fn every_database_publishes_the_version_its_open_enforces() {
     assert_eq!(
         SqliteDatabase::DurableCore.expected_version(),
         i64::from(crate::schema::SCHEMA_VERSION)

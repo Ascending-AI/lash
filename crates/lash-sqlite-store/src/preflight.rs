@@ -44,52 +44,7 @@ use lash_core::{
 mod walk;
 
 use crate::conn::SqliteConnection;
-use crate::schema::{
-    EFFECT_SCHEMA_VERSION, PROCESS_SCHEMA_VERSION, SCHEMA_VERSION, TRIGGER_SCHEMA_VERSION,
-};
-
-/// One of the four independently versioned SQLite databases a lash deployment
-/// can hold.
-///
-/// They version separately and can disagree, which is why a refusal has to name
-/// the database rather than the deployment.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum SqliteDatabase {
-    /// Sessions, graph nodes, checkpoints, leases, queued work.
-    DurableCore,
-    /// The process registry.
-    ProcessRegistry,
-    /// The trigger store.
-    Triggers,
-    /// The effect-replay journal and await-event ledger.
-    EffectReplay,
-}
-
-impl SqliteDatabase {
-    /// The `PRAGMA user_version` this build requires of the database.
-    ///
-    /// These are the same target integers the open path enforces. A durable-core
-    /// database at generation 43 is the one declared migration source; every
-    /// other different on-disk version is refused.
-    pub fn expected_version(self) -> i64 {
-        i64::from(match self {
-            SqliteDatabase::DurableCore => SCHEMA_VERSION,
-            SqliteDatabase::ProcessRegistry => PROCESS_SCHEMA_VERSION,
-            SqliteDatabase::Triggers => TRIGGER_SCHEMA_VERSION,
-            SqliteDatabase::EffectReplay => EFFECT_SCHEMA_VERSION,
-        })
-    }
-
-    /// The operator-facing name used in reports and refusal messages.
-    pub fn name(self) -> &'static str {
-        match self {
-            SqliteDatabase::DurableCore => "durable core",
-            SqliteDatabase::ProcessRegistry => "process registry",
-            SqliteDatabase::Triggers => "trigger store",
-            SqliteDatabase::EffectReplay => "effect replay",
-        }
-    }
-}
+use crate::schema::SqliteDatabase;
 
 /// Read one SQLite database's recorded schema version and compare it against
 /// this build, without opening the store.

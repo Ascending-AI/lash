@@ -95,7 +95,7 @@ impl Store {
         .await?;
         #[cfg(not(feature = "testing"))]
         let conn = SqliteConnection::open_with_policy(path, options.connection_policy).await?;
-        ensure_schema(&conn).await?;
+        ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
         let process_registry_attached = if let Some(process_registry_path) = process_registry_path {
             if !process_registry_path.exists() {
                 return Err(tokio_rusqlite::Error::Error(
@@ -229,7 +229,7 @@ impl Store {
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open_in_memory_with_policy(options.connection_policy).await?;
-        ensure_schema(&conn).await?;
+        ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
         Ok(Self {
             conn,
             session_id: OnceLock::new(),

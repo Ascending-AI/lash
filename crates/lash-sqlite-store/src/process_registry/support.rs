@@ -286,7 +286,7 @@ impl SqliteProcessRegistry {
         process_session_store_root: PathBuf,
     ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open(path).await?;
-        ensure_process_schema(&conn).await?;
+        ensure_versioned_schema(&conn, SqliteDatabase::ProcessRegistry).await?;
         apply_pragmas(&conn, StoreBacking::File).await?;
         Ok(Self {
             conn,
@@ -304,7 +304,7 @@ impl SqliteProcessRegistry {
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open_in_memory().await?;
-        ensure_process_schema(&conn).await?;
+        ensure_versioned_schema(&conn, SqliteDatabase::ProcessRegistry).await?;
         apply_pragmas(&conn, StoreBacking::Memory).await?;
         Ok(Self {
             conn,

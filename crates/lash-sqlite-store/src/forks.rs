@@ -8,7 +8,9 @@ async fn open_factory_catalog(
     let conn = SqliteConnection::open_with_policy(&root.join(DURABLE_CORE_DB_FILE), policy)
         .await
         .map_err(|err| lash_core::StoreError::Backend(err.to_string()))?;
-    ensure_schema(&conn).await.map_err(sqlite_error)?;
+    ensure_versioned_schema(&conn, SqliteDatabase::DurableCore)
+        .await
+        .map_err(sqlite_error)?;
     Ok(conn)
 }
 

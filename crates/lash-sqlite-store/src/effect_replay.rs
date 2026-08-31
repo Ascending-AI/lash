@@ -498,7 +498,16 @@ async fn open_effect_replay_driver(
     clock: Arc<dyn lash_core::Clock>,
 ) -> tokio_rusqlite::Result<Arc<SqliteEffectReplay>> {
     let conn = SqliteConnection::open(path).await?;
-    let signing_secret = ensure_effect_schema(&conn).await?;
+    ensure_versioned_schema(&conn, SqliteDatabase::EffectReplay).await?;
+    let signing_secret = conn
+        .call(|connection| {
+            connection.query_row(
+                "SELECT signing_secret FROM await_event_meta WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+        })
+        .await?;
     apply_pragmas(&conn, backing).await?;
     Ok(Arc::new(build_effect_replay_driver(
         conn,
@@ -514,7 +523,16 @@ async fn open_effect_replay_memory_driver(
     clock: Arc<dyn lash_core::Clock>,
 ) -> tokio_rusqlite::Result<Arc<SqliteEffectReplay>> {
     let conn = SqliteConnection::open_in_memory().await?;
-    let signing_secret = ensure_effect_schema(&conn).await?;
+    ensure_versioned_schema(&conn, SqliteDatabase::EffectReplay).await?;
+    let signing_secret = conn
+        .call(|connection| {
+            connection.query_row(
+                "SELECT signing_secret FROM await_event_meta WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+        })
+        .await?;
     apply_pragmas(&conn, StoreBacking::Memory).await?;
     Ok(Arc::new(build_effect_replay_driver(
         conn,

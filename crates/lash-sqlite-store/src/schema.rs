@@ -16,6 +16,90 @@ pub(crate) enum StoreBacking {
     Memory,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SchemaRemedy {
+    DeleteDatabase,
+    RecreateTrustDomain,
+}
+
+#[derive(Clone, Copy)]
+struct SqliteDatabaseDefinition {
+    name: &'static str,
+    schema: &'static str,
+    version: i32,
+    remedy: SchemaRemedy,
+}
+
+/// One of the four independently versioned SQLite databases a lash deployment
+/// can hold.
+///
+/// The variant is the single table for each database's schema SQL, version,
+/// operator-facing name, and schema-drift remedy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SqliteDatabase {
+    /// Sessions, graph nodes, checkpoints, leases, queued work.
+    DurableCore,
+    /// The process registry.
+    ProcessRegistry,
+    /// The trigger store.
+    Triggers,
+    /// The effect-replay journal and await-event ledger.
+    EffectReplay,
+}
+
+impl SqliteDatabase {
+    const fn definition(self) -> SqliteDatabaseDefinition {
+        match self {
+            Self::DurableCore => SqliteDatabaseDefinition {
+                name: "durable core",
+                schema: SCHEMA,
+                version: SCHEMA_VERSION,
+                remedy: SchemaRemedy::DeleteDatabase,
+            },
+            Self::ProcessRegistry => SqliteDatabaseDefinition {
+                name: "process registry",
+                schema: PROCESS_SCHEMA,
+                version: PROCESS_SCHEMA_VERSION,
+                remedy: SchemaRemedy::DeleteDatabase,
+            },
+            Self::Triggers => SqliteDatabaseDefinition {
+                name: "trigger store",
+                schema: TRIGGER_SCHEMA,
+                version: TRIGGER_SCHEMA_VERSION,
+                remedy: SchemaRemedy::DeleteDatabase,
+            },
+            Self::EffectReplay => SqliteDatabaseDefinition {
+                name: "effect replay",
+                schema: EFFECT_SCHEMA,
+                version: EFFECT_SCHEMA_VERSION,
+                remedy: SchemaRemedy::RecreateTrustDomain,
+            },
+        }
+    }
+
+    fn schema(self) -> &'static str {
+        self.definition().schema
+    }
+
+    fn schema_version(self) -> i32 {
+        self.definition().version
+    }
+
+    /// The `PRAGMA user_version` this build requires of the database.
+    pub fn expected_version(self) -> i64 {
+        i64::from(self.schema_version())
+    }
+
+    /// The operator-facing name used in reports and refusal messages.
+    pub fn name(self) -> &'static str {
+        self.definition().name
+    }
+
+    fn remedy(self) -> SchemaRemedy {
+        self.definition().remedy
+    }
+}
+
 /// Canonical SQLite schema for a factory-wide lash durable-core catalog.
 ///
 /// This is the *only* schema the store supports. Older durable-core databases
@@ -902,61 +986,16 @@ pub(crate) async fn apply_pragmas(
     .await
 }
 
-pub(crate) async fn ensure_schema(conn: &SqliteConnection) -> rusqlite::Result<()> {
-    ensure_versioned_schema(conn, "session", SCHEMA, SCHEMA_VERSION).await
-}
-
-pub(crate) async fn ensure_process_schema(conn: &SqliteConnection) -> rusqlite::Result<()> {
-    ensure_versioned_schema(
-        conn,
-        "process registry",
-        PROCESS_SCHEMA,
-        PROCESS_SCHEMA_VERSION,
-    )
-    .await
-}
-
-pub(crate) async fn ensure_trigger_schema(conn: &SqliteConnection) -> rusqlite::Result<()> {
-    ensure_versioned_schema(
-        conn,
-        "trigger store",
-        TRIGGER_SCHEMA,
-        TRIGGER_SCHEMA_VERSION,
-    )
-    .await
-}
-
-pub(crate) async fn ensure_effect_schema(conn: &SqliteConnection) -> rusqlite::Result<Vec<u8>> {
-    conn.call(|connection| {
-        let tx = prepare_versioned_schema(
-            connection,
-            "effect replay",
-            EFFECT_SCHEMA,
-            EFFECT_SCHEMA_VERSION,
-        )?;
-        let signing_secret = tx.query_row(
-            "SELECT signing_secret FROM await_event_meta WHERE singleton = 1",
-            [],
-            |row| row.get(0),
-        )?;
-        tx.commit()?;
-        Ok(signing_secret)
-    })
-    .await
-}
-
 /// Apply `schema` if the database is already at `schema_version`, initialise it
 /// (under one transaction stamping `user_version`) if the database is empty, or
 /// reject the open if the on-disk `user_version` is anything else. Runs entirely
 /// on the connection thread so the version check and DDL share one connection.
-async fn ensure_versioned_schema(
+pub(crate) async fn ensure_versioned_schema(
     conn: &SqliteConnection,
-    database_kind: &'static str,
-    schema: &'static str,
-    schema_version: i32,
+    database: SqliteDatabase,
 ) -> rusqlite::Result<()> {
     conn.call(move |c| {
-        let tx = prepare_versioned_schema(c, database_kind, schema, schema_version)?;
+        let tx = prepare_versioned_schema(c, database)?;
         tx.commit()
     })
     .await
@@ -964,8 +1003,14 @@ async fn ensure_versioned_schema(
 
 fn prepare_versioned_schema<'connection>(
     connection: &'connection mut Connection,
-    database_kind: &'static str,
-    schema: &'static str,
+    database: SqliteDatabase,
+) -> rusqlite::Result<Transaction<'connection>> {
+    prepare_versioned_schema_at_version(connection, database, database.schema_version())
+}
+
+fn prepare_versioned_schema_at_version<'connection>(
+    connection: &'connection mut Connection,
+    database: SqliteDatabase,
     schema_version: i32,
 ) -> rusqlite::Result<Transaction<'connection>> {
     // The whole check-then-initialise runs inside one `BEGIN IMMEDIATE`
@@ -978,26 +1023,26 @@ fn prepare_versioned_schema<'connection>(
     let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let user_version: i32 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if user_version == schema_version {
-        tx.execute_batch(schema)?;
+        tx.execute_batch(database.schema())?;
         return Ok(tx);
     }
     if user_version == 0 && !has_user_schema_objects(&tx)? {
-        tx.execute_batch(schema)?;
+        tx.execute_batch(database.schema())?;
         tx.pragma_update(None, "user_version", schema_version)?;
         return Ok(tx);
     }
     // Deliberately historical: tests pin the 43-to-44 migration, but the arm is
     // unreachable for production opens now that SCHEMA_VERSION is 45.
-    if database_kind == "session" && user_version == 43 && schema_version == 44 {
+    if database == SqliteDatabase::DurableCore && user_version == 43 && schema_version == 44 {
         tx.execute_batch(SESSION_43_TO_44_MIGRATION)?;
-        tx.execute_batch(schema)?;
+        tx.execute_batch(database.schema())?;
         tx.pragma_update(None, "user_version", schema_version)?;
         return Ok(tx);
     }
     Err(rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_MISUSE),
         Some(unsupported_schema_message(
-            database_kind,
+            database,
             schema_version,
             user_version,
         )),
@@ -1020,25 +1065,26 @@ pub(crate) fn has_user_schema_objects(conn: &Connection) -> rusqlite::Result<boo
 /// part of the trust domain documented in `docs/persistence.html#delete-sessions`,
 /// so its remedy must never prescribe an independent database wipe.
 pub(crate) fn unsupported_schema_message(
-    database_kind: &str,
+    database: SqliteDatabase,
     expected_version: i32,
     found_version: i32,
 ) -> String {
-    let remedy = if database_kind == "effect replay" {
-        "drain affected sessions and recreate the whole Lash trust domain with this version. \
+    let remedy = match database.remedy() {
+        SchemaRemedy::DeleteDatabase => {
+            format!("delete the {} database and start fresh.", database.name())
+        }
+        SchemaRemedy::RecreateTrustDomain => {
+            "drain affected sessions and recreate the whole Lash trust domain with this version. \
          Reset the tombstones, await-event revocation ledger, effect journal, and Restate state \
          together; see docs/persistence.html#delete-sessions."
-    } else {
-        return format!(
-            "Unsupported lash {database_kind} schema: this binary supports schema version \
-             {expected_version}, but the database reports version {found_version}. There is no \
-             migration chain — delete the {database_kind} database and start fresh."
-        );
+                .to_string()
+        }
     };
     format!(
-        "Unsupported lash {database_kind} schema: this binary supports schema version \
-         {expected_version}, but the database reports version {found_version}. There is no \
-         migration chain — {remedy}"
+        "Unsupported lash {} schema: this binary supports schema version {expected_version}, but \
+         the database reports version {found_version}. There is no \
+         migration chain — {remedy}",
+        database.name()
     )
 }
 
@@ -1049,7 +1095,7 @@ mod observer_intent_migration_tests {
     #[test]
     fn historical_component_43_to_44_migration_stays_pinned() {
         let mut connection = Connection::open_in_memory().expect("open migration fixture");
-        prepare_versioned_schema(&mut connection, "session", SCHEMA, 44)
+        prepare_versioned_schema_at_version(&mut connection, SqliteDatabase::DurableCore, 44)
             .expect("create current fixture")
             .commit()
             .expect("commit current fixture");
@@ -1085,7 +1131,7 @@ mod observer_intent_migration_tests {
             )
             .expect("build component-43 observer-intent fixture");
 
-        prepare_versioned_schema(&mut connection, "session", SCHEMA, 44)
+        prepare_versioned_schema_at_version(&mut connection, SqliteDatabase::DurableCore, 44)
             .expect("migrate component 43")
             .commit()
             .expect("commit component-44 migration");
@@ -1156,6 +1202,23 @@ mod observer_intent_migration_tests {
                 )
                 .is_err(),
             "the attribution CHECK must reject relation-borne intent labels"
+        );
+    }
+}
+
+#[cfg(test)]
+mod schema_metadata_tests {
+    use super::*;
+
+    #[test]
+    fn effect_replay_selects_the_trust_domain_remedy_structurally() {
+        assert_eq!(
+            SqliteDatabase::EffectReplay.remedy(),
+            SchemaRemedy::RecreateTrustDomain
+        );
+        assert_eq!(
+            SqliteDatabase::DurableCore.remedy(),
+            SchemaRemedy::DeleteDatabase
         );
     }
 }
