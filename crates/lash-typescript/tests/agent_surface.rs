@@ -1693,6 +1693,7 @@ fn for_of_bodies_accept_effects_and_unrelated_assignment() {
 #[test]
 fn for_of_bodies_still_reject_reaching_the_iterable() {
     let environment = two_leaf_web_environment();
+    let mut unexpectedly_accepted = Vec::new();
     for (source, needle) in [
         (
             "const xs = [1, 2]; for (const x of xs) { xs[0] = 9; } finish('done');",
@@ -1706,14 +1707,64 @@ fn for_of_bodies_still_reject_reaching_the_iterable() {
             "const xs = [1, 2]; for (const x of xs) { await web.fetch({ url: xs }); } finish('done');",
             "passes `xs`",
         ),
+        (
+            "const xs = [1, 2]; for (const x of xs) { xs?.pop(); } finish('done');",
+            "optional",
+        ),
+        (
+            "const xs = [1, 2]; for (const x of xs) { delete xs[0]; } finish('done');",
+            "deletes through `xs`",
+        ),
+        (
+            "const xs = [1, 2]; for (const x of xs) { xs[0]++; } finish('done');",
+            "updates through `xs`",
+        ),
+        (
+            "const xs = [1, 2]; for (const x of xs) { new Set(xs); } finish('done');",
+            "constructs with `xs`",
+        ),
+        (
+            "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { [xs[0]] = ys; } finish('done');",
+            "assigns through `xs`",
+        ),
+        (
+            "const xs = [1, 2]; for (const x of xs) { for (const y of [xs]) { y.pop(); } } finish('done');",
+            "binds `xs`",
+        ),
+        (
+            "const xs = [1, 2]; for (const x of xs) { function f(a = xs) { a.pop(); } f(); } finish('done');",
+            "binds `xs`",
+        ),
     ] {
-        let error = lash_typescript::link(source, &environment)
-            .expect_err("iterable mutation stays rejected");
-        assert_eq!(error.code.as_str(), "TS_FOR_OF_UNSUPPORTED", "{source}");
-        assert!(
-            error.to_string().contains(needle),
-            "the rejection names the shape that reached the iterable: {error}"
-        );
+        match lash_typescript::link(source, &environment) {
+            Ok(_) => unexpectedly_accepted.push(source),
+            Err(error) => {
+                assert_eq!(error.code.as_str(), "TS_FOR_OF_UNSUPPORTED", "{source}");
+                assert!(
+                    error.to_string().contains(needle),
+                    "the rejection names the shape that reached the iterable: {error}"
+                );
+            }
+        }
+    }
+    assert!(
+        unexpectedly_accepted.is_empty(),
+        "iterable mutation rows accepted before fix ({}): {unexpectedly_accepted:?}",
+        unexpectedly_accepted.len()
+    );
+
+    for source in [
+        "const xs = [1, 2]; for (const x of xs) { const ys = [3, 4]; ys?.pop(); } finish('done');",
+        "const xs = [1, 2]; const other = [3, 4]; for (const x of xs) { delete other[0]; } finish('done');",
+        "const xs = [1, 2]; const other = [3, 4]; for (const x of xs) { other[0]++; } finish('done');",
+        "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { new Set(ys); } finish('done');",
+        "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { const [other] = ys; } finish('done');",
+        "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { for (const y of [ys]) { y.pop(); } } finish('done');",
+        "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { function f(a = ys) { a.pop(); } f(); } finish('done');",
+    ] {
+        lash_typescript::link(source, &environment).unwrap_or_else(|error| {
+            panic!("legal counterpart must link: {error}\n  source: {source}")
+        });
     }
 }
 

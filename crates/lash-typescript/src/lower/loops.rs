@@ -303,7 +303,50 @@ fn body_binds_iterable_elsewhere(stmt: &Stmt, binding: &str) -> Option<String> {
         }
     }
 
+    fn pattern_default_binds_iterable(pattern: &Pattern, binding: &str) -> bool {
+        match pattern {
+            Pattern::Assign { target, default } => {
+                names_iterable_directly(default, binding)
+                    || pattern_default_binds_iterable(target, binding)
+            }
+            Pattern::Rest(target) => pattern_default_binds_iterable(target, binding),
+            Pattern::Array { elements, rest } => {
+                elements
+                    .iter()
+                    .flatten()
+                    .any(|pattern| pattern_default_binds_iterable(pattern, binding))
+                    || rest
+                        .as_deref()
+                        .is_some_and(|pattern| pattern_default_binds_iterable(pattern, binding))
+            }
+            Pattern::Object { properties, rest } => {
+                properties
+                    .iter()
+                    .any(|property| pattern_default_binds_iterable(&property.value, binding))
+                    || rest
+                        .as_deref()
+                        .is_some_and(|pattern| pattern_default_binds_iterable(pattern, binding))
+            }
+            Pattern::Ident(_) | Pattern::Member { .. } => false,
+        }
+    }
+
     stmt.descendants().find_map(|stmt| match stmt {
+        Stmt::ForOf { iterable, .. } if names_iterable_directly(iterable, binding) => {
+            Some(format!(
+                "binds `{binding}`, the iterable this loop is walking, as an inner for-of iterable"
+            ))
+        }
+        Stmt::Function { function, .. }
+            if function
+                .params
+                .iter()
+                .any(|param| pattern_default_binds_iterable(param, binding)) =>
+        {
+            Some(format!(
+                "binds `{binding}`, the iterable this loop is walking, in a parameter default"
+            ))
+        }
         Stmt::Var { declarations, .. } => declarations.iter().find_map(|declaration| {
             declaration
                 .init
@@ -330,12 +373,19 @@ fn expression_may_mutate(expr: &Expr, binding: &str) -> Option<String> {
             return;
         }
         match expr {
-            Expr::Assign {
-                target: TsAssignTarget::Member { object, .. },
-                ..
-            } if expression_root_binding(object) == Some(binding) => {
+            Expr::Assign { target, .. } if assign_target_may_mutate_binding(target, binding) => {
                 found = Some(format!(
                     "assigns through `{binding}`, the iterable this loop is walking"
+                ));
+            }
+            Expr::Update { target, .. } if assign_target_may_mutate_binding(target, binding) => {
+                found = Some(format!(
+                    "updates through `{binding}`, the iterable this loop is walking"
+                ));
+            }
+            Expr::Delete { object, .. } if expression_root_binding(object) == Some(binding) => {
+                found = Some(format!(
+                    "deletes through `{binding}`, the iterable this loop is walking"
                 ));
             }
             Expr::Call { callee, args } => {
@@ -358,10 +408,66 @@ fn expression_may_mutate(expr: &Expr, binding: &str) -> Option<String> {
                     ));
                 }
             }
+            Expr::OptionalChain { base, operations }
+                if expression_root_binding(base) == Some(binding)
+                    && operations
+                        .iter()
+                        .any(|operation| matches!(operation, OptionalOperation::Call { .. })) =>
+            {
+                found = Some(format!(
+                    "calls an optional member through `{binding}`, which may mutate the iterable this loop is walking"
+                ));
+            }
+            Expr::New { args, .. }
+                if args.iter().any(|arg| match arg {
+                    CallArg::Value(value) | CallArg::Spread(value) => {
+                        mentions_binding(value, binding)
+                    }
+                }) =>
+            {
+                found = Some(format!(
+                    "constructs with `{binding}`, the iterable this loop is walking"
+                ));
+            }
             _ => {}
         }
     });
     found
+}
+
+fn assign_target_may_mutate_binding(target: &TsAssignTarget, binding: &str) -> bool {
+    match target {
+        TsAssignTarget::Member { object, .. } => expression_root_binding(object) == Some(binding),
+        TsAssignTarget::Pattern(pattern) => pattern_may_mutate_binding(pattern, binding),
+        TsAssignTarget::Ident(_) => false,
+    }
+}
+
+fn pattern_may_mutate_binding(pattern: &Pattern, binding: &str) -> bool {
+    match pattern {
+        Pattern::Member { object, .. } => expression_root_binding(object) == Some(binding),
+        Pattern::Rest(target) | Pattern::Assign { target, .. } => {
+            pattern_may_mutate_binding(target, binding)
+        }
+        Pattern::Array { elements, rest } => {
+            elements
+                .iter()
+                .flatten()
+                .any(|pattern| pattern_may_mutate_binding(pattern, binding))
+                || rest
+                    .as_deref()
+                    .is_some_and(|pattern| pattern_may_mutate_binding(pattern, binding))
+        }
+        Pattern::Object { properties, rest } => {
+            properties
+                .iter()
+                .any(|property| pattern_may_mutate_binding(&property.value, binding))
+                || rest
+                    .as_deref()
+                    .is_some_and(|pattern| pattern_may_mutate_binding(pattern, binding))
+        }
+        Pattern::Ident(_) => false,
+    }
 }
 
 /// Walk every sub-expression, outermost first.
