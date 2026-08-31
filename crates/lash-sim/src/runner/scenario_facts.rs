@@ -4,119 +4,83 @@ pub(super) fn scenario_transition_facts(
     contract: &ScenarioContractSpec,
     selected_events: &[TraceEventLine],
 ) -> Result<Vec<ScenarioTransitionFact>, FixedScriptRunnerError> {
-    if matches!(contract.suite, "standard" | "rlm" | "agent") {
-        let events = selected_events
-            .iter()
-            .map(|line| line.event.clone())
-            .collect::<Vec<_>>();
-        return scenario_contract_generated_facts(contract, &events)
-            .map(|facts| {
-                facts
-                    .into_iter()
-                    .map(|fact| ScenarioTransitionFact {
-                        fact: fact.fact.to_string(),
-                        status: "passed",
-                        assertion: fact.assertion,
-                        boundary_ids: fact.boundary_ids,
-                        observed: fact.observed,
-                    })
-                    .collect()
-            })
-            .map_err(|reason| {
-                FixedScriptRunnerError::Assertion(format!(
-                    "scenario contract `{}` could not prove generated semantic facts: {reason}",
-                    contract.test_name
-                ))
-            });
+    match contract.suite {
+        "runtime" => {
+            let mut facts = Vec::new();
+            match contract.semantic_oracle {
+                "runtime.checkpoint_redrive_cancel" => {
+                    facts.push(queued_active_turn_fact(contract, selected_events)?);
+                    facts.push(cancellation_terminalization_fact(
+                        contract,
+                        selected_events,
+                    )?);
+                }
+                "runtime.queued_work_keeps_pending_input" => {
+                    facts.push(queued_active_turn_fact(contract, selected_events)?);
+                }
+                "runtime.queued_turn_input_completion" => {
+                    facts.push(queued_active_turn_fact(contract, selected_events)?);
+                    facts.push(queued_turn_followup_provider_fact(
+                        contract,
+                        selected_events,
+                    )?);
+                }
+                "runtime.command_only_queue_drain" => {
+                    facts.push(command_queue_drain_fact(contract, selected_events)?);
+                }
+                "runtime.command_before_turn_work" => {
+                    facts.push(trigger_wakeup_fact(contract, selected_events)?);
+                    facts.push(queued_active_turn_fact(contract, selected_events)?);
+                }
+                "runtime.advisory_lease_head_cas" => {
+                    facts.push(worker_stale_completion_rejection_fact(
+                        contract,
+                        selected_events,
+                    )?);
+                }
+                "runtime.stale_lease_ttl" => {
+                    facts.push(worker_stale_lease_ttl_fact(contract, selected_events)?);
+                }
+                "runtime.observation_replay_preserves_input" => {
+                    facts.push(observer_reconnect_transition_fact(
+                        contract,
+                        selected_events,
+                    )?);
+                }
+                _ => {}
+            }
+            Ok(facts)
+        }
+        "standard" | "rlm" | "agent" => {
+            let events = selected_events
+                .iter()
+                .map(|line| line.event.clone())
+                .collect::<Vec<_>>();
+            scenario_contract_generated_facts(contract, &events)
+                .map(|facts| {
+                    facts
+                        .into_iter()
+                        .map(|fact| ScenarioTransitionFact {
+                            fact: fact.fact.to_string(),
+                            status: "passed",
+                            assertion: fact.assertion,
+                            boundary_ids: fact.boundary_ids,
+                            observed: fact.observed,
+                        })
+                        .collect()
+                })
+                .map_err(|reason| {
+                    FixedScriptRunnerError::Assertion(format!(
+                        "scenario contract `{}` could not prove generated semantic facts: {reason}",
+                        contract.test_name
+                    ))
+                })
+        }
+        suite => Err(FixedScriptRunnerError::Assertion(format!(
+            "unknown scenario suite `{suite}` for contract `{}`",
+            contract.test_name
+        ))),
     }
-    let mut facts = Vec::new();
-    match contract.semantic_oracle {
-        "runtime.checkpoint_redrive_cancel" => {
-            facts.push(queued_active_turn_fact(contract, selected_events)?);
-            facts.push(cancellation_terminalization_fact(
-                contract,
-                selected_events,
-            )?);
-        }
-        "runtime.queued_work_keeps_pending_input" => {
-            facts.push(queued_active_turn_fact(contract, selected_events)?);
-        }
-        "runtime.queued_turn_input_completion" => {
-            facts.push(queued_active_turn_fact(contract, selected_events)?);
-            facts.push(queued_turn_followup_provider_fact(
-                contract,
-                selected_events,
-            )?);
-        }
-        "runtime.command_only_queue_drain" => {
-            facts.push(command_queue_drain_fact(contract, selected_events)?);
-        }
-        "runtime.command_before_turn_work" => {
-            facts.push(trigger_wakeup_fact(contract, selected_events)?);
-            facts.push(queued_active_turn_fact(contract, selected_events)?);
-        }
-        "runtime.advisory_lease_head_cas" => {
-            facts.push(worker_stale_completion_rejection_fact(
-                contract,
-                selected_events,
-            )?);
-        }
-        "runtime.stale_lease_ttl" => {
-            facts.push(worker_stale_lease_ttl_fact(contract, selected_events)?);
-        }
-        "runtime.observation_replay_preserves_input" => {
-            facts.push(observer_reconnect_transition_fact(
-                contract,
-                selected_events,
-            )?);
-        }
-        "standard.empty_provider_response_error" | "standard.provider_error_without_checkpoint" => {
-            facts.push(provider_terminalization_fact(contract, selected_events)?);
-        }
-        "standard.streamed_text_finalizes_once" | "standard.initial_request_projection" => {
-            facts.push(provider_success_terminal_fact(contract, selected_events)?);
-        }
-        "standard.native_tool_loop_reenters_model"
-        | "standard.tool_failure_feedback_reenters_model"
-        | "standard.max_turns_after_tool_result"
-        | "standard.parallel_tool_results_checkpoint_once" => {
-            facts.push(tool_result_fact(contract, selected_events)?);
-            facts.push(provider_success_terminal_fact(contract, selected_events)?);
-        }
-        "rlm.lashlang_cell_exec_continues"
-        | "rlm.streamed_lashlang_cell_exec_persists_trajectory"
-        | "rlm.exec_error_max_turn_stop"
-        | "rlm.exec_tool_control_frame_switch_terminal"
-        | "rlm.exec_tool_control_fail_terminal"
-        | "rlm.exec_result_no_tool_call_replay" => {
-            facts.push(exec_terminal_fact(contract, selected_events)?);
-        }
-        "rlm.typed_schema_mismatch_repair_loop" | "rlm.typed_schema_any_of_mismatch" => {
-            facts.push(provider_terminalization_fact(contract, selected_events)?);
-            facts.push(provider_success_terminal_fact(contract, selected_events)?);
-        }
-        semantic if semantic.starts_with("rlm.") => {
-            facts.push(provider_success_terminal_fact(contract, selected_events)?);
-        }
-        "agent.durable_input_suspension_resolution" => {
-            facts.push(durable_effect_replay_fact(contract, selected_events)?);
-            facts.push(process_wake_duplicate_fact(contract, selected_events)?);
-        }
-        semantic if semantic.starts_with("agent.") => {
-            facts.push(process_wake_duplicate_fact(contract, selected_events)?);
-        }
-        _ => {}
-    }
-    if facts.is_empty() {
-        if contract.suite == "runtime" {
-            return Err(FixedScriptRunnerError::Assertion(format!(
-                "runtime scenario contract `{}` has no contract-owned transition fact; generic selected-event fallback is not allowed for runtime contracts",
-                contract.test_name
-            )));
-        }
-        facts.push(generic_transition_fact(contract, selected_events)?);
-    }
-    Ok(facts)
 }
 
 pub(super) fn scenario_backend_regression_reference(
@@ -406,97 +370,6 @@ fn command_queue_drain_fact(
     )
 }
 
-fn process_wake_duplicate_fact(
-    contract: &ScenarioContractSpec,
-    selected_events: &[TraceEventLine],
-) -> Result<ScenarioTransitionFact, FixedScriptRunnerError> {
-    let mut by_source_key: BTreeMap<String, Vec<&TraceEventLine>> = BTreeMap::new();
-    for line in selected_events
-        .iter()
-        .filter(|line| line.event.kind == BoundaryKind::ProcessWake)
-    {
-        if let (Some(process_id), Some(sequence)) = (
-            line.event
-                .observed
-                .pointer("/runtime_process_wake/process_id")
-                .and_then(Value::as_str),
-            line.event
-                .observed
-                .pointer("/runtime_process_wake/sequence")
-                .and_then(Value::as_u64),
-        ) {
-            let source_key = line
-                .event
-                .observed
-                .pointer("/runtime_queued_work/source_key")
-                .and_then(Value::as_str)
-                .map_or_else(
-                    || lash_core::facade_support::process_wake_source_key(process_id, sequence),
-                    ToString::to_string,
-                );
-            by_source_key.entry(source_key).or_default().push(line);
-        } else if let Some(source_key) = line
-            .event
-            .observed
-            .pointer("/runtime_queued_work/source_key")
-            .and_then(Value::as_str)
-        {
-            by_source_key
-                .entry(source_key.to_string())
-                .or_default()
-                .push(line);
-        }
-    }
-    let events = by_source_key
-        .values()
-        .find(|events| {
-            let strict_claim_dedupe = events.len() >= 2
-                && events.iter().any(|line| {
-                    line.event
-                        .observed
-                        .get("claimed_once")
-                        .and_then(Value::as_bool)
-                        == Some(true)
-                });
-            let in_flight_rejection = events.len() >= 2
-                && events.iter().any(|line| {
-                    line.event
-                        .observed
-                        .get("lease_busy")
-                        .and_then(Value::as_bool)
-                        == Some(true)
-                        && line
-                            .event
-                            .observed
-                            .pointer("/runtime_queued_work/enqueued")
-                            .and_then(Value::as_bool)
-                            == Some(false)
-                });
-            strict_claim_dedupe || in_flight_rejection
-        })
-        .cloned()
-        .unwrap_or_default();
-    let observed = json!({
-        "source_keys": by_source_key.iter().map(|(source_key, events)| json!({
-            "source_key": source_key,
-            "delivery_count": events.len(),
-            "claimed_once": events.iter().any(|line| line.event.observed.get("claimed_once").and_then(Value::as_bool) == Some(true)),
-            "lease_busy_rejected": events.iter().any(|line| {
-                line.event.observed.get("lease_busy").and_then(Value::as_bool) == Some(true)
-                    && line.event.observed.pointer("/runtime_queued_work/enqueued").and_then(Value::as_bool) == Some(false)
-            }),
-            "boundary_ids": boundary_ids(events),
-        })).collect::<Vec<_>>(),
-    });
-    require_transition_fact(
-        contract,
-        "duplicate_process_wake_idempotent",
-        "duplicate process wake deliveries share structural process/event identity and are terminalized by receiver evidence or in-flight lease rejection",
-        events,
-        observed,
-    )
-}
-
 fn observer_reconnect_transition_fact(
     contract: &ScenarioContractSpec,
     selected_events: &[TraceEventLine],
@@ -653,208 +526,6 @@ fn worker_stale_lease_ttl_fact(
         contract,
         "stale_lease_ttl_takeover_resumes_worker_owned_work",
         "successor worker waits for the stale lease TTL, acquires a higher fence, and resumes the owned work",
-        events,
-        observed,
-    )
-}
-
-fn provider_terminalization_fact(
-    contract: &ScenarioContractSpec,
-    selected_events: &[TraceEventLine],
-) -> Result<ScenarioTransitionFact, FixedScriptRunnerError> {
-    let events = selected_events
-        .iter()
-        .filter(|line| {
-            line.event.kind == BoundaryKind::ProviderMutation
-                && line
-                    .event
-                    .observed
-                    .pointer("/provider_parser_matrix/matrix/real_provider_parser_execution")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-        })
-        .collect::<Vec<_>>();
-    let observed = json!({
-        "provider_mutations": events.iter().map(|line| json!({
-            "boundary_id": line.event.boundary_id,
-            "mutation": line.event.observed.get("mutation").cloned().unwrap_or(Value::Null),
-            "parser_matrix_digest": line.event.observed.pointer("/provider_parser_matrix/digest").cloned().unwrap_or(Value::Null),
-            "real_provider_parser_execution": true,
-        })).collect::<Vec<_>>(),
-    });
-    require_transition_fact(
-        contract,
-        "provider_failure_terminalized_by_parser_matrix",
-        "scripted provider failure reaches real migrated provider parsers and terminal classification",
-        events,
-        observed,
-    )
-}
-
-fn provider_success_terminal_fact(
-    contract: &ScenarioContractSpec,
-    selected_events: &[TraceEventLine],
-) -> Result<ScenarioTransitionFact, FixedScriptRunnerError> {
-    let events = selected_events
-        .iter()
-        .filter(|line| {
-            line.event.kind == BoundaryKind::Provider
-                && line.event.observed.get("success").and_then(Value::as_bool) == Some(true)
-                && line
-                    .event
-                    .observed
-                    .pointer("/runtime_contract/status")
-                    .and_then(Value::as_str)
-                    == Some("passed")
-        })
-        .collect::<Vec<_>>();
-    let observed = json!({
-        "provider_turns": events.iter().map(|line| json!({
-            "boundary_id": line.event.boundary_id,
-            "provider_kind": line.event.observed.get("provider_kind").cloned().unwrap_or(Value::Null),
-            "turn_index": line.event.observed.get("turn_index").cloned().unwrap_or(Value::Null),
-            "runtime_contract": line.event.observed.get("runtime_contract").cloned().unwrap_or(Value::Null),
-        })).collect::<Vec<_>>(),
-    });
-    require_transition_fact(
-        contract,
-        "provider_success_terminal_boundary",
-        "provider turn terminates through the scripted runtime provider path and passes runtime contract checks",
-        events,
-        observed,
-    )
-}
-
-fn tool_result_fact(
-    contract: &ScenarioContractSpec,
-    selected_events: &[TraceEventLine],
-) -> Result<ScenarioTransitionFact, FixedScriptRunnerError> {
-    let events = selected_events
-        .iter()
-        .filter(|line| {
-            line.event.kind == BoundaryKind::Tool
-                && line.event.observed.get("runtime_tool_output").is_some()
-        })
-        .collect::<Vec<_>>();
-    let observed = json!({
-        "tool_results": events.iter().map(|line| json!({
-            "boundary_id": line.event.boundary_id,
-            "tool_name": line.event.observed.get("tool_name").cloned().unwrap_or(Value::Null),
-            "tool_call_id": line.event.observed.get("tool_call_id").cloned().unwrap_or(Value::Null),
-            "runtime_effect": line.event.observed.get("runtime_effect").cloned().unwrap_or(Value::Null),
-        })).collect::<Vec<_>>(),
-    });
-    require_transition_fact(
-        contract,
-        "tool_result_checkpoint_boundary",
-        "tool result crosses runtime effect-controller output and remains available for protocol re-entry",
-        events,
-        observed,
-    )
-}
-
-fn exec_terminal_fact(
-    contract: &ScenarioContractSpec,
-    selected_events: &[TraceEventLine],
-) -> Result<ScenarioTransitionFact, FixedScriptRunnerError> {
-    let events = selected_events
-        .iter()
-        .filter(|line| {
-            line.event.kind == BoundaryKind::ExecCode
-                && line.event.observed.get("runtime_effect_outcome").is_some()
-        })
-        .collect::<Vec<_>>();
-    let observed = json!({
-        "exec_boundaries": events.iter().map(|line| json!({
-            "boundary_id": line.event.boundary_id,
-            "exit_code": line.event.observed.get("exit_code").cloned().unwrap_or(Value::Null),
-            "runtime_effect": line.event.observed.get("runtime_effect").cloned().unwrap_or(Value::Null),
-            "runtime_effect_outcome_type": line.event.observed.pointer("/runtime_effect_outcome/type").cloned().unwrap_or(Value::Null),
-        })).collect::<Vec<_>>(),
-    });
-    require_transition_fact(
-        contract,
-        "rlm_exec_terminal_boundary",
-        "exec-code result crosses runtime effect-controller outcome and is available to RLM terminal state-machine contracts",
-        events,
-        observed,
-    )
-}
-
-fn durable_effect_replay_fact(
-    contract: &ScenarioContractSpec,
-    selected_events: &[TraceEventLine],
-) -> Result<ScenarioTransitionFact, FixedScriptRunnerError> {
-    let mut by_key: BTreeMap<String, Vec<&TraceEventLine>> = BTreeMap::new();
-    for line in selected_events
-        .iter()
-        .filter(|line| line.event.kind == BoundaryKind::DurableEffect)
-    {
-        if let Some(key) = line
-            .event
-            .observed
-            .get("durable_key")
-            .and_then(Value::as_str)
-        {
-            by_key.entry(key.to_string()).or_default().push(line);
-        }
-    }
-    let events = by_key
-        .values()
-        .find(|events| {
-            events.iter().any(|line| {
-                line.event.observed.get("replayed").and_then(Value::as_bool) == Some(false)
-                    && line
-                        .event
-                        .observed
-                        .pointer("/runtime_effect/local_executor_called")
-                        .and_then(Value::as_bool)
-                        == Some(true)
-            }) && events.iter().any(|line| {
-                line.event.observed.get("replayed").and_then(Value::as_bool) == Some(true)
-                    && line
-                        .event
-                        .observed
-                        .pointer("/runtime_effect/local_executor_called")
-                        .and_then(Value::as_bool)
-                        == Some(false)
-            })
-        })
-        .cloned()
-        .unwrap_or_default();
-    let observed = json!({
-        "durable_keys": by_key.iter().map(|(key, events)| json!({
-            "durable_key": key,
-            "boundary_ids": boundary_ids(events),
-            "first_execution": events.iter().any(|line| line.event.observed.get("replayed").and_then(Value::as_bool) == Some(false)),
-            "replay": events.iter().any(|line| line.event.observed.get("replayed").and_then(Value::as_bool) == Some(true)),
-        })).collect::<Vec<_>>(),
-    });
-    require_transition_fact(
-        contract,
-        "durable_effect_replay_idempotent",
-        "durable effect executes locally once and replay returns stored history without re-execution",
-        events,
-        observed,
-    )
-}
-
-fn generic_transition_fact(
-    contract: &ScenarioContractSpec,
-    selected_events: &[TraceEventLine],
-) -> Result<ScenarioTransitionFact, FixedScriptRunnerError> {
-    let events = selected_events.iter().collect::<Vec<_>>();
-    let observed = json!({
-        "selected_event_count": events.len(),
-        "boundary_kinds": events
-            .iter()
-            .map(|line| format!("{:?}", line.event.kind))
-            .collect::<BTreeSet<_>>(),
-    });
-    require_transition_fact(
-        contract,
-        "generated_transition_evidence_present",
-        "scenario contract selected generated trace events for its required state transition",
         events,
         observed,
     )

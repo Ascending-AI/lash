@@ -1718,6 +1718,196 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
 }
 
 #[test]
+fn runtime_scenario_contracts_dispatch_to_contract_owned_facts() {
+    let line = |sequence, kind, observed| {
+        TraceEventLine::new(
+            "runtime-contract-facts",
+            1,
+            "test",
+            test_delivered(
+                sequence,
+                &format!("runtime-contract-fact:{sequence}"),
+                "session-001",
+                kind,
+                observed,
+            ),
+        )
+    };
+
+    for contract in RUNTIME_SCENARIO_CONTRACTS {
+        let (events, expected) = match contract.semantic_oracle {
+            "runtime.command_before_turn_work" => (
+                vec![
+                    line(
+                        1,
+                        BoundaryKind::Trigger,
+                        json!({
+                            "trigger_delivered": true,
+                            "started_process": true,
+                            "reservation_count": 1,
+                        }),
+                    ),
+                    line(
+                        2,
+                        BoundaryKind::QueuedIngress,
+                        json!({
+                            "source_key": "command-source",
+                            "ingress_mode": "active_turn",
+                            "input_state": "pending",
+                        }),
+                    ),
+                ],
+                vec![
+                    "trigger_routes_process_wakeup",
+                    "active_turn_input_queued_hidden",
+                ],
+            ),
+            "runtime.command_only_queue_drain" => (
+                vec![
+                    line(
+                        1,
+                        BoundaryKind::QueuedIngress,
+                        json!({"source_key": "command-source"}),
+                    ),
+                    line(
+                        2,
+                        BoundaryKind::LeaseTime,
+                        json!({
+                            "runtime_lease_probe": {
+                                "real_lease_store": true,
+                                "session_execution_lease_fencing_token": 2,
+                            }
+                        }),
+                    ),
+                ],
+                vec!["command_queue_drains_with_real_lease_fence"],
+            ),
+            "runtime.queued_work_keeps_pending_input" => (
+                vec![line(
+                    1,
+                    BoundaryKind::QueuedIngress,
+                    json!({
+                        "source_key": "queued-source",
+                        "ingress_mode": "active_turn",
+                        "input_state": "pending",
+                        "input_id": "input-001",
+                    }),
+                )],
+                vec!["active_turn_input_queued_hidden"],
+            ),
+            "runtime.queued_turn_input_completion" => (
+                vec![
+                    line(
+                        1,
+                        BoundaryKind::QueuedIngress,
+                        json!({
+                            "source_key": "queued-source",
+                            "ingress_mode": "active_turn",
+                            "input_state": "pending",
+                        }),
+                    ),
+                    line(
+                        2,
+                        BoundaryKind::Provider,
+                        json!({"success": true, "provider_exchange_count": 1}),
+                    ),
+                ],
+                vec![
+                    "active_turn_input_queued_hidden",
+                    "queued_turn_input_followed_by_provider_completion",
+                ],
+            ),
+            "runtime.observation_replay_preserves_input" => (
+                vec![line(
+                    1,
+                    BoundaryKind::Observer,
+                    json!({
+                        "reconnected": true,
+                        "turn_index": 1,
+                        "observer_invariants": {
+                            "session_id": true,
+                            "turn_index_converged": true,
+                            "transcript_message_count_converged": true,
+                        },
+                    }),
+                )],
+                vec!["observer_reconnect_replays_original_input_state"],
+            ),
+            "runtime.checkpoint_redrive_cancel" => (
+                vec![
+                    line(
+                        1,
+                        BoundaryKind::QueuedIngress,
+                        json!({
+                            "source_key": "queued-source",
+                            "ingress_mode": "active_turn",
+                            "input_state": "pending",
+                        }),
+                    ),
+                    line(
+                        2,
+                        BoundaryKind::Cancellation,
+                        json!({"cancelled": true, "target": "queued-source"}),
+                    ),
+                ],
+                vec![
+                    "active_turn_input_queued_hidden",
+                    "cancellation_terminalized_pending_input",
+                ],
+            ),
+            "runtime.advisory_lease_head_cas" => (
+                vec![line(
+                    1,
+                    BoundaryKind::Worker,
+                    json!({
+                        "stale_completion_rejected": true,
+                        "runtime_active_lease": {"fencing_token": 2},
+                        "runtime_stale_completion": {"fencing_token": 1},
+                    }),
+                )],
+                vec!["lease_release_rejects_stale_completion"],
+            ),
+            "runtime.stale_lease_ttl" => (
+                vec![line(
+                    1,
+                    BoundaryKind::Worker,
+                    json!({
+                        "lease_owner_changed": true,
+                        "runtime_worker_store": {
+                            "session_execution_lease_acquired_after_ttl": true,
+                            "worker_owned_work": {
+                                "second_owner_resumed_work": true,
+                                "second_owner_outranks_first": true,
+                                "source_key": "worker-source",
+                            },
+                        },
+                    }),
+                )],
+                vec!["stale_lease_ttl_takeover_resumes_worker_owned_work"],
+            ),
+            semantic => panic!("missing runtime contract test fixture for {semantic}"),
+        };
+
+        let facts = scenario_transition_facts(contract, &events)
+            .expect("runtime contract should yield transition facts");
+        let actual = facts
+            .iter()
+            .map(|fact| fact.fact.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual, expected,
+            "unexpected facts for {}",
+            contract.test_name
+        );
+        assert!(
+            facts
+                .iter()
+                .all(|fact| fact.status == "passed" && !fact.boundary_ids.is_empty())
+        );
+    }
+}
+
+#[test]
 fn generated_transcript_write_failure_is_best_effort() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let transcript_path = tmp.path().join("transcript.txt");
