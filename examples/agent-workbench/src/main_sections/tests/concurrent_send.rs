@@ -671,6 +671,516 @@ async fn spawn_failing_restate_ingress() -> String {
     format!("http://{addr}")
 }
 
+async fn spawn_terminally_failed_session_delete_restate(
+) -> (String, mpsc::UnboundedReceiver<Value>) {
+    let (request_tx, request_rx) = mpsc::unbounded_channel();
+    let ingress_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind terminal-delete Restate ingress");
+    let ingress_addr = ingress_listener
+        .local_addr()
+        .expect("terminal-delete Restate ingress addr");
+    let ingress = Router::new()
+        .route("/{*path}", post(capture_terminal_delete_restate_send))
+        .with_state(request_tx);
+    tokio::spawn(async move {
+        if let Err(error) = axum::serve(ingress_listener, ingress).await {
+            eprintln!("terminal-delete Restate ingress stopped: {error}");
+        }
+    });
+
+    (format!("http://{ingress_addr}"), request_rx)
+}
+
+async fn capture_terminal_delete_restate_send(
+    AxumPath(path): AxumPath<String>,
+    State(tx): State<mpsc::UnboundedSender<Value>>,
+    Json(body): Json<Value>,
+) -> (StatusCode, Json<Value>) {
+    let _ = tx.send(json!({ "path": path, "body": body }));
+    if path.starts_with("WorkbenchSessionDeleteWorkflow/") && !path.ends_with("/send") {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "message": "timed out waiting for revoked turns to settle before deleting session"
+            })),
+        );
+    }
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "invocationId": "inv_terminal_delete",
+            "status": "Accepted",
+        })),
+    )
+}
+
+async fn spawn_ambiguous_session_delete_restate() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind ambiguous-delete Restate ingress");
+    let addr = listener
+        .local_addr()
+        .expect("ambiguous-delete Restate ingress addr");
+    let app = Router::new().route(
+        "/{*path}",
+        post(|AxumPath(path): AxumPath<String>, Json(_body): Json<Value>| async move {
+            assert!(path.starts_with("WorkbenchSessionDeleteWorkflow/"));
+            assert!(!path.ends_with("/send"));
+            (StatusCode::OK, Json(json!({ "unexpected": "shape" })))
+        }),
+    );
+    tokio::spawn(async move {
+        if let Err(error) = axum::serve(listener, app).await {
+            eprintln!("ambiguous-delete Restate ingress stopped: {error}");
+        }
+    });
+    format!("http://{addr}")
+}
+
+#[derive(Clone, Default)]
+struct SlowSessionDeleteRetentionIngress {
+    attempts: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+async fn spawn_slow_session_delete_retention_restate() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind slow-delete Restate ingress");
+    let addr = listener
+        .local_addr()
+        .expect("slow-delete Restate ingress addr");
+    let app = Router::new()
+        .route("/{*path}", post(slow_session_delete_retention_call))
+        .with_state(SlowSessionDeleteRetentionIngress::default());
+    tokio::spawn(async move {
+        if let Err(error) = axum::serve(listener, app).await {
+            eprintln!("slow-delete Restate ingress stopped: {error}");
+        }
+    });
+    format!("http://{addr}")
+}
+
+async fn slow_session_delete_retention_call(
+    AxumPath(path): AxumPath<String>,
+    State(state): State<SlowSessionDeleteRetentionIngress>,
+    Json(_body): Json<Value>,
+) -> (StatusCode, Json<Value>) {
+    assert!(path.starts_with("WorkbenchSessionDeleteWorkflow/"));
+    assert!(!path.ends_with("/send"));
+    if state
+        .attempts
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        == 0
+    {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+    (StatusCode::OK, Json(Value::Null))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn slow_delete_retention_is_bounded_and_can_be_retried() {
+    let data_dir = tempfile::tempdir().expect("slow delete tempdir");
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-slow-delete")
+        .complete_error("the slow delete test must not call the provider")
+        .build()
+        .into_handle();
+    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    state.restate_ingress_url = spawn_slow_session_delete_retention_restate().await;
+    let old_session_id = state.current_session_id();
+    state
+        .open_session(&old_session_id)
+        .await
+        .expect("materialize the session before the slow delete");
+
+    let started = tokio::time::Instant::now();
+    let delete = crate::restate::session_delete_client::with_session_delete_attach_ceiling(
+        250,
+        reset_chat(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(old_session_id.clone()),
+            }),
+        ),
+    );
+    let error = Box::pin(tokio::time::timeout(Duration::from_secs(2), delete))
+    .await
+    .expect("delete attach exceeded its delete-class deadline")
+    .expect_err("the bounded slow attach must be reported as ambiguous");
+
+    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(error.message.contains("could not be confirmed"));
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert_eq!(state.current_session_id(), old_session_id);
+    assert!(
+        !state
+            .core
+            .session_was_deleted(&old_session_id)
+            .await
+            .expect("read durable deletion fence after timeout")
+    );
+
+    let Json(replacement) = Box::pin(reset_chat(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(old_session_id.clone()),
+        }),
+    ))
+    .await
+    .expect("a later delete attempt can complete");
+    assert_ne!(replacement.settings.session_id, old_session_id);
+    assert_eq!(state.current_session_id(), replacement.settings.session_id);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_ambiguous_delete_attach_failure_never_claims_the_session_remains_live() {
+    let data_dir = tempfile::tempdir().expect("ambiguous delete tempdir");
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-ambiguous-delete")
+        .complete_error("the ambiguous delete test must not call the provider")
+        .build()
+        .into_handle();
+    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    state.restate_ingress_url = spawn_ambiguous_session_delete_restate().await;
+    let old_session_id = state.current_session_id();
+    state
+        .open_session(&old_session_id)
+        .await
+        .expect("materialize the session before the ambiguous delete");
+
+    let error = Box::pin(reset_chat(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(old_session_id.clone()),
+        }),
+    ))
+    .await
+    .expect_err("an ambiguous attach result must not rotate the session");
+
+    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(error.message.contains("could not be confirmed"));
+    assert!(!error.message.contains("remains live"));
+    assert_eq!(state.current_session_id(), old_session_id);
+    assert!(
+        !state
+            .core
+            .session_was_deleted(&old_session_id)
+            .await
+            .expect("read durable deletion fence")
+    );
+}
+
+#[derive(Clone)]
+struct TombstoneThenFailDeleteIngress {
+    session_id: String,
+    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+}
+
+async fn spawn_tombstone_then_fail_session_delete_restate(
+    session_id: String,
+    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind tombstone-then-fail Restate ingress");
+    let addr = listener
+        .local_addr()
+        .expect("tombstone-then-fail Restate ingress addr");
+    let app = Router::new()
+        .route("/{*path}", post(tombstone_then_fail_delete_call))
+        .with_state(TombstoneThenFailDeleteIngress {
+            session_id,
+            store_factory,
+        });
+    tokio::spawn(async move {
+        if let Err(error) = axum::serve(listener, app).await {
+            eprintln!("tombstone-then-fail Restate ingress stopped: {error}");
+        }
+    });
+    format!("http://{addr}")
+}
+
+async fn tombstone_then_fail_delete_call(
+    AxumPath(path): AxumPath<String>,
+    State(state): State<TombstoneThenFailDeleteIngress>,
+    Json(_body): Json<Value>,
+) -> (StatusCode, Json<Value>) {
+    assert!(path.starts_with("WorkbenchSessionDeleteWorkflow/"));
+    assert!(!path.ends_with("/send"));
+    state
+        .store_factory
+        .delete_session(&state.session_id)
+        .await
+        .expect("commit the simulated workflow tombstone");
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({ "message": "post-tombstone retention failed" })),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating() {
+    let data_dir = tempfile::tempdir().expect("reconciled delete tempdir");
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-reconciled-delete")
+        .complete_error("the reconciled delete test must not call the provider")
+        .build()
+        .into_handle();
+    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let old_session_id = state.current_session_id();
+    state
+        .open_session(&old_session_id)
+        .await
+        .expect("materialize the session before simulated deletion");
+    state.restate_ingress_url = spawn_tombstone_then_fail_session_delete_restate(
+        old_session_id.clone(),
+        Arc::clone(&state.session_store_factory),
+    )
+    .await;
+
+    let Json(snapshot) = Box::pin(reset_chat(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(old_session_id.clone()),
+        }),
+    ))
+    .await
+    .expect("the durable tombstone wins over the failed attach receipt");
+
+    assert_ne!(snapshot.settings.session_id, old_session_id);
+    assert_eq!(state.current_session_id(), snapshot.settings.session_id);
+    let state_error = app_state(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(old_session_id.clone()),
+        }),
+    )
+    .await
+    .expect_err("GET /api/state must honor the reconciled tombstone");
+    assert_eq!(state_error.status, StatusCode::CONFLICT);
+    let turn_error = send_turn(
+        State(state),
+        Query(SessionQuery {
+            session_id: Some(old_session_id),
+        }),
+        Json(TurnRequest {
+            text: "tombstone fence probe".to_string(),
+            model: Some("test-model".to_string()),
+            model_variant: None,
+            attachment_id: None,
+        }),
+    )
+    .await
+    .expect_err("POST /api/turn must honor the reconciled tombstone");
+    assert_eq!(turn_error.status, StatusCode::CONFLICT);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
+    let data_dir = tempfile::tempdir().expect("non-current delete tempdir");
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-non-current-delete")
+        .complete_error("the non-current delete test must not call the provider")
+        .build()
+        .into_handle();
+    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let retired_session_id = state.current_session_id();
+    state
+        .open_session(&retired_session_id)
+        .await
+        .expect("materialize the session before deleting it");
+    let selected_session_id = "workbench-selected-during-delete";
+    state.sessions.record(
+        selected_session_id.to_string(),
+        "selected".to_string(),
+        lash::rlm::RlmDialect::Lashlang,
+    );
+    state
+        .sessions
+        .select(selected_session_id)
+        .expect("select the competing session");
+    state.messages.lock_recover().push(ChatMessage {
+        id: "selected-message".to_string(),
+        role: "user".to_string(),
+        text: "keep the selected view".to_string(),
+        at: "2026-08-30T00:00:00Z".to_string(),
+        attachments: Vec::new(),
+    });
+    append_started_graph(
+        &state.lashlang_execution,
+        &test_graph(
+            "selected-session-graph",
+            selected_session_id,
+            TraceRuntimeSubject::Effect {
+                effect_id: "selected-session-effect".to_string(),
+                kind: "test".to_string(),
+            },
+            Vec::new(),
+        ),
+    );
+    state
+        .mail_world
+        .add_account("Selected Inbox")
+        .expect("add selected-session mail account");
+    let messages_before = serde_json::to_value(state.messages_snapshot())
+        .expect("serialize selected-session messages");
+    let graphs_before = state.lashlang_execution.graphs();
+    let mail_before = serde_json::to_value(state.mail_world.account_summaries())
+        .expect("serialize selected-session mail accounts");
+    let (restate_ingress_url, _requests) = spawn_restate_ingress_capture().await;
+    state.restate_ingress_url = restate_ingress_url;
+
+    let Json(replacement) = Box::pin(reset_chat(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(retired_session_id.clone()),
+        }),
+    ))
+    .await
+    .expect("delete the non-current session");
+
+    assert_ne!(replacement.settings.session_id, retired_session_id);
+    assert_eq!(state.current_session_id(), selected_session_id);
+    assert_eq!(
+        serde_json::to_value(state.messages_snapshot()).expect("serialize messages after delete"),
+        messages_before
+    );
+    assert_eq!(state.lashlang_execution.graphs(), graphs_before);
+    assert_eq!(
+        serde_json::to_value(state.mail_world.account_summaries())
+            .expect("serialize mail accounts after delete"),
+        mail_before
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visible() {
+    let data_dir = tempfile::tempdir().expect("terminal delete failure tempdir");
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-terminal-delete-failure")
+        .complete_error("the delete failure fence test must not call the provider")
+        .build()
+        .into_handle();
+    let mut state = queued_send_test_state(data_dir.path(), provider).await;
+    let (restate_ingress_url, mut restate_requests) =
+        spawn_terminally_failed_session_delete_restate().await;
+    state.restate_ingress_url = restate_ingress_url;
+    let old_session_id = state.current_session_id();
+    state
+        .open_session(&old_session_id)
+        .await
+        .expect("materialize the old session before its failed delete");
+
+    let reset = Box::pin(reset_chat(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(old_session_id.clone()),
+        }),
+    ))
+    .await;
+    if let Ok(Json(snapshot)) = reset {
+        let state_status = if app_state(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(old_session_id.clone()),
+            }),
+        )
+        .await
+        .is_ok()
+        {
+            StatusCode::OK
+        } else {
+            StatusCode::CONFLICT
+        };
+        let turn_status = if send_turn(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(old_session_id.clone()),
+            }),
+            Json(TurnRequest {
+                text: "still-live fence probe".to_string(),
+                model: Some("test-model".to_string()),
+                model_variant: None,
+                attachment_id: None,
+            }),
+        )
+        .await
+        .is_ok()
+        {
+            StatusCode::OK
+        } else {
+            StatusCode::CONFLICT
+        };
+        panic!(
+            "DELETE /api/session returned 200 with rotated id `{}` after terminal failure; GET /api/state on `{old_session_id}` returned {state_status}; POST /api/turn returned {turn_status}",
+            snapshot.settings.session_id
+        );
+    }
+    let error = reset.expect_err("terminal delete failure must be operator-visible");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains(&old_session_id));
+    assert!(error.message.contains("remains live"));
+    assert_eq!(state.current_session_id(), old_session_id);
+    let response = error.into_response();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read terminal delete failure response body");
+    let body: Value = serde_json::from_slice(&body).expect("decode terminal delete failure body");
+    assert!(
+        body.pointer("/error")
+            .and_then(Value::as_str)
+            .is_some_and(|message| {
+                message.contains(&old_session_id) && message.contains("remains live")
+            })
+    );
+
+    let _ = app_state(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(old_session_id.clone()),
+        }),
+    )
+    .await
+    .expect("GET /api/state deliberately keeps serving the visibly live old session");
+    let _ = send_turn(
+        State(state.clone()),
+        Query(SessionQuery {
+            session_id: Some(old_session_id.clone()),
+        }),
+        Json(TurnRequest {
+            text: "retry after visible delete failure".to_string(),
+            model: Some("test-model".to_string()),
+            model_variant: None,
+            attachment_id: None,
+        }),
+    )
+    .await
+    .expect("POST /api/turn deliberately accepts work on the visibly live old session");
+
+    let delete_request = tokio::time::timeout(Duration::from_secs(2), restate_requests.recv())
+        .await
+        .expect("delete submission reaches Restate")
+        .expect("delete submission body");
+    assert!(
+        delete_request
+            .pointer("/path")
+            .and_then(Value::as_str)
+            .is_some_and(|path| path.starts_with("WorkbenchSessionDeleteWorkflow/"))
+    );
+    let turn_request = tokio::time::timeout(Duration::from_secs(2), restate_requests.recv())
+        .await
+        .expect("still-live turn reaches Restate")
+        .expect("still-live turn submission body");
+    assert!(
+        turn_request
+            .pointer("/path")
+            .and_then(Value::as_str)
+            .is_some_and(|path| path.starts_with("WorkbenchTurnWorkflow/"))
+    );
+}
+
 #[test]
 fn active_turn_idle_claim_is_atomic_per_session() {
     let active_turns = ActiveTurns::default();

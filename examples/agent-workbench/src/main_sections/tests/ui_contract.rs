@@ -85,6 +85,17 @@ fn workbench_ui_renders_typed_session_open_errors() {
 }
 
 #[test]
+fn workbench_ui_renders_delete_failures_and_scopes_the_replacement_session() {
+    assert!(ui::INDEX_HTML.contains("async function doReset()"));
+    assert!(ui::INDEX_HTML.contains("typeof state?.error === \"string\""));
+    assert!(ui::INDEX_HTML.contains("renderError(\n          error instanceof Error ? error.message"));
+    assert!(ui::INDEX_HTML.contains("scopedSessionId = state.settings.session_id"));
+    assert!(
+        ui::INDEX_HTML.contains("replacementUrl.searchParams.set(\"session_id\", scopedSessionId)")
+    );
+}
+
+#[test]
 fn workbench_ui_never_ships_an_unhydrated_session_claim() {
     // FIG-791: a reload during a backend outage rendered the pristine shell —
     // `session —`, an `idle` pill, "no turns yet" — which is an affirmative

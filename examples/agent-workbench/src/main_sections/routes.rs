@@ -832,7 +832,7 @@ async fn reset_chat(
         .await
         // Audited: first-party existence probes return absence or untyped factory/backend errors, never SessionDeleted.
         .map_err(AppError::internal)?;
-    restate::submit_session_delete(
+    restate::call_session_delete(
         &state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
             operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
@@ -842,18 +842,17 @@ async fn reset_chat(
     )
     .await?;
     state.event_tx.remove(&old_session_id);
-    let (rotated_old, new_session_id) = state.sessions.rotate();
-    if rotated_old != old_session_id {
-        eprintln!(
-            "warning: workbench session changed during reset; deleted {old_session_id}, rotated {rotated_old}"
-        );
-    }
+    let retired_dialect = state.requested_dialect(&old_session_id);
+    let (new_session_id, replaced_current) = state
+        .sessions
+        .replace(&old_session_id, retired_dialect);
     state.trace_for_session(
         &old_session_id,
         "api.reset",
         json!({
             "old_session_id": old_session_id,
             "new_session_id": new_session_id.clone(),
+            "replaced_current": replaced_current,
         }),
     );
     let session = state
@@ -870,9 +869,11 @@ async fn reset_chat(
         // The setter returns only after the model override is durable; queue
         // rejection or settlement failure remains an internal control error.
         .map_err(AppError::internal)?;
-    state.messages.lock_recover().clear();
-    state.lashlang_execution.clear();
-    state.mail_world.clear();
+    if replaced_current {
+        state.messages.lock_recover().clear();
+        state.lashlang_execution.clear();
+        state.mail_world.clear();
+    }
     // The rotated session has committed nothing yet, so it has recorded no
     // dialect: the badge shows the dialect it will be opened with, which the
     // rotation carried over from the session it replaced.

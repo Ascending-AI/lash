@@ -195,12 +195,56 @@ mod tests {
     fn reset_session_rotation_replaces_workbench_session_id() {
         let ids = WorkbenchSessions::fresh();
         let original = ids.current();
-        let (old, new) = ids.rotate();
-        assert_eq!(old, original);
+        let (new, replaced_current) =
+            ids.replace(&original, lash::rlm::RlmDialect::Lashlang);
+        assert!(replaced_current);
         assert_eq!(ids.current(), new);
-        assert_ne!(old, new);
-        assert!(old.starts_with(SESSION_ID_PREFIX));
+        assert_ne!(original, new);
+        assert!(original.starts_with(SESSION_ID_PREFIX));
         assert!(new.starts_with(SESSION_ID_PREFIX));
+    }
+
+    #[test]
+    fn replacing_a_non_current_session_does_not_rotate_the_selected_session() {
+        let ids = WorkbenchSessions::fresh();
+        let retired = ids.current();
+        ids.ensure(&retired, lash::rlm::RlmDialect::Lashlang);
+        let selected = "workbench-selected-during-delete";
+        ids.record(
+            selected.to_string(),
+            "selected".to_string(),
+            lash::rlm::RlmDialect::Lashlang,
+        );
+        ids.select(selected).expect("select competing session");
+
+        let (replacement, replaced_current) =
+            ids.replace(&retired, lash::rlm::RlmDialect::Lashlang);
+
+        assert!(!replaced_current);
+        assert_eq!(ids.current(), selected);
+        assert!(ids.entry(&retired).is_none());
+        assert_eq!(
+            ids.entry(&replacement)
+                .expect("replacement keeps retired roster slot")
+                .name,
+            retired
+        );
+    }
+
+    #[test]
+    fn replacing_an_unrostered_session_records_its_replacement() {
+        let ids = WorkbenchSessions::fresh();
+        let retired = "workbench-external-session";
+
+        let (replacement, replaced_current) =
+            ids.replace(retired, lash::rlm::RlmDialect::Typescript);
+
+        assert!(!replaced_current);
+        let entry = ids
+            .entry(&replacement)
+            .expect("replacement joins the roster");
+        assert_eq!(entry.name, retired);
+        assert_eq!(entry.dialect, lash::rlm::RlmDialect::Typescript);
     }
 
     #[test]
@@ -1420,6 +1464,9 @@ finish initial
             "path": path,
             "body": body,
         }));
+        if path.starts_with("WorkbenchSessionDeleteWorkflow/") && !path.ends_with("/send") {
+            return (StatusCode::OK, Json(Value::Null));
+        }
         (
             StatusCode::ACCEPTED,
             Json(json!({
@@ -1579,7 +1626,7 @@ finish initial
             "unexpected Restate path: {path}"
         );
         assert!(
-            path.ends_with("/run/send"),
+            path.ends_with("/run"),
             "unexpected Restate path: {path}"
         );
         assert_eq!(
