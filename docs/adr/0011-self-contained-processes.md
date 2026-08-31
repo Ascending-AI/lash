@@ -12,6 +12,11 @@ which implies cleanup: deleting a session erases only the session's side of ever
 (its observer edges, pending wake deliveries addressed to it, its trigger subscriptions) and
 never cancels a process; lifecycle remains host policy.
 
+Amended 2026-08-31 (FIG-2346, PR #932): descendants of a session-originated
+process chain propagate the root session's observer edge, so the root session
+observes the whole chain. Observer edges remain explicit and orthogonal
+otherwise: a host-originated start still implies no observer.
+
 ## Considered Options
 
 - **Live session binding (status quo)**: the worker rebuilt the owner session's runtime
