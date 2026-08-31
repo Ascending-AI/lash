@@ -496,7 +496,7 @@ async fn regexp_match_value_of_preserves_receiver_identity() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn global_regexp_match_value_of_returns_the_list_value() {
+async fn global_regexp_match_value_of_preserves_identity() {
     let program = Program::block(vec![
         ts_assign(
             "regexp",
@@ -516,13 +516,15 @@ async fn global_regexp_match_value_of_returns_the_list_value() {
                 ],
             ),
         ),
-        Expr::Finish(Box::new(heap_method("valueOf", "matched", Vec::new()))),
+        Expr::Finish(Box::new(Expr::JavaScriptBinary {
+            left: Box::new(heap_method("valueOf", "matched", Vec::new())),
+            op: crate::JavaScriptBinaryOp::StrictEqual,
+            right: Box::new(Expr::Variable("matched".into())),
+        })),
     ]);
     assert_eq!(
         run_typescript_ast_across_every_effect(program).await,
-        ExecutionOutcome::Finished(Value::List(
-            vec![Value::String("b".into())].into(),
-        ))
+        ExecutionOutcome::Finished(Value::Bool(true))
     );
 }
 

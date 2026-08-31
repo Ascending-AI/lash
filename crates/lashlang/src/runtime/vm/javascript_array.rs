@@ -9,11 +9,16 @@ pub(super) fn javascript_array_method_for_value(
     args: &[Value],
 ) -> Result<Value, RuntimeError> {
     if method == "valueOf" && args.is_empty() {
+        // Defensive arm for non-heap dispatch paths; currently unreachable via
+        // guest code.
         return Ok(target.clone());
     }
     super::javascript::javascript_array_method(method, items, args)
 }
 
+/// A regexp match is array-shaped to JavaScript, so its method dispatch lives
+/// beside ordinary array methods while this helper preserves heap identity for
+/// `valueOf`.
 pub(super) fn javascript_regexp_match_method(
     method: &str,
     receiver: HeapId,

@@ -629,6 +629,25 @@ fn array_value_of_returns_the_receiver_rather_than_a_copy() {
     );
 }
 
+/// The ticket repro is a guest-level RegExp match: preserve its array-shaped
+/// result fields while `valueOf()` returns the same match object.
+#[test]
+fn regexp_match_value_of_preserves_guest_shape_and_identity() {
+    assert_eq!(
+        finished(
+            r#"
+            const matched = "abc".match(/b/).valueOf();
+            finish({ index: matched.index, first: matched[0], same: matched.valueOf() === matched });
+            "#,
+        ),
+        lashlang::from_json(serde_json::json!({
+            "index": 1,
+            "first": "b",
+            "same": true
+        }))
+    );
+}
+
 #[test]
 fn instance_stdlib_collision_matrix_guard_sweeps_all_stdlib_methods() {
     let methods = lash_typescript::accepted_instance_methods();
