@@ -319,6 +319,13 @@ async fn execute_code_inner(
         live_global_names.extend(extension.bindings.names());
     }
     host_environment = host_environment.with_globals(live_global_names);
+    host_environment = host_environment.with_process_handles(
+        state
+            .rlm
+            .globals()
+            .iter()
+            .filter_map(|(name, value)| is_process_handle(value).then_some(name.to_string())),
+    );
 
     // The kind is decided here, while the failure is still a typed diagnostic.
     // "Compilation failed" is not enough to classify it: a misspelled name and a
@@ -356,29 +363,33 @@ async fn execute_code_inner(
                 // Rendered against the cell source, not `to_string()`: the
                 // diagnostic carries a span and the model needs the line it
                 // wrote. Lashlang's parse failures have always arrived this way.
-                None => lash_typescript::parse_with_globals(code, &host_environment.globals)
-                    .map_err(|error| {
-                        (
-                            typescript_feedback_kind(&error),
-                            lash_typescript::format_diagnostic(code, &error),
+                None => lash_typescript::parse_with_globals_and_process_handles(
+                    code,
+                    &host_environment.globals,
+                    &host_environment.process_handles,
+                )
+                .map_err(|error| {
+                    (
+                        typescript_feedback_kind(&error),
+                        lash_typescript::format_diagnostic(code, &error),
+                    )
+                })
+                .and_then(|program| {
+                    state
+                        .linked_programs
+                        .get_or_compile_ast(
+                            code,
+                            program,
+                            &host_environment,
+                            lashlang::CompilationDialect::Typescript,
                         )
-                    })
-                    .and_then(|program| {
-                        state
-                            .linked_programs
-                            .get_or_compile_ast(
-                                code,
-                                program,
-                                &host_environment,
-                                lashlang::CompilationDialect::Typescript,
+                        .map_err(|error| {
+                            (
+                                lashlang_link_feedback_kind(&error),
+                                format_rlm_link_diagnostic(code, &error),
                             )
-                            .map_err(|error| {
-                                (
-                                    lashlang_link_feedback_kind(&error),
-                                    format_rlm_link_diagnostic(code, &error),
-                                )
-                            })
-                    }),
+                        })
+                }),
             },
         }
     };
@@ -590,6 +601,19 @@ async fn execute_code_inner(
         terminal_finish,
         start,
         degraded_bindings,
+    )
+}
+
+fn is_process_handle(value: &FlowValue) -> bool {
+    let Some(record) = value.as_record() else {
+        return false;
+    };
+    matches!(
+        record.get("__handle__"),
+        Some(FlowValue::String(kind)) if kind.as_str() == "process"
+    ) && matches!(
+        record.get("id"),
+        Some(FlowValue::String(id)) if !id.is_empty()
     )
 }
 
@@ -2778,9 +2802,10 @@ mod tests {
                 session_policy,
             ),
         );
+        let mut state = RlmExecutionState::for_engine("typescript");
         let response = execute_code_with_dialect_and_bounds(
-            &mut RlmExecutionState::for_engine("typescript"),
-            ctx,
+            &mut state,
+            ctx.clone(),
             ExecRequest {
                 language: "typescript".to_string(),
                 code: r#"
@@ -2794,8 +2819,8 @@ mod tests {
                 "#
                 .to_string(),
             },
-            artifact_store,
-            surface,
+            artifact_store.clone(),
+            surface.clone(),
             None,
             RlmProjectedBindings::default(),
             Arc::new(ProjectionRegistry::new()),
@@ -2808,6 +2833,35 @@ mod tests {
         assert_eq!(
             response.terminal_finish,
             Some(serde_json::json!("signal-sent"))
+        );
+
+        // The first cell left the handle in session state. The next cell uses
+        // that same binding while the process is still waiting on the signal
+        // delivered above; driving pending work concurrently lets the await
+        // observe the real process completion rather than a parser-only pass.
+        let (next_response, _) = tokio::join!(
+            execute_code_with_dialect_and_bounds(
+                &mut state,
+                ctx,
+                ExecRequest {
+                    language: "typescript".to_string(),
+                    code: "finish(await handle);".to_string(),
+                },
+                artifact_store.clone(),
+                surface.clone(),
+                None,
+                RlmProjectedBindings::default(),
+                Arc::new(ProjectionRegistry::new()),
+                RlmLashlangExecutionTraceConfig::default(),
+                lashlang::ExecutionBounds::unbounded(),
+                SourceDialect::Typescript,
+            ),
+            worker.drive_pending_processes()
+        );
+        assert!(next_response.error.is_none(), "{:?}", next_response.error);
+        assert_eq!(
+            next_response.terminal_finish,
+            Some(serde_json::json!({ "ok": true }))
         );
 
         let _ = worker

@@ -77,7 +77,19 @@ pub fn parse_with_globals(
     globals: &std::collections::BTreeSet<String>,
 ) -> Result<lashlang::Program, Diagnostic> {
     let normalized = adapter::parse(source)?;
-    lower::lower_with_ambient(&normalized, globals)
+    lower::lower_with_ambient(&normalized, globals, &std::collections::BTreeSet::new())
+}
+
+/// Parses a cell with live session globals and the subset that currently hold
+/// process handles. The second set is semantic binding metadata: it keeps an
+/// ambient handle awaitable without making arbitrary ambient values awaitable.
+pub fn parse_with_globals_and_process_handles(
+    source: &str,
+    globals: &std::collections::BTreeSet<String>,
+    process_handles: &std::collections::BTreeSet<String>,
+) -> Result<lashlang::Program, Diagnostic> {
+    let normalized = adapter::parse(source)?;
+    lower::lower_with_ambient(&normalized, globals, process_handles)
 }
 
 /// Validates that a source program belongs to the accepted TypeScript dialect.
@@ -99,7 +111,8 @@ pub fn link(
 ) -> Result<lashlang::LinkedModule, Diagnostic> {
     // The host environment already carries the session's live globals, so
     // linking a cell reads them from the same place the linker will.
-    let program = parse_with_globals(source, &host.globals)?;
+    let program =
+        parse_with_globals_and_process_handles(source, &host.globals, &host.process_handles)?;
     lashlang::LinkedModule::link_with_dialect(
         program,
         host,

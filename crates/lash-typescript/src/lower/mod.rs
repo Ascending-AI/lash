@@ -45,7 +45,11 @@ pub(crate) fn accepted_instance_methods() -> &'static [&'static str] {
 pub(crate) const GENERATED_BINDING_PREFIX: &str = "__typescript_";
 
 pub(crate) fn lower(program: &adapter::Program) -> Result<LashProgram, Diagnostic> {
-    lower_with_ambient(program, &std::collections::BTreeSet::new())
+    lower_with_ambient(
+        program,
+        &std::collections::BTreeSet::new(),
+        &std::collections::BTreeSet::new(),
+    )
 }
 
 /// Lowers `program` with `ambient` names already in scope.
@@ -71,6 +75,7 @@ pub(crate) fn lower(program: &adapter::Program) -> Result<LashProgram, Diagnosti
 pub(crate) fn lower_with_ambient(
     program: &adapter::Program,
     ambient: &std::collections::BTreeSet<String>,
+    process_handles: &std::collections::BTreeSet<String>,
 ) -> Result<LashProgram, Diagnostic> {
     let mut lowerer = Lowerer {
         root_scope_depth: 2,
@@ -90,7 +95,11 @@ pub(crate) fn lower_with_ambient(
                 kind: BindingKind::Const,
                 initialized: true,
                 owner_function: 0,
-                role: BindingRole::Plain,
+                role: if process_handles.contains(name) {
+                    BindingRole::ProcessHandle
+                } else {
+                    BindingRole::Plain
+                },
             },
         );
     }
