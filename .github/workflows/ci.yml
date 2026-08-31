@@ -1282,13 +1282,14 @@ jobs:
     # 14 and 18 bracket the supported range — 18 is where NOT NULL became
     # `pg_constraint` rows, 14 is before `pg_index.indnullsnotdistinct` existed —
     # and the shape suite asserts all three produce the byte-identical artifact.
-    # Lean runs (push and merge queue paths) test only the primary major; the
-    # catalog byte-identity bracket (14 and 18) runs on the full profile
-    # (workflow_dispatch), which the release gate requires on the release SHA.
+    # Pull requests and merge-group runs are PR-class and test only the oldest
+    # supported major (14), keeping the queue on the same fast path. Main
+    # pushes run the full 14/16/18 catalog byte-identity bracket; the full
+    # profile (workflow_dispatch) keeps the release certification path intact.
     strategy:
       fail-fast: false
       matrix:
-        postgres: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '["14", "16", "18"]' || '["16"]') }}
+        postgres: ${{ fromJSON((github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && '["14", "16", "18"]' || '["14"]') }}
 
     services:
       postgres:
