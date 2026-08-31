@@ -1725,6 +1725,35 @@ test("execution scorecard ordering follows attempt start time with call id as ti
   );
 });
 
+test("execution scorecard renders cached input components separately", () => {
+  const target = { textContent: "" };
+  const scorecardContext = { Map, Math, Number };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
+     this.scorecard = createExecutionScorecardState();`,
+    scorecardContext,
+  );
+  scorecardContext.applyExecutionScorecardRecord(scorecardContext.scorecard, {
+    call_id: "cached-call",
+    attempts: [{
+      ordinal: 1,
+      started_at_ms: 1,
+      outcome: "completed",
+      usage: {
+        input_tokens: 1747,
+        cache_read_input_tokens: 21120,
+        cache_write_input_tokens: 0,
+        output_tokens: 63,
+      },
+    }],
+  });
+  scorecardContext.renderExecutionScorecard(scorecardContext.scorecard, target);
+  assert.equal(
+    target.textContent,
+    "cached-call #1 completed · usage input=1747 cache_read=21120 cache_write=0 output=63",
+  );
+});
+
 test("execution scorecard explains collection interruption only when reported", () => {
   const target = { textContent: "" };
   const scorecardContext = { Map, Math, Number };
