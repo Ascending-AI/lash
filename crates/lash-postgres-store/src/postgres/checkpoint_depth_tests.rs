@@ -1,6 +1,5 @@
 use crate::*;
-use sqlx::ConnectOptions;
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::postgres::PgPoolOptions;
 
 fn checkpoint_with_changed_components(depth: usize) -> HydratedSessionCheckpoint {
     HydratedSessionCheckpoint {
@@ -42,32 +41,17 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
         return;
     };
     let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let admin_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&database_url)
-        .await
-        .expect("connect PostgreSQL checkpoint-test admin pool");
-    let database_name = format!("lash_checkpoint_depth_{}", uuid::Uuid::new_v4().simple());
-    sqlx::query(&format!("CREATE DATABASE {database_name}"))
-        .execute(&admin_pool)
-        .await
-        .expect("create isolated PostgreSQL checkpoint-test database");
-    let isolated_url = database_url
-        .parse::<PgConnectOptions>()
-        .expect("parse PostgreSQL checkpoint-test database URL")
-        .database(&database_name)
-        .to_url_lossy()
-        .to_string();
+    let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
     let statement_pool = PgPoolOptions::new()
         .max_connections(1)
-        .connect(&isolated_url)
+        .connect(isolated_database.url())
         .await
         .expect("connect PostgreSQL statement-statistics pool");
     sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
         .execute(&statement_pool)
         .await
         .expect("enable pg_stat_statements for checkpoint depth invariance");
-    let storage = PostgresStorage::connect(&isolated_url)
+    let storage = PostgresStorage::connect(isolated_database.url())
         .await
         .expect("connect checkpoint depth-invariance storage");
     let mut observed = Vec::new();
@@ -110,10 +94,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
     }
     storage.pool().close().await;
     statement_pool.close().await;
-    sqlx::query(&format!("DROP DATABASE {database_name} WITH (FORCE)"))
-        .execute(&admin_pool)
-        .await
-        .expect("drop isolated PostgreSQL checkpoint-test database");
+    drop(isolated_database);
     assert!(
         observed
             .iter()

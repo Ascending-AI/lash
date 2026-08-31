@@ -458,7 +458,8 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
         return;
     };
     let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
+    let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
+    let storage = PostgresStorage::connect(isolated_database.url())
         .await
         .expect("connect selected-drain plan storage");
     sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
