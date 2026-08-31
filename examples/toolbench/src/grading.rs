@@ -150,6 +150,53 @@ mod tests {
     }
 
     #[test]
+    fn wrong_tool_call_count_is_rejected() {
+        let task = fixture();
+        let mut evidence = passing_evidence();
+        evidence.tool_call_count = 2;
+        let result = grade(&task, &task.expected_world, &evidence);
+        assert!(!result.passed);
+        assert!(
+            result
+                .failure_reason
+                .unwrap()
+                .contains("tool-call count mismatch: expected 1, got 2")
+        );
+    }
+
+    #[test]
+    fn timed_out_turn_is_rejected() {
+        let task = fixture();
+        let mut evidence = passing_evidence();
+        evidence.completed = false;
+        evidence.completion_error =
+            Some("turn exceeded the 120 second wall-clock limit".to_string());
+        let result = grade(&task, &task.expected_world, &evidence);
+        assert!(!result.passed);
+        assert_eq!(
+            result.failure_reason.as_deref(),
+            Some("turn did not complete: turn exceeded the 120 second wall-clock limit")
+        );
+    }
+
+    #[test]
+    fn failed_execution_allowance_is_enforced() {
+        let task = fixture();
+        let mut evidence = passing_evidence();
+        evidence.failed_execution_errors = vec![
+            "first execution failed".to_string(),
+            "second execution failed".to_string(),
+            "third execution failed".to_string(),
+        ];
+        let result = grade(&task, &task.expected_world, &evidence);
+        assert!(!result.passed);
+        assert_eq!(
+            result.failure_reason.as_deref(),
+            Some("3 failed execution iterations exceeds allowance 2")
+        );
+    }
+
+    #[test]
     fn stuck_identical_error_loop_is_rejected() {
         let task = fixture();
         let mut evidence = passing_evidence();
