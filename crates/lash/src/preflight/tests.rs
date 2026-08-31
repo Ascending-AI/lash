@@ -353,6 +353,32 @@ fn every_durable_format_has_one_explicit_surface_relation() {
 }
 
 #[test]
+fn primary_formats_stay_in_parity_with_the_registry() {
+    for entry in durable_formats() {
+        if matches!(
+            format_surface(entry.format),
+            SurfaceRelation::Walk { primary: true, .. }
+        ) {
+            assert!(
+                PRIMARY_FORMATS.contains(&entry.format),
+                "registry primary format {} is missing from PRIMARY_FORMATS",
+                entry.format.name()
+            );
+        }
+    }
+    for format in PRIMARY_FORMATS {
+        assert!(
+            matches!(
+                format_surface(format),
+                SurfaceRelation::Walk { primary: true, .. }
+            ),
+            "PRIMARY_FORMATS contains non-primary {}",
+            format.name()
+        );
+    }
+}
+
+#[test]
 fn named_formats_retain_walk_primary_and_evidence_answers() {
     let named = [
         (
