@@ -541,6 +541,7 @@ def main() -> int:
 
     payload = {
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "kind": "runtime-stack",
         "binary": str(binary),
         "binary_metadata": binary_metadata(binary),
         "git": git_metadata(root),

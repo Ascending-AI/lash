@@ -26,6 +26,7 @@ use guards::{
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RuntimePerfReport {
+    kind: &'static str,
     created_at: String,
     version: String,
     warmups: usize,
@@ -89,6 +90,8 @@ pub async fn run_cli(
     let scenarios = resolve_scenarios(&scenario_filters)?;
     let runs = runs.max(1);
     let chat_turns = chat_turns.max(1);
+    let duration_geometry =
+        duration_trend::DurationTrendGeometry::current(runs, warmups, chat_turns);
     let contention_workers = contention_workers.max(1);
     let checkpoint_curve = CheckpointCurveConfig::new(
         checkpoint_transcript_bytes,
@@ -163,6 +166,7 @@ pub async fn run_cli(
     let scenario_harness_summary = summarize_scenario_harnesses(&results, &scenarios);
     let budget_results = evaluate_budgets(&summary, &scenarios);
     let report = RuntimePerfReport {
+        kind: "runtime-perf",
         created_at: Utc::now().to_rfc3339(),
         version: version.to_string(),
         warmups,
@@ -183,7 +187,7 @@ pub async fn run_cli(
         results,
     };
 
-    report_support::write_json_report(&out_path, &report)?;
+    write_runtime_perf_report(&out_path, &report)?;
 
     println!(
         "{}",
@@ -194,7 +198,12 @@ pub async fn run_cli(
     // failed still contributes its duration observation: the history is a
     // record of what the machine measured, not of which runs passed.
     if let Some(history_path) = duration_history.as_deref() {
-        duration_trend::record_and_report(history_path, &duration_profile, &report.summary);
+        duration_trend::record_and_report(
+            history_path,
+            &duration_profile,
+            duration_geometry,
+            &report.summary,
+        );
     }
     if enforce_budgets || enforce_inventory {
         let inventory_only = enforce_inventory && !enforce_budgets;
@@ -223,6 +232,13 @@ fn runtime_perf_output_json(out_path: &Path, report: &RuntimePerfReport) -> serd
         "scenario_harness_summary": report.scenario_harness_summary,
         "budget_results": report.budget_results,
     })
+}
+
+fn write_runtime_perf_report(path: &Path, report: &RuntimePerfReport) -> anyhow::Result<()> {
+    if report.summary.is_empty() {
+        anyhow::bail!("refusing to write runtime perf report with an empty summary");
+    }
+    report_support::write_json_report(path, report)
 }
 
 fn resolve_dhat_output_path(
@@ -912,6 +928,7 @@ mod tests {
         let summary = summarize(&results, &scenarios, 1, &stack_profile);
         let scenario_harness_summary = summarize_scenario_harnesses(&results, &scenarios);
         let report = RuntimePerfReport {
+            kind: "runtime-perf",
             created_at: "test".to_string(),
             version: "test".to_string(),
             warmups: 0,
@@ -933,6 +950,15 @@ mod tests {
         };
 
         let report_json = serde_json::to_value(&report).expect("report serializes");
+        let dir = tempfile::tempdir().expect("temp dir");
+        let empty_path = dir.path().join("empty-summary.json");
+        let mut empty_report = report.clone();
+        empty_report.summary.clear();
+        let error = write_runtime_perf_report(&empty_path, &empty_report)
+            .expect_err("summary-less reports must not be written");
+        assert!(format!("{error:#}").contains("summary"), "{error:#}");
+        assert!(!empty_path.exists(), "summary-less report was written");
+        assert_eq!(report_json["kind"], "runtime-perf");
         assert_eq!(
             report_json["scenario_harnesses"],
             serde_json::json!([
@@ -981,6 +1007,7 @@ mod tests {
             report_json["scenario_harness_summary"]
         );
         assert_eq!(output_json["allocation_mode"], crate::ALLOCATION_MODE);
+        assert!(output_json.get("kind").is_none());
 
         let output_golden = serde_json::json!({
             "scenario_harnesses": [
@@ -1087,7 +1114,11 @@ mod tests {
             .next()
             .expect("summary exists");
 
-        let records = duration_trend::records_for_run(std::slice::from_ref(&summary), "full");
+        let records = duration_trend::records_for_run(
+            std::slice::from_ref(&summary),
+            "full",
+            duration_trend::DurationTrendGeometry::current(1, 0, 1),
+        );
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].total_ms, summary.total_ms.median);
         assert_eq!(records[0].total_p95_ms, Some(summary.total_ms.p95));

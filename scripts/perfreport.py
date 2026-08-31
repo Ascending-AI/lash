@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -86,55 +87,6 @@ def fmt_stack_profile(profile: Any) -> str | None:
     if isinstance(within, bool):
         parts.append(f"within_budget={'yes' if within else 'no'}")
     return "  " + "  ".join(parts) if parts else None
-
-
-def is_dhat(payload: dict[str, Any]) -> bool:
-    return "dhatFileVersion" in payload and "ftbl" in payload
-
-
-def is_lashlang_report(payload: dict[str, Any]) -> bool:
-    return payload.get("kind") == "lashlang-perf"
-
-
-def is_runtime_report(payload: dict[str, Any]) -> bool:
-    return "summary" in payload and any(
-        "phase_summary" in s for s in payload.get("summary", []) if isinstance(s, dict)
-    )
-
-
-def is_runtime_stack_report(payload: dict[str, Any]) -> bool:
-    return (
-        isinstance(payload.get("first_success_stack_bytes"), dict)
-        and isinstance(payload.get("samples"), list)
-        and isinstance(payload.get("stack_budgets"), dict)
-    )
-
-
-def is_runtime_guard_report(payload: dict[str, Any]) -> bool:
-    return (
-        "normal_runtime" in payload
-        and "stack_sensitivity" in payload
-        and isinstance(payload.get("normal_runtime"), dict)
-        and isinstance(payload.get("stack_sensitivity"), dict)
-    )
-
-
-def is_profile_guard_report(payload: dict[str, Any]) -> bool:
-    return (
-        payload.get("kind") == "perf-guard"
-        and isinstance(payload.get("runtime"), dict)
-        and isinstance(payload.get("runtime_stack"), dict)
-        and isinstance(payload.get("ui"), dict)
-        and isinstance(payload.get("lashlang"), dict)
-    )
-
-
-def is_ui_report(payload: dict[str, Any]) -> bool:
-    return (
-        "parameters" in payload
-        and isinstance(payload.get("scenarios"), list)
-        and any("budgets" in s for s in payload.get("scenarios", []) if isinstance(s, dict))
-    )
 
 
 def summarize_runtime(report: dict[str, Any]) -> str:
@@ -339,290 +291,6 @@ def summarize_runtime_stack(report: dict[str, Any]) -> str:
     )
     lines.append("")
     lines.append(f"failed_or_timeout_samples={failures}  unaccounted_stack_samples={unaccounted}")
-    return "\n".join(lines)
-
-
-def summarize_profile_guard(report: dict[str, Any]) -> str:
-    lines: list[str] = []
-    coverage = report.get("coverage") or {}
-    lines.append(
-        f"# perf guard report  ({report.get('created_at', '?')[:19]}, profile={report.get('profile', '?')})"
-    )
-    lines.append(
-        f"release={report.get('release', '?')}  coverage={'pass' if coverage.get('passed') else 'fail'}"
-    )
-    lines.append("")
-
-    findings = coverage.get("findings", [])
-    if findings:
-        lines.append("## coverage findings")
-        for finding in findings:
-            kind = finding.get("kind", "?")
-            section = finding.get("section", "?")
-            scenario = finding.get("scenario")
-            detail = f" scenario={scenario}" if scenario else ""
-            lines.append(f"  {section}: {kind}{detail}")
-        lines.append("")
-
-    runtime_report = report.get("runtime", {}).get("report", {})
-    summaries = runtime_report.get("summary", [])
-    if summaries:
-        lines.append("## runtime")
-        worker_stack = runtime_report.get("worker_stack_bytes")
-        if isinstance(worker_stack, int | float):
-            lines.append(f"  worker_stack={fmt_bytes(worker_stack)}")
-        stack_text = fmt_stack_profile(runtime_report.get("stack_profile"))
-        if stack_text:
-            lines.append(stack_text)
-        for item in summaries:
-            counters = item.get("sample_extra_counters") or {}
-            counter_text = ""
-            if counters:
-                counter_text = "  " + ", ".join(f"{k}={v}" for k, v in counters.items())
-            lines.append(
-                f"  {item.get('scenario', '?'):28s} "
-                f"total={fmt_ms(item.get('total_ms', {}).get('median')):>9s}  "
-                f"alloc={fmt_bytes(item.get('total_alloc_bytes', {}).get('median', 0)):>10s}"
-                f"{counter_text}"
-            )
-        lines.append("")
-
-    stack = report.get("runtime_stack", {})
-    first_success = stack.get("first_success_stack_bytes", {})
-    if first_success:
-        lines.append("## runtime stack")
-        budgets = stack.get("stack_budgets", {})
-        for scenario, stack_bytes in sorted(first_success.items()):
-            label = fmt_bytes(stack_bytes) if isinstance(stack_bytes, int | float) else "n/a"
-            budget = budgets.get(scenario) if isinstance(budgets, dict) else None
-            budget_text = (
-                f"  budget={fmt_bytes(budget)}"
-                if isinstance(budget, int | float)
-                else ""
-            )
-            lines.append(f"  {scenario:28s} first_success={label}{budget_text}")
-        unaccounted = [
-            sample
-            for sample in stack.get("samples", [])
-            if sample.get("status") == "ok" and not sample.get("stack_accounted", False)
-        ]
-        if unaccounted:
-            lines.append(f"  unaccounted_stack_samples={len(unaccounted)}")
-        lines.append("")
-
-    cli_stack = report.get("cli_stack", {})
-    cli_first_success = cli_stack.get("first_success_stack_bytes", {})
-    if cli_first_success:
-        lines.append("## cli stack")
-        budget = cli_stack.get("stack_budget_bytes")
-        if isinstance(budget, int | float):
-            lines.append(f"  budget={fmt_bytes(budget)}")
-        for scenario, stack_bytes in sorted(cli_first_success.items()):
-            label = fmt_bytes(stack_bytes) if isinstance(stack_bytes, int | float) else "n/a"
-            lines.append(f"  {scenario:28s} first_success={label}")
-        unaccounted = [
-            sample
-            for sample in cli_stack.get("samples", [])
-            if sample.get("status") == "ok" and not sample.get("stack_accounted", False)
-        ]
-        if unaccounted:
-            lines.append(f"  unaccounted_stack_samples={len(unaccounted)}")
-        lines.append("")
-
-    cli_release_stack = report.get("cli_release_stack", {})
-    cli_release_first_success = cli_release_stack.get("first_success_stack_bytes", {})
-    if cli_release_first_success:
-        lines.append("## release cli stack")
-        budget = cli_release_stack.get("stack_budget_bytes")
-        if isinstance(budget, int | float):
-            lines.append(f"  budget={fmt_bytes(budget)}")
-        binary_metadata = cli_release_stack.get("report", {}).get("binary_metadata", {})
-        binary_sha = binary_metadata.get("sha256") if isinstance(binary_metadata, dict) else None
-        if isinstance(binary_sha, str):
-            lines.append(f"  binary_sha256={binary_sha[:12]}")
-        for scenario, stack_bytes in sorted(cli_release_first_success.items()):
-            label = fmt_bytes(stack_bytes) if isinstance(stack_bytes, int | float) else "n/a"
-            lines.append(f"  {scenario:28s} first_success={label}")
-        lines.append("")
-
-    ui_report = report.get("ui", {}).get("report", {})
-    ui_scenarios = ui_report.get("scenarios", [])
-    if ui_scenarios:
-        lines.append("## ui")
-        stack_text = fmt_stack_profile(ui_report.get("stack_profile"))
-        if stack_text:
-            lines.append(stack_text)
-        for item in ui_scenarios:
-            failed = [
-                budget for budget in item.get("budgets", []) if not budget.get("passed")
-            ]
-            status = "fail" if failed else "pass"
-            lines.append(f"  {item.get('scenario', '?'):28s} budgets={status}")
-        lines.append("")
-
-    lashlang_report = report.get("lashlang", {}).get("report", {})
-    if lashlang_report:
-        failed = [
-            budget
-            for budget in lashlang_report.get("budget_results", [])
-            if not budget.get("passed")
-        ]
-        lines.append("## lashlang")
-        stack_text = fmt_stack_profile(lashlang_report.get("stack_profile"))
-        if stack_text:
-            lines.append(stack_text)
-        lines.append(
-            f"  perf_results={len(lashlang_report.get('perf_results', []))}  "
-            f"profile_results={len(lashlang_report.get('profile_results', []))}  "
-            f"budgets={'fail' if failed else 'pass'}"
-        )
-        lines.append("")
-
-    dhat = report.get("dhat")
-    if dhat:
-        lines.append("## dhat")
-        lines.append(f"  runtime_perf_out={dhat.get('runtime_perf_out')}")
-        lines.append(f"  dhat_out={dhat.get('dhat_out')}")
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def summarize_runtime_guard(report: dict[str, Any]) -> str:
-    scenarios = ", ".join(report.get("scenarios", []))
-    lines: list[str] = []
-    lines.append(
-        f"# runtime guard report  ({report.get('created_at', '?')[:19]}, profile={report.get('profile', '?')})"
-    )
-    lines.append(f"release={report.get('release', '?')}  scenarios: {scenarios}")
-    lines.append("")
-
-    runtime_report = report.get("normal_runtime", {}).get("report", {})
-    summaries = runtime_report.get("summary", [])
-    if summaries:
-        lines.append("## runtime lane")
-        worker_stack = runtime_report.get("worker_stack_bytes")
-        if isinstance(worker_stack, int | float):
-            lines.append(f"  worker_stack={fmt_bytes(worker_stack)}")
-        for item in summaries:
-            lines.append(
-                f"  {item.get('scenario', '?'):28s} "
-                f"run_turn={fmt_ms(item.get('run_turn_ms', {}).get('median')):>9s}  "
-                f"total={fmt_ms(item.get('total_ms', {}).get('median')):>9s}  "
-                f"alloc={fmt_bytes(item.get('total_alloc_bytes', {}).get('median', 0)):>10s}  "
-                f"live={fmt_bytes(item.get('total_live_bytes', {}).get('median', 0)):>10s}"
-            )
-        lines.append("")
-
-    stack = report.get("stack_sensitivity", {})
-    first_success = stack.get("first_success_stack_bytes", {})
-    samples = stack.get("samples", [])
-    if first_success:
-        failures = sum(1 for sample in samples if sample.get("status") != "ok")
-        unaccounted = sum(
-            1
-            for sample in samples
-            if sample.get("status") == "ok" and not sample.get("stack_accounted", False)
-        )
-        lines.append("## stack lane")
-        for scenario, stack_bytes in sorted(first_success.items()):
-            stack_label = fmt_bytes(stack_bytes) if isinstance(stack_bytes, int | float) else "n/a"
-            lines.append(f"  {scenario:28s} first_success={stack_label}")
-        lines.append(f"  failed_or_timeout_samples={failures}")
-        if unaccounted:
-            lines.append(f"  unaccounted_stack_samples={unaccounted}")
-        lines.append("")
-
-    dhat = report.get("dhat")
-    if dhat:
-        lines.append("## dhat lane")
-        lines.append(f"  runtime_perf_out={dhat.get('runtime_perf_out')}")
-        lines.append(f"  dhat_out={dhat.get('dhat_out')}")
-        lines.append("")
-
-    comparison = report.get("comparison")
-    if comparison:
-        lines.append("## comparison")
-        lines.append(f"  baseline={comparison.get('baseline')}")
-        lines.append(f"  failed={comparison.get('failed')}")
-        findings = comparison.get("findings", [])
-        for finding in findings:
-            scenario = finding.get("scenario", "?")
-            metric_name = finding.get("metric", finding.get("kind", "?"))
-            lines.append(
-                f"  {scenario} {metric_name}: current={finding.get('current')} allowed={finding.get('allowed')}"
-            )
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def summarize_ui(report: dict[str, Any]) -> str:
-    params = report.get("parameters", {})
-    profile = params.get("profile", "?")
-    scenario_names = ", ".join(params.get("scenarios", []))
-    lines: list[str] = []
-    lines.append(
-        f"# ui-perf report  ({report.get('created_at', '?')[:19]}, {params.get('runs')} runs, {profile} profile)"
-    )
-    git = report.get("git", {})
-    dirty = "dirty" if git.get("dirty") else "clean"
-    lines.append(
-        f"version: {report.get('version', '?')}  build={report.get('build_mode', '?')}  "
-        f"git={git.get('sha', '?')} ({dirty})  scenarios: {scenario_names}"
-    )
-    if params.get("dhat_out"):
-        lines.append(f"dhat profile: {params['dhat_out']}")
-    stack_text = fmt_stack_profile(report.get("stack_profile"))
-    if stack_text:
-        lines.append(stack_text.strip())
-    if params.get("compare_inputs"):
-        lines.append("comparison inputs: " + ", ".join(str(p) for p in params["compare_inputs"]))
-    lines.append("")
-
-    interesting = [
-        "initial_render_ms",
-        "height_cache_rebuild_ms",
-        "steady_scroll_selection_render_ms",
-        "render_build_ms",
-        "diff_scan_ms",
-        "foreground_handler_ms",
-        "input_control_latency_ms",
-        "render_frame_ms",
-        "snapshot_ms",
-        "file_index_suggestion_query_ms",
-        "file_index_refresh_visible_ms",
-        "total_ms",
-    ]
-
-    for scenario in report.get("scenarios", []):
-        lines.append(f"## scenario: {scenario.get('scenario', '?')}")
-        summary = scenario.get("summary", {})
-        for metric in interesting:
-            if metric not in summary:
-                continue
-            m = summary[metric]
-            lines.append(
-                f"  {metric:36s} p50={fmt_ms(m.get('p50')):>9s}  "
-                f"p95={fmt_ms(m.get('p95')):>9s}  p99={fmt_ms(m.get('p99')):>9s}  "
-                f"max={fmt_ms(m.get('max')):>9s}"
-            )
-        budgets = scenario.get("budgets", [])
-        if budgets:
-            failed = [b for b in budgets if not b.get("passed")]
-            if failed:
-                lines.append("  budget failures:")
-                for b in failed:
-                    lines.append(
-                        f"    {b['metric']} {b['statistic']} {fmt_ms(b['actual_ms'])} > {fmt_ms(b['budget_ms'])}"
-                    )
-            else:
-                lines.append("  budgets: pass")
-        counters = scenario.get("counters", {})
-        if counters:
-            short = ", ".join(f"{k}={v}" for k, v in counters.items())
-            lines.append(f"  counters: {short}")
-        lines.append("")
     return "\n".join(lines)
 
 
@@ -833,39 +501,6 @@ def diff_runtime(baseline: dict[str, Any], current: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def diff_ui(baseline: dict[str, Any], current: dict[str, Any]) -> str:
-    lines = ["# ui-perf diff", ""]
-    bp = baseline.get("parameters", {})
-    cp = current.get("parameters", {})
-    lines.append(
-        f"baseline: {baseline.get('created_at', '?')[:19]}  profile={bp.get('profile', '?')}"
-    )
-    lines.append(
-        f"current:  {current.get('created_at', '?')[:19]}  profile={cp.get('profile', '?')}"
-    )
-    lines.append("")
-    bs = {s["scenario"]: s for s in baseline.get("scenarios", [])}
-    cs = {s["scenario"]: s for s in current.get("scenarios", [])}
-    for name in sorted(set(bs) & set(cs)):
-        lines.append(f"### {name}")
-        bsum = bs[name].get("summary", {})
-        csum = cs[name].get("summary", {})
-        for metric in sorted(set(bsum) & set(csum)):
-            for stat in ("p95", "p99", "max"):
-                b = bsum[metric].get(stat)
-                c = csum[metric].get(stat)
-                if b is None or c is None:
-                    continue
-                delta = c - b
-                pct = (delta / b * 100.0) if b else 0.0
-                lines.append(
-                    f"  {metric:36s} {stat:>3s} baseline={fmt_ms(b):>9s}  "
-                    f"current={fmt_ms(c):>9s}  Δ={delta:+.2f}ms ({pct:+.1f}%)"
-                )
-        lines.append("")
-    return "\n".join(lines)
-
-
 def diff_lashlang(baseline: dict[str, Any], current: dict[str, Any]) -> str:
     lines = ["# lashlang-perf diff", ""]
     lines.append(
@@ -1003,6 +638,34 @@ def summarize_dhat(payload: dict[str, Any], top: int) -> str:
     return "\n".join(lines)
 
 
+def summarize_dhat_report(payload: dict[str, Any], top: int) -> str:
+    return summarize_dhat(payload, top)
+
+
+REPORT_DISPATCH: dict[
+    str,
+    tuple[
+        Callable[[dict[str, Any], int], str],
+        Callable[[dict[str, Any], dict[str, Any]], str] | None,
+    ],
+] = {
+    "runtime-perf": (lambda payload, _top: summarize_runtime(payload), diff_runtime),
+    "runtime-stack": (lambda payload, _top: summarize_runtime_stack(payload), None),
+    "lashlang-perf": (lambda payload, _top: summarize_lashlang(payload), diff_lashlang),
+}
+
+
+def dispatch_entry(payload: dict[str, Any], path: Path) -> tuple[str, Callable, Callable | None]:
+    # dhat is the one report family lash does not author.
+    if "kind" not in payload and "dhatFileVersion" in payload:
+        return "dhat", summarize_dhat_report, None
+    kind = payload.get("kind", "<missing>")
+    entry = REPORT_DISPATCH.get(kind) if isinstance(kind, str) else None
+    if entry is None:
+        raise ValueError(f"unknown report kind {kind!r} in {path}")
+    return kind, entry[0], entry[1]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument(
@@ -1018,42 +681,31 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     payload = json.loads(args.report.read_text())
-    if is_dhat(payload):
-        print(summarize_dhat(payload, args.top))
-        return 0
+    try:
+        kind, summarize, diff = dispatch_entry(payload, args.report)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     if args.diff:
         baseline = json.loads(args.diff.read_text())
-        if is_lashlang_report(payload) and is_lashlang_report(baseline):
-            print(diff_lashlang(baseline, payload))
-            return 0
-        if is_runtime_report(payload) and is_runtime_report(baseline):
-            print(diff_runtime(baseline, payload))
-            return 0
-        if is_ui_report(payload) and is_ui_report(baseline):
-            print(diff_ui(baseline, payload))
-            return 0
-        print("error: --diff expects matching runtime-perf, ui-perf, or lashlang-perf JSON pairs", file=sys.stderr)
-        return 2
-    if is_lashlang_report(payload):
-        print(summarize_lashlang(payload))
+        try:
+            baseline_kind, _baseline_summarize, baseline_diff = dispatch_entry(
+                baseline, args.diff
+            )
+        except ValueError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
+        if baseline_kind != kind or diff is None or baseline_diff is None:
+            print(
+                "error: --diff expects matching report kinds with a diff handler: "
+                f"current={kind!r}, baseline={baseline_kind!r}",
+                file=sys.stderr,
+            )
+            return 2
+        print(diff(baseline, payload))
         return 0
-    if is_profile_guard_report(payload):
-        print(summarize_profile_guard(payload))
-        return 0
-    if is_runtime_guard_report(payload):
-        print(summarize_runtime_guard(payload))
-        return 0
-    if is_runtime_stack_report(payload):
-        print(summarize_runtime_stack(payload))
-        return 0
-    if is_runtime_report(payload):
-        print(summarize_runtime(payload))
-        return 0
-    if is_ui_report(payload):
-        print(summarize_ui(payload))
-        return 0
-    print(f"error: unrecognized report format at {args.report}", file=sys.stderr)
-    return 2
+    print(summarize(payload, args.top))
+    return 0
 
 
 if __name__ == "__main__":

@@ -403,6 +403,7 @@ jobs:
           python3 scripts/test_restate_workers_e2e_coverage.py
           python3 scripts/test_rustdoc_json_cache.py
           python3 scripts/test_runtime_perf_percentiles.py
+          python3 scripts/test_perfreport.py
           python3 scripts/test_ci_plan.py
           bash scripts/test-worktree-gate-env.sh
           bash scripts/test-dev-script-process-identity.sh
