@@ -46,8 +46,9 @@ pub struct ToolStateEntry {
     /// re-advertises the same tool id.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     orphaned: bool,
-    /// Catalog membership. Members are callable; non-members do not exist to
-    /// the model. Hosts toggle this via `set_tool_membership`.
+    /// ToolId-keyed host curation intent. Authority exclusions are transient
+    /// policy and never change this bit. Hosts toggle it via
+    /// `set_tool_membership`.
     #[serde(default = "is_member_default", skip_serializing_if = "is_default_member")]
     member: bool,
     /// Persisted registration-lane hint. Missing values from pre-cutover
@@ -81,8 +82,8 @@ impl ToolStateEntry {
         self.orphaned
     }
 
-    /// Whether this entry is currently a Tool Catalog member. Orphaned entries
-    /// are never members.
+    /// Whether host curation retains this bound entry. Orphaned entries are
+    /// never effective members even when their retained curation bit is true.
     pub fn is_member(&self) -> bool {
         self.member && !self.orphaned
     }

@@ -529,7 +529,6 @@ impl RuntimeExecutionContext<'_> {
 mod tests {
     use super::*;
     use lash_sansio::sync::MutexExt as _;
-    use std::collections::BTreeSet;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -614,12 +613,9 @@ mod tests {
             crate::facade_support::OrchestratingToolDef::new(Arc::new(OrchestrationProbe {
                 executions: Arc::clone(&executions),
             }));
-        let registry = crate::ToolRegistry::from_tool_registrations_with_hidden_tools(
-            Vec::new(),
-            vec![orchestrating],
-            BTreeSet::new(),
-        )
-        .expect("orchestration probe registry");
+        let registry =
+            crate::ToolRegistry::from_tool_registrations(Vec::new(), vec![orchestrating])
+                .expect("orchestration probe registry");
         let plugins = crate::plugin::PluginHost::empty()
             .build_session("granted-call-session")
             .expect("plugin session");

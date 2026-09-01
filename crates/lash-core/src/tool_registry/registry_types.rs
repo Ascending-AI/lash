@@ -3,8 +3,8 @@ struct ToolRegistryEntry {
     manifest: ToolManifest,
     binding: ToolBinding,
     kind: ToolRegistrationKind,
-    /// Tool Catalog membership. A member is callable; a non-member does not
-    /// exist to the model. Orphaned entries are never members.
+    /// ToolId-keyed host curation intent. Authority policy is applied only to
+    /// a pinned model-request surface and is never written back here.
     member: bool,
 }
 
@@ -43,9 +43,8 @@ impl ToolRegistryEntry {
         self.kind
     }
 
-    /// The manifest as exposed to surfaces and catalogs. Membership is the
-    /// execution gate, so the view is just the stored manifest; orphaned and
-    /// host-removed entries are filtered out by the caller, not flagged here.
+    /// The manifest as exposed to surfaces and catalogs. The view carries no
+    /// curation or authority flags; callers derive effective membership.
     fn view_manifest(&self) -> ToolManifest {
         self.manifest.clone()
     }
@@ -187,10 +186,6 @@ pub enum ReconfigureError {
 pub struct ToolRegistry {
     sources: Arc<RwLock<BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>>>,
     state: Arc<RwLock<ToolRegistryState>>,
-    /// Authority exclusions are part of registry policy, not snapshot shape.
-    /// Keeping them at this seam prevents a live-source rebuild from granting
-    /// a hidden tool merely because its id was absent from the snapshot.
-    hidden_tool_names: Arc<BTreeSet<String>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

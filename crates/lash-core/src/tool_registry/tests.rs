@@ -287,13 +287,12 @@ mod tests {
 
     #[test]
     fn leaf_and_orchestrating_tool_id_collision_is_typed() {
-        let error = match ToolRegistry::from_tool_registrations_with_hidden_tools(
+        let error = match ToolRegistry::from_tool_registrations(
             vec![(
                 "orchestrating:tool:batch".to_string(),
                 vec![Arc::new(LeafBatchTool) as Arc<dyn ToolProvider>],
             )],
             vec![test_batch_orchestrating_tool()],
-            BTreeSet::new(),
         ) {
             Ok(_) => panic!("cross-lane tool ids must be rejected"),
             Err(error) => error,
@@ -341,23 +340,19 @@ mod tests {
 
     #[test]
     fn registration_kind_alone_selects_orchestration_dispatch() {
-        let leaf = ToolRegistry::from_tool_provider_sources_with_hidden_tools(
-            vec![(
-                "subagents".to_string(),
-                vec![Arc::new(LeafBatchTool) as Arc<dyn ToolProvider>],
-            )],
-            BTreeSet::new(),
-        )
+        let leaf = ToolRegistry::from_tool_provider_sources(vec![(
+            "subagents".to_string(),
+            vec![Arc::new(LeafBatchTool) as Arc<dyn ToolProvider>],
+        )])
         .expect("leaf ids and plugin ids have no reserved-name semantics");
         assert!(
             !leaf.is_orchestrating_tool(&tool_id("batch")),
             "an impostor plugin id cannot change a leaf registration's kind"
         );
 
-        let orchestrating = ToolRegistry::from_tool_registrations_with_hidden_tools(
+        let orchestrating = ToolRegistry::from_tool_registrations(
             Vec::new(),
             vec![test_batch_orchestrating_tool()],
-            BTreeSet::new(),
         )
         .expect("typed orchestrating registration");
         assert!(orchestrating.is_orchestrating_tool(&tool_id("batch")));
@@ -365,10 +360,9 @@ mod tests {
 
     #[tokio::test]
     async fn pre_cutover_batch_snapshot_restores_and_dispatches_as_orchestration() {
-        let source = ToolRegistry::from_tool_registrations_with_hidden_tools(
+        let source = ToolRegistry::from_tool_registrations(
             Vec::new(),
             vec![test_batch_orchestrating_tool()],
-            BTreeSet::new(),
         )
         .expect("source registry");
         let mut legacy_blob = serde_json::to_value(source.export_state()).expect("serialize state");
@@ -388,10 +382,9 @@ mod tests {
         let legacy_snapshot: ToolState =
             serde_json::from_value(legacy_blob).expect("deserialize pre-cutover state");
 
-        let target = ToolRegistry::from_tool_registrations_with_hidden_tools(
+        let target = ToolRegistry::from_tool_registrations(
             Vec::new(),
             vec![test_batch_orchestrating_tool()],
-            BTreeSet::new(),
         )
         .expect("target registry");
         target
@@ -2012,10 +2005,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hidden_snapshot_tool_is_denied_after_explicit_source_admission() {
-        let target = ToolRegistry::empty_with_hidden_tools(
-            ["host_only".to_string()].into_iter().collect(),
-        );
+    async fn source_admission_preserves_snapshot_curation_without_authority_latching() {
+        let target = ToolRegistry::empty();
         target
             .upsert_source(Arc::new(NamedExactSource { id: "exact-a" }))
             .expect("exact source registered");
@@ -2031,9 +2022,12 @@ mod tests {
             )
             .await;
 
-        assert!(!result.is_success(), "hidden admitted id must not execute");
         assert!(
-            !target
+            result.is_success(),
+            "authority policy is not registry curation: {result:?}"
+        );
+        assert!(
+            target
                 .export_state()
                 .get(&tool_id("host_only"))
                 .expect("admitted tool recorded")
@@ -2142,6 +2136,41 @@ mod tests {
         }))
         .expect("legacy entry without the flag deserializes");
         assert!(!legacy.is_orphaned());
+    }
+
+    #[test]
+    fn legacy_member_false_decodes_as_host_curation_intent() {
+        let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source");
+        let manifest = serde_json::to_value(
+            source
+                .export_state()
+                .get(&tool_id("mock_tool"))
+                .expect("mock entry")
+                .manifest(),
+        )
+        .expect("serialize mock manifest");
+        let legacy: ToolStateEntry = serde_json::from_value(json!({
+            "manifest": manifest,
+            "member": false
+        }))
+        .expect("legacy non-member entry decodes");
+
+        let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
+        target
+            .restore_state(ToolState::new(
+                1,
+                [(tool_id("mock_tool"), legacy)].into_iter().collect(),
+            ))
+            .expect("legacy curation restores against the live source");
+
+        assert!(
+            !target
+                .export_state()
+                .get(&tool_id("mock_tool"))
+                .expect("restored mock entry")
+                .is_member(),
+            "legacy member=false remains an explicit host opt-out"
+        );
     }
 
     #[test]

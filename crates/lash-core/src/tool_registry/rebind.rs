@@ -80,13 +80,12 @@ fn reconcile_tool_state_entries(
     sources: &BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>,
     mode: ReconcileMode,
     preferred_source_key: Option<&ToolSourceKey>,
-    hidden_tool_names: &BTreeSet<String>,
 ) -> Result<ReconciledTools, ReconfigureError> {
     validate_snapshot_entries(entries)?;
 
     let mut surface = match mode {
         ReconcileMode::LiveSurface => {
-            advertised_tool_entries(sources, preferred_source_key, hidden_tool_names)?
+            advertised_tool_entries(sources, preferred_source_key)?
         }
         ReconcileMode::SnapshotSurface => ToolSurface::default(),
     };
@@ -94,15 +93,15 @@ fn reconcile_tool_state_entries(
 
     for (id, stored) in entries {
         if let Some(live) = surface.get_mut(id) {
-            live.member = stored.member && !hidden_tool_names.contains(&live.manifest.name);
+            live.member = stored.member;
             continue;
         }
 
         let resolved = resolve_snapshot_id(id, sources, preferred_source_key)?;
         match resolved {
             Some((source_key, manifest, kind)) => {
-                let mut entry = bound_tool_entry(manifest, source_key, kind, hidden_tool_names);
-                entry.member &= stored.member;
+                let mut entry = bound_tool_entry(manifest, source_key, kind);
+                entry.member = stored.member;
                 insert_result_entry(&mut surface, id.clone(), entry)?;
             }
             None if mode == ReconcileMode::SnapshotSurface && !stored.orphaned => {
@@ -124,8 +123,7 @@ fn reconcile_tool_state_entries(
                     stored.manifest.clone(),
                     stored.registration_kind,
                 );
-                orphan.member =
-                    stored.member && !hidden_tool_names.contains(&orphan.manifest.name);
+                orphan.member = stored.member;
                 insert_result_entry(&mut surface, id.clone(), orphan)?;
             }
         }
@@ -142,7 +140,6 @@ fn reconcile_tool_state_entries(
 fn advertised_tool_entries(
     sources: &BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>,
     preferred_source_key: Option<&ToolSourceKey>,
-    hidden_tool_names: &BTreeSet<String>,
 ) -> Result<ToolSurface, ReconfigureError> {
     let mut advertised = ToolSurface::default();
     for (source_key, source) in sources {
@@ -159,7 +156,6 @@ fn advertised_tool_entries(
                 source.registration_kind(),
                 manifest,
                 preferred_source_key,
-                hidden_tool_names,
             )?;
         }
     }
@@ -172,7 +168,6 @@ fn insert_advertised_entry(
     kind: ToolRegistrationKind,
     manifest: ToolManifest,
     preferred_source_key: Option<&ToolSourceKey>,
-    hidden_tool_names: &BTreeSet<String>,
 ) -> Result<(), ReconfigureError> {
     let manifest_id = manifest.id.clone();
     let id_conflict = advertised.get(&manifest.id).map(|entry| {
@@ -234,7 +229,7 @@ fn insert_advertised_entry(
         }
     }
 
-    let entry = bound_tool_entry(manifest, source_key.clone(), kind, hidden_tool_names);
+    let entry = bound_tool_entry(manifest, source_key.clone(), kind);
     match advertised.insert(entry) {
         Ok(()) => Ok(()),
         Err(ToolSurfaceInsertError::DuplicateId) => {
@@ -257,11 +252,8 @@ fn bound_tool_entry(
     manifest: ToolManifest,
     source_key: ToolSourceKey,
     kind: ToolRegistrationKind,
-    hidden_tool_names: &BTreeSet<String>,
 ) -> ToolRegistryEntry {
-    let mut entry = ToolRegistryEntry::new(manifest, source_key, kind);
-    entry.member = !hidden_tool_names.contains(&entry.manifest.name);
-    entry
+    ToolRegistryEntry::new(manifest, source_key, kind)
 }
 
 fn resolve_snapshot_id(

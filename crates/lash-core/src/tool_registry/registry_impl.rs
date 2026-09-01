@@ -18,10 +18,9 @@ impl ToolRegistry {
         provider: Arc<dyn ToolProvider>,
         orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
     ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_registrations_with_hidden_tools(
+        Self::from_tool_registrations(
             vec![(PLUGIN_TOOL_SOURCE_ID.to_string(), vec![provider])],
             orchestrating_tools,
-            BTreeSet::new(),
         )
     }
 
@@ -29,38 +28,21 @@ impl ToolRegistry {
     pub(crate) fn from_tool_providers(
         providers: Vec<Arc<dyn ToolProvider>>,
     ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_providers_with_hidden_tools(providers, BTreeSet::new())
+        Self::from_tool_provider_sources(vec![(PLUGIN_TOOL_SOURCE_ID.to_string(), providers)])
     }
 
     #[cfg(test)]
-    pub(crate) fn from_tool_providers_with_hidden_tools(
-        providers: Vec<Arc<dyn ToolProvider>>,
-        hidden_tool_names: BTreeSet<String>,
-    ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_provider_sources_with_hidden_tools(
-            vec![(PLUGIN_TOOL_SOURCE_ID.to_string(), providers)],
-            hidden_tool_names,
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_tool_provider_sources_with_hidden_tools(
+    pub(crate) fn from_tool_provider_sources(
         sources: Vec<(String, Vec<Arc<dyn ToolProvider>>)>,
-        hidden_tool_names: BTreeSet<String>,
     ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_registrations_with_hidden_tools(
-            sources,
-            Vec::new(),
-            hidden_tool_names,
-        )
+        Self::from_tool_registrations(sources, Vec::new())
     }
 
-    pub(crate) fn from_tool_registrations_with_hidden_tools(
+    pub(crate) fn from_tool_registrations(
         sources: Vec<(String, Vec<Arc<dyn ToolProvider>>)>,
         orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
-        hidden_tool_names: BTreeSet<String>,
     ) -> Result<Self, ReconfigureError> {
-        let registry = Self::empty_with_hidden_tools(hidden_tool_names);
+        let registry = Self::empty();
         for (source_id, providers) in sources {
             registry.upsert_source(Arc::new(ToolProviderSource::new(
                 source_id, providers,
@@ -73,10 +55,6 @@ impl ToolRegistry {
     }
 
     pub(crate) fn empty() -> Self {
-        Self::empty_with_hidden_tools(BTreeSet::new())
-    }
-
-    fn empty_with_hidden_tools(hidden_tool_names: BTreeSet<String>) -> Self {
         Self {
             sources: Arc::new(RwLock::new(BTreeMap::new())),
             state: Arc::new(RwLock::new(ToolRegistryState {
@@ -84,7 +62,6 @@ impl ToolRegistry {
                 surface: ToolSurface::default(),
                 next_live_source_id: 0,
             })),
-            hidden_tool_names: Arc::new(hidden_tool_names),
         }
     }
 
@@ -127,7 +104,6 @@ impl ToolRegistry {
                 &sources,
                 ReconcileMode::SnapshotSurface,
                 None,
-                &self.hidden_tool_names,
             )?
         };
 
@@ -151,7 +127,7 @@ impl ToolRegistry {
     /// Unlike [`apply_state`](Self::apply_state) — which applies an incremental
     /// *delta* expected at the current generation and bumps it by one — a
     /// restore rebuilds from the current live source surface and overlays the
-    /// snapshot's per-id membership. A byte-equivalent surface remains at `G`;
+    /// snapshot's per-id host curation. A byte-equivalent surface remains at `G`;
     /// a new tool, refreshed manifest, rebound orphan, or superseded orphan
     /// bumps to `G + 1` so persistence captures the served surface. Cold
     /// rebuilds can therefore restore a session whose catalog reached
@@ -163,7 +139,7 @@ impl ToolRegistry {
     /// manifest, excluded from the catalog as a non-member, rebound when its
     /// source returns) instead of failing the whole restore. Tool id is the
     /// registry identity; the live manifest wins on rebind, with persisted Tool
-    /// Catalog membership preserved per id. The live source also re-derives the
+    /// Host curation is preserved per id. The live source also re-derives the
     /// registration lane, so snapshots written before lane persistence remain
     /// resumable. Newly advertised ids are members by default. Consequently an
     /// opt-out does not transfer when a provider replaces a tool with a new id,
@@ -181,7 +157,6 @@ impl ToolRegistry {
                 &sources,
                 ReconcileMode::LiveSurface,
                 None,
-                &self.hidden_tool_names,
             )?
         };
 
@@ -206,7 +181,7 @@ impl ToolRegistry {
             self.refresh_sources()?;
             self.fork_with_state(self.export_state())?
         } else {
-            Self::empty_with_hidden_tools((*self.hidden_tool_names).clone())
+            Self::empty()
         };
         registry.upsert_overlay_source(Arc::new(ToolProviderSource::new(
             "context",
@@ -283,7 +258,6 @@ impl ToolRegistry {
             &sources,
             ReconcileMode::LiveSurface,
             preferred_source_key,
-            &self.hidden_tool_names,
         )?;
 
         self.sources
@@ -316,7 +290,6 @@ impl ToolRegistry {
             &sources,
             ReconcileMode::LiveSurface,
             None,
-            &self.hidden_tool_names,
         )?;
         let mut state = self
             .state
@@ -341,7 +314,6 @@ impl ToolRegistry {
             &sources,
             ReconcileMode::LiveSurface,
             None,
-            &self.hidden_tool_names,
         )?;
         let generation = reconciled_generation(snapshot.generation.max(1), rebound.changed)?;
         Ok(Self {
@@ -351,7 +323,6 @@ impl ToolRegistry {
                 surface: rebound.surface,
                 next_live_source_id: 0,
             })),
-            hidden_tool_names: Arc::clone(&self.hidden_tool_names),
         })
     }
 }

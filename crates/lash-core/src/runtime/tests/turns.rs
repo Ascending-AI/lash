@@ -1,5 +1,4 @@
 use super::*;
-use crate::ToolProvider as _;
 use crate::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
 use lash_sansio::core_support::*;
 use lash_sansio::sync::MutexExt;
@@ -1794,21 +1793,11 @@ async fn continue_as_frame_rotation_reconciles_newly_advertised_tool() {
             .is_member()
     );
     assert!(
-        !post_rotation_state
+        post_rotation_state
             .get(&crate::ToolId::from("tool:hidden_after_rotation"))
-            .expect("new hidden entry is retained as denied policy")
-            .is_member()
-    );
-    let hidden_result = registry
-        .execute_by_id(
-            &crate::ToolId::from("tool:hidden_after_rotation"),
-            &json!({}),
-            &crate::testing::mock_attempt_context(),
-        )
-        .await;
-    assert!(
-        !hidden_result.is_success(),
-        "new hidden id must not execute after frame rotation: {hidden_result:?}"
+            .expect("new hidden entry retains host curation")
+            .is_member(),
+        "frame authority must not rewrite ToolId-keyed host curation"
     );
 }
 

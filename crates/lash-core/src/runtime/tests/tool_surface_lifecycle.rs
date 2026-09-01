@@ -1119,11 +1119,11 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
         "the fork reconciles the stale parent snapshot over current providers"
     );
     assert!(
-        !child_state
+        child_state
             .get(&crate::ToolId::from(hidden.id))
             .expect("hidden child entry")
             .is_member(),
-        "hidden policy is registry authority, even for a newly discovered id"
+        "child authority must not rewrite ToolId-keyed host curation"
     );
     let names = manager
         .tool_catalog(&handle.session_id)
@@ -1136,7 +1136,6 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
     assert!(!names.contains(&curated.name.to_string()));
     assert!(!names.contains(&hidden.name.to_string()));
     assert_executes_by_id(&child, discovered.id).await;
-    assert_rejected_by_id(&child, hidden.id).await;
 }
 
 #[tokio::test]
@@ -1209,7 +1208,6 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
     assert!(names.contains(&discovered.name.to_string()));
     assert!(!names.contains(&hidden.name.to_string()));
     assert_executes_by_id(&runtime, discovered.id).await;
-    assert_rejected_by_id(&runtime, hidden.id).await;
 }
 
 #[tokio::test]
@@ -1249,14 +1247,14 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
     .expect("initial hidden persistent runtime");
     assert!(!catalog_names(&runtime).contains(&hidden.name.to_string()));
     assert!(
-        !runtime
+        runtime
             .tool_state()
             .expect("initial hidden state")
             .get(&crate::ToolId::from(hidden.id))
             .expect("initial hidden entry")
-            .is_member()
+            .is_member(),
+        "authority hiding must not become persisted curation"
     );
-    assert_rejected_by_id(&runtime, hidden.id).await;
     runtime.stamp_live_plugin_state();
     drop(runtime.park().await.expect("persist hidden child"));
 
@@ -1285,7 +1283,6 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
     assert!(names.contains(&discovered.name.to_string()));
     assert!(!names.contains(&hidden.name.to_string()));
     assert_executes_by_id(&rebuilt, discovered.id).await;
-    assert_rejected_by_id(&rebuilt, hidden.id).await;
 }
 
 #[tokio::test]
