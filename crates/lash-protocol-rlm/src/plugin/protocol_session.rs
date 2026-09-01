@@ -14,6 +14,7 @@ use lash_rlm_types::{
 use super::budget_warning::BUDGET_WARNING_STATUS;
 use super::runtime_state::RlmRuntimeState;
 use super::{RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig};
+use crate::rlm_support::effective_budget_tokens;
 
 pub(super) struct RlmProtocolSession {
     config: RlmProtocolPluginConfig,
@@ -52,7 +53,11 @@ impl RlmProtocolSession {
         if ctx.checkpoint != CheckpointKind::AfterWork {
             return Ok(Vec::new());
         }
-        let Some(threshold) = self.config.continue_as_soft_warn_tokens else {
+        let threshold = effective_budget_tokens(
+            self.config.continue_as_soft_warn_tokens,
+            Some(ctx.state.policy().context_window_tokens()),
+        );
+        let Some(threshold) = threshold else {
             return Ok(Vec::new());
         };
         let used = ctx.state.token_usage().total().max(0) as usize;
