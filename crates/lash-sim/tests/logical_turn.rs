@@ -240,20 +240,29 @@ fn whole_runtime_host_config_rejects_queued_work_batching_override() {
 
 #[test]
 fn whole_runtime_host_config_rejects_provider_resolver_override() {
-    let provider = lash_core::testing::TestProvider::builder()
-        .kind("logical-turn-provider-resolver-conflict")
+    let builder_provider = lash_core::testing::TestProvider::builder()
+        .kind("logical-turn-builder-provider")
         .complete(|_| async { Ok(text_response("unused")) })
         .build()
         .into_handle();
+    let configured_provider = lash_core::testing::TestProvider::builder()
+        .kind("logical-turn-configured-provider")
+        .complete(|_| async { Ok(text_response("unused")) })
+        .build()
+        .into_handle();
+    let mut runtime_host_config = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    );
+    runtime_host_config.providers.provider_resolver = Arc::new(
+        lash_core::facade_support::SingleProviderResolver::new(configured_provider),
+    );
     let result = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .provider(provider)
+        .provider(builder_provider)
         .model(model())
         .without_queued_work()
         .advanced()
-        .runtime_host_config(lash_core::facade_support::RuntimeHostConfig::in_memory(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-        ))
+        .runtime_host_config(runtime_host_config)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-provider-resolver-conflict-test",
             "logical-turn-provider-resolver-conflict-test-boot",
@@ -269,6 +278,55 @@ fn whole_runtime_host_config_rejects_provider_resolver_override() {
             field: "provider_resolver"
         }
     ));
+}
+
+#[tokio::test]
+async fn whole_runtime_host_config_without_resolver_uses_builder_provider() {
+    let builder_provider = lash_core::testing::TestProvider::builder()
+        .kind("logical-turn-builder-provider")
+        .complete(|_| async { Ok(text_response("builder provider response")) })
+        .build()
+        .into_handle();
+    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        ))
+        .provider(builder_provider)
+        .model(model())
+        .tools(Arc::new(NoTools))
+        .without_queued_work()
+        .advanced()
+        .runtime_host_config(lash_core::facade_support::RuntimeHostConfig::in_memory(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        ))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "logical-turn-builder-provider-test",
+            "logical-turn-builder-provider-test-boot",
+        ))
+        .expect("whole config without a resolver accepts the builder provider");
+    let session = core
+        .session("logical-turn-builder-provider")
+        .open()
+        .await
+        .expect("open builder-provider session");
+    session
+        .enqueue(TurnInput::text("use the builder provider"))
+        .send()
+        .await
+        .expect("enqueue builder-provider turn");
+
+    let output = session
+        .queued_turn()
+        .run()
+        .await
+        .expect("builder-provider turn succeeds")
+        .expect("builder-provider turn runs");
+
+    assert_eq!(
+        output.assistant_message(),
+        Some("builder provider response")
+    );
 }
 
 fn canonical_seed_nodes(state: &lash_core::SessionSnapshot, frame_id: &str) -> Vec<Value> {
