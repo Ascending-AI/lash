@@ -23,7 +23,7 @@ use lash::persistence::{
     queued_work::{PendingSessionWorkOrdering, PendingWorkOrderingKey},
 };
 use lash::plugins::{
-    AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord, ChatContextProjector,
+    AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, ChatContextProjector,
     CheckpointApplication, CodeExecutorPlugin, ContextProjector, ExecRequest, ExecResponse,
     ExecutionStateComponentSnapshot, ExecutionStateSnapshot, FrameNodeId, HostTurnProtocol,
     HydratedExecutionState, LlmToolSpec, PersistedSegmentHandover, PluginAbort, PluginExtensions,

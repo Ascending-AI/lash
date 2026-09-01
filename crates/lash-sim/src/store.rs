@@ -573,8 +573,12 @@ impl ModelStore {
                     ledger_keys.insert(provider_kind.to_string());
                 }
                 let zero_usage = usage(0);
-                let frame_node_id =
-                    lash_core::facade_support::frame_node_id(&event.actor_alias, "initial-frame");
+                let frame_key = lash_core::FrameKey::from_caller_material("initial-frame")
+                    .expect("non-empty initial frame material");
+                let frame_node_id = lash_core::facade_support::frame_node_id(
+                    &event.actor_alias,
+                    frame_key.as_str(),
+                );
                 json!({
                     "session": event.actor_alias,
                     "runtime_session_id": event.actor_alias,

@@ -269,7 +269,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 69 constrains pending-turn-input state and scope correlation while
 // removing the remaining unread owner-liveness columns. Component-68 databases
 // are rejected at open; there is deliberately no migration arm.
-const SCHEMA_VERSION: i32 = 69;
+// Version 70 stores checked `FrameKey` values in every frame-open node.
+// Component-69 databases contain raw initial-frame keys and are rejected at
+// open; there is deliberately no migration arm.
+const SCHEMA_VERSION: i32 = 70;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -1,8 +1,8 @@
 {
-  "fixture_schema_version": 39,
+  "fixture_schema_version": 40,
   "head_revision": 3,
   "node_ids_in_read_order": [
-    "frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a",
+    "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940",
     "n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08",
     "n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a"
   ],
@@ -30,14 +30,14 @@
       "prompt": {},
       "generation": {}
     },
-    "current_frame_node_id": "frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a",
+    "current_frame_node_id": "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940",
     "graph": {
       "nodes": [
         {
-          "node_id": "frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a",
+          "node_id": "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940",
           "timestamp": "2023-11-14T22:13:20+00:00",
           "kind": "frame_open",
-          "frame_key": "initial-frame",
+          "frame_key": "frame-key/v2/c9b08bd8c779c300744ed4d57455bc2d2166e56c7b2b2783b2fa9db331ef66e6",
           "reason": "initial",
           "assignment": {
             "policy": {
@@ -62,7 +62,7 @@
         },
         {
           "node_id": "n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08",
-          "parent_node_id": "frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a",
+          "parent_node_id": "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940",
           "timestamp": "2023-11-14T22:13:20+00:00",
           "kind": "event",
           "event": {
@@ -160,7 +160,7 @@
       "prompt": {},
       "generation": {}
     },
-    "current_frame_node_id": "frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a",
+    "current_frame_node_id": "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940",
     "graph": {
       "nodes": [],
       "leaf_node_id": "n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a"

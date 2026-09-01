@@ -111,7 +111,7 @@ pub(super) fn materialize_agent_frame_switch(
     super::super::open_agent_frame_in_state_with_clock(
         state,
         crate::OpenAgentFrameRequest::new(
-            frame_key.as_str(),
+            frame_key.clone(),
             crate::AgentFrameReason::continue_as(),
         )
         .with_initial_nodes(initial_nodes.clone()),

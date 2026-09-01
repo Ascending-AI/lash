@@ -3046,8 +3046,9 @@ pub(super) async fn commit_runtime_state_for_test(
 }
 
 fn sample_session_node(session_id: &str, id: &str, parent: Option<&str>) -> SessionNodeRecord {
+    let frame_key = crate::FrameKey::from_caller_material(id).expect("non-empty frame material");
     let node_id = parent.map_or_else(
-        || crate::frame_node_id(session_id, id).into_inner(),
+        || caller_frame_node_id(session_id, id).into_inner(),
         |_| id.to_string(),
     );
     SessionNodeRecord {
@@ -3056,7 +3057,7 @@ fn sample_session_node(session_id: &str, id: &str, parent: Option<&str>) -> Sess
         timestamp: "1970-01-01T00:00:00Z".to_string(),
         payload: if parent.is_none() {
             SessionNodePayload::FrameOpen {
-                frame_key: id.to_string(),
+                frame_key,
                 reason: AgentFrameReason::initial(),
                 assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
@@ -3072,6 +3073,12 @@ fn sample_session_node(session_id: &str, id: &str, parent: Option<&str>) -> Sess
             }
         },
     }
+}
+
+fn caller_frame_node_id(session_id: &str, material: &str) -> crate::FrameNodeId {
+    let frame_key =
+        crate::FrameKey::from_caller_material(material).expect("non-empty frame material");
+    crate::frame_node_id(session_id, frame_key.as_str())
 }
 
 fn attachment_intent(id: &str) -> AttachmentIntent {
@@ -3104,10 +3111,13 @@ async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn Runt
         .assignment
         .clone();
     let custom_reason = AgentFrameReason::new("plan_mode");
-    let second_frame_node_id = crate::session_graph::frame_node_id(&state.session_id, "frame-2");
+    let second_frame_key =
+        crate::FrameKey::from_caller_material("frame-2").expect("non-empty frame material");
+    let second_frame_node_id =
+        crate::session_graph::frame_node_id(&state.session_id, second_frame_key.as_str());
     assert!(state.session_graph.append_frame_open_with_id_at(
         second_frame_node_id.to_string(),
-        "frame-2".to_string(),
+        second_frame_key,
         custom_reason.clone(),
         assignment,
         ProtocolTurnOptions::default(),
@@ -3220,8 +3230,8 @@ async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Runtim
         .expect("concurrent head-CAS winner persisted a session");
     assert_eq!(persisted.head_revision, 1, "exactly one commit applied");
     assert_eq!(persisted.graph.nodes.len(), 1, "exactly one graph applied");
-    let left_node_id = crate::frame_node_id(session_id, "cas-left");
-    let right_node_id = crate::frame_node_id(session_id, "cas-right");
+    let left_node_id = caller_frame_node_id(session_id, "cas-left");
+    let right_node_id = caller_frame_node_id(session_id, "cas-right");
     assert!(
         persisted.graph.nodes[0].node_id == left_node_id.as_str()
             || persisted.graph.nodes[0].node_id == right_node_id.as_str(),
@@ -9743,15 +9753,16 @@ async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersis
     };
     state.ensure_agent_frame_initialized();
     let operation = crate::OperationId::turn("root", "realization-guard", "final");
-    let frame_key = "realization-guard-frame";
-    let node_id = crate::session_graph::frame_node_id(&state.session_id, frame_key);
+    let frame_key = crate::FrameKey::from_caller_material("realization-guard-frame")
+        .expect("non-empty frame material");
+    let node_id = crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
     let graph = crate::GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
             node_id: node_id.to_string(),
             parent_node_id: None,
             timestamp: "2026-07-26T10:00:00Z".to_string(),
             payload: crate::SessionNodePayload::FrameOpen {
-                frame_key: frame_key.to_string(),
+                frame_key,
                 reason: AgentFrameReason::initial(),
                 assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
@@ -9847,14 +9858,15 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
-    let frame_key = "collision-frame";
-    let colliding_id = crate::session_graph::frame_node_id(&state.session_id, frame_key);
+    let frame_key =
+        crate::FrameKey::from_caller_material("collision-frame").expect("non-empty frame material");
+    let colliding_id = crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
     let original = crate::SessionNodeRecord {
         node_id: colliding_id.to_string(),
         parent_node_id: None,
         timestamp: "2026-07-26T10:00:00Z".to_string(),
         payload: crate::SessionNodePayload::FrameOpen {
-            frame_key: frame_key.to_string(),
+            frame_key: frame_key.clone(),
             reason: AgentFrameReason::new("original"),
             assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
@@ -9872,7 +9884,7 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
 
     let replacement = crate::SessionNodeRecord {
         payload: crate::SessionNodePayload::FrameOpen {
-            frame_key: frame_key.to_string(),
+            frame_key,
             reason: AgentFrameReason::new("replacement"),
             assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
@@ -9914,7 +9926,7 @@ async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersisten
         session_id: "root".to_string(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let duplicate_node_id = crate::frame_node_id("root", "duplicate");
+    let duplicate_node_id = caller_frame_node_id("root", "duplicate");
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
         crate::GraphAppend {
@@ -9971,7 +9983,7 @@ async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>) {
         ),
         "unexpected unresolved-leaf error: {err:?}"
     );
-    let valid_node_id = crate::frame_node_id("root", "valid-node");
+    let valid_node_id = caller_frame_node_id("root", "valid-node");
     assert!(
         store
             .load_node(&valid_node_id)
@@ -10002,7 +10014,7 @@ async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
         matches!(&err, StoreError::InvalidGraphLeaf { leaf_node_id: None }),
         "unexpected missing-leaf error: {err:?}"
     );
-    let node_without_leaf_id = crate::frame_node_id("root", "node-without-leaf");
+    let node_without_leaf_id = caller_frame_node_id("root", "node-without-leaf");
     assert!(
         store
             .load_node(&node_without_leaf_id)

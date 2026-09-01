@@ -540,7 +540,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// let ingress JSON without a `scope` key pass both checks; serde cannot emit
 /// that shape, so the behavior is identical across backends. Existing
 /// catalogs are rejected rather than migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 49;
+/// Version 50 stores checked `FrameKey` values in every frame-open node. Existing
+/// catalogs contain raw initial-frame keys and are rejected rather than decoded
+/// through a legacy path.
+pub(crate) const SCHEMA_VERSION: i32 = 50;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -1063,7 +1066,7 @@ fn prepare_versioned_schema_at_version<'connection>(
         return Ok(tx);
     }
     // Deliberately historical: tests pin the 43-to-44 migration, but the arm is
-    // unreachable for production opens now that SCHEMA_VERSION is 49.
+    // unreachable for production opens now that SCHEMA_VERSION is 50.
     if database == SqliteDatabase::DurableCore && user_version == 43 && schema_version == 44 {
         tx.execute_batch(SESSION_43_TO_44_MIGRATION)?;
         tx.execute_batch(database.schema())?;

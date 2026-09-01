@@ -556,14 +556,16 @@ fn node_derivation_remaps_in_batch_parent_edges() {
 #[test]
 fn frame_node_identity_is_stable_across_operation_realization() {
     let operation = OperationId::turn("session", "turn", "final");
-    let frame_node_id = crate::session_graph::frame_node_id("session", "initial-frame");
+    let frame_key =
+        crate::FrameKey::from_caller_material("initial-frame").expect("non-empty frame material");
+    let frame_node_id = crate::session_graph::frame_node_id("session", frame_key.as_str());
     let mut graph = GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
             node_id: frame_node_id.to_string(),
             parent_node_id: None,
             timestamp: "2026-07-26T10:00:00Z".to_string(),
             payload: crate::SessionNodePayload::FrameOpen {
-                frame_key: "initial-frame".to_string(),
+                frame_key,
                 reason: crate::AgentFrameReason::initial(),
                 assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,

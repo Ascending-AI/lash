@@ -410,14 +410,16 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     let first_state = factory_state(&first, "first", 0).await;
     let second_state = factory_state(&second, "second", 0).await;
     let commit = |state: &RuntimeSessionState| {
+        let frame_key = lash_core::FrameKey::from_caller_material("shared-frame-key")
+            .expect("non-empty frame material");
         let frame_node_id =
-            lash_core::facade_support::frame_node_id(&state.session_id, "shared-frame-key");
+            lash_core::facade_support::frame_node_id(&state.session_id, frame_key.as_str());
         let node = lash_core::SessionNodeRecord {
             node_id: frame_node_id.to_string(),
             parent_node_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: lash_core::SessionNodePayload::FrameOpen {
-                frame_key: "shared-frame-key".to_string(),
+                frame_key,
                 reason: lash_core::AgentFrameReason::initial(),
                 assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
@@ -451,10 +453,12 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
         .await
         .expect("second session derives a distinct node id");
 
+    let frame_key = lash_core::FrameKey::from_caller_material("shared-frame-key")
+        .expect("non-empty frame material");
     let first_node_id =
-        lash_core::facade_support::frame_node_id(&first_state.session_id, "shared-frame-key");
+        lash_core::facade_support::frame_node_id(&first_state.session_id, frame_key.as_str());
     let second_node_id =
-        lash_core::facade_support::frame_node_id(&second_state.session_id, "shared-frame-key");
+        lash_core::facade_support::frame_node_id(&second_state.session_id, frame_key.as_str());
     assert_ne!(first_node_id, second_node_id);
     assert!(first.load_node(&first_node_id).await.unwrap().is_some());
     assert!(second.load_node(&second_node_id).await.unwrap().is_some());
@@ -480,15 +484,16 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         .expect("second store");
     let first_state = factory_state(&first, "leaf-a", 0).await;
     let second_state = factory_state(&second, "leaf-b", 0).await;
-    let frame_key = "leaf-a-node";
+    let frame_key =
+        lash_core::FrameKey::from_caller_material("leaf-a-node").expect("non-empty frame material");
     let frame_node_id =
-        lash_core::facade_support::frame_node_id(&first_state.session_id, frame_key);
+        lash_core::facade_support::frame_node_id(&first_state.session_id, frame_key.as_str());
     let node = lash_core::SessionNodeRecord {
         node_id: frame_node_id.to_string(),
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {
-            frame_key: frame_key.to_string(),
+            frame_key,
             reason: lash_core::AgentFrameReason::initial(),
             assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,

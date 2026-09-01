@@ -538,25 +538,69 @@ fn stored_bodies_from_a_newer_generation_are_refused() {
 }
 
 #[test]
+fn stored_frame_open_rejects_a_raw_frame_key() {
+    let frame_key = crate::FrameKey::from_caller_material("strict-durable-frame")
+        .expect("non-empty frame material");
+    let node = SessionNodeRecord {
+        node_id: frame_node_id("session", frame_key.as_str()).into_inner(),
+        parent_node_id: None,
+        timestamp: "2026-09-01T00:00:00Z".to_string(),
+        payload: SessionNodePayload::FrameOpen {
+            frame_key,
+            reason: crate::AgentFrameReason::initial(),
+            assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            )),
+            protocol_turn_options: crate::ProtocolTurnOptions::default(),
+        },
+    };
+    let mut stored: serde_json::Value = serde_json::from_str(
+        &node
+            .encode_storage_body()
+            .expect("encode current frame-open body"),
+    )
+    .expect("frame-open body is JSON");
+    stored["frame_key"] = serde_json::json!("initial-frame");
+
+    let error = SessionNodeRecord::decode_storage_body(
+        node.node_id,
+        None,
+        &serde_json::to_string(&stored).expect("encode malformed frame-open body"),
+    )
+    .expect_err("raw durable frame keys must fail the FrameKey gate");
+
+    assert!(
+        error
+            .to_string()
+            .contains("frame key must be derived by Lash"),
+        "strict durable decode must surface the FrameKey refusal: {error}"
+    );
+}
+
+#[test]
 fn nearest_frame_is_derived_from_ancestry() {
     let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
     ));
     let mut graph = SessionGraph::default();
-    let first = frame_node_id("session", "first-frame");
+    let first_key =
+        crate::FrameKey::from_caller_material("first-frame").expect("non-empty frame material");
+    let first = frame_node_id("session", first_key.as_str());
     assert!(graph.append_frame_open_with_id_at(
         first.to_string(),
-        "first-frame".to_string(),
+        first_key,
         crate::AgentFrameReason::initial(),
         assignment.clone(),
         crate::ProtocolTurnOptions::default(),
         "2026-07-27T00:00:00Z".to_string(),
     ));
     let first_message = graph.append_message(text_message("m1", MessageRole::User, "first"));
-    let second = frame_node_id("session", "second-frame");
+    let second_key =
+        crate::FrameKey::from_caller_material("second-frame").expect("non-empty frame material");
+    let second = frame_node_id("session", second_key.as_str());
     assert!(graph.append_frame_open_with_id_at(
         second.to_string(),
-        "second-frame".to_string(),
+        second_key,
         crate::AgentFrameReason::continue_as(),
         assignment,
         crate::ProtocolTurnOptions::default(),
@@ -753,10 +797,12 @@ fn a_frame_read_model_is_shared_by_identity_until_the_active_path_moves() {
         crate::TurnBudget::Unbounded,
     ));
     let mut graph = SessionGraph::default();
-    let frame = frame_node_id("session", "frame");
+    let frame_key =
+        crate::FrameKey::from_caller_material("frame").expect("non-empty frame material");
+    let frame = frame_node_id("session", frame_key.as_str());
     assert!(graph.append_frame_open_with_id_at(
         frame.to_string(),
-        "frame".to_string(),
+        frame_key,
         crate::AgentFrameReason::initial(),
         assignment,
         crate::ProtocolTurnOptions::default(),

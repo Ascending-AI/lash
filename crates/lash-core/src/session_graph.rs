@@ -226,6 +226,8 @@ pub struct SessionNodeRecord {
 /// Version 5 persists typed `MessageOrigin::TurnOutput` provenance on durable
 /// assistant messages.
 ///
+/// Version 6 stores checked `FrameKey` values in durable frame-open payloads.
+///
 /// Version 3 removes the duplicated `LlmResponse.full_text` member. The
 /// pre-v3 decode path below projects that legacy value into response parts
 /// before typed decoding when the parts carry no visible assistant prose.
@@ -233,7 +235,7 @@ pub struct SessionNodeRecord {
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as a forward-only fence rather than a
 /// counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 5;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 6;
 
 /// Generation of a body written before the stamp existed.
 ///
@@ -348,7 +350,7 @@ pub enum SessionNodePayload {
         body: SharedJsonValue,
     },
     FrameOpen {
-        frame_key: String,
+        frame_key: crate::FrameKey,
         reason: crate::AgentFrameReason,
         assignment: crate::AgentFrameAssignment,
         protocol_turn_options: crate::ProtocolTurnOptions,
@@ -1132,7 +1134,7 @@ impl SessionGraph {
     pub(crate) fn append_frame_open_with_id_at(
         &mut self,
         frame_node_id: String,
-        frame_key: String,
+        frame_key: crate::FrameKey,
         reason: crate::AgentFrameReason,
         assignment: crate::AgentFrameAssignment,
         protocol_turn_options: crate::ProtocolTurnOptions,

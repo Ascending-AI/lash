@@ -80,7 +80,9 @@ fn realistic_commit(
     logical_bytes: usize,
     sample: usize,
 ) -> RuntimeCommit {
-    let frame_node_id = lash_core::facade_support::frame_node_id(session_id, "benchmark-frame");
+    let frame_key = lash_core::FrameKey::from_caller_material("benchmark-frame")
+        .expect("non-empty frame material");
+    let frame_node_id = lash_core::facade_support::frame_node_id(session_id, frame_key.as_str());
     let nodes = (0..row_shape.graph)
         .map(|index| {
             let node_id = if index == 0 {
@@ -100,7 +102,7 @@ fn realistic_commit(
                 timestamp: "2026-08-20T12:00:00Z".to_string(),
                 payload: if index == 0 {
                     SessionNodePayload::FrameOpen {
-                        frame_key: "benchmark-frame".to_string(),
+                        frame_key: frame_key.clone(),
                         reason: lash_core::AgentFrameReason::initial(),
                         assignment: lash_core::AgentFrameAssignment::from_policy(
                             SessionPolicy::new(lash_core::TurnBudget::Unbounded),

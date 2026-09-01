@@ -49,7 +49,8 @@ async fn frame_switch_refreshes_policy_readers_from_target_frame() {
 
     let opened = runtime
         .open_agent_frame(crate::OpenAgentFrameRequest::new(
-            "changed-policy-frame",
+            crate::FrameKey::from_caller_material("changed-policy-frame")
+                .expect("non-empty frame material"),
             crate::AgentFrameReason::new("test"),
         ))
         .await
@@ -71,7 +72,8 @@ async fn frame_switch_refreshes_policy_readers_from_target_frame() {
 
     runtime
         .open_agent_frame(crate::OpenAgentFrameRequest::new(
-            "initial-frame",
+            crate::FrameKey::from_caller_material("initial-frame")
+                .expect("non-empty frame material"),
             crate::AgentFrameReason::new("test"),
         ))
         .await

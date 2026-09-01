@@ -282,8 +282,9 @@ impl NodeSpec {
     }
 }
 
-fn differential_frame_key(node_id: &str) -> String {
-    format!("differential-frame:{node_id}")
+fn differential_frame_key(node_id: &str) -> lash_core::FrameKey {
+    lash_core::FrameKey::from_caller_material(&format!("differential-frame:{node_id}"))
+        .expect("non-empty differential frame material")
 }
 
 fn is_frame_alias(node_id: &str) -> bool {
@@ -295,8 +296,11 @@ fn is_frame_alias(node_id: &str) -> bool {
 
 fn scoped_node_id(session_id: &str, node_id: &str) -> String {
     if is_frame_alias(node_id) {
-        lash_core::facade_support::frame_node_id(session_id, &differential_frame_key(node_id))
-            .into_inner()
+        lash_core::facade_support::frame_node_id(
+            session_id,
+            differential_frame_key(node_id).as_str(),
+        )
+        .into_inner()
     } else {
         format!("{session_id}:{node_id}")
     }
@@ -645,7 +649,7 @@ fn runtime_commit(
         .appended_nodes()
         .filter_map(|node| match &node.payload {
             SessionNodePayload::FrameOpen { frame_key, .. } => Some(
-                lash_core::facade_support::frame_node_id(session_id, frame_key),
+                lash_core::facade_support::frame_node_id(session_id, frame_key.as_str()),
             ),
             _ => None,
         })

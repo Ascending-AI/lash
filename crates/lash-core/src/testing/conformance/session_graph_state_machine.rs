@@ -1410,8 +1410,12 @@ fn malformed_graph_append(
     };
     Ok(match shape {
         0 => {
-            let frame_key = format!("malformed-duplicate-{}", state.head_revision);
-            let node_id = crate::frame_node_id(&state.session_id, &frame_key).into_inner();
+            let frame_key = crate::FrameKey::from_caller_material(&format!(
+                "malformed-duplicate-{}",
+                state.head_revision
+            ))
+            .expect("non-empty frame material");
+            let node_id = crate::frame_node_id(&state.session_id, frame_key.as_str()).into_inner();
             let frame = |parent_node_id: Option<String>| crate::SessionNodeRecord {
                 node_id: node_id.clone(),
                 parent_node_id,
@@ -1440,8 +1444,12 @@ fn malformed_graph_append(
             leaf_node_id: Some("missing-leaf".to_string()),
         },
         _ => {
-            let frame_key = format!("malformed-cycle-{}", state.head_revision);
-            let node_id = crate::frame_node_id(&state.session_id, &frame_key).into_inner();
+            let frame_key = crate::FrameKey::from_caller_material(&format!(
+                "malformed-cycle-{}",
+                state.head_revision
+            ))
+            .expect("non-empty frame material");
+            let node_id = crate::frame_node_id(&state.session_id, frame_key.as_str()).into_inner();
             crate::GraphAppend {
                 nodes: vec![crate::SessionNodeRecord {
                     node_id: node_id.clone(),

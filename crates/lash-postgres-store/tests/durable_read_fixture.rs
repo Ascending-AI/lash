@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 69);
+    assert_eq!(PostgresStorage::schema_version(), 70);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -183,12 +183,13 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
                      OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
                          AND state IN ('deferred_next_turn', 'cancelled', 'completed')));
          UPDATE lash_schema_versions
-            SET version = 69
+            SET version = 70
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)
     .await
     .expect("refresh refusal fixture pending-input and process-lease catalog");
+    upgrade_prior_fixture_frame_identity(&pool).await;
     pool.close().await;
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -200,6 +201,72 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     )
     .expect("write refreshed Postgres refusal fixture catalog");
     drop_fixture_schema(&database_url).await;
+}
+
+async fn upgrade_prior_fixture_frame_identity(pool: &sqlx::PgPool) {
+    let previous_frame_node_id: String = sqlx::query_scalar(
+        "SELECT node_id
+           FROM lash_graph_nodes
+          WHERE session_id = $1
+            AND node_json::jsonb ->> 'kind' = 'frame_open'",
+    )
+    .bind(fixture::SESSION_ID)
+    .fetch_one(pool)
+    .await
+    .expect("read prior fixture frame identity");
+    let frame_key = lash_core::FrameKey::from_caller_material("initial-frame")
+        .expect("non-empty initial frame material");
+    let frame_node_id =
+        lash_core::facade_support::frame_node_id(fixture::SESSION_ID, frame_key.as_str())
+            .into_inner();
+
+    let graph_rows = sqlx::query(
+        "UPDATE lash_graph_nodes
+            SET node_id = CASE WHEN node_id = $2 THEN $3 ELSE node_id END,
+                parent_node_id = CASE
+                    WHEN parent_node_id = $2 THEN $3
+                    ELSE parent_node_id
+                END,
+                frame_node_id = $3,
+                node_json = replace(node_json, $4, $5)
+          WHERE session_id = $1",
+    )
+    .bind(fixture::SESSION_ID)
+    .bind(&previous_frame_node_id)
+    .bind(&frame_node_id)
+    .bind("\"frame_key\":\"initial-frame\"")
+    .bind(format!("\"frame_key\":\"{}\"", frame_key.as_str()))
+    .execute(pool)
+    .await
+    .expect("upgrade prior fixture graph frame identity");
+    assert_eq!(
+        graph_rows.rows_affected(),
+        3,
+        "the prior fixture carries one three-node frame"
+    );
+
+    sqlx::query(
+        "UPDATE lash_runtime_turn_commits
+            SET result_json = replace(result_json, $2, $3)
+          WHERE session_id = $1",
+    )
+    .bind(fixture::SESSION_ID)
+    .bind(&previous_frame_node_id)
+    .bind(&frame_node_id)
+    .execute(pool)
+    .await
+    .expect("upgrade prior fixture receipt frame references");
+    sqlx::query(
+        "UPDATE lash_sessions
+            SET head_json = replace(head_json, $2, $3)
+          WHERE session_id = $1",
+    )
+    .bind(fixture::SESSION_ID)
+    .bind(&previous_frame_node_id)
+    .bind(&frame_node_id)
+    .execute(pool)
+    .await
+    .expect("upgrade prior fixture head frame reference");
 }
 
 fn assert_fixture_version() {

@@ -1189,7 +1189,7 @@ async fn caller_supplied_key_colliding_with_existing_frame_preserves_execution_s
         .expect("non-empty caller material");
     let opened = runtime
         .open_agent_frame(crate::OpenAgentFrameRequest::new(
-            colliding_frame_key.as_str(),
+            colliding_frame_key,
             crate::AgentFrameReason::initial(),
         ))
         .await
@@ -9400,8 +9400,10 @@ async fn session_manager_persists_child_sessions_in_separate_store() {
         .expect("load session")
         .expect("session read");
     let graph = read.graph;
+    let child_frame_key = crate::FrameKey::from_caller_material("initial-frame")
+        .expect("non-empty initial frame material");
     let child_frame_node_id =
-        crate::session_graph::frame_node_id(&meta.session_id, "initial-frame");
+        crate::session_graph::frame_node_id(&meta.session_id, child_frame_key.as_str());
     assert_eq!(
         graph.nodes.first().map(|node| node.node_id.as_str()),
         Some(child_frame_node_id.as_str())

@@ -345,7 +345,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
     assert_eq!(frame.frame_node_id, provisional_frame);
     assert_eq!(
         frame.frame_node_id,
-        crate::frame_node_id("preopened-session", frame_key),
+        crate::frame_node_id("preopened-session", frame_key.as_str()),
         "frame identity is stable before and after store binding"
     );
     assert!(matches!(
