@@ -303,9 +303,9 @@ const RETIRED_HARD_CUTOVER_COLUMNS: &[(&str, &str)] = &[("lash_graph_nodes", "se
 ///
 /// These rows are an admission catalog, not a history of shipped edges. Older
 /// source declarations are retargeted to the last retained catalog endpoint as
-/// destructive cutovers advance: the recent history is a refusal-only 66 -> 67
-/// edge followed by the 67 -> 68 and 68 -> 69 hard cutovers, not a direct
-/// migration from every `from` below to its current `to`.
+/// destructive cutovers advance: the retained history records the 66 -> 67,
+/// 67 -> 68, and 68 -> 69 hard-cutover boundaries as refusal-only edges, not
+/// direct migrations from every `from` below to its current `to`.
 ///
 /// The version-bump recreation harness
 /// (`runbooks/restate-postgres-workers/src/bin/version_bump.rs`) pins its

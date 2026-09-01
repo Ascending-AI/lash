@@ -4,6 +4,10 @@ const RETAINED_PRIOR_DURABLE_CORE_GENERATION: i32 = 48;
 
 #[tokio::test]
 async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
+    assert_eq!(
+        RETAINED_PRIOR_DURABLE_CORE_GENERATION + 1,
+        SESSION_SCHEMA_VERSION
+    );
     let dir = tempfile::tempdir().expect("SQLite predecessor-refusal tempdir");
     let path = dir.path().join("durable-core.db");
     drop(

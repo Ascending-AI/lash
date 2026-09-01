@@ -990,6 +990,10 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
 /// update from silently targeting an older synthetic witness instead.
 #[tokio::test]
 async fn postgres_retained_prior_component_is_refused_at_open() {
+    assert_eq!(
+        RETAINED_PRIOR_COMPONENT_GENERATION + 1,
+        PostgresStorage::schema_version()
+    );
     let Some(database_url) = database_url() else {
         eprintln!("skipping retained Postgres predecessor refusal: database URL is not set");
         return;
