@@ -657,10 +657,14 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                     execution_scope_id: "pg-segmented-process-parent".to_string(),
                     tool_call_id: "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1".to_string(),
                     intent_index: 0,
-                    replay_key: "tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113".to_string(),
+                    replay_key: "tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3".to_string(),
+                    minting_emission_replay_key: Some(
+                        "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1:attempt:1"
+                            .to_string(),
+                    ),
                 },
                 parent_end: lash_core::ToolIntentParentEnd {
-                    process_id: "tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113".to_string(),
+                    process_id: "tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3".to_string(),
                     policy: lash_core::ProcessParentEndPolicy::Cancel,
                 },
             },
@@ -670,10 +674,14 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                     execution_scope_id: "pg-segmented-process-parent".to_string(),
                     tool_call_id: "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:bafd89a81de63475643c98aa:1".to_string(),
                     intent_index: 0,
-                    replay_key: "tool-intent:v1:blake3:4454df073582e09e241c6b424b24bcf90f9f6be7bd9e5eccf6e3ca3fc8191929".to_string(),
+                    replay_key: "tool-intent:v2:blake3:03f6d6a878730a682be12709db67df8e0252f3639fef420ee533753ba800e9de".to_string(),
+                    minting_emission_replay_key: Some(
+                        "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:bafd89a81de63475643c98aa:1:attempt:1"
+                            .to_string(),
+                    ),
                 },
                 parent_end: lash_core::ToolIntentParentEnd {
-                    process_id: "tool-intent:v1:blake3:4454df073582e09e241c6b424b24bcf90f9f6be7bd9e5eccf6e3ca3fc8191929".to_string(),
+                    process_id: "tool-intent:v2:blake3:03f6d6a878730a682be12709db67df8e0252f3639fef420ee533753ba800e9de".to_string(),
                     policy: lash_core::ProcessParentEndPolicy::Cancel,
                 },
             },
@@ -767,7 +775,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                     "scope": {"session_id": "process-env:pg-segmented-process-parent"},
                     "subject": {
                         "type": "effect",
-                        "effect_id": "process:parent-end:tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113",
+                        "effect_id": "process:parent-end:tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3",
                         "kind": "process"
                     },
                     "caused_by": {
@@ -776,7 +784,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                         "effect_id": "tool-intent-parent-end:0"
                     },
                     "replay": {
-                        "key": "tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113:parent-end:process:parent-end:tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113",
+                        "key": "tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3:parent-end:process:parent-end:tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3",
                         "attribution": {
                             "kind": "tool_intent",
                             "identity": {
@@ -784,7 +792,8 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                                 "execution_scope_id": "pg-segmented-process-parent",
                                 "tool_call_id": "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1",
                                 "intent_index": 0,
-                                "replay_key": "tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113"
+                                "minting_emission_replay_key": "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1:attempt:1",
+                                "replay_key": "tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3"
                             }
                         }
                     }
@@ -798,9 +807,10 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                             "execution_scope_id": "pg-segmented-process-parent",
                             "tool_call_id": "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1",
                             "intent_index": 0,
-                            "replay_key": "tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113"
+                            "minting_emission_replay_key": "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1:attempt:1",
+                            "replay_key": "tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3"
                         },
-                        "process_id": "tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113",
+                        "process_id": "tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3",
                         "policy": "cancel",
                         "reason": "recorded start intent parent ended with cancel policy"
                     }
@@ -901,15 +911,15 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         recorded_outcomes,
         vec![
             lash_core::ToolIntentParentEndOutcome::Cancelled {
-                identity: literal_segmented_plan.actions[0].identity.clone(),
-                process_id: literal_segmented_plan.actions[0]
+                identity: literal_segmented_plan.actions[1].identity.clone(),
+                process_id: literal_segmented_plan.actions[1]
                     .parent_end
                     .process_id
                     .clone(),
             },
             lash_core::ToolIntentParentEndOutcome::Cancelled {
-                identity: literal_segmented_plan.actions[1].identity.clone(),
-                process_id: literal_segmented_plan.actions[1]
+                identity: literal_segmented_plan.actions[0].identity.clone(),
+                process_id: literal_segmented_plan.actions[0]
                     .parent_end
                     .process_id
                     .clone(),
@@ -979,8 +989,11 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         tool_call_id: "pg-tool-call-parent-call".to_string(),
         intent_index: 0,
         replay_key:
-            "tool-intent:v1:blake3:1be9324a1697dfce44d6d9b2760bbd63c34736c5ca4c50d2b9243ed134e79458"
+            "tool-intent:v2:blake3:a9204d625b00c558109d8aece31d959c0b48d9f88c682ffca3fd83c89616cb8a"
                 .to_string(),
+        minting_emission_replay_key: Some(
+            "tool:process:pg-tool-call-parent:tool:pg_process_parent_intent:attempt:1".to_string(),
+        ),
     };
     assert_eq!(
         registry

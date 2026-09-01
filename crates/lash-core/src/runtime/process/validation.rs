@@ -73,7 +73,7 @@ pub enum ProcessTransitionPlan {
     /// The requested transition is already reflected in the record.
     Unchanged,
     /// Append the supplied request through the normal process-event fold.
-    Append(ProcessEventAppendRequest),
+    Append(Box<ProcessEventAppendRequest>),
 }
 
 const FOLD_VALIDATION_REPLAY_KEY_SUFFIX: &str = ":fold-validation";
@@ -224,7 +224,7 @@ pub fn prepare_process_transition(
             ProcessEventAppendRequest::wait_cleared(&record.id, wait)
         }
     };
-    Ok(ProcessTransitionPlan::Append(append))
+    Ok(ProcessTransitionPlan::Append(Box::new(append)))
 }
 
 fn abandon_requests_match(existing: &AbandonRequest, requested: &AbandonRequest) -> bool {

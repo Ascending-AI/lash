@@ -1073,6 +1073,7 @@ async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
             tool_call_id: "host-call".to_string(),
             intent_index: 0,
             replay_key: "forged".to_string(),
+            minting_emission_replay_key: None,
         });
 
     assert!(matches!(

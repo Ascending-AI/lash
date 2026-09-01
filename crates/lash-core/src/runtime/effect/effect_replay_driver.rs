@@ -712,6 +712,15 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         request: &EffectClaimRequest,
     ) -> Result<EffectClaimObservation, RuntimeEffectControllerError>;
 
+    /// Read whether an exact replay row exists without claiming or mutating it.
+    /// Used only after a strict v2 miss to distinguish an absent continuation
+    /// from a pre-cutover v1 tool-intent row that must be refused loudly.
+    async fn replay_row_exists(
+        &self,
+        scope_id: &str,
+        replay_key: &str,
+    ) -> Result<bool, RuntimeEffectControllerError>;
+
     /// Write `terminal` and release the lease, guarded by `fence`, allocating a
     /// settlement rank when the row belongs to a durable effect group.
     ///
@@ -849,6 +858,19 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         &self,
         retirement: &EffectJournalRetirement,
     ) -> Result<usize, RuntimeError>;
+}
+
+#[doc(hidden)]
+pub fn tool_intent_replay_key_format_cutover(
+    recorded_replay_key: &str,
+    requested_replay_key: &str,
+) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(
+        RuntimeErrorCode::ToolIntentReplayKeyFormatCutover,
+        format!(
+            "continuation replay refused at the tool-intent replay-key format cutover: journaled row uses `{recorded_replay_key}` from `tool-intent:v1:`, but this build requested `{requested_replay_key}` from `tool-intent:v2:`; start a fresh post-cutover invocation instead of re-executing the pre-cutover command"
+        ),
+    )
 }
 
 /// A claim this driver holds: the fence plus the due time it recorded.
@@ -1368,13 +1390,27 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             EffectClaimObservation::Busy { retry_at_ms } => {
                 Ok(PreparedEffect::Busy { retry_at_ms })
             }
-            EffectClaimObservation::StrictReplayMiss => Err(vocabulary.error(
-                EffectReplayFailure::Missing,
-                format!(
-                    "no recorded runtime effect for scope `{}` and replay key `{}`",
-                    request.scope_id, request.replay_key
-                ),
-            )),
+            EffectClaimObservation::StrictReplayMiss => {
+                if let Some(legacy_replay_key) =
+                    crate::tool_intent::legacy_tool_intent_v1_lookup_key(&envelope.invocation)
+                    && self
+                        .row_store
+                        .replay_row_exists(&request.scope_id, &legacy_replay_key)
+                        .await?
+                {
+                    return Err(tool_intent_replay_key_format_cutover(
+                        &legacy_replay_key,
+                        &request.replay_key,
+                    ));
+                }
+                Err(vocabulary.error(
+                    EffectReplayFailure::Missing,
+                    format!(
+                        "no recorded runtime effect for scope `{}` and replay key `{}`",
+                        request.scope_id, request.replay_key
+                    ),
+                ))
+            }
             EffectClaimObservation::CorruptRow { defect } => {
                 Err(vocabulary.error(EffectReplayFailure::CorruptRow, defect.message()))
             }

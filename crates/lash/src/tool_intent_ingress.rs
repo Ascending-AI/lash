@@ -35,6 +35,7 @@ impl ToolIntentIngressKey {
             tool_call_id: tool_call_id.to_string(),
             intent_index,
             replay_key: String::new(),
+            minting_emission_replay_key: None,
         });
         Self(identity)
     }

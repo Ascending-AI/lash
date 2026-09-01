@@ -227,32 +227,127 @@ pub struct EmitTriggerIntent {
     pub request: crate::TriggerOccurrenceRequest,
 }
 
-/// The single identity seam for the v1 protocol.
+const TOOL_INTENT_IDENTITY_FAMILY_VERSION: u8 = 2;
+
+/// The public identity seam for host-submitted intents.
+///
+/// Runtime-minted declarations use the same v2 family through
+/// [`derive_tool_intent_identity_for_emission`], which additionally binds the
+/// identity to the durable invocation that minted the declaration.
 pub fn derive_tool_intent_identity(
     session_id: &str,
     execution_scope_id: &str,
     tool_call_id: Option<&str>,
     intent_index: usize,
 ) -> Result<ToolIntentIdentity, ToolIntentRefusalReason> {
+    derive_tool_intent_identity_inner(
+        session_id,
+        execution_scope_id,
+        tool_call_id,
+        intent_index,
+        None,
+    )
+}
+
+pub(crate) fn derive_tool_intent_identity_for_emission(
+    session_id: &str,
+    execution_scope_id: &str,
+    tool_call_id: Option<&str>,
+    intent_index: usize,
+    minting_emission_replay_key: &str,
+) -> Result<ToolIntentIdentity, ToolIntentRefusalReason> {
+    derive_tool_intent_identity_inner(
+        session_id,
+        execution_scope_id,
+        tool_call_id,
+        intent_index,
+        Some(minting_emission_replay_key),
+    )
+}
+
+fn derive_tool_intent_identity_inner(
+    session_id: &str,
+    execution_scope_id: &str,
+    tool_call_id: Option<&str>,
+    intent_index: usize,
+    minting_emission_replay_key: Option<&str>,
+) -> Result<ToolIntentIdentity, ToolIntentRefusalReason> {
     let tool_call_id = tool_call_id.ok_or(ToolIntentRefusalReason::MissingToolCallId)?;
     let intent_index =
         u32::try_from(intent_index).map_err(|_| ToolIntentRefusalReason::IntentIndexOverflow)?;
 
-    // FIG-1203 rebase point: replace these current-tree components with the
-    // frame-key-grade stable call identity supplied by FIG-1203.
-    let mut encoder = crate::stable_identity::IdentityEncoder::new("lash.tool-intent", 1);
+    let mut encoder = crate::stable_identity::IdentityEncoder::new(
+        "lash.tool-intent",
+        TOOL_INTENT_IDENTITY_FAMILY_VERSION,
+    );
     encoder.string(session_id);
     encoder.string(execution_scope_id);
     encoder.string(tool_call_id);
     encoder.u32(intent_index);
-    let replay_key = crate::stable_identity::rendered_hash("tool-intent", 1, &encoder.finish());
+    encoder.optional(minting_emission_replay_key, |encoder, replay_key| {
+        encoder.string(replay_key)
+    });
+    let replay_key = crate::stable_identity::rendered_hash(
+        "tool-intent",
+        TOOL_INTENT_IDENTITY_FAMILY_VERSION,
+        &encoder.finish(),
+    );
     Ok(ToolIntentIdentity {
         session_id: session_id.to_string(),
         execution_scope_id: execution_scope_id.to_string(),
         tool_call_id: tool_call_id.to_string(),
         intent_index,
         replay_key,
+        minting_emission_replay_key: minting_emission_replay_key.map(str::to_string),
     })
+}
+
+/// Re-derive an identity from its own durable fields.
+///
+/// The v2 replay key hashes the minting-emission replay key, so the record
+/// retains that input; a record whose `replay_key` does not equal the
+/// re-derived one carries a forged or corrupted identity.
+pub fn rederive_tool_intent_identity(
+    identity: &ToolIntentIdentity,
+) -> Result<ToolIntentIdentity, ToolIntentRefusalReason> {
+    derive_tool_intent_identity_inner(
+        &identity.session_id,
+        &identity.execution_scope_id,
+        Some(&identity.tool_call_id),
+        identity.intent_index as usize,
+        identity.minting_emission_replay_key.as_deref(),
+    )
+}
+
+pub(crate) fn derive_legacy_tool_intent_v1_replay_key(identity: &ToolIntentIdentity) -> String {
+    let mut encoder = crate::stable_identity::IdentityEncoder::new("lash.tool-intent", 1);
+    encoder.string(&identity.session_id);
+    encoder.string(&identity.execution_scope_id);
+    encoder.string(&identity.tool_call_id);
+    encoder.u32(identity.intent_index);
+    crate::stable_identity::rendered_hash("tool-intent", 1, &encoder.finish())
+}
+
+pub(crate) fn has_v2_tool_intent_replay_key(identity: &ToolIntentIdentity) -> bool {
+    let Some(hash) = identity.replay_key.strip_prefix("tool-intent:v2:blake3:") else {
+        return false;
+    };
+    hash.len() == 64
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+#[doc(hidden)]
+pub fn legacy_tool_intent_v1_lookup_key(invocation: &crate::RuntimeInvocation) -> Option<String> {
+    let replay = invocation.replay.as_ref()?;
+    let crate::RuntimeReplayAttribution::ToolIntent(identity) = replay.attribution.as_ref()?;
+    if !has_v2_tool_intent_replay_key(identity) {
+        return None;
+    }
+    let legacy_identity = derive_legacy_tool_intent_v1_replay_key(identity);
+    let legacy_lookup = replay.key.replace(&identity.replay_key, &legacy_identity);
+    (legacy_lookup != replay.key).then_some(legacy_lookup)
 }
 
 /// A completed leaf-provider value. Unlike [`crate::ToolOutcome`], this type has
@@ -339,9 +434,34 @@ mod tests {
                 execution_scope_id: "turn-7".to_string(),
                 tool_call_id: "call-3".to_string(),
                 intent_index: 2,
-                replay_key: "tool-intent:v1:blake3:b757ef3f41338e84374dcdf4a72819c12c1804ce0ab5bd3f717a8a0df2a51cf6".to_string(),
+                replay_key: "tool-intent:v2:blake3:11066b1512aa6d126c635d3b3dde273ad9e3dfeeea7ae985894652309c7da31c".to_string(),
+                minting_emission_replay_key: None,
             }
         );
+    }
+
+    #[test]
+    fn emitted_intent_identity_is_scoped_by_the_minting_replay_key() {
+        let first = derive_tool_intent_identity_for_emission(
+            "session",
+            "process",
+            Some("call"),
+            0,
+            "turn:7:child:0:call:attempt:1",
+        )
+        .expect("first emission identity");
+        let second = derive_tool_intent_identity_for_emission(
+            "session",
+            "process",
+            Some("call"),
+            0,
+            "turn:8:child:0:call:attempt:1",
+        )
+        .expect("second emission identity");
+
+        assert!(first.replay_key.starts_with("tool-intent:v2:blake3:"));
+        assert!(second.replay_key.starts_with("tool-intent:v2:blake3:"));
+        assert_ne!(first.replay_key, second.replay_key);
     }
 
     #[test]

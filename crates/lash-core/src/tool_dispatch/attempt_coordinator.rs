@@ -339,7 +339,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
             .controller()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
-                    invocation,
+                    invocation.clone(),
                     crate::RuntimeEffectCommand::ToolAttempt {
                         call: call.clone(),
                         execution_grant: execution_grant.clone(),
@@ -417,12 +417,15 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                     return CoordinatedToolInvocation {
                         launch: match settle_terminal_attempt(
                             context,
-                            intent_drain_slot.take(),
-                            child_trace_hook.as_ref(),
-                            recorded_call_id.as_deref(),
-                            record,
-                            intents,
-                            attempts,
+                            TerminalAttemptSettlement {
+                                minting_emission: &invocation,
+                                intent_drain_slot: intent_drain_slot.take(),
+                                child_trace_hook: child_trace_hook.as_ref(),
+                                recorded_call_id: recorded_call_id.as_deref(),
+                                record,
+                                intents,
+                                attempts,
+                            },
                         )
                         .await
                         {
@@ -445,12 +448,15 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                     return CoordinatedToolInvocation {
                         launch: match settle_terminal_attempt(
                             context,
-                            intent_drain_slot.take(),
-                            child_trace_hook.as_ref(),
-                            recorded_call_id.as_deref(),
-                            record,
-                            intents,
-                            attempts,
+                            TerminalAttemptSettlement {
+                                minting_emission: &invocation,
+                                intent_drain_slot: intent_drain_slot.take(),
+                                child_trace_hook: child_trace_hook.as_ref(),
+                                recorded_call_id: recorded_call_id.as_deref(),
+                                record,
+                                intents,
+                                attempts,
+                            },
                         )
                         .await
                         {
@@ -508,21 +514,41 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
 /// body. Taking the drain guard by value makes the settlement window the
 /// guard's lifetime: the slot is claimed for the whole drain and discharged
 /// when this body ends, on every path out of it.
-async fn settle_terminal_attempt(
-    context: &ToolDispatchContext<'_>,
+struct TerminalAttemptSettlement<'settlement> {
+    minting_emission: &'settlement RuntimeInvocation,
     intent_drain_slot: Option<IntentDrainGuard>,
-    child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
-    recorded_call_id: Option<&str>,
-    mut record: Box<ToolCallRecord>,
+    child_trace_hook: Option<&'settlement crate::ToolChildExecutionTraceHook>,
+    recorded_call_id: Option<&'settlement str>,
+    record: Box<ToolCallRecord>,
     intents: crate::ToolIntents,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
+}
+
+async fn settle_terminal_attempt(
+    context: &ToolDispatchContext<'_>,
+    settlement: TerminalAttemptSettlement<'_>,
 ) -> Result<ToolDispatchOutcome, crate::RuntimeEffectControllerError> {
+    let TerminalAttemptSettlement {
+        minting_emission,
+        intent_drain_slot,
+        child_trace_hook,
+        recorded_call_id,
+        mut record,
+        intents,
+        attempts,
+    } = settlement;
     if let Some(slot) = &intent_drain_slot {
         slot.begin_final_drain().await;
     }
-    let intent_outcomes =
-        super::execute_final_tool_intents(context, recorded_call_id, &intents, child_trace_hook)
-            .await?;
+    let mut intent_context = context.clone();
+    intent_context.parent_invocation = Some(minting_emission.clone());
+    let intent_outcomes = super::execute_final_tool_intents(
+        &intent_context,
+        recorded_call_id,
+        &intents,
+        child_trace_hook,
+    )
+    .await?;
     project_recorded_intent_outcomes(&mut record.output, &intent_outcomes);
     context.recorded_intent_outcomes.record(&intent_outcomes);
     // Discharges the drain slot, where both former bodies called
@@ -695,6 +721,7 @@ mod projection_tests {
                 tool_call_id: "call".to_string(),
                 intent_index: 0,
                 replay_key: "replay".to_string(),
+                minting_emission_replay_key: None,
             },
             kind: crate::ToolIntentKind::SignalProcess,
             result: serde_json::json!({ "sequence": sequence }),

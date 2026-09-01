@@ -906,7 +906,7 @@ mod tests {
             .as_str()
             .expect("derived process id")
             .to_string();
-        assert!(derived_id.starts_with("tool-intent:v1:blake3:"));
+        assert!(derived_id.starts_with("tool-intent:v2:blake3:"));
         assert_eq!(result.value_for_projection()["id"], derived_id);
 
         let entries = service
@@ -942,7 +942,7 @@ mod tests {
         let value = result.into_output().value_for_projection();
         assert_eq!(
             value["process_id"],
-            "tool-intent:v1:blake3:d087b5296a95eac74a4606f890cd20667a2e4a5106c3703a1ae50a93d6c411fa:detached"
+            "tool-intent:v2:blake3:5885c20631dd1a87f21c7e18fdef9dbf37725ec1af3cd8bd83e2cd97167e23e5:detached"
         );
         assert_eq!(intents.protocol_version, lash_core::TOOL_INTENT_PROTOCOL_V1);
         assert_eq!(intents.intents.len(), 1);
@@ -964,7 +964,7 @@ mod tests {
         );
         assert_eq!(
             intent.request.id,
-            "tool-intent:v1:blake3:d087b5296a95eac74a4606f890cd20667a2e4a5106c3703a1ae50a93d6c411fa"
+            "tool-intent:v2:blake3:5885c20631dd1a87f21c7e18fdef9dbf37725ec1af3cd8bd83e2cd97167e23e5"
         );
         assert_eq!(call.args["detached_process_id"], value["process_id"]);
         assert!(intent.request.env_spec.is_some());

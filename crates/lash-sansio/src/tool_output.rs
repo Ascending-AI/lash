@@ -110,6 +110,11 @@ pub struct ToolIntentIdentity {
     pub tool_call_id: String,
     pub intent_index: u32,
     pub replay_key: String,
+    /// Replay key of the durable invocation that minted this declaration,
+    /// retained so `replay_key` stays re-derivable from the record alone.
+    /// `None` for host-submitted intents, whose identity binds no emission.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minting_emission_replay_key: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

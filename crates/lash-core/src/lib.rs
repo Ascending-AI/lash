@@ -513,6 +513,8 @@ pub mod facade_support {
     pub use crate::store::LeaseTimingsError;
     pub use crate::store::SessionHead;
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
+    #[doc(hidden)]
+    pub use crate::tool_intent::legacy_tool_intent_v1_lookup_key;
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
     pub use crate::tool_provider::ToolTriggerClient;
     pub use crate::tool_registry::PLUGIN_TOOL_SOURCE_ID;
@@ -1210,7 +1212,7 @@ pub use tool_intent::{
     SignalProcessIntent, StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES,
     TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptOutcome,
     ToolIntent, ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents,
-    ToolOutcomeDone, derive_tool_intent_identity,
+    ToolOutcomeDone, derive_tool_intent_identity, rederive_tool_intent_identity,
 };
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{

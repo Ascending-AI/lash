@@ -207,7 +207,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             Self::append_event_conn(
                                 tx,
                                 &mut record,
-                                request,
+                                *request,
                                 now,
                                 wake_delivery_config,
                             )?;
@@ -799,7 +799,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             Self::append_event_conn(
                                 tx,
                                 &mut record,
-                                append,
+                                *append,
                                 now,
                                 wake_delivery_config,
                             )?;
@@ -832,7 +832,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             Self::append_event_conn(
                                 tx,
                                 &mut record,
-                                append,
+                                *append,
                                 now,
                                 wake_delivery_config,
                             )?;
@@ -876,7 +876,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             Self::append_event_conn(
                                 tx,
                                 &mut record,
-                                request,
+                                *request,
                                 now,
                                 wake_delivery_config,
                             )?;
@@ -919,7 +919,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             Self::append_event_conn(
                                 tx,
                                 &mut record,
-                                request,
+                                *request,
                                 now,
                                 wake_delivery_config,
                             )?;

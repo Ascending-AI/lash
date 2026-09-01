@@ -5369,6 +5369,7 @@ async fn fig1767_journal_entry_byte_sequence_equality() {
                     tool_call_id: "call".to_string(),
                     intent_index: 0,
                     replay_key: "key".to_string(),
+                    minting_emission_replay_key: None,
                 },
                 process_id: "fig1767-proc".to_string(),
                 policy: lash_core::ProcessParentEndPolicy::Cancel,
@@ -5509,6 +5510,7 @@ async fn fig1767_give_up_verdict_redrive_executes_nothing() {
                     tool_call_id: "call".to_string(),
                     intent_index: 0,
                     replay_key: "key".to_string(),
+                    minting_emission_replay_key: None,
                 },
                 process_id: "fig1767-proc".to_string(),
                 policy: lash_core::ProcessParentEndPolicy::Cancel,
@@ -7337,7 +7339,7 @@ struct ToolIntentJournalCorpusFixture {
     expected_signal_events: usize,
 }
 
-const TOOL_INTENT_CORPUS_KEY: &str = "tool-intent-corpus-v1";
+const TOOL_INTENT_CORPUS_KEY: &str = "tool-intent-corpus-v2";
 const TOOL_INTENT_CORPUS_SESSION: &str = "tool-intent-corpus-session";
 const TOOL_INTENT_CORPUS_TURN: &str = "tool-intent-corpus-turn";
 const TOOL_INTENT_CORPUS_TARGET: &str = "tool-intent-corpus-target";
@@ -7528,9 +7530,9 @@ async fn replay_tool_intent_corpus_fixture(
 #[tokio::test]
 async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes() {
     for checked_in in [
-        include_bytes!("../tests/fixtures/tool_intent_journals/v1-mid-drain.json").as_slice(),
-        include_bytes!("../tests/fixtures/tool_intent_journals/v1-mid-intent.json").as_slice(),
-        include_bytes!("../tests/fixtures/tool_intent_journals/v1-full-drain.json").as_slice(),
+        include_bytes!("../tests/fixtures/tool_intent_journals/v2-mid-drain.json").as_slice(),
+        include_bytes!("../tests/fixtures/tool_intent_journals/v2-mid-intent.json").as_slice(),
+        include_bytes!("../tests/fixtures/tool_intent_journals/v2-full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
@@ -7557,6 +7559,54 @@ async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_ou
             fixture.crash_point
         );
     }
+}
+
+#[tokio::test]
+async fn checked_in_v1_tool_intent_journal_refuses_the_v2_key_cutover_without_duplicate_effect() {
+    let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(include_bytes!(
+        "../tests/fixtures/tool_intent_journals/v1-full-drain.json"
+    ))
+    .expect("decode the pre-cutover endpoint corpus fixture");
+    let (endpoint, registry) = tool_intent_corpus_endpoint().await;
+
+    let response = invoke_endpoint_body(
+        &endpoint,
+        "ToolIntentCorpusReplay",
+        "run",
+        bytes::Bytes::from(fixture.invocation_body_bytes),
+    )
+    .await
+    .expect("feed the v1 journal through the v2 endpoint");
+    let error = restate_output_failure_message(&response)
+        .or_else(|| restate_error_message(&response))
+        .unwrap_or_else(|| {
+            panic!(
+                "v1 replay must refuse loudly; messages={:?}; frames={:?}; output={:?}",
+                restate_message_types(&response),
+                restate_command_frame_types(&response),
+                restate_output_json::<serde_json::Value>(&response)
+            )
+        });
+
+    assert!(
+        error.contains("tool_intent_replay_key_format_cutover"),
+        "the refusal must retain its typed format-cutover code: {error}"
+    );
+    assert!(
+        error.contains("tool-intent:v1:") && error.contains("tool-intent:v2:"),
+        "the refusal must name both sides of the key-family cutover: {error}"
+    );
+    assert_eq!(
+        registry
+            .events_after(TOOL_INTENT_CORPUS_TARGET, 0)
+            .await
+            .expect("read the refusal witness target")
+            .into_iter()
+            .filter(|event| event.event_type == "signal.resume")
+            .count(),
+        1,
+        "a pre-cutover journal may reconstruct its committed effect but must not duplicate it"
+    );
 }
 
 /// Regeneration is deliberately separate from the replay law above: the law
@@ -7625,16 +7675,16 @@ async fn capture_tool_intent_journal_corpus_from_real_endpoint_interruptions() {
 
     let captures = [
         (
-            "v1-mid-drain",
+            "v2-mid-drain",
             "after_tool_attempt_before_signal_command",
             mid_drain,
         ),
         (
-            "v1-mid-intent",
+            "v2-mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v1-full-drain", "full_drain", full),
+        ("v2-full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {
@@ -10143,8 +10193,8 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
                 serde_json::json!({
                     "__handle__": "process",
                     "done": false,
-                    "id": "tool-intent:v1:blake3:38fe75a23e6a480ef35585ffe4f231bc3df10b2626da8f6da26740b0bfb715ea",
-                    "process_id": "tool-intent:v1:blake3:38fe75a23e6a480ef35585ffe4f231bc3df10b2626da8f6da26740b0bfb715ea",
+                    "id": "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
+                    "process_id": "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
                     "running": true,
                     "status": "running",
                 }),
@@ -10154,8 +10204,8 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
                 serde_json::json!({
                     "__handle__": "process",
                     "done": true,
-                    "id": "tool-intent:v1:blake3:46535e8757014700cdfcf2a2bab0a5fa1bb0c7f170326057729832f833347f55:detached",
-                    "process_id": "tool-intent:v1:blake3:46535e8757014700cdfcf2a2bab0a5fa1bb0c7f170326057729832f833347f55:detached",
+                    "id": "tool-intent:v2:blake3:58c100661aca7a188965f9cc5f6ad14dc19f23a3f4f23a90fa426b5af449429e:detached",
+                    "process_id": "tool-intent:v2:blake3:58c100661aca7a188965f9cc5f6ad14dc19f23a3f4f23a90fa426b5af449429e:detached",
                     "running": false,
                     "status": "detached",
                 }),
@@ -10511,7 +10561,7 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
             }))
             .collect::<Vec<_>>(),
         vec![serde_json::json!({
-            "replay_key": "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b:parent-end:process:parent-end:tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b",
+            "replay_key": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244:parent-end:process:parent-end:tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244",
             "command": {
                 "type": "process",
                 "command": {
@@ -10521,9 +10571,10 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                         "execution_scope_id": "restate-parent-end-turn-1",
                         "tool_call_id": "restate-parent-end-call",
                         "intent_index": 0,
-                        "replay_key": "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b"
+                        "minting_emission_replay_key": "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1",
+                        "replay_key": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244"
                     },
-                    "process_id": "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b",
+                    "process_id": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244",
                     "policy": "cancel",
                     "reason": "recorded start intent parent ended with cancel policy"
                 }
@@ -10582,9 +10633,12 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                 execution_scope_id: "restate-parent-end-turn-1".to_string(),
                 tool_call_id: "restate-parent-end-call".to_string(),
                 intent_index: 0,
-                replay_key: "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b".to_string(),
+                replay_key: "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244".to_string(),
+                minting_emission_replay_key: Some(
+                    "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1".to_string(),
+                ),
             },
-            process_id: "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b".to_string(),
+            process_id: "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244".to_string(),
         }]
     );
     assert_eq!(
@@ -10655,7 +10709,7 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
         literal_parent_end_frames,
         vec![
             serde_json::json!({
-                "replay_key": "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b:parent-end:process:parent-end:tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b",
+                "replay_key": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244:parent-end:process:parent-end:tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244",
                 "command": {
                     "type": "process",
                     "command": {
@@ -10665,16 +10719,17 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                             "execution_scope_id": "restate-parent-end-turn-1",
                             "tool_call_id": "restate-parent-end-call",
                             "intent_index": 0,
-                            "replay_key": "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b"
+                            "minting_emission_replay_key": "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1",
+                            "replay_key": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244"
                         },
-                        "process_id": "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b",
+                        "process_id": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244",
                         "policy": "cancel",
                         "reason": "recorded start intent parent ended with cancel policy"
                     }
                 }
             }),
             serde_json::json!({
-                "replay_key": "tool-intent:v1:blake3:38e45eac3bf722392e41f2a27b147edd9a89747eab7c6a45369ae6b313ed3cf4:parent-end:process:parent-end:tool-intent:v1:blake3:38e45eac3bf722392e41f2a27b147edd9a89747eab7c6a45369ae6b313ed3cf4",
+                "replay_key": "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9:parent-end:process:parent-end:tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9",
                 "command": {
                     "type": "process",
                     "command": {
@@ -10684,9 +10739,10 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                             "execution_scope_id": "restate-parent-end-turn-1",
                             "tool_call_id": "restate-parent-end-call",
                             "intent_index": 1,
-                            "replay_key": "tool-intent:v1:blake3:38e45eac3bf722392e41f2a27b147edd9a89747eab7c6a45369ae6b313ed3cf4"
+                            "minting_emission_replay_key": "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1",
+                            "replay_key": "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9"
                         },
-                        "process_id": "tool-intent:v1:blake3:38e45eac3bf722392e41f2a27b147edd9a89747eab7c6a45369ae6b313ed3cf4",
+                        "process_id": "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9",
                         "policy": "cancel",
                         "reason": "recorded start intent parent ended with cancel policy"
                     }
@@ -10729,9 +10785,12 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                     execution_scope_id: "restate-parent-end-turn-1".to_string(),
                     tool_call_id: "restate-parent-end-call".to_string(),
                     intent_index: 0,
-                    replay_key: "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b".to_string(),
+                    replay_key: "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244".to_string(),
+                    minting_emission_replay_key: Some(
+                        "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1".to_string(),
+                    ),
                 },
-                process_id: "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b".to_string(),
+                process_id: "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244".to_string(),
             },
             lash_core::ToolIntentParentEndOutcome::Cancelled {
                 identity: lash_core::ToolIntentIdentity {
@@ -10739,9 +10798,12 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                     execution_scope_id: "restate-parent-end-turn-1".to_string(),
                     tool_call_id: "restate-parent-end-call".to_string(),
                     intent_index: 1,
-                    replay_key: "tool-intent:v1:blake3:38e45eac3bf722392e41f2a27b147edd9a89747eab7c6a45369ae6b313ed3cf4".to_string(),
+                    replay_key: "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9".to_string(),
+                    minting_emission_replay_key: Some(
+                        "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1".to_string(),
+                    ),
                 },
-                process_id: "tool-intent:v1:blake3:38e45eac3bf722392e41f2a27b147edd9a89747eab7c6a45369ae6b313ed3cf4".to_string(),
+                process_id: "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9".to_string(),
             },
         ]
     );
@@ -14688,13 +14750,8 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
         lash_core::ProcessParentEndPolicy::Cancel
     );
     assert_eq!(
-        lash_core::derive_tool_intent_identity(
-            &segmented_action.identity.session_id,
-            &segmented_action.identity.execution_scope_id,
-            Some(&segmented_action.identity.tool_call_id),
-            segmented_action.identity.intent_index as usize,
-        )
-        .expect("rederive retained segmented identity"),
+        lash_core::rederive_tool_intent_identity(&segmented_action.identity)
+            .expect("rederive retained segmented identity"),
         segmented_action.identity,
         "the retained action carries its full validated identity"
     );

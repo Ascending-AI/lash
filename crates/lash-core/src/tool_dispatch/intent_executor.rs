@@ -24,12 +24,7 @@ pub(crate) async fn execute_final_tool_intents(
 
     let mut outcomes = Vec::with_capacity(intents.intents.len());
     for (index, intent) in intents.intents.iter().enumerate() {
-        let identity = match crate::derive_tool_intent_identity(
-            &context.session_id,
-            &execution_scope_id,
-            tool_call_id,
-            index,
-        ) {
+        let identity = match derive_identity(context, &execution_scope_id, tool_call_id, index) {
             Ok(identity) => identity,
             Err(refusal) => {
                 outcomes.push(refused(index, intent.kind(), None, refusal));
@@ -242,13 +237,8 @@ fn refuse_all(
         .iter()
         .enumerate()
         .map(|(index, intent)| {
-            let identity = crate::derive_tool_intent_identity(
-                &context.session_id,
-                execution_scope_id,
-                tool_call_id,
-                index,
-            )
-            .ok();
+            let identity =
+                derive_identity(context, execution_scope_id, tool_call_id, index).ok();
             let span = tracing::info_span!(
                 target: "lash::tool_intent",
                 "tool_intent.execute",
@@ -263,6 +253,35 @@ fn refuse_all(
             refused(index, intent.kind(), identity, refusal.clone())
         })
         .collect()
+}
+
+fn derive_identity(
+    context: &ToolDispatchContext<'_>,
+    execution_scope_id: &str,
+    tool_call_id: Option<&str>,
+    intent_index: usize,
+) -> Result<crate::ToolIntentIdentity, crate::ToolIntentRefusalReason> {
+    match context
+        .parent_invocation
+        .as_ref()
+        .and_then(crate::RuntimeInvocation::replay_key)
+    {
+        Some(minting_emission_replay_key) => {
+            crate::tool_intent::derive_tool_intent_identity_for_emission(
+                &context.session_id,
+                execution_scope_id,
+                tool_call_id,
+                intent_index,
+                minting_emission_replay_key,
+            )
+        }
+        None => crate::derive_tool_intent_identity(
+            &context.session_id,
+            execution_scope_id,
+            tool_call_id,
+            intent_index,
+        ),
+    }
 }
 
 fn refused(
@@ -555,6 +574,7 @@ mod tests {
                 tool_call_id: "call".to_string(),
                 intent_index: 4,
                 replay_key: "tool-intent-v1-literal".to_string(),
+                minting_emission_replay_key: None,
             },
             kind: crate::ToolIntentKind::CancelProcess,
             result: serde_json::json!({"cancelled": true}),

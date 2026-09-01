@@ -63,12 +63,7 @@ impl RecordedToolIntentOutcomeBuffer {
             else {
                 continue;
             };
-            let Ok(derived) = crate::derive_tool_intent_identity(
-                &identity.session_id,
-                &identity.execution_scope_id,
-                Some(&identity.tool_call_id),
-                identity.intent_index as usize,
-            ) else {
+            let Ok(derived) = crate::rederive_tool_intent_identity(identity) else {
                 tracing::error!(
                     target: "lash::tool_intent",
                     session_id = %identity.session_id,
@@ -253,14 +248,20 @@ mod parent_end_buffer_tests {
         )
         .expect("valid intent identity");
         let mut wrong_key = valid.clone();
-        wrong_key.replay_key = "tool-intent:v1:sha256:wrong".to_string();
+        wrong_key.replay_key = "tool-intent:v1:blake3:pre-cutover".to_string();
+        let mut malformed_v2 = valid.clone();
+        malformed_v2.replay_key = "tool-intent:v2:blake3:not-a-hash".to_string();
         let mut wrong_tuple_same_key = valid.clone();
         wrong_tuple_same_key.intent_index = 1;
+        let mut wrong_emission_same_key = valid.clone();
+        wrong_emission_same_key.minting_emission_replay_key = Some("forged-emission".to_string());
 
         let buffer = RecordedToolIntentOutcomeBuffer::default();
         buffer.record(&[
             outcome(wrong_key, "wrong-key-child"),
+            outcome(malformed_v2, "malformed-v2-child"),
             outcome(wrong_tuple_same_key, "wrong-tuple-child"),
+            outcome(wrong_emission_same_key, "wrong-emission-child"),
             outcome(valid.clone(), "canonical-child"),
             outcome(valid, "conflicting-child"),
         ]);
@@ -280,7 +281,7 @@ mod parent_end_buffer_tests {
                     policy: crate::ProcessParentEndPolicy::Cancel,
                 },
             }],
-            "malformed replay keys and conflicting duplicate sightings must not alter teardown"
+            "malformed, pre-cutover, or tuple-mismatched replay keys and conflicting duplicate sightings must not alter teardown"
         );
     }
 }

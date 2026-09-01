@@ -136,6 +136,11 @@ pub enum RuntimeErrorCode {
     RestateAwaitEventRevoke,
     RestateAwaitEventSessionUpdate,
     RestateEffectController,
+    /// Continuation replay encountered a journal row addressed by the retired
+    /// tool-intent v1 key family while this build derives emission-scoped v2
+    /// keys. Re-executing would duplicate or diverge from the committed
+    /// command, so the in-flight continuation is deliberately refused.
+    ToolIntentReplayKeyFormatCutover,
     /// A Restate redrive reconstructed an effect envelope that differs from its
     /// durable journal. This commonly follows worker replacement across a
     /// deployment, but the discriminator proves divergence rather than the
@@ -544,6 +549,7 @@ impl RuntimeErrorCode {
             Self::RestateAwaitEventRevoke => "restate_await_event_revoke",
             Self::RestateAwaitEventSessionUpdate => "restate_await_event_session_update",
             Self::RestateEffectController => "restate_effect_controller",
+            Self::ToolIntentReplayKeyFormatCutover => "tool_intent_replay_key_format_cutover",
             Self::WorkerReplacementAbort => "worker_replacement_abort",
             Self::RestateJournaledEffectPoisoned => "restate_journaled_effect_poisoned",
             Self::RestateEffectHostRequiresHandlerScope => {
@@ -662,6 +668,7 @@ impl RuntimeErrorCode {
             Self::SqliteEffectReplayHashConflict
                 | Self::PostgresEffectReplayHashConflict
                 | Self::WorkerReplacementAbort
+                | Self::ToolIntentReplayKeyFormatCutover
         )
     }
 
@@ -750,6 +757,7 @@ impl RuntimeErrorCode {
                 | Self::PostgresAwaitEventEncode
                 | Self::PostgresAwaitEventSign
                 | Self::RestateEffectController
+                | Self::ToolIntentReplayKeyFormatCutover
                 | Self::ProcessPanicked
                 | Self::ProcessNotVisible
                 | Self::ProcessAlreadyTerminal
@@ -909,6 +917,7 @@ impl RuntimeErrorCode {
             "restate_await_event_revoke" => Self::RestateAwaitEventRevoke,
             "restate_await_event_session_update" => Self::RestateAwaitEventSessionUpdate,
             "restate_effect_controller" => Self::RestateEffectController,
+            "tool_intent_replay_key_format_cutover" => Self::ToolIntentReplayKeyFormatCutover,
             "worker_replacement_abort" | "restate_effect_hash_mismatch" => {
                 Self::WorkerReplacementAbort
             }
@@ -1146,6 +1155,7 @@ mod tests {
             "sqlite_effect_replay_hash_conflict",
             "postgres_effect_replay_hash_conflict",
             "worker_replacement_abort",
+            "tool_intent_replay_key_format_cutover",
         ] {
             let typed = RuntimeErrorCode::from_wire_code(code);
             assert!(typed.is_replay_mismatch(), "{code}");
@@ -1289,6 +1299,7 @@ mod tests {
             | RuntimeErrorCode::ProcessSignalWaitCancelled
             | RuntimeErrorCode::ProcessSignalWaitTimeout
             | RuntimeErrorCode::WorkerReplacementAbort
+            | RuntimeErrorCode::ToolIntentReplayKeyFormatCutover
             | RuntimeErrorCode::RestateEffectHostRequiresHandlerScope
             | RuntimeErrorCode::RestateJournaledEffectPoisoned
             | RuntimeErrorCode::RestateProcessAwait
@@ -1456,6 +1467,7 @@ mod tests {
             RuntimeErrorCode::RestateAwaitEventSessionUpdate,
             RuntimeErrorCode::RestateEffectController,
             RuntimeErrorCode::WorkerReplacementAbort,
+            RuntimeErrorCode::ToolIntentReplayKeyFormatCutover,
             RuntimeErrorCode::RestateEffectHostRequiresHandlerScope,
             RuntimeErrorCode::RestateJournaledEffectPoisoned,
             RuntimeErrorCode::RestateProcessAwait,
