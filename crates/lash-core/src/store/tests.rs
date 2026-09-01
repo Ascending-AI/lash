@@ -518,6 +518,27 @@ fn node_derivation_guard_rejects_rogue_ids() {
 }
 
 #[test]
+fn node_derivation_guard_rejects_frame_open_rogue_id() {
+    let mut commit = intent_fixture();
+    let frame_key =
+        crate::FrameKey::from_caller_material("frame-42").expect("non-empty frame material");
+    let GraphAppend { nodes, .. } = &mut commit.graph;
+    nodes[0].payload = crate::SessionNodePayload::FrameOpen {
+        frame_key,
+        reason: crate::AgentFrameReason::initial(),
+        assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+        )),
+        protocol_turn_options: crate::ProtocolTurnOptions::default(),
+    };
+
+    assert!(matches!(
+        commit.validate_node_derivation(),
+        Err(StoreError::NodeIdDerivationMismatch { .. })
+    ));
+}
+
+#[test]
 fn node_derivation_remaps_in_batch_parent_edges() {
     let operation = OperationId::turn("session", "turn", "final");
     let mut graph = GraphAppend {

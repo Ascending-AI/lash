@@ -1487,7 +1487,7 @@ async fn the_schema_gate_emits_its_decision_basis() {
         capture,
         &scratch.name,
         "allowed",
-        &["found_version=Some(69)", "finding_total=0"],
+        &["found_version=Some(70)", "finding_total=0"],
     );
 
     // (b) denied on shape.
