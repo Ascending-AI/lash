@@ -32,22 +32,22 @@
     {
       "at": 20,
       "event": "chunk",
-      "data": "data: {\"choices\":[{\"delta\":{\"content\":\"caf"
+      "payload": { "data": "data: {\"choices\":[{\"delta\":{\"content\":\"caf" }
     },
     {
       "at": 21,
       "event": "chunk",
-      "bytes": [195]
+      "payload": { "bytes": [195] }
     },
     {
       "at": 22,
       "event": "chunk",
-      "bytes": [169]
+      "payload": { "bytes": [169] }
     },
     {
       "at": 23,
       "event": "chunk",
-      "data": " \"}}]}\n\n"
+      "payload": { "data": " \"}}]}\n\n" }
     },
     {
       "at": 30,

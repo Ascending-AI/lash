@@ -228,8 +228,7 @@ impl RecordingExchange {
             if !body.is_empty() {
                 timeline.push(ProviderWireEvent::Chunk {
                     at: response_finished_at,
-                    data: Some(body),
-                    bytes: None,
+                    payload: crate::provider::ProviderWireChunkPayload::Data(body),
                 });
             }
             timeline.push(match stream_error {
@@ -292,6 +291,7 @@ impl RecordingExchange {
             captured_at: Some(Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)),
             notes: self.config.notes.clone(),
         });
+        script.validate()?;
         let mut encoded = serde_json::to_vec_pretty(&script).map_err(|error| {
             recording_error(format!("could not serialize provider recording: {error}"))
         })?;
@@ -682,6 +682,7 @@ mod tests {
             ])),
         });
         let request_match = ProviderWireRequestMatch {
+            any: false,
             body: [(
                 "messages".to_string(),
                 JsonMatcher {
@@ -777,5 +778,53 @@ mod tests {
         assert_eq!(replayed.status, 429);
         assert!(replayed_body.contains(REDACTED));
         assert!(replayed_body.contains("kept"));
+    }
+
+    #[tokio::test]
+    async fn recorder_rejects_invalid_request_matcher_before_writing() {
+        let output = tempfile::tempdir().expect("recording directory");
+        let inner = Arc::new(StaticTransport {
+            status: 200,
+            headers: Vec::new(),
+            chunks: Mutex::new(VecDeque::new()),
+        });
+        let request_match = ProviderWireRequestMatch {
+            any: true,
+            body: Default::default(),
+            headers: [("x-request-id".to_string(), HeaderMatcher::default())]
+                .into_iter()
+                .collect(),
+        };
+        let recorder = RecordingLlmHttpTransport::new(
+            inner,
+            ProviderRecordingConfig::new(output.path(), "invalid_matcher", "openai")
+                .with_request_match(request_match),
+        );
+        let response = recorder
+            .send(
+                LlmHttpRequest {
+                    method: LlmHttpMethod::Post,
+                    url: "https://api.example/v1/responses".to_string(),
+                    headers: Vec::new(),
+                    body: Bytes::new(),
+                    body_for_error: None,
+                    response_start_timeout_message: None,
+                },
+                None,
+            )
+            .await
+            .expect("response before recording is finalized");
+
+        let error = read_http_body_text(response.body, None, "read response")
+            .await
+            .expect_err("invalid matcher must prevent recording");
+        assert_eq!(error.kind, ProviderFailureKind::Validation);
+        assert!(error.message.contains("request matcher cannot combine"));
+        assert!(
+            recorder
+                .recorded_paths()
+                .expect("recorded paths")
+                .is_empty()
+        );
     }
 }

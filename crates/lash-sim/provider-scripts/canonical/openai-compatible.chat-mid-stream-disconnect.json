@@ -31,7 +31,7 @@
     {
       "at": 20,
       "event": "chunk",
-      "data": "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}"
+      "payload": { "data": "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}" }
     },
     {
       "at": 21,

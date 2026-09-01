@@ -3,7 +3,7 @@
   "name": "oauth.token-invalid-client-401",
   "provider_kind": "oauth_token",
   "endpoint": { "method": "POST", "path": "/token" },
-  "request_match": {},
+  "request_match": { "any": true },
   "timeline": [{
     "at": 0,
     "event": "http_error",
