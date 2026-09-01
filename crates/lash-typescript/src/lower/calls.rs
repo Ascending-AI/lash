@@ -690,7 +690,7 @@ impl Lowerer {
             .is_some_and(|root| !self.has_binding(root) && !is_ecma_global_namespace(root));
         let receiver_shadows_module_authority = module_root
             .as_deref()
-            .filter(|root| self.has_binding(root) && !is_ecma_global_namespace(root));
+            .filter(|root| self.has_binding(root) && self.module_authority_roots.contains(*root));
         if !receiver_is_module_authority
             && let Some(lowered) = self.lower_regexp_method(object, method, args)?
         {
