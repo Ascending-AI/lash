@@ -1243,6 +1243,31 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
 }
 
 #[tokio::test]
+async fn sqlite_effect_controller_rejects_retained_generation_15_schema_before_serving() {
+    const RETAINED_PRIOR_EFFECT_GENERATION: i32 = 15;
+    assert_eq!(RETAINED_PRIOR_EFFECT_GENERATION + 1, 16);
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("retained-generation-15-effects.db");
+    let conn = rusqlite::Connection::open(&path).expect("open retained effect db");
+    conn.pragma_update(None, "user_version", RETAINED_PRIOR_EFFECT_GENERATION)
+        .expect("stamp retained prior effect schema");
+    drop(conn);
+
+    let error =
+        match SqliteRuntimeEffectController::open(&path, durable_turn_scope("session", "turn"))
+            .await
+        {
+            Ok(_) => panic!("retained prior effect stores must be recreated"),
+            Err(error) => error,
+        };
+    let message = error.to_string();
+    assert!(message.contains("Unsupported lash effect replay schema"));
+    assert!(message.contains("supports schema version 16"));
+    assert!(message.contains("database reports version 15"));
+}
+
+#[tokio::test]
 async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("malformed-trigger.db");
