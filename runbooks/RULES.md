@@ -5,9 +5,9 @@ Read this before running any scenario in `runbooks/`. Each runbook links here an
 phases, and scorecard.
 
 `runbooks/` has **two layers**. Scripted deterministic harnesses
-(`runbooks/restate-postgres-workers/`, driven by `just restate-postgres-workers-e2e` and the
-`scripts/*-e2e.sh` runners) are gate **evidence**: they boot real infrastructure and assert
-exact outcomes, and they stay scripts. Browser runbooks are the **agent-judged semantic
+(`runbooks/restate-postgres-workers/`, `runbooks/rlm-smoke/`, and the
+`scripts/*-e2e.sh` runners) are gate **evidence**: they boot real hosts or infrastructure
+and assert exact outcomes, and they stay scripts. Browser runbooks are the **agent-judged semantic
 layer** on top: you (the agent) drive the example apps through browser automation and judge
 the result with your own reasoning, gating on what the browser surface actually renders.
 Keep the layers separate — a runbook never re-implements a scripted harness, and a
@@ -29,6 +29,7 @@ judged. **Manual judged** is the semantic browser or static-page runbook layer.
 | `agent-workbench` | `Test docs + build cache` runs `Check workspace (all targets)` and `Package feature checks` runs the package-scoped workbench check; `Test shard ${{ matrix.shard }}/4` runs `Test workspace shard`. | `Functional E2E (agent-workbench)` runs `agent-workbench-restate-e2e` with Restate and Postgres live tests; it is not a browser journey. | [`workbench-process-lifecycle`](workbench-process-lifecycle/runbook.md), [`workbench-session-resume`](workbench-session-resume/runbook.md), and [`workbench-deferred-tools`](workbench-deferred-tools/runbook.md), plus the other `workbench-*` runbooks. |
 | `docs-snippets` | `Test docs + build cache` runs `Check workspace (all targets)`, which compiles the snippet target; `Repository gates` runs the docs lints and the full-profile facade contract job checks the generated API gates. | None. `Publish docs` publishes the checked-in static docs; it does not judge a hosted quickstart journey. | [`docs-quickstart`](docs-quickstart/runbook.md). |
 | `slack-clone` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/4` runs the workspace tests, including the Slack package tests. | `Functional E2E (slack-clone-full-host)` is token-free and deterministic. The separate `Slack-clone live-model acceptance` workflow is dispatch-only and uses exact nonce/tool/UI oracles around real OpenRouter turns. | [`slack-clone-bot`](slack-clone-bot/runbook.md), whose Phase 3M carries MCP client depth and runtime integration attach/detach. |
+| `rlm-smoke` | The workspace check compiles `rlm-smoke-host`; its focused tests prove path, symlink, and command jail refusals. | `just rlm-smoke-e2e` runs `file-edit-bugfix`, `missing-helper-file`, and `config-contract-edit` against exact shell oracles after live OpenRouter turns, once per dialect. It is a local/manual paid gate, not per-PR CI. | None. These are scripted deterministic-oracle rows, never judged browser rows. |
 | `workflow-graph-roundtrip` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/4` runs workspace tests; `Lint` runs `Check workflow graph model`. | Partial: `Functional E2E (workflow-graph-roundtrip)` runs `workflow-graph-integration-verify` (frontend production build, backend tests, and model check); it does not judge the browser journey. | [`workflow-editor-authoring`](workflow-editor-authoring/runbook.md). |
 
 ## Dialect parity is mandatory

@@ -5,12 +5,11 @@
 # Tests deliberately stay out of hooks: the full workspace suite is minutes
 # long and belongs to the development loop and CI's Test job — a hook that
 # slow gets --no-verify'd and rots.
-# docs/pagefind is a generated search index; scenarios/ holds replay
-# fixtures whose bytes are load-bearing. Neither should be "fixed".
+# docs/pagefind is a generated search index whose bytes are load-bearing.
 # The vendored Test262 corpus (tests, upstream harness, LICENSE) is kept
 # byte-for-byte at its pinned upstream commit and sync-verified; "fixing"
 # its whitespace breaks the byte-comparison.
-exclude: '^(docs/pagefind/|scenarios/|crates/lash-typescript/tests/test262/(test/|harness/|LICENSE))'
+exclude: '^(docs/pagefind/|crates/lash-typescript/tests/test262/(test/|harness/|LICENSE))'
 repos:
   - repo: builtin
     hooks:

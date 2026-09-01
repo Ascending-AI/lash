@@ -3862,6 +3862,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rlm-smoke-host"
+version = "0.0.0-dev"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "lash-internal-provider-openai",
+ "lash-internal-sqlite-store",
+ "lash-runtime",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "rmcp"
 version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

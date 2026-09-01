@@ -39,6 +39,7 @@ members = [
     "examples/slack-clone",
     "examples/workflow-graph-roundtrip",
     "runbooks/restate-postgres-workers",
+    "runbooks/rlm-smoke",
 ]
 # `cargo build` from the repo root compiles only the publishable SDK surface.
 # Internal bins/benches/examples build with `cargo build --workspace` or `-p <name>`.

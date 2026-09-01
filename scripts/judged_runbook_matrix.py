@@ -76,6 +76,7 @@ def tier_violations(config: dict[str, object]) -> list[str]:
         "scenarios",
         "typescript_only",
         "no_rlm_session_only",
+        "scripted_live_model",
         "deterministic_only",
     ):
         for scenario, entry in config[group].items():

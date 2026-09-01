@@ -32,6 +32,9 @@ agent-workbench-foreground port='3030':
 toolbench model='z-ai/glm-5.3-flash' *args:
   cargo run -p toolbench --locked -- --model "{{model}}" {{args}}
 
+rlm-smoke-e2e:
+  bash "{{repo}}/scripts/rlm-smoke-e2e.sh"
+
 # The slack-clone example is three processes: the platform on `port`, the bot on
 # `port + 1`, and the runtime-attachable HTTP MCP server on `port + 2`. `up`
 # starts them and waits for the bot to register for events.
