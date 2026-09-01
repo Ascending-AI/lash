@@ -18,10 +18,9 @@ impl ToolRegistry {
         provider: Arc<dyn ToolProvider>,
         orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
     ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_registrations_with_hidden_tools(
+        Self::from_tool_registrations(
             vec![(PLUGIN_TOOL_SOURCE_ID.to_string(), vec![provider])],
             orchestrating_tools,
-            BTreeSet::new(),
         )
     }
 
@@ -29,38 +28,21 @@ impl ToolRegistry {
     pub(crate) fn from_tool_providers(
         providers: Vec<Arc<dyn ToolProvider>>,
     ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_providers_with_hidden_tools(providers, BTreeSet::new())
+        Self::from_tool_provider_sources(vec![(PLUGIN_TOOL_SOURCE_ID.to_string(), providers)])
     }
 
     #[cfg(test)]
-    pub(crate) fn from_tool_providers_with_hidden_tools(
-        providers: Vec<Arc<dyn ToolProvider>>,
-        hidden_tool_names: BTreeSet<String>,
-    ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_provider_sources_with_hidden_tools(
-            vec![(PLUGIN_TOOL_SOURCE_ID.to_string(), providers)],
-            hidden_tool_names,
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_tool_provider_sources_with_hidden_tools(
+    pub(crate) fn from_tool_provider_sources(
         sources: Vec<(String, Vec<Arc<dyn ToolProvider>>)>,
-        hidden_tool_names: BTreeSet<String>,
     ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_registrations_with_hidden_tools(
-            sources,
-            Vec::new(),
-            hidden_tool_names,
-        )
+        Self::from_tool_registrations(sources, Vec::new())
     }
 
-    pub(crate) fn from_tool_registrations_with_hidden_tools(
+    pub(crate) fn from_tool_registrations(
         sources: Vec<(String, Vec<Arc<dyn ToolProvider>>)>,
         orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
-        hidden_tool_names: BTreeSet<String>,
     ) -> Result<Self, ReconfigureError> {
-        let registry = Self::empty_with_hidden_tools(hidden_tool_names);
+        let registry = Self::empty();
         for (source_id, providers) in sources {
             registry.upsert_source(Arc::new(ToolProviderSource::new(
                 source_id, providers,
@@ -73,10 +55,6 @@ impl ToolRegistry {
     }
 
     pub(crate) fn empty() -> Self {
-        Self::empty_with_hidden_tools(BTreeSet::new())
-    }
-
-    fn empty_with_hidden_tools(hidden_tool_names: BTreeSet<String>) -> Self {
         Self {
             sources: Arc::new(RwLock::new(BTreeMap::new())),
             state: Arc::new(RwLock::new(ToolRegistryState {
@@ -84,7 +62,6 @@ impl ToolRegistry {
                 surface: ToolSurface::default(),
                 next_live_source_id: 0,
             })),
-            hidden_tool_names: Arc::new(hidden_tool_names),
         }
     }
 
@@ -127,7 +104,6 @@ impl ToolRegistry {
                 &sources,
                 ReconcileMode::SnapshotSurface,
                 None,
-                &self.hidden_tool_names,
             )?
         };
 
@@ -151,7 +127,7 @@ impl ToolRegistry {
     /// Unlike [`apply_state`](Self::apply_state) — which applies an incremental
     /// *delta* expected at the current generation and bumps it by one — a
     /// restore rebuilds from the current live source surface and overlays the
-    /// snapshot's per-id membership. A byte-equivalent surface remains at `G`;
+    /// snapshot's per-id host curation. A byte-equivalent surface remains at `G`;
     /// a new tool, refreshed manifest, rebound orphan, or superseded orphan
     /// bumps to `G + 1` so persistence captures the served surface. Cold
     /// rebuilds can therefore restore a session whose catalog reached
@@ -163,7 +139,7 @@ impl ToolRegistry {
     /// manifest, excluded from the catalog as a non-member, rebound when its
     /// source returns) instead of failing the whole restore. Tool id is the
     /// registry identity; the live manifest wins on rebind, with persisted Tool
-    /// Catalog membership preserved per id. The live source also re-derives the
+    /// Host curation is preserved per id. The live source also re-derives the
     /// registration lane, so snapshots written before lane persistence remain
     /// resumable. Newly advertised ids are members by default. Consequently an
     /// opt-out does not transfer when a provider replaces a tool with a new id,
@@ -181,7 +157,6 @@ impl ToolRegistry {
                 &sources,
                 ReconcileMode::LiveSurface,
                 None,
-                &self.hidden_tool_names,
             )?
         };
 
@@ -204,9 +179,9 @@ impl ToolRegistry {
     ) -> Result<Self, ReconfigureError> {
         let registry = if include_base_tools {
             self.refresh_sources()?;
-            self.fork_with_state(self.export_state())?
+            self.pin_current_surface()
         } else {
-            Self::empty_with_hidden_tools((*self.hidden_tool_names).clone())
+            Self::empty()
         };
         registry.upsert_overlay_source(Arc::new(ToolProviderSource::new(
             "context",
@@ -215,11 +190,22 @@ impl ToolRegistry {
         Ok(registry)
     }
 
+    /// Admit each live source once, compose the session overlay, and freeze
+    /// the resulting surface for one model request.
+    pub(crate) fn pin_session_surface(
+        &self,
+        include_base_tools: bool,
+        context_providers: Vec<Arc<dyn ToolProvider>>,
+    ) -> Result<Self, ReconfigureError> {
+        let registry = self.compose_session_catalog(include_base_tools, context_providers)?;
+        Ok(registry.pin_current_surface())
+    }
+
     pub(crate) fn upsert_source(
         &self,
         source: Arc<dyn ToolSourceExecutor>,
     ) -> Result<u64, ReconfigureError> {
-        self.reconcile_source(source, SourceReconcilePolicy::RejectExternalConflicts)
+        self.reconcile_source(source)
     }
 
     pub(crate) fn remove_source_id(&self, source_id: &str) -> Result<u64, ReconfigureError> {
@@ -252,13 +238,51 @@ impl ToolRegistry {
         &self,
         source: Arc<dyn ToolSourceExecutor>,
     ) -> Result<u64, ReconfigureError> {
-        self.reconcile_source(source, SourceReconcilePolicy::OverlayReplacingConflicts)
+        let source_key = source.source_key();
+        let manifests = source
+            .advertised_tools()
+            .into_iter()
+            .map(|manifest| manifest_with_compact_contract(source.as_ref(), manifest))
+            .collect::<Vec<_>>();
+        validate_unique_manifests(&manifests)?;
+
+        let mut next_state = self.state.read_recover().clone();
+        let curated = next_state
+            .surface
+            .by_id
+            .iter()
+            .map(|(id, entry)| (id.clone(), entry.member))
+            .collect::<BTreeMap<_, _>>();
+        let previous = export_tool_state_entries(&next_state.surface);
+        for manifest in manifests {
+            let id = manifest.id.clone();
+            insert_advertised_entry(
+                &mut next_state.surface,
+                &source_key,
+                source.registration_kind(),
+                manifest,
+                Some(&source_key),
+            )?;
+            if let Some(member) = curated.get(&id)
+                && let Some(entry) = next_state.surface.get_mut(&id)
+            {
+                entry.member = *member;
+            }
+        }
+        next_state.surface.debug_assert_invariant();
+        if export_tool_state_entries(&next_state.surface) != previous {
+            next_state.generation = reconciled_generation(next_state.generation, true)?;
+        }
+
+        self.sources.write_recover().insert(source_key, source);
+        let generation = next_state.generation;
+        *self.state.write_recover() = next_state;
+        Ok(generation)
     }
 
     fn reconcile_source(
         &self,
         source: Arc<dyn ToolSourceExecutor>,
-        policy: SourceReconcilePolicy,
     ) -> Result<u64, ReconfigureError> {
         let source_key = source.source_key();
         let mut sources = self
@@ -276,14 +300,11 @@ impl ToolRegistry {
         }
         sources.insert(source_key.clone(), Arc::clone(&source));
         let snapshot = self.export_state();
-        let preferred_source_key = (policy == SourceReconcilePolicy::OverlayReplacingConflicts)
-            .then_some(&source_key);
         let reconciled = reconcile_tool_state_entries(
             snapshot.entries(),
             &sources,
             ReconcileMode::LiveSurface,
-            preferred_source_key,
-            &self.hidden_tool_names,
+            None,
         )?;
 
         self.sources
@@ -316,7 +337,6 @@ impl ToolRegistry {
             &sources,
             ReconcileMode::LiveSurface,
             None,
-            &self.hidden_tool_names,
         )?;
         let mut state = self
             .state
@@ -327,6 +347,20 @@ impl ToolRegistry {
             state.generation = reconciled_generation(state.generation, true)?;
         }
         Ok(state.generation)
+    }
+
+    fn pin_current_surface(&self) -> Self {
+        let sources = self
+            .sources
+            .read_recover()
+            .iter()
+            .map(|(key, source)| (key.clone(), Arc::clone(source)))
+            .collect();
+        let state = self.state.read_recover().clone();
+        Self {
+            sources: Arc::new(RwLock::new(sources)),
+            state: Arc::new(RwLock::new(state)),
+        }
     }
 
     pub(crate) fn fork_with_state(&self, snapshot: ToolState) -> Result<Self, ReconfigureError> {
@@ -341,7 +375,6 @@ impl ToolRegistry {
             &sources,
             ReconcileMode::LiveSurface,
             None,
-            &self.hidden_tool_names,
         )?;
         let generation = reconciled_generation(snapshot.generation.max(1), rebound.changed)?;
         Ok(Self {
@@ -351,7 +384,6 @@ impl ToolRegistry {
                 surface: rebound.surface,
                 next_live_source_id: 0,
             })),
-            hidden_tool_names: Arc::clone(&self.hidden_tool_names),
         })
     }
 }

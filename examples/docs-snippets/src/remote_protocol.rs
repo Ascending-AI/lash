@@ -1441,11 +1441,8 @@ mod asserted_tool_examples {
             lash::TurnBudget::Bounded(limit) if limit.get() == 8
         ));
         let persisted = lash::persistence::PersistedSessionConfig {
-            provider_id: String::new(),
-            model: lash::ModelSpec::default(),
-            turn_budget: core_budget,
             prompt: Some(lash::prompt::PromptLayer::new()),
-            generation: lash::direct::GenerationOptions::default(),
+            ..lash::persistence::PersistedSessionConfig::new(core_budget)
         };
         assert_eq!(persisted.turn_budget, core_budget);
         let encoded = serde_json::to_value(&persisted).expect("serialize persisted config");

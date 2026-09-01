@@ -606,6 +606,15 @@ impl RuntimeCheckpointComponents {
 /// (head-revision CAS guard, pending dirty-write buffers, graph-flush
 /// flag). Public serialization goes through [`RuntimeSessionState::to_snapshot`],
 /// which drops runtime-only fields by construction.
+/// Durable authority inputs required to reconstruct a session on another worker.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct RuntimeSessionAuthority {
+    #[serde(default)]
+    pub tool_access: crate::SessionToolAccess,
+    #[serde(default)]
+    pub subagent: Option<crate::SubagentSessionContext>,
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeSessionState {
     pub session_id: String,
@@ -625,6 +634,9 @@ pub struct RuntimeSessionState {
     pub last_prompt_usage: Option<PromptUsage>,
     #[serde(default)]
     pub protocol_turn_options: crate::ProtocolTurnOptions,
+    /// Durable authority used to rebuild the session's Tool Catalog policy.
+    #[serde(flatten)]
+    pub authority: Box<RuntimeSessionAuthority>,
     #[serde(skip, default)]
     #[doc(hidden)]
     pub checkpoint_components: RuntimeCheckpointComponents,
@@ -664,6 +676,7 @@ impl RuntimeSessionState {
             token_usage: TokenUsage::default(),
             last_prompt_usage: None,
             protocol_turn_options: crate::ProtocolTurnOptions::default(),
+            authority: Box::default(),
             checkpoint_components: RuntimeCheckpointComponents::complete_empty(),
             plugin_snapshot_revision: None,
             token_ledger: Vec::new(),
@@ -676,6 +689,8 @@ impl RuntimeSessionState {
     /// Builds a `RuntimeSessionState` from snapshot data for protocol and process-engine
     /// implementors while materializing or restoring protocol session state.
     pub fn from_snapshot(snapshot: SessionSnapshot) -> Self {
+        // Authority deliberately defaults here and must be restored by apply_session_head;
+        // consuming a snapshot without the subsequent head apply would widen authority.
         let checkpoint_components = RuntimeCheckpointComponents::from_snapshot(&snapshot);
         let agent_frames = snapshot
             .session_graph
@@ -690,6 +705,7 @@ impl RuntimeSessionState {
             token_usage: snapshot.token_usage,
             last_prompt_usage: snapshot.last_prompt_usage,
             protocol_turn_options: snapshot.protocol_turn_options,
+            authority: Box::default(),
             checkpoint_components,
             plugin_snapshot_revision: snapshot.plugin_snapshot_revision,
             token_ledger: snapshot.token_ledger,
@@ -1246,6 +1262,8 @@ pub(super) fn apply_session_head(
         .iter()
         .map(|node| node.node_id.clone())
         .collect();
+    state.authority.tool_access = head.config.tool_access.clone();
+    state.authority.subagent = head.config.subagent.clone();
     apply_persisted_session_config(&mut state.policy, &head.config);
 }
 

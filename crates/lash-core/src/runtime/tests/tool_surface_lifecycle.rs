@@ -255,6 +255,133 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
 }
 
 #[tokio::test]
+async fn park_resume_restores_tool_and_subagent_authority() {
+    let visible = DynamicToolSpec::new(
+        "tool:authority_visible",
+        "authority_visible",
+        "present before and after the worker bounce",
+    );
+    let hidden = DynamicToolSpec::new(
+        "tool:authority_hidden",
+        "authority_hidden",
+        "appears only after the worker bounce",
+    );
+    let surface = Arc::new(DynamicToolSurface::new(vec![visible.clone()]));
+    let provider: Arc<dyn crate::ToolProvider> = surface.clone();
+    let plugin_host = dynamic_plugin_host(provider);
+    let authority = SessionAuthorityContext {
+        tool_access: crate::SessionToolAccess {
+            tools: Vec::new(),
+            hidden_tools: [hidden.name.to_string()].into_iter().collect(),
+        },
+        subagent: Some(crate::SubagentSessionContext {
+            parent_session_id: "authority-parent".to_string(),
+            capability: "authority-capability".to_string(),
+            depth: 2,
+            max_depth: 4,
+        }),
+        ..SessionAuthorityContext::default()
+    };
+    let plugins = plugin_host
+        .build_session_with_parent(
+            "authority-child",
+            Some("authority-parent".to_string()),
+            crate::plugin::SessionCreationConfig {
+                authority,
+                ..Default::default()
+            },
+        )
+        .expect("initial authority plugin session");
+    let store = Arc::new(RecordingStore::default());
+    let owner = crate::LeaseOwnerIdentity::opaque("authority-worker", "authority-boot");
+    let mut runtime = LashRuntime::from_persistent_embedded_state(
+        standard_test_policy(),
+        test_host_config(),
+        crate::PersistentRuntimeServices::new(plugins, store),
+        root_state("authority-child"),
+        owner.clone(),
+    )
+    .await
+    .expect("initial authority runtime");
+    runtime.stamp_live_plugin_state();
+    let parked = runtime.park().await.expect("persist authority runtime");
+
+    surface.replace(vec![visible, hidden.clone()]);
+    let env = runtime_environment(plugin_host);
+    let resumed = LashRuntime::resume(parked, &env, owner)
+        .await
+        .expect("resume authority runtime");
+
+    let names = catalog_names(&resumed);
+    assert!(names.contains(&"authority_visible".to_string()));
+    assert!(
+        !names.contains(&hidden.name.to_string()),
+        "a newly live tool must still be hidden by persisted authority after a worker bounce: {names:?}"
+    );
+    let resumed_subagent = resumed
+        .session
+        .as_ref()
+        .expect("resumed session")
+        .plugins()
+        .subagent_context()
+        .expect("persisted subagent context");
+    assert_eq!(resumed_subagent.parent_session_id, "authority-parent");
+    assert_eq!(resumed_subagent.capability, "authority-capability");
+    assert_eq!(resumed_subagent.depth, 2);
+    assert_eq!(resumed_subagent.max_depth, 4);
+}
+
+#[tokio::test]
+async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authority() {
+    let hidden = DynamicToolSpec::new(
+        "tool:persisted_broader",
+        "persisted_broader",
+        "visible only under the broader persisted authority",
+    );
+    let surface = Arc::new(DynamicToolSurface::new(vec![hidden.clone()]));
+    let provider: Arc<dyn crate::ToolProvider> = surface;
+    let plugin_host = dynamic_plugin_host(provider);
+    let plugins = plugin_host
+        .build_session_with_parent(
+            "persisted-broader",
+            None,
+            crate::plugin::SessionCreationConfig {
+                authority: hidden_authority(hidden.name),
+                ..Default::default()
+            },
+        )
+        .expect("narrower live-authority plugin session");
+    let store = Arc::new(RecordingStore::default());
+    let owner = crate::LeaseOwnerIdentity::opaque("persisted-worker", "persisted-boot");
+    let mut runtime = LashRuntime::from_persistent_embedded_state(
+        standard_test_policy(),
+        test_host_config(),
+        crate::PersistentRuntimeServices::new(plugins, store),
+        root_state("persisted-broader"),
+        owner.clone(),
+    )
+    .await
+    .expect("initial narrower-authority runtime");
+    assert!(
+        !catalog_names(&runtime).contains(&hidden.name.to_string()),
+        "the live session-open authority must start narrower"
+    );
+
+    runtime.stamp_live_plugin_state();
+    runtime.state.authority = Box::default();
+    let parked = runtime.park().await.expect("persist broader authority");
+    let resumed = LashRuntime::resume(parked, &runtime_environment(plugin_host), owner)
+        .await
+        .expect("resume broader persisted authority");
+
+    let names = catalog_names(&resumed);
+    assert!(
+        names.contains(&hidden.name.to_string()),
+        "persisted broader authority must win; live narrowing is ignored: {names:?}"
+    );
+}
+
+#[tokio::test]
 async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes() {
     let session_id = "filter-session";
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
@@ -1042,11 +1169,11 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
         "the fork reconciles the stale parent snapshot over current providers"
     );
     assert!(
-        !child_state
+        child_state
             .get(&crate::ToolId::from(hidden.id))
             .expect("hidden child entry")
             .is_member(),
-        "hidden policy is registry authority, even for a newly discovered id"
+        "child authority must not rewrite ToolId-keyed host curation"
     );
     let names = manager
         .tool_catalog(&handle.session_id)
@@ -1059,7 +1186,72 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
     assert!(!names.contains(&curated.name.to_string()));
     assert!(!names.contains(&hidden.name.to_string()));
     assert_executes_by_id(&child, discovered.id).await;
-    assert_rejected_by_id(&child, hidden.id).await;
+    drop(child);
+
+    manager
+        .set_tool_membership(&handle.session_id, &[hidden.name.to_string()], false)
+        .await
+        .expect("explicitly curate the authority-hidden tool out");
+    manager
+        .set_tool_membership(&handle.session_id, &[hidden.name.to_string()], true)
+        .await
+        .expect("explicitly restore host curation");
+    let child = child_handle.runtime.lock().await;
+    assert!(
+        child
+            .tool_state()
+            .expect("child state after explicit re-add")
+            .get(&crate::ToolId::from(hidden.id))
+            .expect("hidden child entry after explicit re-add")
+            .is_member(),
+        "authority policy must not silently undo set_tool_membership(true)"
+    );
+    assert!(
+        !catalog_names(&child).contains(&hidden.name.to_string()),
+        "authority still suppresses a host-curated member from the effective surface"
+    );
+}
+
+#[tokio::test]
+async fn broader_authority_fork_regains_parent_hidden_tool() {
+    let hidden = DynamicToolSpec::new(
+        "tool:broader_fork",
+        "broader_fork",
+        "hidden only from the parent",
+    );
+    let provider: Arc<dyn crate::ToolProvider> =
+        Arc::new(DynamicToolSurface::new(vec![hidden.clone()]));
+    let plugin_host = dynamic_plugin_host(provider);
+    let parent = build_hidden_session(plugin_host.as_ref(), "narrow-parent", hidden.name, None);
+    assert!(
+        parent
+            .tool_registry()
+            .export_state()
+            .get(&crate::ToolId::from(hidden.id))
+            .expect("parent hidden entry")
+            .is_member(),
+        "the parent's authority must not become inherited curation"
+    );
+
+    let child = parent
+        .fork_for_child_session(
+            "broader-child",
+            Some("narrow-parent".to_string()),
+            crate::plugin::SessionCreationConfig::default(),
+        )
+        .expect("fork with broader child authority");
+    let session = crate::Session::new(crate::RuntimeServices::new(child), "broader-child")
+        .await
+        .expect("broader child session");
+    let surface = session
+        .pin_tool_surface("broader-child", &crate::SessionToolAccess::default(), None)
+        .expect("broader child request surface");
+
+    assert!(
+        surface.tool_catalog().has_callable_tool(hidden.name),
+        "the child re-derives authority instead of inheriting the parent's hide"
+    );
+    assert!(surface.tools().resolve_manifest(hidden.name).is_some());
 }
 
 #[tokio::test]
@@ -1132,7 +1324,6 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
     assert!(names.contains(&discovered.name.to_string()));
     assert!(!names.contains(&hidden.name.to_string()));
     assert_executes_by_id(&runtime, discovered.id).await;
-    assert_rejected_by_id(&runtime, hidden.id).await;
 }
 
 #[tokio::test]
@@ -1172,14 +1363,14 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
     .expect("initial hidden persistent runtime");
     assert!(!catalog_names(&runtime).contains(&hidden.name.to_string()));
     assert!(
-        !runtime
+        runtime
             .tool_state()
             .expect("initial hidden state")
             .get(&crate::ToolId::from(hidden.id))
             .expect("initial hidden entry")
-            .is_member()
+            .is_member(),
+        "authority hiding must not become persisted curation"
     );
-    assert_rejected_by_id(&runtime, hidden.id).await;
     runtime.stamp_live_plugin_state();
     drop(runtime.park().await.expect("persist hidden child"));
 
@@ -1208,7 +1399,6 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
     assert!(names.contains(&discovered.name.to_string()));
     assert!(!names.contains(&hidden.name.to_string()));
     assert_executes_by_id(&rebuilt, discovered.id).await;
-    assert_rejected_by_id(&rebuilt, hidden.id).await;
 }
 
 #[tokio::test]

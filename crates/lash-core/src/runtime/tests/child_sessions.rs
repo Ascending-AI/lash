@@ -1,6 +1,5 @@
 use super::*;
 use crate::AttachmentStore as _;
-use crate::ToolProvider as _;
 use crate::facade_support::ToolStateFacadeOps;
 use lash_sansio::sync::MutexExt;
 
@@ -624,7 +623,7 @@ impl crate::plugin::SessionPlugin for MemoryProbePlugin {
 }
 
 #[tokio::test]
-async fn forked_child_session_keeps_hidden_live_tool_non_executable_across_rebuild() {
+async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebuild() {
     let plugin_host = crate::PluginHost::new(vec![Arc::new(MemoryProbeFactory)]);
     let plugin_session = plugin_host.build_session("root").expect("plugins");
     let mut runtime = LashRuntime::from_embedded_state(
@@ -673,20 +672,6 @@ async fn forked_child_session_keeps_hidden_live_tool_non_executable_across_rebui
         .get(&handle.session_id)
         .cloned()
         .expect("managed child runtime");
-    let tool_id = crate::ToolId::from("tool:memory_probe");
-    let execute_hidden = |registry: Arc<crate::ToolRegistry>| {
-        let tool_id = tool_id.clone();
-        async move {
-            registry
-                .execute_by_id(
-                    &tool_id,
-                    &json!({}),
-                    &crate::testing::mock_attempt_context(),
-                )
-                .await
-        }
-    };
-
     let registry = {
         let child = child_handle.runtime.lock().await;
         child
@@ -697,16 +682,12 @@ async fn forked_child_session_keeps_hidden_live_tool_non_executable_across_rebui
             .tool_registry()
     };
     assert!(
-        !registry
+        registry
             .export_state()
             .get(&crate::ToolId::from("tool:memory_probe"))
-            .expect("hidden entry retained as policy")
-            .is_member()
-    );
-    let result = execute_hidden(Arc::clone(&registry)).await;
-    assert!(
-        !result.is_success(),
-        "hidden id must not execute: {result:?}"
+            .expect("authority-hidden entry retained with curation")
+            .is_member(),
+        "fork authority must not latch into the child's membership bit"
     );
 
     let catalog = manager
@@ -727,11 +708,6 @@ async fn forked_child_session_keeps_hidden_live_tool_non_executable_across_rebui
             .expect("rebuild child catalog from live sources");
         child_handle.publish_from(&child);
     }
-    let result = execute_hidden(registry).await;
-    assert!(
-        !result.is_success(),
-        "hidden id must remain non-executable after rebuild: {result:?}"
-    );
     let rebuilt_catalog = manager
         .tool_catalog(&handle.session_id)
         .await

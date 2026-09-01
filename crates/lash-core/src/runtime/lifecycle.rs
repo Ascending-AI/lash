@@ -186,6 +186,10 @@ impl LashRuntime {
         if state_policy_was_unconfigured {
             state.policy = policy.clone();
         }
+        if state.checkpoint_ref.is_none() && state.head_revision == 0 {
+            state.authority.tool_access = services.plugins.tool_access().clone();
+            state.authority.subagent = services.plugins.subagent_context().cloned();
+        }
         state.ensure_agent_frame_initialized();
         if state.effective_policy().model.id.trim().is_empty() {
             return Err(SessionError::Protocol(
@@ -517,14 +521,20 @@ impl LashRuntime {
                 "RuntimeEnvironment.plugin_host is required for from_environment".to_string(),
             )
         })?;
+        let parent_session_id = state
+            .authority
+            .subagent
+            .as_ref()
+            .map(|subagent| subagent.parent_session_id.clone());
         let authority = crate::plugin::SessionAuthorityContext {
+            tool_access: state.authority.tool_access.clone(),
+            subagent: state.authority.subagent.clone(),
             plugin_options,
-            ..crate::plugin::SessionAuthorityContext::default()
         };
         let plugin_session = match state.plugin_snapshot() {
             Some(snapshot) => plugin_host.rematerialize_session_with_parent(
                 state.session_id.as_str(),
-                None,
+                parent_session_id.clone(),
                 snapshot,
                 crate::plugin::RecordedSessionConfig {
                     authority,
@@ -533,7 +543,7 @@ impl LashRuntime {
             ),
             None => plugin_host.build_session_with_parent(
                 state.session_id.as_str(),
-                None,
+                parent_session_id,
                 crate::plugin::SessionCreationConfig {
                     authority,
                     protocol_turn_options: state.protocol_turn_options.clone(),

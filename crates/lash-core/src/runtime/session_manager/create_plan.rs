@@ -138,6 +138,8 @@ fn build_runtime_state(
     base.head_revision = 0;
     base.checkpoint_components.complete_for_new_session()?;
     base.policy = policy.clone();
+    base.authority.tool_access = request.tool_access.clone();
+    base.authority.subagent = request.subagent.clone();
     base.session_graph = crate::SessionGraph::default();
     base.agent_frames.clear();
     base.current_frame_node_id = None;

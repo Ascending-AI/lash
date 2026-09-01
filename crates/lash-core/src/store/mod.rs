@@ -286,7 +286,10 @@ impl SessionHeadMeta {
 fn persisted_session_config_from_state(
     state: &crate::RuntimeSessionState,
 ) -> crate::PersistedSessionConfig {
-    crate::PersistedSessionConfig::from(&state.policy)
+    let mut config = crate::PersistedSessionConfig::from(&state.policy);
+    config.tool_access = state.authority.tool_access.clone();
+    config.subagent = state.authority.subagent.clone();
+    config
 }
 
 #[derive(Clone, Debug)]
@@ -829,6 +832,10 @@ fn persisted_session_state_from_head(
         token_usage: crate::TokenUsage::default(),
         last_prompt_usage: None,
         protocol_turn_options: crate::ProtocolTurnOptions::default(),
+        authority: Box::new(crate::runtime::state::RuntimeSessionAuthority {
+            tool_access: head.config.tool_access.clone(),
+            subagent: head.config.subagent.clone(),
+        }),
         checkpoint_components: crate::runtime::state::RuntimeCheckpointComponents::unproven(),
         plugin_snapshot_revision: None,
         token_ledger: head.token_ledger,

@@ -334,11 +334,16 @@ impl EmbeddedRuntimeBuilder {
                 .isolated_registry()
                 .build_session_with_parent(
                     state.session_id.clone(),
-                    None,
+                    state
+                        .authority
+                        .subagent
+                        .as_ref()
+                        .map(|subagent| subagent.parent_session_id.clone()),
                     crate::plugin::SessionCreationConfig {
                         authority: crate::plugin::SessionAuthorityContext {
+                            tool_access: state.authority.tool_access.clone(),
+                            subagent: state.authority.subagent.clone(),
                             plugin_options: self.plugin_options.clone(),
-                            ..crate::plugin::SessionAuthorityContext::default()
                         },
                         protocol_turn_options: state.protocol_turn_options.clone(),
                     },

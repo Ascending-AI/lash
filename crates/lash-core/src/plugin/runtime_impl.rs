@@ -357,7 +357,7 @@ impl PluginHost {
             contributions,
             triggers,
         } = self.build_session_contributions(&ctx)?;
-        let registry = build_tool_registry(&contributions, &authority.tool_access, tool_snapshot)?;
+        let registry = build_tool_registry(&contributions, tool_snapshot)?;
         let tools = Arc::clone(&registry) as Arc<dyn ToolProvider>;
 
         let session = Arc::new(PluginSession {
@@ -438,7 +438,7 @@ impl PluginHost {
             parent_session_id: None,
         };
         let built = self.build_session_contributions(&ctx)?;
-        build_tool_registry(&built.contributions, &ctx.tool_access, None)
+        build_tool_registry(&built.contributions, None)
     }
 
     fn register_session(
@@ -489,7 +489,6 @@ impl PluginHost {
 
 fn build_tool_registry(
     contributions: &PluginContributions,
-    tool_access: &SessionToolAccess,
     tool_snapshot: Option<crate::ToolState>,
 ) -> Result<Arc<crate::ToolRegistry>, PluginError> {
     let mut providers_by_source = BTreeMap::<String, Vec<Arc<dyn crate::ToolProvider>>>::new();
@@ -499,10 +498,9 @@ fn build_tool_registry(
             .or_default()
             .push(Arc::clone(&registered.hook));
     }
-    let registry = crate::ToolRegistry::from_tool_registrations_with_hidden_tools(
+    let registry = crate::ToolRegistry::from_tool_registrations(
         providers_by_source.into_iter().collect(),
         contributions.orchestrating_tools.clone(),
-        tool_access.hidden_tools.clone(),
     )
     .map_err(|err| PluginError::Registration(format!("failed to build tool registry: {err}")))?;
     match tool_snapshot {

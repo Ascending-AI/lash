@@ -34,6 +34,7 @@ struct ToolCatalogDerived {
 }
 
 struct ToolCatalogArtifact {
+    tool_registry: Arc<crate::ToolRegistry>,
     tool_catalog: Arc<crate::ToolCatalog>,
     preamble: Arc<crate::TurnDriverPreamble>,
     derived: ToolCatalogDerived,
@@ -53,11 +54,19 @@ type CompositionToolFingerprintCache = Arc<
 >;
 
 impl ToolCatalogHandle {
-    fn tool_catalog(&self) -> Arc<crate::ToolCatalog> {
+    pub(crate) fn tool_registry(&self) -> Arc<crate::ToolRegistry> {
+        Arc::clone(&self.0.tool_registry)
+    }
+
+    pub(crate) fn tools(&self) -> Arc<dyn ToolProvider> {
+        Arc::clone(&self.0.tool_registry) as Arc<dyn ToolProvider>
+    }
+
+    pub(crate) fn tool_catalog(&self) -> Arc<crate::ToolCatalog> {
         Arc::clone(&self.0.tool_catalog)
     }
 
-    fn preamble(&self) -> Arc<crate::TurnDriverPreamble> {
+    pub(crate) fn preamble(&self) -> Arc<crate::TurnDriverPreamble> {
         Arc::clone(&self.0.preamble)
     }
 
@@ -265,21 +274,28 @@ impl Session {
         self.services.store.clone()
     }
 
-    fn tool_catalog_cache_key(&self) -> ToolCatalogCacheKey {
+    fn tool_catalog_cache_key(
+        &self,
+        tool_access: &crate::SessionToolAccess,
+        tool_generation: u64,
+    ) -> ToolCatalogCacheKey {
         ToolCatalogCacheKey {
             include_base_tools: self.include_base_tools,
             context_overlay_revision: self.context_overlay_revision,
-            tool_generation: self.tool_registry.generation(),
+            tool_generation,
             plugin_revision: self.plugins().snapshot_revision_fingerprint(),
-            authority_fingerprint: tool_catalog_authority_fingerprint(self.plugins().tool_access()),
+            authority_fingerprint: tool_catalog_authority_fingerprint(tool_access),
         }
     }
 
     fn build_tool_catalog_entry(
         &self,
         session_id: &str,
+        tool_registry: Arc<crate::ToolRegistry>,
+        tool_access: crate::SessionToolAccess,
+        subagent: Option<crate::SubagentSessionContext>,
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
-        let provider = self.tools();
+        let provider = Arc::clone(&tool_registry) as Arc<dyn ToolProvider>;
         let tools = provider.tool_manifests();
         let contract_provider = Arc::clone(&provider);
         let resolve_contract: lash_sansio::ToolContractResolver =
@@ -289,8 +305,8 @@ impl Session {
                 session_id: session_id.to_string(),
                 tools,
                 resolve_contract: Some(Arc::clone(&resolve_contract)),
-                tool_access: self.plugins().tool_access().clone(),
-                subagent: self.plugins().subagent_context().cloned(),
+                tool_access,
+                subagent,
                 extensions: self.plugins().extensions().clone(),
             },
         )?);
@@ -303,6 +319,7 @@ impl Session {
         let driver = self.plugins().protocol_driver();
         let preamble = driver.build_preamble(input);
         Ok(ToolCatalogHandle(Arc::new(ToolCatalogArtifact {
+            tool_registry,
             tool_catalog,
             preamble: Arc::new(preamble),
             derived: ToolCatalogDerived::default(),
@@ -313,30 +330,73 @@ impl Session {
         &self,
         session_id: &str,
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
-        let key = self.tool_catalog_cache_key();
+        let tool_access = self.plugins().tool_access().clone();
+        let subagent = self.plugins().subagent_context().cloned();
+        let key = self.tool_catalog_cache_key(&tool_access, self.tool_registry.generation());
         let mut cache = self.tool_catalog_cache.lock_recover();
         if let Some((entry_key, entry)) = cache.as_ref()
             && *entry_key == key
         {
             return Ok(entry.clone());
         }
-        let entry = self.build_tool_catalog_entry(session_id)?;
+        let tool_registry = self.pin_live_tool_registry()?;
+        let key = self.tool_catalog_cache_key(&tool_access, tool_registry.generation());
+        let entry =
+            self.build_tool_catalog_entry(session_id, tool_registry, tool_access, subagent)?;
         *cache = Some((key, entry.clone()));
         Ok(entry)
+    }
+
+    fn active_tool_surface_entry(
+        &self,
+        session_id: &str,
+    ) -> Result<ToolCatalogHandle, crate::PluginError> {
+        if let Some((_, entry)) = self.tool_catalog_cache.lock_recover().as_ref() {
+            return Ok(entry.clone());
+        }
+        self.tool_catalog_cache_entry(session_id)
+    }
+
+    /// Derive and pin the effective surface for one model request.
+    ///
+    /// Live sources are enumerated exactly once before the registry snapshot is
+    /// frozen. Host curation is already attached by ToolId in that snapshot;
+    /// authority and plugin contributions then filter the model-facing names.
+    /// The returned handle owns both the catalog and the registry dispatch will
+    /// use for calls from that request.
+    pub(crate) fn pin_tool_surface(
+        &self,
+        session_id: &str,
+        tool_access: &crate::SessionToolAccess,
+        subagent: Option<&crate::SubagentSessionContext>,
+    ) -> Result<ToolCatalogHandle, crate::PluginError> {
+        let tool_registry = self.pin_live_tool_registry()?;
+        let key = self.tool_catalog_cache_key(tool_access, tool_registry.generation());
+        let entry = self.build_tool_catalog_entry(
+            session_id,
+            tool_registry,
+            tool_access.clone(),
+            subagent.cloned(),
+        )?;
+        *self.tool_catalog_cache.lock_recover() = Some((key, entry.clone()));
+        Ok(entry)
+    }
+
+    fn pin_live_tool_registry(&self) -> Result<Arc<crate::ToolRegistry>, crate::PluginError> {
+        self.plugins()
+            .tool_registry()
+            .pin_session_surface(self.include_base_tools, self.context_tools.clone())
+            .map(Arc::new)
+            .map_err(|err| {
+                crate::PluginError::Session(format!("failed to pin session tool surface: {err}"))
+            })
     }
 
     pub fn resolved_tool_catalog(
         &self,
         session_id: &str,
     ) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
-        Ok(self.tool_catalog_cache_entry(session_id)?.tool_catalog())
-    }
-
-    pub(crate) fn turn_driver_preamble(
-        &self,
-        session_id: &str,
-    ) -> Result<Arc<crate::TurnDriverPreamble>, crate::PluginError> {
-        Ok(self.tool_catalog_cache_entry(session_id)?.preamble())
+        Ok(self.active_tool_surface_entry(session_id)?.tool_catalog())
     }
 
     pub(crate) fn composition_tool_fingerprints(
@@ -367,7 +427,7 @@ impl Session {
         &self,
         session_id: &str,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
-        Ok(self.tool_catalog_cache_entry(session_id)?.catalog())
+        Ok(self.active_tool_surface_entry(session_id)?.catalog())
     }
 
     pub fn tool_catalog(
@@ -401,11 +461,12 @@ impl Session {
         recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer,
         attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     ) -> Result<RuntimeExecutionContext<'run>, crate::PluginError> {
+        let tool_surface = self.active_tool_surface_entry(session_id)?;
         let dispatch = Arc::new(ToolDispatchContext {
             plugins: Arc::clone(self.plugins()),
-            tools: self.tools(),
-            tool_registry: Some(Arc::clone(&self.tool_registry)),
-            tool_catalog: self.resolved_tool_catalog(session_id)?,
+            tools: tool_surface.tools(),
+            tool_registry: Some(tool_surface.tool_registry()),
+            tool_catalog: tool_surface.tool_catalog(),
             sessions,
             session_lifecycle,
             session_graph,
@@ -465,6 +526,50 @@ fn tool_catalog_authority_fingerprint(tool_access: &crate::SessionToolAccess) ->
 #[cfg(test)]
 mod tool_catalog_cache_tests {
     use super::*;
+    use crate::plugin::StaticPluginFactory;
+    use lash_sansio::sync::MutexExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingDynamicProvider {
+        names: Arc<std::sync::Mutex<Vec<String>>>,
+        manifest_reads: Arc<AtomicUsize>,
+    }
+
+    impl CountingDynamicProvider {
+        fn definition(name: &str) -> crate::ToolDefinition {
+            crate::ToolDefinition::raw(
+                format!("tool:{name}"),
+                name,
+                format!("dynamic {name}"),
+                crate::ToolDefinition::default_input_schema(),
+                serde_json::json!({ "type": "string" }),
+            )
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for CountingDynamicProvider {
+        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+            self.manifest_reads.fetch_add(1, Ordering::SeqCst);
+            self.names
+                .lock_recover()
+                .iter()
+                .map(|name| Self::definition(name).manifest())
+                .collect()
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+            self.names
+                .lock_recover()
+                .iter()
+                .any(|candidate| candidate == name)
+                .then(|| Arc::new(Self::definition(name).contract()))
+        }
+
+        async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+            crate::ToolOutcome::ok(serde_json::json!(call.name))
+        }
+    }
 
     #[test]
     fn authority_fingerprint_covers_hidden_tools_and_explicit_definitions() {
@@ -489,6 +594,105 @@ mod tool_catalog_cache_tests {
         assert_ne!(
             tool_catalog_authority_fingerprint(&base),
             tool_catalog_authority_fingerprint(&explicit)
+        );
+    }
+
+    #[tokio::test]
+    async fn model_request_pin_enumerates_once_and_freezes_catalog_and_dispatch() {
+        let names = Arc::new(std::sync::Mutex::new(vec!["alpha".to_string()]));
+        let manifest_reads = Arc::new(AtomicUsize::new(0));
+        let provider: Arc<dyn ToolProvider> = Arc::new(CountingDynamicProvider {
+            names: Arc::clone(&names),
+            manifest_reads: Arc::clone(&manifest_reads),
+        });
+        let mut factories = crate::testing::test_standard_protocol_factories();
+        factories.push(Arc::new(StaticPluginFactory::new(
+            "pinned_surface",
+            crate::PluginSpec::new().with_tool_provider(provider),
+        )));
+        let plugins = crate::PluginHost::new(factories)
+            .build_session("pinned-surface")
+            .expect("plugin session");
+        let session = Session::new(crate::RuntimeServices::new(plugins), "pinned-surface")
+            .await
+            .expect("runtime session");
+        let reads_before_pin = manifest_reads.load(Ordering::SeqCst);
+
+        let first = session
+            .pin_tool_surface("pinned-surface", &crate::SessionToolAccess::default(), None)
+            .expect("first request surface");
+        assert_eq!(
+            manifest_reads.load(Ordering::SeqCst),
+            reads_before_pin + 1,
+            "one model-request pin performs one live-source enumeration"
+        );
+        assert!(first.tool_catalog().has_callable_tool("alpha"));
+
+        names.lock_recover().push("beta".to_string());
+        assert!(!first.tool_catalog().has_callable_tool("beta"));
+        assert!(first.tools().resolve_manifest("beta").is_none());
+        assert_eq!(
+            manifest_reads.load(Ordering::SeqCst),
+            reads_before_pin + 1,
+            "catalog and dispatch reads stay on the same frozen request surface"
+        );
+
+        let second = session
+            .pin_tool_surface("pinned-surface", &crate::SessionToolAccess::default(), None)
+            .expect("next request surface");
+        assert_eq!(
+            manifest_reads.load(Ordering::SeqCst),
+            reads_before_pin + 2,
+            "the next model request performs exactly one fresh enumeration"
+        );
+        assert!(second.tool_catalog().has_callable_tool("beta"));
+        assert!(second.tools().resolve_manifest("beta").is_some());
+        assert!(
+            session
+                .plugins()
+                .tool_registry()
+                .export_state()
+                .iter()
+                .any(|(_, entry)| entry.manifest().name == "beta"),
+            "request admission updates the registry captured at the next durable turn boundary"
+        );
+
+        let hidden_access = crate::SessionToolAccess {
+            tools: Vec::new(),
+            hidden_tools: ["alpha".to_string()].into_iter().collect(),
+        };
+        let hidden = session
+            .pin_tool_surface("pinned-surface", &hidden_access, None)
+            .expect("authority-hidden request surface");
+        assert!(!hidden.tool_catalog().has_callable_tool("alpha"));
+        assert!(
+            !session
+                .resolved_tool_catalog("pinned-surface")
+                .expect("active hidden request surface")
+                .has_callable_tool("alpha"),
+            "consumers retain the exact request pin even when session-construction authority differs"
+        );
+        assert!(
+            hidden
+                .tool_registry()
+                .export_state()
+                .iter()
+                .find(|(_, entry)| entry.manifest().name == "alpha")
+                .is_some_and(|(_, entry)| entry.is_member()),
+            "authority suppression must leave host curation true"
+        );
+
+        let unhidden = session
+            .pin_tool_surface("pinned-surface", &crate::SessionToolAccess::default(), None)
+            .expect("next request with broader authority");
+        assert!(
+            unhidden.tool_catalog().has_callable_tool("alpha"),
+            "removing an authority suppression takes effect on the next request"
+        );
+        assert_eq!(
+            manifest_reads.load(Ordering::SeqCst),
+            reads_before_pin + 4,
+            "each of four request pins enumerated the live source exactly once"
         );
     }
 }

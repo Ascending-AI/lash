@@ -182,8 +182,14 @@ impl RuntimeTurnDriver<'_> {
         turn_index: usize,
         messages: crate::MessageSequence,
     ) -> Result<PreparedExecutionEnvironment, PluginError> {
-        let tool_catalog = self.session.resolved_tool_catalog(&self.session_id)?;
-        let turn_driver_preamble = self.session.turn_driver_preamble(&self.session_id)?;
+        let state = self.turn_pipeline.state();
+        let tool_surface = self.session.pin_tool_surface(
+            &self.session_id,
+            &state.authority.tool_access,
+            state.authority.subagent.as_ref(),
+        )?;
+        let tool_catalog = tool_surface.tool_catalog();
+        let turn_driver_preamble = tool_surface.preamble();
         let plugin_prompt_contributions = self
             .session
             .plugins()
