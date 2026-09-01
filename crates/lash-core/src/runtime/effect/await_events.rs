@@ -16,8 +16,9 @@ use super::executor::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome,
 };
 use super::promise_semantics::{
-    PromiseState, PromiseTransition, SessionRevocationTransition, cancel_sweep, constant_time_eq,
-    derive_key_id, resolve, revoke_session, session_allows_access, sign_material,
+    PromiseState, PromiseTransition, SessionRevocationTransition, WaitStopReason, cancel_sweep,
+    constant_time_eq, derive_key_id, resolve, revoke_session, session_allows_access, sign_material,
+    turn_control_wait_stop,
 };
 
 type HmacSha256 = Hmac<sha2::Sha256>;
@@ -394,38 +395,32 @@ impl AwaitEventRegistry {
                 }
                 Arc::clone(&entry.notify)
             };
-            if let Some(deadline) = deadline {
-                tokio::select! {
-                    _ = cancel.cancelled() => {
-                        if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(crate::RuntimeErrorCode::TurnControlWaitCancelled,
-                                "turn-control waiter stopped without resolving its keyed promise",
-                            ));
-                        }
-                        let _ = self.resolve(key, Resolution::Cancelled)?;
-                    }
-                    _ = clock.sleep_until(deadline) => {
-                        if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(crate::RuntimeErrorCode::TurnControlWaitTimeout,
-                                "turn-control waiter timed out without resolving its keyed promise",
-                            ));
-                        }
-                        let _ = self.resolve(key, Resolution::Timeout)?;
-                    }
-                    _ = notify.notified() => {}
+            let deadline = async {
+                if let Some(deadline) = deadline {
+                    clock.sleep_until(deadline).await;
+                } else {
+                    std::future::pending().await
                 }
-            } else {
-                tokio::select! {
-                    _ = cancel.cancelled() => {
-                        if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(crate::RuntimeErrorCode::TurnControlWaitCancelled,
-                                "turn-control waiter stopped without resolving its keyed promise",
-                            ));
-                        }
-                        let _ = self.resolve(key, Resolution::Cancelled)?;
+            };
+            tokio::pin!(deadline);
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    if let Some((code, message)) =
+                        turn_control_wait_stop(&key.wait, WaitStopReason::Cancelled)
+                    {
+                        return Err(RuntimeError::new(code, message));
                     }
-                    _ = notify.notified() => {}
+                    let _ = self.resolve(key, Resolution::Cancelled)?;
                 }
+                _ = &mut deadline => {
+                    if let Some((code, message)) =
+                        turn_control_wait_stop(&key.wait, WaitStopReason::TimedOut)
+                    {
+                        return Err(RuntimeError::new(code, message));
+                    }
+                    let _ = self.resolve(key, Resolution::Timeout)?;
+                }
+                _ = notify.notified() => {}
             }
         }
     }
