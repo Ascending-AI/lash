@@ -11,7 +11,7 @@
 //! family version and an explicit old-row policy.
 
 use super::{AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome};
-use crate::RuntimeError;
+use crate::{RuntimeError, RuntimeErrorCode};
 
 const AWAIT_EVENT_FAMILY_VERSION: u8 = 3;
 
@@ -187,6 +187,33 @@ pub(crate) fn cancel_sweep(
     }
 }
 
+/// Why an await-event waiter stopped before its promise resolved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WaitStopReason {
+    Cancelled,
+    TimedOut,
+}
+
+/// Classify a stopped turn-control waiter in the shared promise policy.
+pub(crate) fn turn_control_wait_stop(
+    wait: &AwaitEventWaitIdentity,
+    reason: WaitStopReason,
+) -> Option<(RuntimeErrorCode, &'static str)> {
+    if !wait.is_turn_control() {
+        return None;
+    }
+    Some(match reason {
+        WaitStopReason::Cancelled => (
+            RuntimeErrorCode::TurnControlWaitCancelled,
+            "turn-control waiter stopped without resolving its keyed promise",
+        ),
+        WaitStopReason::TimedOut => (
+            RuntimeErrorCode::TurnControlWaitTimeout,
+            "turn-control waiter timed out without resolving its keyed promise",
+        ),
+    })
+}
+
 /// Pure session-tombstone decision shared by in-memory and durable stores.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SessionRevocationTransition {
@@ -229,6 +256,32 @@ mod tests {
 
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[test]
+    fn turn_control_wait_stop_table_classifies_only_turn_control_waiters() {
+        let gate = AwaitEventWaitIdentity::TurnCancelGate;
+        assert_eq!(
+            turn_control_wait_stop(&gate, WaitStopReason::Cancelled),
+            Some((
+                RuntimeErrorCode::TurnControlWaitCancelled,
+                "turn-control waiter stopped without resolving its keyed promise",
+            ))
+        );
+        assert_eq!(
+            turn_control_wait_stop(&gate, WaitStopReason::TimedOut),
+            Some((
+                RuntimeErrorCode::TurnControlWaitTimeout,
+                "turn-control waiter timed out without resolving its keyed promise",
+            ))
+        );
+        assert_eq!(
+            turn_control_wait_stop(
+                &AwaitEventWaitIdentity::tool_completion("ordinary"),
+                WaitStopReason::Cancelled,
+            ),
+            None
+        );
     }
 
     #[test]

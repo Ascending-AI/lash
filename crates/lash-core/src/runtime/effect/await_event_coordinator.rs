@@ -32,7 +32,7 @@ use crate::{RuntimeError, RuntimeErrorCode};
 use super::executor::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome,
 };
-use super::promise_semantics::{self, PromiseState};
+use super::promise_semantics::{self, PromiseState, WaitStopReason, turn_control_wait_stop};
 
 type HmacSha256 = Hmac<sha2::Sha256>;
 
@@ -385,46 +385,37 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
 
             let poll = clock.sleep(backoff);
             tokio::pin!(poll);
-            if let Some(deadline) = deadline {
-                tokio::select! {
-                    _ = cancel.cancelled() => {
-                        if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(crate::RuntimeErrorCode::TurnControlWaitCancelled,
-                                "turn-control waiter stopped without resolving its keyed promise",
-                            ));
-                        }
-                        let _ = self.resolve(key, Resolution::Cancelled).await?;
-                    }
-                    _ = clock.sleep_until(deadline) => {
-                        if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(crate::RuntimeErrorCode::TurnControlWaitTimeout,
-                                "turn-control waiter timed out without resolving its keyed promise",
-                            ));
-                        }
-                        let _ = self.resolve(key, Resolution::Timeout).await?;
-                    }
-                    _ = notify.notified() => {
-                        backoff = INITIAL_POLL;
-                        continue;
-                    }
-                    _ = &mut poll => {}
+            let deadline = async {
+                if let Some(deadline) = deadline {
+                    clock.sleep_until(deadline).await;
+                } else {
+                    // This arm must never resolve; a resolvable default would silently give a no-deadline waiter a timeout it never had.
+                    std::future::pending().await
                 }
-            } else {
-                tokio::select! {
-                    _ = cancel.cancelled() => {
-                        if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(crate::RuntimeErrorCode::TurnControlWaitCancelled,
-                                "turn-control waiter stopped without resolving its keyed promise",
-                            ));
-                        }
-                        let _ = self.resolve(key, Resolution::Cancelled).await?;
+            };
+            tokio::pin!(deadline);
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    if let Some((code, message)) =
+                        turn_control_wait_stop(&key.wait, WaitStopReason::Cancelled)
+                    {
+                        return Err(RuntimeError::new(code, message));
                     }
-                    _ = notify.notified() => {
-                        backoff = INITIAL_POLL;
-                        continue;
-                    }
-                    _ = &mut poll => {}
+                    let _ = self.resolve(key, Resolution::Cancelled).await?;
                 }
+                _ = &mut deadline => {
+                    if let Some((code, message)) =
+                        turn_control_wait_stop(&key.wait, WaitStopReason::TimedOut)
+                    {
+                        return Err(RuntimeError::new(code, message));
+                    }
+                    let _ = self.resolve(key, Resolution::Timeout).await?;
+                }
+                _ = notify.notified() => {
+                    backoff = INITIAL_POLL;
+                    continue;
+                }
+                _ = &mut poll => {}
             }
             backoff = (backoff * 2).min(MAX_POLL);
         }
