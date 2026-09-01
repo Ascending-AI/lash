@@ -1496,6 +1496,60 @@ mod tests {
             .expect("release current lease");
     }
 
+    #[tokio::test]
+    async fn released_in_memory_lease_row_traces_owner_mismatch_with_fencing_token() {
+        let store = Arc::new(InMemorySessionStore::new());
+        let session_id = "released-row-fence-facts";
+        store
+            .admit_and_bind_session(&crate::SessionBinding::root(session_id))
+            .await
+            .expect("bind session");
+        let current = store
+            .try_claim_session_execution_lease(
+                session_id,
+                &crate::LeaseOwnerIdentity::opaque("current-owner", "current-incarnation"),
+                "released-row-fence-facts-executor",
+                60_000,
+            )
+            .await
+            .expect("claim current lease")
+            .acquired()
+            .expect("current lease acquired");
+        let presented = SessionExecutionLeaseAuthority {
+            session_id: session_id.to_string(),
+            owner: crate::LeaseOwnerIdentity::opaque("presented-owner", "presented-incarnation"),
+            executor_id: "presented-executor".to_string(),
+            lease_token: "presented-stale-token".to_string(),
+            fencing_token: current.fencing_token,
+        };
+        store
+            .release_session_execution_lease(&current.completion())
+            .await
+            .expect("release current lease");
+
+        let (error, capture) = crate::runtime::tests::trace_capture::capturing(|| async {
+            store
+                .admit_session_state(&presented)
+                .await
+                .expect_err("a released row must fail the execution fence")
+        })
+        .await;
+        assert!(matches!(
+            error,
+            StoreError::SessionExecutionLeaseExpired { .. }
+        ));
+
+        let event = capture.exactly_one("session_execution_lease.execution_fence_refused");
+        assert_eq!(event.field("refusal_cause"), "owner_mismatch");
+        assert_eq!(event.field("current_owner_id"), "none");
+        assert_eq!(event.field("current_incarnation_id"), "none");
+        assert_eq!(event.field("current_executor_id"), "none");
+        assert_eq!(event.field("current_fencing_token"), "Some(1)");
+        assert_eq!(event.field("generation_matched"), "Some(true)");
+        assert_eq!(event.field("current_expires_at_epoch_ms"), "Some(0)");
+        assert_eq!(event.field("expiry_matched"), "Some(false)");
+    }
+
     /// Exercise the real FIG-924-shaped classification path: a same-owner claim
     /// rotates durable identity, the old renewal loop receives the new named
     /// refusal, marks itself lost, and Drop does not make a doomed release call.

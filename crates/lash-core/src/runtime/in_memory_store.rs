@@ -46,15 +46,42 @@ struct InMemoryQueuedBatch {
     claim_session_lease_generation: u64,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
+enum Lease {
+    Free,
+    Held {
+        owner: crate::LeaseOwnerIdentity,
+        executor_id: String,
+        lease_token: String,
+        claimed_at_epoch_ms: u64,
+        lease_term_ms: u64,
+        expires_at_epoch_ms: u64,
+    },
+}
+
+#[derive(Clone)]
 struct InMemorySessionExecutionLease {
-    owner: Option<crate::LeaseOwnerIdentity>,
-    executor_id: Option<String>,
-    lease_token: Option<String>,
+    lease: Lease,
     fencing_token: u64,
+}
+
+#[derive(Clone, Copy)]
+struct HeldLeaseFields<'a> {
+    owner: &'a crate::LeaseOwnerIdentity,
+    executor_id: &'a str,
+    lease_token: &'a str,
     claimed_at_epoch_ms: u64,
     lease_term_ms: u64,
     expires_at_epoch_ms: u64,
+}
+
+impl Default for InMemorySessionExecutionLease {
+    fn default() -> Self {
+        Self {
+            lease: Lease::Free,
+            fencing_token: 0,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -95,8 +122,60 @@ fn turn_input_settlement_matches(
 }
 
 impl InMemorySessionExecutionLease {
+    fn is_held(&self) -> bool {
+        matches!(&self.lease, Lease::Held { .. })
+    }
+
     fn is_live(&self, now: u64) -> bool {
-        self.lease_token.is_some() && self.expires_at_epoch_ms > now
+        matches!(
+            &self.lease,
+            Lease::Held {
+                expires_at_epoch_ms,
+                ..
+            } if *expires_at_epoch_ms > now
+        )
+    }
+
+    fn is_held_by(&self, owner: &crate::LeaseOwnerIdentity, executor_id: &str) -> bool {
+        matches!(
+            &self.lease,
+            Lease::Held {
+                owner: current_owner,
+                executor_id: current_executor_id,
+                ..
+            } if current_owner.same_incarnation(owner) && current_executor_id == executor_id
+        )
+    }
+
+    fn lease_token_matches(&self, lease_token: &str) -> bool {
+        matches!(
+            &self.lease,
+            Lease::Held {
+                lease_token: current_lease_token,
+                ..
+            } if current_lease_token == lease_token
+        )
+    }
+
+    fn held_fields(&self) -> Option<HeldLeaseFields<'_>> {
+        match &self.lease {
+            Lease::Free => None,
+            Lease::Held {
+                owner,
+                executor_id,
+                lease_token,
+                claimed_at_epoch_ms,
+                lease_term_ms,
+                expires_at_epoch_ms,
+            } => Some(HeldLeaseFields {
+                owner,
+                executor_id,
+                lease_token,
+                claimed_at_epoch_ms: *claimed_at_epoch_ms,
+                lease_term_ms: *lease_term_ms,
+                expires_at_epoch_ms: *expires_at_epoch_ms,
+            }),
+        }
     }
 }
 
@@ -392,12 +471,13 @@ impl InMemorySessionStore {
         crate::store::session_execution_lease::require_current_session_execution_lease(
             session_id,
             leases.get(session_id).map(|current| {
+                let held = current.held_fields();
                 crate::store::session_execution_lease::SessionExecutionLeaseFenceFacts {
-                    owner: current.owner.as_ref(),
-                    executor_id: current.executor_id.as_deref(),
-                    lease_token: current.lease_token.as_deref(),
+                    owner: held.map(|fields| fields.owner),
+                    executor_id: held.map(|fields| fields.executor_id),
+                    lease_token: held.map(|fields| fields.lease_token),
                     fencing_token: current.fencing_token,
-                    expires_at_epoch_ms: current.expires_at_epoch_ms,
+                    expires_at_epoch_ms: held.map_or(0, |fields| fields.expires_at_epoch_ms),
                 }
             }),
             fence,
@@ -424,19 +504,10 @@ impl InMemorySessionStore {
     ) -> bool {
         let mut leases = self.session_execution_leases.lock_recover();
         if let Some(current) = leases.get_mut(&completion.session_id)
-            && current
-                .owner
-                .as_ref()
-                .is_some_and(|owner| owner.same_incarnation(&completion.owner))
-            && current.executor_id.as_deref() == Some(completion.executor_id.as_str())
-            && current.lease_token.as_deref() == Some(completion.lease_token.as_str())
+            && current.is_held_by(&completion.owner, &completion.executor_id)
+            && current.lease_token_matches(&completion.lease_token)
         {
-            current.owner = None;
-            current.executor_id = None;
-            current.lease_token = None;
-            current.claimed_at_epoch_ms = 0;
-            current.lease_term_ms = 0;
-            current.expires_at_epoch_ms = 0;
+            current.lease = Lease::Free;
             true
         } else {
             if trace_refusal {
@@ -447,9 +518,11 @@ impl InMemorySessionStore {
                     "in_memory_write_transaction",
                     completion,
                     crate::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
-                        current.and_then(|lease| lease.owner.as_ref()),
-                        current.and_then(|lease| lease.executor_id.as_deref()),
-                        current.and_then(|lease| lease.lease_token.as_deref()),
+                        current.and_then(|lease| lease.held_fields().map(|fields| fields.owner)),
+                        current
+                            .and_then(|lease| lease.held_fields().map(|fields| fields.executor_id)),
+                        current
+                            .and_then(|lease| lease.held_fields().map(|fields| fields.lease_token)),
                     ),
                 );
             }
@@ -461,18 +534,18 @@ impl InMemorySessionStore {
         session_id: &str,
         current: &InMemorySessionExecutionLease,
     ) -> crate::SessionExecutionLease {
-        crate::SessionExecutionLease {
-            session_id: session_id.to_string(),
-            owner: current.owner.clone().expect("live lease owner set"),
-            executor_id: current
-                .executor_id
-                .clone()
-                .expect("live lease executor id set"),
-            lease_token: current.lease_token.clone().expect("live lease token set"),
-            fencing_token: current.fencing_token,
-            claimed_at_epoch_ms: current.claimed_at_epoch_ms,
-            lease_term_ms: current.lease_term_ms,
-            expires_at_epoch_ms: current.expires_at_epoch_ms,
+        match current.held_fields() {
+            Some(fields) => crate::SessionExecutionLease {
+                session_id: session_id.to_string(),
+                owner: fields.owner.clone(),
+                executor_id: fields.executor_id.to_string(),
+                lease_token: fields.lease_token.to_string(),
+                fencing_token: current.fencing_token,
+                claimed_at_epoch_ms: fields.claimed_at_epoch_ms,
+                lease_term_ms: fields.lease_term_ms,
+                expires_at_epoch_ms: fields.expires_at_epoch_ms,
+            },
+            None => unreachable!("free session execution lease has no public projection"),
         }
     }
 
@@ -489,12 +562,14 @@ impl InMemorySessionStore {
             "session_execution_lease_fencing_token",
             current.fencing_token,
         )?;
-        current.owner = Some(owner.clone());
-        current.executor_id = Some(executor_id.to_string());
-        current.lease_token = Some(lease_token.to_string());
-        current.claimed_at_epoch_ms = now;
-        current.lease_term_ms = lease_ttl_ms;
-        current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
+        current.lease = Lease::Held {
+            owner: owner.clone(),
+            executor_id: executor_id.to_string(),
+            lease_token: lease_token.to_string(),
+            claimed_at_epoch_ms: now,
+            lease_term_ms: lease_ttl_ms,
+            expires_at_epoch_ms: now.saturating_add(lease_ttl_ms),
+        };
         Ok(Self::in_memory_session_execution_lease(session_id, current))
     }
 
