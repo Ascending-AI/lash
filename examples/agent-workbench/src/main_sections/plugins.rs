@@ -115,10 +115,13 @@ impl SessionPlugin for WorkbenchSessionPlugin {
             let mail_world = mail_world.clone();
             let deferred_preview = deferred_preview.clone();
             // ADR 0063: the host's worked examples are written in the dialect
-            // the executor is actually serving this turn, read from its own
-            // execution section rather than from this process's configuration.
-            let prompt = workbench_prompt(tutorial_dialect(&ctx.protocol_turn_options));
+            // the session recorded, read from its own execution section rather
+            // than from this process's configuration. A bag that does not
+            // decode refuses the contribution instead of teaching Lashlang to
+            // a TypeScript session (FIG-1979).
+            let dialect = tutorial_dialect(&ctx.protocol_turn_options);
             Box::pin(async move {
+                let prompt = workbench_prompt(dialect?);
                 let mut contributions = vec![PromptContribution::environment(
                     "Agent Workbench",
                     format!("{prompt}\n\n{}", connected_accounts_prompt(&mail_world)),

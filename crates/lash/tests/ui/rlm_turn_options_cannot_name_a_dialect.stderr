@@ -1,0 +1,7 @@
+error[E0560]: struct `RlmTurnOptions` has no field named `dialect`
+  --> tests/ui/rlm_turn_options_cannot_name_a_dialect.rs:12:9
+   |
+12 |         dialect: Some(RlmDialect::Typescript),
+   |         ^^^^^^^ `RlmTurnOptions` does not have this field
+   |
+   = note: all struct fields are already assigned

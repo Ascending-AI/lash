@@ -304,21 +304,25 @@ pub(crate) fn rlm_dialect_from_env() -> Result<lash::rlm::RlmDialect, String> {
     Ok(lash::rlm::RlmDialect::from_env()?.unwrap_or_default())
 }
 
-/// The dialect a turn actually resolved, for prompt copy that has to be written
-/// in one language.
+/// The dialect the session recorded, for prompt copy that has to be written in
+/// one language.
 ///
-/// ADR 0063: host copy follows the session's own dialect. This reads the same
-/// resolved options the executor is handed, so a store that outlived a
-/// configuration change is described in the dialect it is running rather than
-/// the one this process was started with.
-pub(crate) fn rlm_dialect_from_turn_options(
+/// ADR 0063: host copy follows the session's own dialect. The dialect is
+/// session scope (ADR 0066, FIG-1979) — a turn cannot restate it — so this
+/// re-sources the prompt's language from the session config carried on the
+/// options the hook is handed, and a store that outlived a configuration
+/// change is described in the dialect it is running rather than the one this
+/// process was started with.
+///
+/// The decode is strict. A malformed or unknown language id is a refusal, not
+/// the default: silently substituting Lashlang is the very substitution
+/// `RlmDialect::from_language_id` refuses by design, and it would word the
+/// board prompt in one dialect while the cells executed the other.
+pub(crate) fn rlm_session_dialect(
     options: &lash::runtime::ProtocolTurnOptions,
-) -> lash::rlm::RlmDialect {
-    options
-        .decode::<lash_rlm_types::RlmCreateExtras>()
-        .ok()
-        .and_then(|extras| extras.dialect)
-        .unwrap_or_default()
+) -> Result<lash::rlm::RlmDialect, lash::plugins::PluginError> {
+    lash::rlm::rlm_session_dialect(options)
+        .map_err(|err| lash::plugins::PluginError::Session(err.to_string()))
 }
 
 #[cfg(test)]

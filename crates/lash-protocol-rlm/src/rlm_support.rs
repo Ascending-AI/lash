@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
 
 use lash_core::{PromptUsage, TextProjectionMetadata};
-use lash_rlm_types::{RlmCreateExtras, RlmTermination};
+use lash_rlm_types::{RlmTermination, RlmTurnOptions};
 use lashlang::{
     BudgetedJsonProjectionConfig, BudgetedJsonProjector, Value as FlowValue, ValueProjectionContext,
 };
@@ -49,9 +49,9 @@ pub(crate) fn bound_variable_projector() -> BudgetedJsonProjector {
 
 pub(crate) fn decode_rlm_options(
     options: &lash_core::ProtocolTurnOptions,
-) -> Result<RlmCreateExtras, String> {
+) -> Result<RlmTurnOptions, String> {
     if options.is_empty() {
-        return Ok(RlmCreateExtras::default());
+        return Ok(RlmTurnOptions::default());
     }
     options
         .decode()

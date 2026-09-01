@@ -13,15 +13,19 @@ impl AppState {
     /// config (ADR 0066) — no raw-payload peek needed to tell absence from the
     /// Lashlang default — and what it will be pinned to is the honest answer
     /// for it, so that is what a fresh session's badge shows.
-    async fn recorded_dialect(&self, session_id: &str) -> lash::rlm::RlmDialect {
+    ///
+    /// The decode is strict (FIG-1979): a recorded bag that does not decode is
+    /// reported, never smoothed into the default dialect. Absence is a
+    /// different answer from malformed and keeps its fallback.
+    async fn recorded_dialect(&self, session_id: &str) -> Result<lash::rlm::RlmDialect, AppError> {
         use lash::rlm::RlmSessionExt as _;
 
         let Ok(session) = self.open_session(session_id).await else {
-            return self.requested_dialect(session_id);
+            return Ok(self.requested_dialect(session_id));
         };
-        let recorded = session.rlm_config().dialect;
+        let recorded = session.rlm_config().map_err(AppError::internal)?.dialect;
         drop(session);
-        recorded.unwrap_or_else(|| self.requested_dialect(session_id))
+        Ok(recorded.unwrap_or_else(|| self.requested_dialect(session_id)))
     }
 
     /// A builder that *states* the dialect this session is meant to run.

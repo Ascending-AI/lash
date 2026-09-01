@@ -490,7 +490,33 @@ pub struct RlmCreateExtras {
     pub final_answer_format: Option<RlmFinalAnswerFormat>,
 }
 
-impl RlmCreateExtras {
+/// The RLM options a *single turn* may restate (FIG-1979).
+///
+/// The dialect is deliberately absent. It is resolved once, at session
+/// materialization, from the session's own recorded config (ADR 0066), and the
+/// executor never consults a per-turn value. While the turn bag carried a
+/// `dialect` field, a turn could name one dialect while its cells ran another
+/// and a host reading the turn bag would print the wrong language's vocabulary;
+/// with the field gone that disagreement is unrepresentable rather than
+/// merely unused. Hosts that need the running language read it from the
+/// session config instead — `lash_protocol_rlm::rlm_session_dialect`.
+///
+/// Unstated fields are omitted from the wire, not written as `null`: the
+/// per-turn bag is merged over the session bag key by key, so a serialized
+/// absence would clobber a recorded session value.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct RlmTurnOptions {
+    /// Termination requirement for this turn. Absence is the `Natural`
+    /// default, and leaves whatever the session recorded alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub termination: Option<RlmTermination>,
+    /// Presentation preference for this turn's final answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_answer_format: Option<RlmFinalAnswerFormat>,
+}
+
+impl RlmTurnOptions {
     /// The termination this bag means, resolving absence to the default.
     pub fn effective_termination(&self) -> RlmTermination {
         self.termination.clone().unwrap_or_default()
@@ -819,5 +845,48 @@ mod dialect_serde_tests {
         assert!(!encoded.contains("dialect"), "{encoded}");
         let decoded: RlmCreateExtras = serde_json::from_str(&encoded).expect("decode");
         assert_eq!(decoded.dialect, None);
+    }
+}
+
+#[cfg(test)]
+mod turn_options_tests {
+    use super::{RlmFinalAnswerFormat, RlmTermination, RlmTurnOptions};
+
+    /// FIG-1979: a turn cannot name a dialect. The type has no field for it, so
+    /// the only way a `dialect` key reaches this bag is the session bag it is
+    /// merged over — and that key is read from the session config, never from
+    /// here.
+    #[test]
+    fn a_turn_bag_never_writes_a_dialect_key() {
+        let encoded = serde_json::to_string(&RlmTurnOptions {
+            termination: Some(RlmTermination::Natural),
+            final_answer_format: None,
+        })
+        .expect("encode");
+        assert!(!encoded.contains("dialect"), "{encoded}");
+        assert!(!encoded.contains("final_answer_format"), "{encoded}");
+    }
+
+    /// The bag decodes off the *merged* session⊕turn payload, so a session's
+    /// recorded dialect key must be carried past rather than refused.
+    #[test]
+    fn a_merged_payload_with_a_session_dialect_still_decodes() {
+        let options: RlmTurnOptions = serde_json::from_str(
+            r#"{"dialect":"typescript","termination":{"kind":"natural"},"final_answer_format":{"kind":"markdown"}}"#,
+        )
+        .expect("merged payload decodes");
+        assert_eq!(options.effective_termination(), RlmTermination::Natural);
+        assert_eq!(
+            options.final_answer_format,
+            Some(RlmFinalAnswerFormat::Markdown)
+        );
+    }
+
+    #[test]
+    fn an_unstated_termination_is_the_natural_default() {
+        assert_eq!(
+            RlmTurnOptions::default().effective_termination(),
+            RlmTermination::Natural
+        );
     }
 }

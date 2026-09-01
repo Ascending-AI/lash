@@ -198,3 +198,20 @@ still lands only with the session's next commit.
 * Sibling facts follow the same shape rather than growing their own request
   parameters: the provider pin is FIG-1558 and the parent-relation rebind is
   FIG-1559.
+
+### Amendment (FIG-1979): the dialect has exactly one carrier
+
+`RlmCreateExtras` doubled as the session create bag *and* the per-turn override
+bag, so a turn could state a dialect that execution — already pinned at
+materialization — ignored, while a host reading that bag printed the stated one.
+The types now split: `RlmTurnOptions` is the per-turn bag and has no dialect
+field at all, so the disagreement is unrepresentable rather than merely unused.
+`RlmCreateExtras` keeps the dialect and stays the session carrier.
+
+Host reads of the running dialect go through `rlm_session_dialect`, and they are
+strict: an unknown or malformed language id is an error, never the ratified
+default. Defaulting on a decode failure re-admitted through the back door the
+substitution `RlmDialect::from_language_id` refuses at the front. Absence stays a
+distinct answer from malformed — a session that recorded nothing *is* running the
+default — and `RlmSessionReadViewExt::rlm_config` returns a `Result` for the same
+reason.

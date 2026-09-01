@@ -24,4 +24,5 @@ pub use factory::{
 pub use protocol_session::{
     RlmSessionConfigDecodeError, apply_rlm_session_config_if_unset,
     apply_rlm_session_config_post_open, rlm_session_config, rlm_session_config_options,
+    rlm_session_dialect,
 };

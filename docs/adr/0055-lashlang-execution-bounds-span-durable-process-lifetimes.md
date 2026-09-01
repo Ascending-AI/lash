@@ -35,7 +35,7 @@ configuring it, and a silent default would be a bound nobody chose.
 Each bound is its own Rust type, and each type carries only the constructors
 that make sense for its axis: `InstructionBound::instructions(n)`,
 `WallClockBound::millis(n)` / `WallClockBound::secs(n)`, and
-`MemoryBound::bytes(n)` / `MemoryBound::mebibytes(n)`, plus `unbounded()` on
+`MemoryBound::logical_bytes(n)` / `MemoryBound::mebibytes(n)`, plus `unbounded()` on
 each for the explicit opt-out. Instructions and heap bytes share a nonzero
 integer representation but not a type, so a byte count can never be spent as an
 instruction budget. Hosts assemble a config through

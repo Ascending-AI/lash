@@ -254,11 +254,11 @@ fn the_workbench_typescript_tutorials_link() {
     );
 }
 
-/// The tutorials follow the dialect the turn resolved, not this process's
+/// The tutorials follow the dialect the session recorded, not this process's
 /// configuration: a store that outlived a config change runs its recorded
 /// dialect, and copy keyed on configuration teaches the other one.
 #[test]
-fn the_tutorials_follow_the_turns_resolved_options() {
+fn the_tutorials_follow_the_sessions_recorded_dialect() {
     let typescript = lash::runtime::ProtocolTurnOptions::typed(
         lash_rlm_types::RlmCreateExtras {
             dialect: Some(lash::rlm::RlmDialect::Typescript),
@@ -266,16 +266,29 @@ fn the_tutorials_follow_the_turns_resolved_options() {
         },
     )
     .expect("typed options");
-    assert_eq!(
-        tutorial_dialect(&typescript),
-        lash::rlm::RlmDialect::Typescript
-    );
-    assert!(workbench_prompt(tutorial_dialect(&typescript)).contains("<typescript>"));
+    let resolved = tutorial_dialect(&typescript).expect("recorded dialect decodes");
+    assert_eq!(resolved, lash::rlm::RlmDialect::Typescript);
+    assert!(workbench_prompt(resolved).contains("<typescript>"));
 
     // Absent options are how every pre-dialect session reads.
     assert_eq!(
-        tutorial_dialect(&lash::runtime::ProtocolTurnOptions::default()),
+        tutorial_dialect(&lash::runtime::ProtocolTurnOptions::default())
+            .expect("an empty bag is a session running the default"),
         lash::rlm::RlmDialect::Lashlang
+    );
+}
+
+/// FIG-1979: an undecodable dialect refuses the contribution rather than
+/// injecting the default dialect's three complete programs into the prompt of
+/// a session executing the other one.
+#[test]
+fn a_malformed_recorded_dialect_refuses_the_tutorials() {
+    let tampered =
+        lash::runtime::ProtocolTurnOptions::from_payload(serde_json::json!({ "dialect": "python" }));
+    let error = tutorial_dialect(&tampered).expect_err("an unknown language id must refuse");
+    assert!(
+        error.to_string().contains("invalid RLM session config"),
+        "the refusal names the config it could not read: {error}"
     );
 }
 

@@ -7172,8 +7172,8 @@ lash::rlm::LashlangSurfaceContribution::language_features
 lash::rlm::LashlangSurfaceContribution::new
 lash::rlm::LashlangSurfaceContribution::resources
 lash::rlm::MemoryBound
-lash::rlm::MemoryBound::bytes
 lash::rlm::MemoryBound::limit
+lash::rlm::MemoryBound::logical_bytes
 lash::rlm::MemoryBound::mebibytes
 lash::rlm::MemoryBound::unbounded
 lash::rlm::ModuleCompileOutput
@@ -7189,7 +7189,6 @@ lash::rlm::ProjectionRegistry::register_memory
 lash::rlm::RLM_PROTOCOL_PLUGIN_ID
 lash::rlm::RlmCreateExtras
 lash::rlm::RlmCreateExtras::dialect
-lash::rlm::RlmCreateExtras::effective_termination
 lash::rlm::RlmCreateExtras::final_answer_format
 lash::rlm::RlmCreateExtras::termination
 lash::rlm::RlmDialect
@@ -7258,6 +7257,8 @@ lash::rlm::RlmSessionConfigConflict::Termination
 lash::rlm::RlmSessionConfigConflict::Termination::recorded
 lash::rlm::RlmSessionConfigConflict::Termination::requested
 lash::rlm::RlmSessionConfigConflict::field
+lash::rlm::RlmSessionConfigDecodeError
+lash::rlm::RlmSessionConfigDecodeError::0
 lash::rlm::RlmSessionConfigError
 lash::rlm::RlmSessionConfigError::Conflict
 lash::rlm::RlmSessionConfigError::Conflict::0
@@ -7279,6 +7280,10 @@ lash::rlm::RlmTurnBuilderExt::require_finish_schema
 lash::rlm::RlmTurnInputExt
 lash::rlm::RlmTurnInputExt::rlm_project
 lash::rlm::RlmTurnInputExt::rlm_project_tool_results
+lash::rlm::RlmTurnOptions
+lash::rlm::RlmTurnOptions::effective_termination
+lash::rlm::RlmTurnOptions::final_answer_format
+lash::rlm::RlmTurnOptions::termination
 lash::rlm::TypeExpr
 lash::rlm::TypeExpr::Any
 lash::rlm::TypeExpr::Bool
@@ -7314,6 +7319,7 @@ lash::rlm::WallClockBound::millis
 lash::rlm::WallClockBound::secs
 lash::rlm::WallClockBound::unbounded
 lash::rlm::format_type_expr
+lash::rlm::rlm_session_dialect
 lash::rlm::rlm_session_projection_extension
 lash::runtime::AdvancedLashCoreBuilder
 lash::runtime::AdvancedLashCoreBuilder::build

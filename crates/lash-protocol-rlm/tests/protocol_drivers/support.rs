@@ -14,7 +14,7 @@ pub(crate) use lash_protocol_rlm::{RlmDriver, RlmProtocolPluginConfig, RlmProtoc
 /// one sans-io machine for one session.
 pub(crate) const RLM_TRANSCRIPT_ACTOR: &str = "rlm";
 pub(crate) use lash_rlm_types::{
-    RlmCreateExtras, RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry,
+    RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry, RlmTurnOptions,
 };
 pub(crate) use lash_sansio::llm::types::{
     LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, LlmRole,
@@ -29,8 +29,7 @@ pub(crate) fn test_config() -> TurnMachineConfig {
 
 pub(crate) fn test_config_with_termination(rlm_termination: RlmTermination) -> TurnMachineConfig {
     test_config_with_protocol_turn_options(
-        lash_core::ProtocolTurnOptions::typed(RlmCreateExtras {
-            dialect: None,
+        lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {
             termination: Some(rlm_termination),
             final_answer_format: None,
         })

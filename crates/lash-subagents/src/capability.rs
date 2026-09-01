@@ -61,15 +61,8 @@ impl SubagentSpawnContext<'_> {
     /// A parent with no recorded dialect is a pre-layer session, and its
     /// children inherit the same Lashlang default it resolves to.
     pub fn inherited_rlm_dialect(&self) -> Result<lash_rlm_types::RlmDialect, String> {
-        let options = &self.parent_snapshot.protocol_turn_options;
-        if options.is_empty() {
-            return Ok(lash_rlm_types::RlmDialect::default());
-        }
-        Ok(options
-            .decode::<lash_rlm_types::RlmCreateExtras>()
-            .map_err(|err| format!("failed to read the parent session's dialect: {err}"))?
-            .dialect
-            .unwrap_or_default())
+        lash_protocol_rlm::rlm_session_dialect(&self.parent_snapshot.protocol_turn_options)
+            .map_err(|err| format!("failed to read the parent session's dialect: {err}"))
     }
 
     pub fn base_policy(&self) -> SessionPolicy {

@@ -154,6 +154,27 @@ pub fn rlm_session_config(
     Ok(RlmSessionConfig::from(&extras))
 }
 
+/// The dialect a session is running, read from its own recorded config.
+///
+/// This is the one read a host may make when it needs the running language —
+/// for prompt copy, a rendered label, an evidence bundle. The dialect is
+/// session scope (ADR 0066): it is resolved once at materialization and a turn
+/// cannot restate it, so reading it off a set of turn options reads the
+/// session's answer whether or not a turn merged its own options over the bag.
+///
+/// The decode is strict (FIG-1979). A malformed or unknown language id is an
+/// error, never the default: silently substituting Lashlang is exactly the
+/// substitution [`RlmDialect::from_language_id`](lash_rlm_types::RlmDialect::from_language_id)
+/// refuses by design, and it would print one dialect's vocabulary at a session
+/// executing the other. Absence is a different answer from malformed: a session
+/// that recorded nothing is *running* the ratified default, so absence resolves
+/// to it.
+pub fn rlm_session_dialect(
+    options: &ProtocolTurnOptions,
+) -> Result<lash_rlm_types::RlmDialect, RlmSessionConfigDecodeError> {
+    Ok(rlm_session_config(options)?.dialect.unwrap_or_default())
+}
+
 /// A recorded RLM options bag that could not be decoded.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RlmSessionConfigDecodeError(pub String);
@@ -751,6 +772,62 @@ mod tests {
         assert_eq!(
             detail.as_deref(),
             Some("40999 tokens used; warn at 40999; choose frame switch path")
+        );
+    }
+
+    /// FIG-1979: the session-dialect read is strict.
+    ///
+    /// The read this replaces was `.ok().and_then(..).unwrap_or_default()`, so
+    /// a language id the registry does not know selected Lashlang -- the exact
+    /// substitution `RlmDialect::from_language_id` refuses by design, arriving
+    /// through the back door and leaving a host wording its prompt in one
+    /// dialect while the cells executed the other.
+    #[test]
+    fn an_unreadable_dialect_is_an_error_not_the_default() {
+        for (label, payload) in [
+            (
+                "an unknown language id",
+                serde_json::json!({"dialect": "python"}),
+            ),
+            (
+                "a case-drifted id",
+                serde_json::json!({"dialect": "Lashlang"}),
+            ),
+            (
+                "an explicit null",
+                serde_json::json!({"dialect": serde_json::Value::Null}),
+            ),
+            ("a non-string value", serde_json::json!({"dialect": 7})),
+        ] {
+            let tampered = ProtocolTurnOptions::from_payload(payload);
+            match rlm_session_dialect(&tampered) {
+                Ok(dialect) => {
+                    panic!("{label} resolved to {dialect:?} instead of refusing")
+                }
+                Err(error) => assert!(
+                    error.to_string().starts_with("invalid RLM session config"),
+                    "{label} refused with an unexpected message: {error}"
+                ),
+            }
+        }
+    }
+
+    /// Absence is a different answer from malformed: a session that recorded
+    /// nothing is *running* the ratified default, so it reads as that default
+    /// rather than as a refusal.
+    #[test]
+    fn an_absent_dialect_reads_as_the_running_default() {
+        assert_eq!(
+            rlm_session_dialect(&ProtocolTurnOptions::default())
+                .expect("an empty bag is a session running the default"),
+            RlmDialect::Lashlang
+        );
+        let recorded =
+            rlm_session_config_options(&RlmSessionConfig::new().dialect(RlmDialect::Typescript))
+                .expect("encode");
+        assert_eq!(
+            rlm_session_dialect(&recorded).expect("a recorded dialect decodes"),
+            RlmDialect::Typescript
         );
     }
 

@@ -30,7 +30,7 @@ async fn list_sessions(
     }
     let mut sessions = Vec::with_capacity(rostered.len());
     for entry in rostered {
-        let dialect = state.recorded_dialect(&entry.session_id).await;
+        let dialect = state.recorded_dialect(&entry.session_id).await?;
         sessions.push(SessionSummary {
             current: entry.session_id == current_session_id,
             dialect: dialect.language_id(),
@@ -108,7 +108,7 @@ async fn create_session(
     );
     Ok(Json(SessionSummary {
         current: session_id == state.current_session_id(),
-        dialect: state.recorded_dialect(&session_id).await.language_id(),
+        dialect: state.recorded_dialect(&session_id).await?.language_id(),
         session_id,
         name: entry.name,
         created_at_ms: entry.created_at_ms,
@@ -144,7 +144,7 @@ async fn select_session(
     );
     Ok(Json(SessionSummary {
         current: true,
-        dialect: state.recorded_dialect(&session_id).await.language_id(),
+        dialect: state.recorded_dialect(&session_id).await?.language_id(),
         session_id,
         name: entry.name,
         created_at_ms: entry.created_at_ms,

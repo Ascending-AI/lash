@@ -47,15 +47,23 @@ impl RlmTurnBuilderExt for TurnBuilder {
 /// The write half of the pair is
 /// [`RlmSessionExt::set_rlm_config_if_unset`].
 #[cfg(feature = "rlm")]
+/// The read is strict (FIG-1979): a bag that does not decode is an error, not
+/// an empty config. A swallowed decode failure reads as "this session recorded
+/// nothing", which is the one answer a host must never infer from a corrupted
+/// bag — it resolves every fact to a default the session is not running.
 pub trait RlmSessionReadViewExt {
     /// The RLM config this session recorded, as recorded.
-    fn rlm_config(&self) -> lash_rlm_types::RlmSessionConfig;
+    fn rlm_config(
+        &self,
+    ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigDecodeError>;
 }
 
 #[cfg(feature = "rlm")]
 impl RlmSessionReadViewExt for lash_core::SessionReadView {
-    fn rlm_config(&self) -> lash_rlm_types::RlmSessionConfig {
-        lash_protocol_rlm::rlm_session_config(self.protocol_turn_options()).unwrap_or_default()
+    fn rlm_config(
+        &self,
+    ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigDecodeError> {
+        lash_protocol_rlm::rlm_session_config(self.protocol_turn_options())
     }
 }
 
@@ -114,7 +122,9 @@ impl From<EmbedError> for RlmSessionConfigError {
 #[async_trait::async_trait]
 pub trait RlmSessionExt {
     /// The RLM config this session recorded, as recorded.
-    fn rlm_config(&self) -> lash_rlm_types::RlmSessionConfig;
+    fn rlm_config(
+        &self,
+    ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigDecodeError>;
 
     /// Write every fact the request states that the session has not recorded,
     /// and return the resulting config.
@@ -142,7 +152,9 @@ pub trait RlmSessionExt {
 #[cfg(feature = "rlm")]
 #[async_trait::async_trait]
 impl RlmSessionExt for crate::LashSession {
-    fn rlm_config(&self) -> lash_rlm_types::RlmSessionConfig {
+    fn rlm_config(
+        &self,
+    ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigDecodeError> {
         self.read_view().rlm_config()
     }
 
@@ -179,8 +191,9 @@ pub use lash_lashlang_runtime::{
 };
 pub use lash_protocol_rlm::{
     ExecutionBounds, InstructionBound, MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID,
-    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, TypeExpr,
-    TypeField, UnsetBound, WallClockBound, format_type_expr,
+    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
+    RlmSessionConfigDecodeError, TypeExpr, TypeField, UnsetBound, WallClockBound, format_type_expr,
+    rlm_session_dialect,
 };
 /// Projection vocabulary: register lazy host projections on a
 /// [`ProjectionRegistry`], bind projected values session-wide via
@@ -191,7 +204,7 @@ pub use lash_protocol_rlm::{
 };
 pub use lash_rlm_types::{
     RlmCreateExtras, RlmDialect, RlmFinalAnswerFormat, RlmSessionConfig, RlmSessionConfigConflict,
-    RlmTermination,
+    RlmTermination, RlmTurnOptions,
 };
 
 /// The Lashlang compile APIs are operations over an
@@ -208,8 +221,7 @@ fn rlm_termination(
     mut builder: TurnBuilder,
     termination: lash_rlm_types::RlmTermination,
 ) -> Result<TurnBuilder> {
-    let override_options = ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
-        dialect: None,
+    let override_options = ProtocolTurnOptions::typed(lash_rlm_types::RlmTurnOptions {
         termination: Some(termination),
         final_answer_format: None,
     })?;

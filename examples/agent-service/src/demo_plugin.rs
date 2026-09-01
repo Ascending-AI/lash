@@ -66,11 +66,9 @@ impl SessionPlugin for DemoSessionPlugin {
         reg.prompt().contribute(Arc::new(move |ctx| {
             let db = Arc::clone(&db);
             Box::pin(async move {
+                let dialect = crate::state::rlm_session_dialect(&ctx.protocol_turn_options)?;
                 let board = load_chat_board_for_plugin(&db, &ctx.session_id)?;
-                let context = board_prompt(
-                    &board,
-                    crate::state::rlm_dialect_from_turn_options(&ctx.protocol_turn_options),
-                );
+                let context = board_prompt(&board, dialect);
                 Ok(vec![PromptContribution::environment(
                     "Tic Tac Toe Board",
                     context,
