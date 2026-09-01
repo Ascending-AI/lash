@@ -17,7 +17,7 @@ use lash_rlm_types::{RlmCreateExtras, RlmFinalAnswerFormat, RlmTermination};
 use crate::dialect::{LashlangDialect, RlmDialect};
 #[cfg(test)]
 use crate::projection::rlm_protocol_event;
-use crate::rlm_support::{SharedBoundVariablesPrompt, decode_rlm_options};
+use crate::rlm_support::{SharedBoundVariablesPrompt, decode_rlm_options, effective_budget_tokens};
 
 #[cfg(any(test, feature = "testing"))]
 use history::render_history_messages;
@@ -309,7 +309,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         let budget_suffix = crate::rlm_support::format_budget_suffix_with_vocabulary(
             ctx.protocol_iteration + 1,
             guard.as_ref(),
-            self.max_budget_tokens,
+            effective_budget_tokens(self.max_budget_tokens, ctx.config.max_context_tokens),
             vocabulary,
         );
         let bound_variables_prompt = self.bound_variables_prompt.read_recover().clone();
@@ -678,6 +678,7 @@ mod tests {
             protocol_iteration,
             model,
             Default::default(),
+            None,
         )
     }
 
@@ -687,13 +688,14 @@ mod tests {
         protocol_iteration: usize,
         model: &str,
         generation: lash_core::GenerationOptions,
+        max_context_tokens: Option<usize>,
     ) -> Arc<LlmRequest> {
         let config = lash_core::TurnMachineConfig {
             protocol_driver: Arc::new(crate::protocol::RlmDriver::default()),
             projector: Arc::new(lash_core::sansio::ChatContextProjector),
             sync_execution_environment: true,
             model: model.to_string(),
-            max_context_tokens: None,
+            max_context_tokens,
             turn_budget: lash_core::TurnBudget::Unbounded,
             no_progress_budget: Default::default(),
             model_variant: Default::default(),
@@ -723,6 +725,29 @@ mod tests {
     }
 
     #[test]
+    fn rlm_projector_renders_a_reachable_threshold_for_a_small_context_window() {
+        let mut projector = projector(1000);
+        projector.max_budget_tokens = Some(100_000);
+        *projector.last_prompt_usage.write_recover() = Some(lash_core::PromptUsage {
+            context_budget_tokens: 40_999,
+            ..Default::default()
+        });
+
+        let request = project_iteration_request_with_generation(
+            &projector,
+            &[],
+            0,
+            "test-model",
+            Default::default(),
+            Some(41_000),
+        );
+        let tail = message_text(request.messages.last().expect("current iteration tail"));
+
+        assert!(tail.contains("frame switch threshold: 40999"));
+        assert!(!tail.contains("frame switch threshold: 100000"));
+    }
+
+    #[test]
     fn rlm_projector_sends_no_stop_sequence_without_caller_stops() {
         let request = project_iteration_request(&projector(100), &[], 0, "test-model");
         assert!(request.generation.stop_sequences.is_empty());
@@ -744,6 +769,7 @@ mod tests {
                     stop_sequences: caller_stops,
                     ..Default::default()
                 },
+                None,
             );
             assert!(request.generation.stop_sequences.is_empty());
             assert!(request.generation.stop_sequences_suppressed_by_protocol());

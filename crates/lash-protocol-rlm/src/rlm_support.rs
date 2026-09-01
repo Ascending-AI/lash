@@ -87,6 +87,15 @@ pub fn format_budget_suffix(
     )
 }
 
+pub(crate) fn effective_budget_tokens(
+    max_budget_tokens: Option<usize>,
+    context_window_tokens: Option<usize>,
+) -> Option<usize> {
+    max_budget_tokens.map(|threshold| {
+        context_window_tokens.map_or(threshold, |window| threshold.min(window.saturating_sub(1)))
+    })
+}
+
 pub(crate) fn format_budget_suffix_with_vocabulary(
     turn_index: usize,
     usage: Option<&PromptUsage>,

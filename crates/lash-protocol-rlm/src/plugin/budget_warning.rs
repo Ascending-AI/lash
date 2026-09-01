@@ -28,7 +28,7 @@ impl TurnContextTransform for BudgetUsageObserver {
 
 #[cfg(test)]
 mod tests {
-    use crate::rlm_support::format_budget_suffix_with_vocabulary;
+    use crate::rlm_support::{effective_budget_tokens, format_budget_suffix_with_vocabulary};
 
     fn prompt_usage(context_budget_tokens: usize) -> lash_core::PromptUsage {
         lash_core::PromptUsage {
@@ -37,6 +37,30 @@ mod tests {
             cache_read_input_tokens: 0,
             cache_write_input_tokens: 0,
             context_budget_tokens,
+        }
+    }
+
+    #[test]
+    fn effective_frame_switch_threshold_stays_below_representative_context_windows() {
+        for (configured_threshold, context_window_tokens, expected_threshold) in [
+            (100_000, 41_000, 40_999),
+            (30_000, 41_000, 30_000),
+            (100_000, 200_000, 100_000),
+        ] {
+            let threshold =
+                effective_budget_tokens(Some(configured_threshold), Some(context_window_tokens))
+                    .expect("configured threshold should remain enabled");
+            assert_eq!(threshold, expected_threshold);
+            assert!(threshold < context_window_tokens);
+
+            let content = format_budget_suffix_with_vocabulary(
+                0,
+                Some(&prompt_usage(threshold)),
+                Some(threshold),
+                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            )
+            .expect("budget suffix should render");
+            assert!(content.contains(&format!("frame switch threshold: {threshold}")));
         }
     }
 
