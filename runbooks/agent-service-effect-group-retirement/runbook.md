@@ -292,7 +292,7 @@ submit fresh `await_resolution` calls; state reads alone do not prove late regis
 
 ```sh
 restate sql --json \
-  "select i.target, j.* from sys_invocation i join sys_journal j on i.id = j.id where i.invoked_by_id = '$retirement_id' and i.target_service_name = 'LashDurableWaitIndex' and i.target_handler_name = 'retain_resolution' and j.index = 0 order by i.created_at asc limit 2" \
+  "select i.target, j.entry_json from sys_invocation i join sys_journal j on i.id = j.id where i.invoked_by_id = '$retirement_id' and i.target_service_name = 'LashDurableWaitIndex' and i.target_handler_name = 'retain_resolution' and j.index = 0 order by i.created_at asc limit 2" \
   >"$run_root/ready-rank-retains.json"
 
 python3 - "$run_root/ready-rank-retains.json" "$RESTATE_INGRESS_URL" <<'PY' | tee "$run_root/late-ready-rank.txt"
@@ -300,7 +300,7 @@ import json, sys, urllib.request
 rows = json.load(open(sys.argv[1], encoding="utf-8"))
 assert len(rows) == 2, rows
 for label, suffix, row in zip(("READY", "RANK-1"), (":ready", ":rank:1"), rows):
-    entry = json.loads(row["entry" + "_json"])
+    entry = json.loads(row["entry_json"])
     request = json.loads(bytes(entry["Command"]["Input"]["payload"]))
     request.pop("resolution")
     assert request["key"]["wait"]["key"].endswith(suffix), request
