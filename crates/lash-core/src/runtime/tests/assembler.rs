@@ -393,6 +393,43 @@ fn assembler_treats_any_non_success_record_as_tool_failure() {
 }
 
 #[test]
+fn assembler_classifies_failure_omitted_beyond_128_call_horizon() {
+    let mut assembler = TurnAssembler::default();
+    for index in 0..128 {
+        assembler.push(&SessionStreamEvent::ToolCall {
+            call_id: Some(format!("call-{index}")),
+            name: "successful_tool".to_string(),
+            args: serde_json::json!({ "index": index }),
+            output: crate::ToolCallOutput::success(serde_json::json!(index)),
+            duration_ms: 1,
+        });
+    }
+    assembler.push(&SessionStreamEvent::ToolCallsOmitted {
+        summary: crate::OmittedToolCalls {
+            count: 1,
+            failures: 1,
+            attachments: Vec::new(),
+        },
+    });
+    assembler.push(&SessionStreamEvent::Error {
+        message: "runtime also reported a blocking issue".to_string(),
+        envelope: None,
+    });
+    assembler.push(&SessionStreamEvent::Done);
+
+    let out = assembler.finish(
+        default_state().to_snapshot(),
+        None,
+        None,
+        &TerminationPolicy::default(),
+    );
+
+    assert_eq!(out.outcome, TurnOutcome::Stopped(TurnStop::ToolFailure));
+    assert_eq!(out.tool_calls.len(), 128);
+    assert_eq!(out.omitted.expect("typed omission").failures, 1);
+}
+
+#[test]
 fn assembler_marks_missing_done_as_failure() {
     let mut assembler = TurnAssembler::default();
     assembler.push(&SessionStreamEvent::TextDelta {

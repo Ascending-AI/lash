@@ -5841,7 +5841,7 @@ fn agent_shell_output_projection_fact(
                     == Some("exec_result")
                 && event
                     .observed
-                    .pointer("/runtime_effect_outcome/result/Ok/tool_calls")
+                    .pointer("/runtime_effect_outcome/result/Ok/calls")
                     .and_then(Value::as_array)
                     .is_some_and(Vec::is_empty)
                 && event
@@ -6489,8 +6489,15 @@ fn exec_outcome_has_no_tool_call_replay(events: &[DeliveredBoundary]) -> bool {
         if outcome.get("type").and_then(Value::as_str) != Some("exec_code") {
             return false;
         }
-        let serialized = outcome.to_string();
-        serialized.contains("\"tool_calls\":[]") || !serialized.contains("\"tool_calls\"")
+        outcome
+            .pointer("/result/Ok/calls")
+            .and_then(Value::as_array)
+            .is_some_and(|calls| {
+                calls.iter().all(|call| {
+                    call.get("host_record")
+                        .is_none_or(serde_json::Value::is_null)
+                })
+            })
     })
 }
 
@@ -9522,7 +9529,7 @@ mod tests {
                     "runtime_effect_outcome": {
                         "result": {
                             "Ok": {
-                                "tool_calls": []
+                                "calls": []
                             }
                         },
                         "type": "exec_code"

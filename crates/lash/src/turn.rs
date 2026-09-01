@@ -1572,6 +1572,9 @@ pub struct TurnReport {
     pub failure_evidence: Vec<lash_core::TurnFailureEvidence>,
     /// Tool calls issued by the turn in protocol order.
     pub tool_calls: Vec<ToolCallRecord>,
+    /// Typed accounting for tool calls omitted from the bounded record view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omitted: Option<crate::OmittedToolCalls>,
     /// Execution metadata collected for the turn.
     pub execution: TurnExecutionMetrics,
     /// Errors captured while settling the turn.
@@ -1608,6 +1611,7 @@ impl TurnReport {
             children_usage,
             llm_calls,
             tool_calls,
+            omitted,
             failure_evidence,
             errors,
         } = turn;
@@ -1620,6 +1624,7 @@ impl TurnReport {
             llm_calls,
             failure_evidence,
             tool_calls,
+            omitted,
             execution,
             errors,
             acceptance: turn_input_acceptance,

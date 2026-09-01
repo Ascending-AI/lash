@@ -339,6 +339,10 @@ lash::ObservableSession::subscribe_from_remote_cursor
 lash::ObservableSession::subscribe_recoverable_chat
 lash::ObservableSession::tool_state
 lash::ObservableSession::usage_report
+lash::OmittedToolCalls
+lash::OmittedToolCalls::attachments
+lash::OmittedToolCalls::count
+lash::OmittedToolCalls::failures
 lash::ParkedSession
 lash::ParkedSession::session_id
 lash::PendingTurnInput
@@ -906,6 +910,7 @@ lash::TurnReport::failure_evidence
 lash::TurnReport::final_value
 lash::TurnReport::is_success
 lash::TurnReport::llm_calls
+lash::TurnReport::omitted
 lash::TurnReport::outcome
 lash::TurnReport::started_at
 lash::TurnReport::state
@@ -1888,6 +1893,10 @@ lash::persistence::DurableSurface::name
 lash::persistence::EmptyRootSetPolicy
 lash::persistence::EmptyRootSetPolicy::AuthorizeDeleteAll
 lash::persistence::EmptyRootSetPolicy::Refuse
+lash::persistence::ExecutedCall
+lash::persistence::ExecutedCall::host_record
+lash::persistence::ExecutedCall::operation
+lash::persistence::ExecutedCall::outcome
 lash::persistence::ExecutedCallOutcome
 lash::persistence::ExecutedCallOutcome::Err
 lash::persistence::ExecutedCallOutcome::Ok
@@ -3054,14 +3063,13 @@ lash::plugins::ExecRequest
 lash::plugins::ExecRequest::code
 lash::plugins::ExecRequest::language
 lash::plugins::ExecResponse
+lash::plugins::ExecResponse::calls
 lash::plugins::ExecResponse::degraded_bindings
 lash::plugins::ExecResponse::duration_ms
 lash::plugins::ExecResponse::error
-lash::plugins::ExecResponse::executed_calls
 lash::plugins::ExecResponse::observations
 lash::plugins::ExecResponse::printed_images
 lash::plugins::ExecResponse::terminal_finish
-lash::plugins::ExecResponse::tool_calls
 lash::plugins::ExecutionStateComponentSnapshot
 lash::plugins::ExecutionStateComponentSnapshot::Changed
 lash::plugins::ExecutionStateComponentSnapshot::Changed::0
@@ -3801,6 +3809,7 @@ lash::plugins::TurnHookReport::assistant_output
 lash::plugins::TurnHookReport::errors
 lash::plugins::TurnHookReport::execution
 lash::plugins::TurnHookReport::from_assembled
+lash::plugins::TurnHookReport::omitted
 lash::plugins::TurnHookReport::outcome
 lash::plugins::TurnHookReport::token_usage
 lash::plugins::TurnHookReport::tool_calls
@@ -4519,6 +4528,7 @@ lash::prelude::TurnReport::failure_evidence
 lash::prelude::TurnReport::final_value
 lash::prelude::TurnReport::is_success
 lash::prelude::TurnReport::llm_calls
+lash::prelude::TurnReport::omitted
 lash::prelude::TurnReport::outcome
 lash::prelude::TurnReport::started_at
 lash::prelude::TurnReport::state
@@ -7262,6 +7272,7 @@ lash::runtime::AssembledTurn::errors
 lash::runtime::AssembledTurn::execution
 lash::runtime::AssembledTurn::failure_evidence
 lash::runtime::AssembledTurn::llm_calls
+lash::runtime::AssembledTurn::omitted
 lash::runtime::AssembledTurn::outcome
 lash::runtime::AssembledTurn::state
 lash::runtime::AssembledTurn::token_usage
@@ -10456,6 +10467,7 @@ lash::turn::TurnReport::failure_evidence
 lash::turn::TurnReport::final_value
 lash::turn::TurnReport::is_success
 lash::turn::TurnReport::llm_calls
+lash::turn::TurnReport::omitted
 lash::turn::TurnReport::outcome
 lash::turn::TurnReport::started_at
 lash::turn::TurnReport::state

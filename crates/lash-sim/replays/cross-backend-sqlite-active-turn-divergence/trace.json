@@ -1216,7 +1216,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -1236,8 +1236,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 1 for session-001"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -6967,7 +6966,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -6987,8 +6986,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 1 for session-002"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -9788,7 +9786,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": "exit code 1",
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -9808,8 +9806,7 @@
               "terminal_finish": {
                 "exit_code": 1,
                 "output": "exec result 1 for session-004"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -13604,7 +13601,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -13624,8 +13621,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 2 for session-004"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -14935,7 +14931,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": "exit code 1",
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -14955,8 +14951,7 @@
               "terminal_finish": {
                 "exit_code": 1,
                 "output": "exec result 2 for session-001"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -15850,7 +15845,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -15870,8 +15865,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 3 for session-001"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -19918,7 +19912,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -19938,8 +19932,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 1 for session-003"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -20217,7 +20210,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -20237,8 +20230,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 2 for session-003"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -21798,7 +21790,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -21818,8 +21810,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 3 for session-003"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -24378,7 +24369,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -24398,8 +24389,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 2 for session-002"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -24461,7 +24451,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": "exit code 1",
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -24481,8 +24471,7 @@
               "terminal_finish": {
                 "exit_code": 1,
                 "output": "exec result 4 for session-003"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -25103,7 +25092,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -25123,8 +25112,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 3 for session-002"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -26910,7 +26898,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -26930,8 +26918,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 4 for session-002"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -27136,7 +27123,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -27156,8 +27143,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 4 for session-001"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -28590,7 +28576,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -28610,8 +28596,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 3 for session-004"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -30474,7 +30459,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": "exit code 1",
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -30494,8 +30479,7 @@
               "terminal_finish": {
                 "exit_code": 1,
                 "output": "exec result 5 for session-001"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -33495,7 +33479,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -33515,8 +33499,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 5 for session-003"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -40092,7 +40075,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -40112,8 +40095,7 @@
               "terminal_finish": {
                 "exit_code": 0,
                 "output": "exec result 4 for session-004"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"
@@ -41322,7 +41304,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": "exit code 1",
-              "executed_calls": [],
+              "calls": [],
               "observations": [
                 {
                   "projection": {
@@ -41342,8 +41324,7 @@
               "terminal_finish": {
                 "exit_code": 1,
                 "output": "exec result 5 for session-002"
-              },
-              "tool_calls": []
+              }
             }
           },
           "type": "exec_code"

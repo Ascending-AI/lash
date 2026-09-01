@@ -65,8 +65,7 @@ impl crate::plugin::CodeExecutorPlugin for SettlementExecutor {
             }
             return Ok(crate::ExecResponse {
                 observations: Vec::new(),
-                tool_calls: Vec::new(),
-                executed_calls: Vec::new(),
+                calls: Vec::new(),
                 printed_images: Vec::new(),
                 error: Some("code execution stopped".to_string()),
                 duration_ms: 1,
@@ -79,8 +78,7 @@ impl crate::plugin::CodeExecutorPlugin for SettlementExecutor {
                 text: "next cell executed".to_string(),
                 projection: Default::default(),
             }],
-            tool_calls: Vec::new(),
-            executed_calls: Vec::new(),
+            calls: Vec::new(),
             printed_images: Vec::new(),
             error: None,
             duration_ms: 1,

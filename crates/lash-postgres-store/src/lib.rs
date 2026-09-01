@@ -272,7 +272,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 70 stores checked `FrameKey` values in every frame-open node.
 // Component-69 databases contain raw initial-frame keys and are rejected at
 // open; there is deliberately no migration arm.
-const SCHEMA_VERSION: i32 = 70;
+// Version 71 merges the two journaled exec dispatch ledgers. Component-70
+// databases may contain the removed two-list payload and are rejected at open;
+// there is deliberately no migration arm.
+const SCHEMA_VERSION: i32 = 71;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

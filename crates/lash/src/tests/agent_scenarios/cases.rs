@@ -53,6 +53,11 @@ const STARTED_PROCESS_LABELED_TOOL_CALL: AgentScenarioCoverage = agent_scenario_
     "started process labeled tool call",
     "Started Lashlang process calling an app tool with process graph completion."
 );
+const AWAITED_PROCESS_ATTACHMENT_RETENTION: AgentScenarioCoverage = agent_scenario_coverage!(
+    agent_scenario_awaited_process_attachment_is_a_parent_commit_gc_root,
+    "awaited process attachment retention",
+    "An attachment returned only by an awaited child process remains rooted by the parent commit."
+);
 const DURABLE_INPUT_REQUEST: AgentScenarioCoverage = agent_scenario_coverage!(
     agent_scenario_process_durable_input_request_tool,
     "durable input suspension",
@@ -122,6 +127,7 @@ const FIG1293_MIGRATED_TOOL_COMPOSITION: AgentScenarioCoverage = agent_scenario_
 const AGENT_SCENARIO_COVERAGE: &[AgentScenarioCoverage] = &[
     FOREGROUND_LABELED_TOOL_CALL,
     STARTED_PROCESS_LABELED_TOOL_CALL,
+    AWAITED_PROCESS_ATTACHMENT_RETENTION,
     DURABLE_INPUT_REQUEST,
     PROCESS_LLM_QUERY,
     DIRECT_COMPLETION_ATTEMPT_RETRY,
@@ -139,7 +145,7 @@ const AGENT_SCENARIO_COVERAGE: &[AgentScenarioCoverage] = &[
 
 #[test]
 fn agent_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(AGENT_SCENARIO_COVERAGE.len(), 15);
+    assert_eq!(AGENT_SCENARIO_COVERAGE.len(), 16);
     let mut names = BTreeSet::new();
     for coverage in AGENT_SCENARIO_COVERAGE {
         #[cfg(feature = "rlm")]
@@ -314,6 +320,62 @@ finish result"#,
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="lookup" kind="lashlang" terminal=true
         "#);
+        Ok(())
+    })
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn agent_scenario_awaited_process_attachment_is_a_parent_commit_gc_root() -> Result<()> {
+    run_async_test_on_stack_budget("agent-scenario-awaited-process-attachment", || async {
+        let attachment = lash_core::facade_support::AttachmentMeta::new(
+            lash_core::AttachmentId::parse("awaited-child-only").expect("valid attachment id"),
+            lash_core::MediaType::parse("image/png").expect("test media type"),
+            18,
+            Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
+            Some("awaited-child-only.png".to_string()),
+        )
+        .as_ref();
+        let run = run_agent_turn_scenario(
+            AgentScenario::new(
+                AWAITED_PROCESS_ATTACHMENT_RETENTION.scenario_name,
+                "Return the attachment produced by a child process.",
+            )
+            .response(lashlang_block(
+                r#"
+handle = { __handle__: "process", id: "awaited-attachment-child" }
+attachment = (await handle)?
+finish attachment"#,
+            ))
+            .precompleted_process(
+                "awaited-attachment-child",
+                lash_core::ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::success_tool_value(
+                        lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(
+                            attachment.clone(),
+                        )),
+                    ),
+                ),
+            ),
+        )
+        .await?;
+        let parent_tool_calls = &run
+            .turn_output
+            .as_ref()
+            .expect("root turn completed")
+            .tool_calls;
+
+        assert_eq!(
+            run.committed_attachment_ids,
+            vec![
+                lash_core::AttachmentId::parse("awaited-child-only").expect("valid attachment id")
+            ]
+        );
+        assert_eq!(parent_tool_calls.len(), 1);
+        assert_eq!(
+            parent_tool_calls[0].output.attachments(),
+            vec![lash_core::AttachmentSource::stored(attachment)]
+        );
         Ok(())
     })
 }

@@ -2,7 +2,8 @@ use crate::facade_support::AgentFrameReasonFacadeOps;
 use std::collections::BTreeSet;
 
 use crate::{
-    Message, MessageRole, Part, PartKind, ToolCallRecord, TurnFinish, TurnOutcome, shared_parts,
+    Message, MessageRole, OmittedToolCalls, Part, PartKind, ToolCallRecord, TurnFinish,
+    TurnOutcome, shared_parts,
 };
 
 use super::RuntimeSessionState;
@@ -21,6 +22,7 @@ pub(super) fn agent_frame_switch_materializes(
 pub(super) fn committed_attachment_ids(
     state: &RuntimeSessionState,
     tool_calls: &[ToolCallRecord],
+    omitted: Option<&OmittedToolCalls>,
 ) -> Vec<crate::AttachmentId> {
     let mut attachment_ids = BTreeSet::new();
     for call in tool_calls {
@@ -28,6 +30,14 @@ pub(super) fn committed_attachment_ids(
             if let Some(attachment_ref) = attachment.stored_ref() {
                 attachment_ids.insert(attachment_ref.id.clone());
             }
+        }
+    }
+    for attachment in omitted
+        .into_iter()
+        .flat_map(|omitted| omitted.attachments.iter())
+    {
+        if let Some(attachment_ref) = attachment.stored_ref() {
+            attachment_ids.insert(attachment_ref.id.clone());
         }
     }
     for message in state.read_model().messages.iter() {
@@ -132,4 +142,79 @@ fn message_rendered_text(message: &Message) -> String {
         .map(|part| part.content.as_str())
         .collect::<Vec<_>>()
         .join("")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const UNBOUNDED: crate::TurnBudget = crate::TurnBudget::Unbounded;
+
+    fn attachment_ref(id: &str) -> crate::AttachmentRef {
+        crate::AttachmentMeta::new(
+            crate::AttachmentId::parse(id).expect("valid attachment id"),
+            crate::MediaType::parse("image/png").unwrap(),
+            3,
+            Some(crate::AttachmentTypeMetadata::image(Some(1), Some(1))),
+            Some("tiny".to_string()),
+        )
+        .as_ref()
+    }
+
+    #[test]
+    fn committed_attachment_ids_merge_tool_outputs_with_message_refs() {
+        let tool_ref = attachment_ref("tool-output");
+        let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
+        let message = crate::Message {
+            id: "message".to_string(),
+            role: crate::MessageRole::User,
+            parts: std::sync::Arc::new(vec![crate::Part::attachment_part(
+                "message.p0".to_string(),
+                String::new(),
+                Some(crate::session_model::message::PartAttachment {
+                    source: crate::AttachmentSource::stored(attachment_ref("message-ref")),
+                }),
+            )]),
+            origin: None,
+        };
+        state.session_graph = crate::SessionGraph::from_active_read_state(&[message]);
+        let tool_calls = vec![crate::ToolCallRecord {
+            call_id: Some("call-1".to_string()),
+            tool: "make_attachment".to_string(),
+            args: serde_json::json!({}),
+            output: crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
+                crate::AttachmentSource::stored(tool_ref),
+            )),
+            duration_ms: 1,
+        }];
+
+        let ids = committed_attachment_ids(&state, &tool_calls, None);
+
+        assert_eq!(
+            ids,
+            vec![
+                crate::AttachmentId::parse("message-ref").expect("valid attachment id"),
+                crate::AttachmentId::parse("tool-output").expect("valid attachment id"),
+            ]
+        );
+    }
+
+    #[test]
+    fn committed_attachment_ids_include_omitted_tool_call_attachments() {
+        let state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
+        let omitted = crate::OmittedToolCalls {
+            count: 1,
+            failures: 0,
+            attachments: vec![crate::AttachmentSource::stored(attachment_ref(
+                "omitted-tool-output",
+            ))],
+        };
+
+        let ids = committed_attachment_ids(&state, &[], Some(&omitted));
+
+        assert_eq!(
+            ids,
+            vec![crate::AttachmentId::parse("omitted-tool-output").expect("valid attachment id")]
+        );
+    }
 }

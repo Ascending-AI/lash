@@ -998,7 +998,9 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // Version 14 switches durable effect identities to domain-tagged BLAKE3.
 // Version 15 adds the DDL-enforced effect-replay status vocabulary. Existing
 // effect journals are rejected rather than migrated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 15;
+// Version 16 merges the two journaled exec dispatch ledgers. Pre-16 effect
+// databases are rejected at open; there is no compatibility decoder.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 16;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

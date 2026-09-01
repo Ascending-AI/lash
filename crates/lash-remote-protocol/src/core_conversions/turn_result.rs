@@ -50,6 +50,9 @@ impl RemoteTurnReport {
             children_usage,
             llm_calls,
             tool_calls,
+            // Omission accounting is an internal bounded-stream surface; the
+            // remote protocol keeps its existing result shape.
+            omitted: _,
             // Failure evidence is a durable turn-receipt read surface, not a
             // duplicate remote execution-result payload.
             failure_evidence: _,

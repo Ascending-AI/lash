@@ -1,4 +1,17 @@
+use crate::llm::types::AttachmentSource;
 use crate::{AttachmentRef, ToolCallRecord};
+
+/// One source-level dispatch, optionally joined to the host tool record it produced.
+///
+/// `operation` and `outcome` are the model-safe execution ledger. Host records
+/// are attached only when the source dispatch resolved to a host tool call;
+/// trigger and other host-internal dispatches therefore carry `None`.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ExecutedCall {
+    pub operation: String,
+    pub outcome: ExecutedCallOutcome,
+    pub host_record: Option<ToolCallRecord>,
+}
 
 /// Compact source-level record of an effect the embedded executor actually ran.
 ///
@@ -10,6 +23,14 @@ use crate::{AttachmentRef, ToolCallRecord};
 pub struct ExecutedCallRecord {
     pub operation: String,
     pub outcome: ExecutedCallOutcome,
+}
+
+/// Typed accounting for host tool records omitted from a bounded turn view.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct OmittedToolCalls {
+    pub count: usize,
+    pub failures: usize,
+    pub attachments: Vec<AttachmentSource>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -55,9 +76,7 @@ pub struct Observation {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExecResponse {
     pub observations: Vec<Observation>,
-    pub tool_calls: Vec<ToolCallRecord>,
-    #[serde(default)]
-    pub executed_calls: Vec<ExecutedCallRecord>,
+    pub calls: Vec<ExecutedCall>,
     pub printed_images: Vec<AttachmentRef>,
     pub error: Option<String>,
     pub duration_ms: u64,
@@ -103,8 +122,7 @@ mod tests {
                     "max_lines": 2000
                 }
             }],
-            "tool_calls": [],
-            "executed_calls": [],
+            "calls": [],
             "images": [
                 {
                     "mime": "image/png",
@@ -128,8 +146,7 @@ mod tests {
     fn paired_observation_lists_are_rejected() {
         let mut paired_json = serde_json::json!({
             "observations": ["step output"],
-            "tool_calls": [],
-            "executed_calls": [],
+            "calls": [],
             "printed_images": [],
             "error": null,
             "duration_ms": 42,
@@ -153,6 +170,27 @@ mod tests {
             .expect_err("paired observation lists must not decode after the hard cutover");
         assert!(
             error.to_string().contains("expected struct Observation"),
+            "unexpected decode error: {error}"
+        );
+    }
+
+    #[test]
+    fn two_list_exec_response_payload_is_rejected() {
+        let legacy_json = serde_json::json!({
+            "observations": [],
+            "tool_calls": [],
+            "executed_calls": [],
+            "printed_images": [],
+            "error": null,
+            "duration_ms": 42,
+            "degraded_bindings": [],
+            "terminal_finish": null
+        });
+
+        let error = serde_json::from_value::<ExecResponse>(legacy_json)
+            .expect_err("the pre-cutover two-list ExecResponse must be refused");
+        assert!(
+            error.to_string().contains("missing field `calls`"),
             "unexpected decode error: {error}"
         );
     }

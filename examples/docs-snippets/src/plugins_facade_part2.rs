@@ -340,7 +340,7 @@ pub(crate) fn plugin_area_facade_witnesses() {
     });
     // FIG-2104-WITNESS-0469: lash::plugins::ExecResponse::tool_calls
     field_witness(|value: &lash::plugins::ExecResponse| {
-        let _ = &value.tool_calls;
+        let _ = &value.calls;
     });
     // FIG-2104-WITNESS-0470: lash::provider::NormalizedError::provider_code
     field_witness(|value: &lash::provider::NormalizedError| {

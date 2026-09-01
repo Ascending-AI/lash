@@ -607,16 +607,16 @@ fn rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_
         ))])
         .exec_result(lash_sansio::ExecResponse {
             observations: Vec::new(),
-            tool_calls: vec![lash_core::ToolCallRecord {
-                call_id: Some("rlm-call-1".to_string()),
-                tool: "read_file".to_string(),
-                args: serde_json::json!({"path": "foo"}),
-                output: lash_core::ToolCallOutput::success(serde_json::json!("contents")),
-                duration_ms: 7,
-            }],
-            executed_calls: vec![lash_core::ExecutedCallRecord {
+            calls: vec![lash_core::ExecutedCall {
                 operation: "tools.read_file".to_string(),
                 outcome: lash_core::ExecutedCallOutcome::Ok,
+                host_record: Some(lash_core::ToolCallRecord {
+                    call_id: Some("rlm-call-1".to_string()),
+                    tool: "read_file".to_string(),
+                    args: serde_json::json!({"path": "foo"}),
+                    output: lash_core::ToolCallOutput::success(serde_json::json!("contents")),
+                    duration_ms: 7,
+                }),
             }],
             printed_images: Vec::new(),
             error: None,
@@ -652,22 +652,22 @@ fn rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal() {
         ))])
         .exec_result(lash_sansio::ExecResponse {
             observations: Vec::new(),
-            tool_calls: vec![lash_core::ToolCallRecord {
-                call_id: Some("custom-call-1".to_string()),
-                tool: "custom_frame_switch".to_string(),
-                args: serde_json::json!({}),
-                output: lash_core::ToolCallOutput::success(serde_json::json!({"ok": true}))
-                    .with_control(lash_core::ToolControl::SwitchAgentFrame {
-                        frame_key: lash_core::FrameKey::from_caller_material("next-frame")
-                            .expect("non-empty caller material"),
-                        initial_nodes: initial_nodes.clone(),
-                        task: Some("continue".to_string()),
-                    }),
-                duration_ms: 3,
-            }],
-            executed_calls: vec![lash_core::ExecutedCallRecord {
+            calls: vec![lash_core::ExecutedCall {
                 operation: "tools.custom_frame_switch".to_string(),
                 outcome: lash_core::ExecutedCallOutcome::Ok,
+                host_record: Some(lash_core::ToolCallRecord {
+                    call_id: Some("custom-call-1".to_string()),
+                    tool: "custom_frame_switch".to_string(),
+                    args: serde_json::json!({}),
+                    output: lash_core::ToolCallOutput::success(serde_json::json!({"ok": true}))
+                        .with_control(lash_core::ToolControl::SwitchAgentFrame {
+                            frame_key: lash_core::FrameKey::from_caller_material("next-frame")
+                                .expect("non-empty caller material"),
+                            initial_nodes: initial_nodes.clone(),
+                            task: Some("continue".to_string()),
+                        }),
+                    duration_ms: 3,
+                }),
             }],
             printed_images: Vec::new(),
             error: None,
@@ -708,23 +708,23 @@ fn rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error() {
         ))])
         .exec_result(lash_sansio::ExecResponse {
             observations: Vec::new(),
-            tool_calls: vec![lash_core::ToolCallRecord {
-                call_id: Some("custom-call-1".to_string()),
-                tool: "custom_fail".to_string(),
-                args: serde_json::json!({}),
-                output: lash_core::ToolCallOutput::success(serde_json::json!({"ok": true}))
-                    .with_control(lash_core::ToolControl::Fail {
-                        failure: lash_core::ToolFailure::tool(
-                            lash_core::ToolFailureClass::Execution,
-                            "custom_fail",
-                            "no valid result",
-                        ),
-                    }),
-                duration_ms: 3,
-            }],
-            executed_calls: vec![lash_core::ExecutedCallRecord {
+            calls: vec![lash_core::ExecutedCall {
                 operation: "tools.custom_fail".to_string(),
                 outcome: lash_core::ExecutedCallOutcome::Ok,
+                host_record: Some(lash_core::ToolCallRecord {
+                    call_id: Some("custom-call-1".to_string()),
+                    tool: "custom_fail".to_string(),
+                    args: serde_json::json!({}),
+                    output: lash_core::ToolCallOutput::success(serde_json::json!({"ok": true}))
+                        .with_control(lash_core::ToolControl::Fail {
+                            failure: lash_core::ToolFailure::tool(
+                                lash_core::ToolFailureClass::Execution,
+                                "custom_fail",
+                                "no valid result",
+                            ),
+                        }),
+                    duration_ms: 3,
+                }),
             }],
             printed_images: Vec::new(),
             error: None,

@@ -143,6 +143,7 @@ struct CheckpointWriteCollectorState {
     events: Vec<CheckpointWriteEvent>,
     next_commit_by_session: BTreeMap<String, usize>,
     commit_budgets: BTreeMap<(String, u64), crate::testing::RuntimeCommitBudgetMeasurement>,
+    committed_attachment_ids: BTreeMap<(String, u64), Vec<AttachmentId>>,
     latest_components_by_session:
         BTreeMap<String, BTreeMap<String, crate::CheckpointComponentDescriptor>>,
 }
@@ -203,6 +204,19 @@ impl CheckpointWriteCollector {
             .copied()
     }
 
+    /// Return the attachment roots submitted by one observed runtime commit.
+    pub fn committed_attachment_ids(
+        &self,
+        session_id: &str,
+        revision_before: u64,
+    ) -> Option<Vec<AttachmentId>> {
+        self.state
+            .lock_recover()
+            .committed_attachment_ids
+            .get(&(session_id.to_string(), revision_before))
+            .cloned()
+    }
+
     /// Record one observed commit, assigning its per-session commit index.
     ///
     /// Harnesses call this when re-attributing a commit that a separately
@@ -220,10 +234,15 @@ impl CheckpointWriteCollector {
         &self,
         event: CheckpointWriteEvent,
         budget: crate::testing::RuntimeCommitBudgetMeasurement,
+        committed_attachment_ids: Vec<AttachmentId>,
     ) {
         let key = (event.session_id.clone(), event.revision_before);
         self.push(event);
-        self.state.lock_recover().commit_budgets.insert(key, budget);
+        let mut state = self.state.lock_recover();
+        state.commit_budgets.insert(key.clone(), budget);
+        state
+            .committed_attachment_ids
+            .insert(key, committed_attachment_ids);
     }
 
     fn apply_mutation(&self, commit: &mut RuntimeCommit) {
@@ -401,6 +420,7 @@ impl crate::store::RuntimePersistenceDecorator for ObservedSessionStore {
         self.collector.apply_mutation(&mut commit);
         let mut event = checkpoint_write_event(&commit);
         let budget = crate::testing::measure_runtime_commit_budget(&commit)?;
+        let committed_attachment_ids = commit.committed_attachment_ids.clone();
         let result = self.inner.commit_runtime_state(commit).await?;
         self.collector
             .record_manifest(&event.session_id, &result.manifest);
@@ -429,6 +449,7 @@ impl crate::store::RuntimePersistenceDecorator for ObservedSessionStore {
                 ..event
             },
             budget,
+            committed_attachment_ids,
         );
         Ok(result)
     }

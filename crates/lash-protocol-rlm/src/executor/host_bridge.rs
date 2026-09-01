@@ -33,8 +33,7 @@ pub(super) struct HostBridge<'run> {
     tool_result_projectors: Vec<crate::RlmToolResultProjector>,
     observations: Mutex<Vec<Observation>>,
     printed_images: Mutex<Vec<AttachmentRef>>,
-    tool_calls: Mutex<Vec<lash_core::ToolCallRecord>>,
-    executed_calls: Mutex<Vec<(usize, lash_core::ExecutedCallRecord)>>,
+    calls: Mutex<Vec<(usize, lash_core::ExecutedCall)>>,
     next_tool_index: Mutex<usize>,
     sleep_sequence: AtomicU64,
     lashlang_execution_trace: Option<LashlangExecutionTrace>,
@@ -67,8 +66,7 @@ impl<'run> HostBridge<'run> {
             tool_result_projectors: config.tool_result_projectors,
             observations: Mutex::new(config.initial_observations),
             printed_images: Mutex::new(Vec::new()),
-            tool_calls: Mutex::new(Vec::new()),
-            executed_calls: Mutex::new(Vec::new()),
+            calls: Mutex::new(Vec::new()),
             next_tool_index: Mutex::new(0),
             sleep_sequence: AtomicU64::new(0),
             lashlang_execution_trace: config.lashlang_execution_trace,
@@ -90,27 +88,28 @@ impl<'run> HostBridge<'run> {
         &self,
         tool_name: &str,
         reply: ToolInvocationReply,
-    ) -> Result<FlowValue, ExecutionHostError> {
+    ) -> (
+        Result<FlowValue, ExecutionHostError>,
+        Option<lash_core::ToolCallRecord>,
+    ) {
         let projected_tool_name = reply
             .record
             .as_ref()
             .map(|record| record.tool.as_str())
             .unwrap_or(tool_name)
             .to_string();
-        if let Some(record) = reply.record {
-            self.tool_calls.lock_recover().push(record);
-        }
-        if reply.output.is_success() {
+        let result = if reply.output.is_success() {
             let value = reply.output.value_for_projection();
             for projector in &self.tool_result_projectors {
                 if let Some(value) = projector(&projected_tool_name, &value) {
-                    return Ok(value);
+                    return (Ok(value), reply.record);
                 }
             }
             protocol_tool_output_to_lashlang_value(&reply.output)
         } else {
             protocol_tool_output_to_lashlang_value(&reply.output)
-        }
+        };
+        (result, reply.record)
     }
 
     fn record_executed_call(
@@ -118,27 +117,47 @@ impl<'run> HostBridge<'run> {
         index: usize,
         operation: String,
         outcome: lash_core::ExecutedCallOutcome,
+        host_record: Option<lash_core::ToolCallRecord>,
     ) -> Result<(), ExecutionHostError> {
         // This ledger records dispatches only. Resolution, argument, and other
         // pre-dispatch failures deliberately produce no `Calls:` entry because
         // the source operation did not execute.
-        self.executed_calls
-            .lock_recover()
-            .push((index, lash_core::ExecutedCallRecord { operation, outcome }));
+        self.calls.lock_recover().push((
+            index,
+            lash_core::ExecutedCall {
+                operation,
+                outcome,
+                host_record,
+            },
+        ));
         Ok(())
     }
 
+    fn consume_recorded_reply(
+        &self,
+        index: usize,
+        operation: &str,
+        reply: ToolInvocationReply,
+    ) -> Result<FlowValue, ExecutionHostError> {
+        let outcome = if reply.output.is_success() {
+            lash_core::ExecutedCallOutcome::Ok
+        } else {
+            lash_core::ExecutedCallOutcome::Err
+        };
+        let (result, host_record) = self.consume_reply(operation, reply);
+        if let Some(host_record) = host_record {
+            self.record_executed_call(index, operation.to_string(), outcome, Some(host_record))?;
+        }
+        result
+    }
+
     pub(super) fn into_collected(self) -> CollectedExecutionOutput {
-        let mut executed_calls = self.executed_calls.into_inner().recover();
-        executed_calls.sort_by_key(|(index, _)| *index);
+        let mut calls = self.calls.into_inner().recover();
+        calls.sort_by_key(|(index, _)| *index);
         CollectedExecutionOutput {
             observations: self.observations.into_inner().recover(),
             printed_images: self.printed_images.into_inner().recover(),
-            tool_calls: self.tool_calls.into_inner().recover(),
-            executed_calls: executed_calls
-                .into_iter()
-                .map(|(_, record)| record)
-                .collect(),
+            calls: calls.into_iter().map(|(_, call)| call).collect(),
         }
     }
 
@@ -340,7 +359,7 @@ impl HostBridge<'_> {
             } else {
                 lash_core::ExecutedCallOutcome::Err
             };
-            self.record_executed_call(index, source_operation, outcome)?;
+            self.record_executed_call(index, source_operation, outcome, None)?;
             return result;
         }
         let tool_id = lash_core::ToolId::from(host_operation.as_str());
@@ -389,8 +408,8 @@ impl HostBridge<'_> {
                 lash_core::ExecutedCallOutcome::Err
             }
         };
-        let result = self.consume_reply(&host_operation, reply);
-        self.record_executed_call(index, source_operation, outcome)?;
+        let (result, host_record) = self.consume_reply(&host_operation, reply);
+        self.record_executed_call(index, source_operation, outcome, host_record)?;
         result
     }
 
@@ -486,7 +505,7 @@ impl HostBridge<'_> {
                     lash_core::ExecutedCallOutcome::Err
                 };
                 let result = self
-                    .record_executed_call(execution_index, source_operation, outcome)
+                    .record_executed_call(execution_index, source_operation, outcome, None)
                     .and(result);
                 results[source_index] =
                     Some(lashlang::ResourceOperationResult::from_result(result));
@@ -538,9 +557,9 @@ impl HostBridge<'_> {
                 lash_core::ToolCallOutcome::Failure(_)
                 | lash_core::ToolCallOutcome::Cancelled(_) => lash_core::ExecutedCallOutcome::Err,
             };
-            let result = self.consume_reply(&host_operation, reply);
+            let (result, host_record) = self.consume_reply(&host_operation, reply);
             let result = self
-                .record_executed_call(execution_index, source_operation, outcome)
+                .record_executed_call(execution_index, source_operation, outcome, host_record)
                 .and(result);
             results[source_index] = Some(lashlang::ResourceOperationResult::from_result(result));
         }
@@ -901,10 +920,16 @@ impl HostBridge<'_> {
                 .start_child_process(prepared.registration, LASHLANG_ENGINE_KIND, prepared.label)
                 .await
         };
-        self.consume_reply("start_process", reply)
+        let (result, host_record) = self.consume_reply("start_process", reply);
+        debug_assert!(
+            host_record.is_none(),
+            "start_process must remain record-free"
+        );
+        result
     }
 
     async fn await_handle(&self, handle: FlowValue) -> Result<FlowValue, ExecutionHostError> {
+        let index = self.next_index();
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.await_handle");
             self.ctx
@@ -914,10 +939,11 @@ impl HostBridge<'_> {
                 )
                 .await
         };
-        self.consume_reply("await_handle", reply)
+        self.consume_recorded_reply(index, "await_handle", reply)
     }
 
     async fn cancel_handle(&self, handle: FlowValue) -> Result<FlowValue, ExecutionHostError> {
+        let index = self.next_index();
         let reply = self
             .ctx
             .cancel_tool_handle(
@@ -925,10 +951,11 @@ impl HostBridge<'_> {
                 handle_to_json(&handle).await?,
             )
             .await;
-        self.consume_reply("cancel_handle", reply)
+        self.consume_recorded_reply(index, "cancel_handle", reply)
     }
 
     async fn signal_run(&self, signal: ProcessSignal) -> Result<FlowValue, ExecutionHostError> {
+        let index = self.next_index();
         let handle = handle_to_json(&signal.run).await?;
         let payload = handle_to_json(&signal.payload).await?;
         let reply = self
@@ -940,9 +967,9 @@ impl HostBridge<'_> {
                 payload,
             )
             .await;
-        self.consume_reply("signal_run", reply)?;
-        // `signal_run` evaluates to null in the language; the appended event is
-        // recorded as a tool call but not surfaced as the expression value.
+        self.consume_recorded_reply(index, "signal_run", reply)?;
+        // `signal_run` evaluates to null in the language; its executed-call host
+        // record is retained without becoming the expression value.
         Ok(FlowValue::Null)
     }
 
@@ -1255,8 +1282,7 @@ fn flow_record_json<'a>(record: &'a FlowRecord) -> ProjectedFuture<'a, Value> {
 pub(super) struct CollectedExecutionOutput {
     pub(super) observations: Vec<Observation>,
     pub(super) printed_images: Vec<AttachmentRef>,
-    pub(super) tool_calls: Vec<lash_core::ToolCallRecord>,
-    pub(super) executed_calls: Vec<lash_core::ExecutedCallRecord>,
+    pub(super) calls: Vec<lash_core::ExecutedCall>,
 }
 
 async fn collect_printed_images(

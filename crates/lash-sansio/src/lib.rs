@@ -54,8 +54,8 @@ pub use schema_contract::{
     SchemaResolutionRequest, project_anthropic_bedrock_schema, project_for_dialect, resolve_schema,
 };
 pub use session::{
-    DegradedBinding, ExecResponse, ExecutedCallOutcome, ExecutedCallRecord, Observation,
-    PromptUsage, TextProjectionMetadata,
+    DegradedBinding, ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord,
+    Observation, OmittedToolCalls, PromptUsage, TextProjectionMetadata,
 };
 pub use session_model::message::{MessageOrigin, TurnOutputSource};
 pub use session_model::{

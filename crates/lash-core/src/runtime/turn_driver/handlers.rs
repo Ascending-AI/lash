@@ -512,8 +512,9 @@ impl RuntimeTurnDriver<'_> {
                         success: output.error.is_none(),
                         duration_ms: output.duration_ms,
                         tool_call_ids: output
-                            .tool_calls
+                            .calls
                             .iter()
+                            .filter_map(|call| call.host_record.as_ref())
                             .filter_map(|record| record.call_id.clone())
                             .collect(),
                         graph_key: graph_key.clone(),
@@ -553,8 +554,9 @@ impl RuntimeTurnDriver<'_> {
                     .map(|observation| observation.projection.clone())
                     .collect::<Vec<_>>();
                 let tool_calls = output
-                    .tool_calls
+                    .calls
                     .iter()
+                    .filter_map(|call| call.host_record.as_ref())
                     .map(|record| lash_trace::TraceExecToolCall {
                         call_id: record.call_id.clone(),
                         name: record.tool.clone(),

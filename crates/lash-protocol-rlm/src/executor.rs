@@ -632,8 +632,7 @@ fn exec_setup_failure_with_degraded(
 ) -> ExecResponse {
     ExecResponse {
         observations: Vec::new(),
-        tool_calls: Vec::new(),
-        executed_calls: Vec::new(),
+        calls: Vec::new(),
         printed_images: Vec::new(),
         error: Some(error.into()),
         duration_ms: start.elapsed().as_millis() as u64,
@@ -670,8 +669,7 @@ fn exec_response_from(
 ) -> ExecResponse {
     ExecResponse {
         observations: collected.observations,
-        tool_calls: collected.tool_calls,
-        executed_calls: collected.executed_calls,
+        calls: collected.calls,
         printed_images: collected.printed_images,
         error,
         duration_ms: start.elapsed().as_millis() as u64,
@@ -1673,12 +1671,13 @@ mod tests {
         )
         .await;
         assert_eq!(response.error, None);
-        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.calls.len(), 1);
         response
-            .tool_calls
+            .calls
             .into_iter()
             .next()
-            .expect("one continue_as call")
+            .and_then(|call| call.host_record)
+            .expect("one continue_as host record")
     }
 
     #[test]
@@ -2323,11 +2322,12 @@ mod tests {
             assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
             assert_eq!(executions.load(Ordering::SeqCst), 1);
             assert_eq!(
-                response.executed_calls,
-                vec![lash_core::ExecutedCallRecord {
-                    operation: "web.fetch".to_string(),
-                    outcome: lash_core::ExecutedCallOutcome::Ok,
-                }],
+                response
+                    .calls
+                    .iter()
+                    .map(|call| (call.operation.as_str(), call.outcome))
+                    .collect::<Vec<_>>(),
+                vec![("web.fetch", lash_core::ExecutedCallOutcome::Ok)],
                 "the ledger must retain the source module.operation, not the host tool id"
             );
             assert_eq!(
@@ -2454,11 +2454,12 @@ mod tests {
                 "observation should be retained despite runtime failure"
             );
             assert_eq!(
-                response.executed_calls,
-                vec![lash_core::ExecutedCallRecord {
-                    operation: "web.fetch".to_string(),
-                    outcome: lash_core::ExecutedCallOutcome::Ok,
-                }],
+                response
+                    .calls
+                    .iter()
+                    .map(|call| (call.operation.as_str(), call.outcome))
+                    .collect::<Vec<_>>(),
+                vec![("web.fetch", lash_core::ExecutedCallOutcome::Ok)],
                 "executed tool call records should be retained despite runtime failure"
             );
             assert_eq!(executions.load(Ordering::SeqCst), 1);
@@ -3491,11 +3492,12 @@ mod tests {
             let handle = response.terminal_finish.expect("terminal finish");
             assert_eq!(handle["type"], serde_json::json!("trigger_handle"));
             assert_eq!(
-                response.executed_calls,
-                vec![lash_core::ExecutedCallRecord {
-                    operation: "triggers.register".to_string(),
-                    outcome: lash_core::ExecutedCallOutcome::Ok,
-                }]
+                response
+                    .calls
+                    .iter()
+                    .map(|call| (call.operation.as_str(), call.outcome))
+                    .collect::<Vec<_>>(),
+                vec![("triggers.register", lash_core::ExecutedCallOutcome::Ok)]
             );
         });
     }
@@ -3552,16 +3554,14 @@ mod tests {
                 finish["handle"]["incarnation"]
             );
             assert_eq!(
-                response.executed_calls,
+                response
+                    .calls
+                    .iter()
+                    .map(|call| (call.operation.as_str(), call.outcome))
+                    .collect::<Vec<_>>(),
                 vec![
-                    lash_core::ExecutedCallRecord {
-                        operation: "triggers.register".to_string(),
-                        outcome: lash_core::ExecutedCallOutcome::Ok,
-                    },
-                    lash_core::ExecutedCallRecord {
-                        operation: "triggers.list".to_string(),
-                        outcome: lash_core::ExecutedCallOutcome::Ok,
-                    },
+                    ("triggers.register", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.list", lash_core::ExecutedCallOutcome::Ok),
                 ],
                 "trigger effects must appear in the executed-call ledger"
             );
@@ -3894,7 +3894,7 @@ mod tests {
             assert!(response.error.is_none(), "{:?}", response.error);
             assert_eq!(
                 response
-                    .executed_calls
+                    .calls
                     .iter()
                     .map(|call| (call.operation.as_str(), call.outcome))
                     .collect::<Vec<_>>(),
@@ -3980,7 +3980,7 @@ mod tests {
             assert!(response.error.is_none(), "{:?}", response.error);
             assert_eq!(
                 response
-                    .executed_calls
+                    .calls
                     .iter()
                     .map(|call| (call.operation.as_str(), call.outcome))
                     .collect::<Vec<_>>(),
@@ -4168,7 +4168,7 @@ mod tests {
                 "{error}"
             );
             assert!(error.contains("hint: use `files.read`"), "{error}");
-            assert!(response.tool_calls.is_empty());
+            assert!(response.calls.is_empty());
             assert!(response.terminal_finish.is_none());
         });
     }
@@ -4196,7 +4196,7 @@ mod tests {
                 response.observations.is_empty(),
                 "no print effect may execute before a link failure"
             );
-            assert!(response.tool_calls.is_empty());
+            assert!(response.calls.is_empty());
             assert!(response.terminal_finish.is_none());
         });
     }
@@ -4288,7 +4288,7 @@ mod tests {
                     case.name
                 );
                 assert!(
-                    response.tool_calls.is_empty(),
+                    response.calls.is_empty(),
                     "{} should not call runtime tools",
                     case.name
                 );
