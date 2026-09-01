@@ -1,5 +1,74 @@
 use crate::*;
 
+fn process_owner_death_sql(process_registry_shared: bool) -> String {
+    if process_registry_shared {
+        format!(
+            "OR (
+                manifest.owner_kind = '{}'
+                AND NOT EXISTS (
+                    SELECT 1 FROM lash_processes AS process
+                    WHERE process.process_id = manifest.owner_id
+                )
+            )",
+            AttachmentOwnerKind::Process.as_str()
+        )
+    } else {
+        String::new()
+    }
+}
+
+pub(crate) fn live_attachment_ref_sql(process_registry_shared: bool) -> String {
+    let process_dead = process_owner_death_sql(process_registry_shared);
+    format!(
+        "SELECT 1 FROM lash_attachment_manifest AS manifest
+         WHERE manifest.attachment_id = $1
+           AND NOT (
+                manifest.committed_at_ms IS NULL
+                AND manifest.intent_at_ms <= $2
+                AND (
+                    manifest.owner_kind IS NULL
+                    OR (
+                        manifest.owner_kind = '{}'
+                        AND EXISTS (
+                            SELECT 1 FROM lash_runtime_turn_commits AS turn_commit
+                            WHERE turn_commit.session_id = manifest.session_id
+                              AND turn_commit.turn_id <> manifest.owner_id
+                              AND turn_commit.committed_at_ms > manifest.intent_at_ms
+                        )
+                    )
+                    {process_dead}
+                )
+           )
+         LIMIT 1",
+        AttachmentOwnerKind::Turn.as_str()
+    )
+}
+
+pub(crate) fn forget_aged_uncommitted_attachment_intents_sql(
+    process_registry_shared: bool,
+) -> String {
+    let process_dead = process_owner_death_sql(process_registry_shared);
+    format!(
+        "DELETE FROM lash_attachment_manifest AS manifest
+         WHERE manifest.committed_at_ms IS NULL
+           AND manifest.intent_at_ms <= $1
+           AND (
+                manifest.owner_kind IS NULL
+                OR (
+                    manifest.owner_kind = '{}'
+                    AND EXISTS (
+                        SELECT 1 FROM lash_runtime_turn_commits AS turn_commit
+                        WHERE turn_commit.session_id = manifest.session_id
+                          AND turn_commit.turn_id <> manifest.owner_id
+                          AND turn_commit.committed_at_ms > manifest.intent_at_ms
+                    )
+                )
+                {process_dead}
+           )",
+        AttachmentOwnerKind::Turn.as_str()
+    )
+}
+
 /// Advisory-lock namespace for the attachment GC fence. Both halves of the
 /// fence — a writer recording an intent and a sweeper condemning a digest —
 /// take this lock keyed on the digest for the duration of their transaction.
@@ -220,11 +289,18 @@ impl AttachmentManifest for PostgresSessionStore {
                                 u64_from_sql("AttachmentManifest", "committed_at_ms", value)
                             })
                             .transpose()?,
-                        owner_kind: match row.get::<Option<String>, _>(5).as_deref() {
-                            Some("turn") => Some(AttachmentOwnerKind::Turn),
-                            Some("process") => Some(AttachmentOwnerKind::Process),
-                            _ => None,
-                        },
+                        owner_kind: row
+                            .get::<Option<String>, _>(5)
+                            .as_deref()
+                            .map(|value| {
+                                AttachmentOwnerKind::from_wire_str(value).ok_or_else(|| {
+                                    StoreError::StoredDataCorrupt {
+                                        record_kind: "AttachmentManifest owner kind",
+                                        message: format!("unknown attachment owner kind `{value}`"),
+                                    }
+                                })
+                            })
+                            .transpose()?,
                         owner_id: row.get(6),
                     })
                 })

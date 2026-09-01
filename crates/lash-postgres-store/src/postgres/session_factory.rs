@@ -540,39 +540,7 @@ impl PostgresSessionStoreFactory {
     /// The targeted probe and the condemn CAS share it so the fence and the
     /// probe cannot drift apart.
     fn live_attachment_ref_sql(&self) -> String {
-        let process_dead = if self.process_registry_shared {
-            "OR (
-                manifest.owner_kind = 'process'
-                AND NOT EXISTS (
-                    SELECT 1 FROM lash_processes AS process
-                    WHERE process.process_id = manifest.owner_id
-                )
-            )"
-        } else {
-            ""
-        };
-        format!(
-            "SELECT 1 FROM lash_attachment_manifest AS manifest
-             WHERE manifest.attachment_id = $1
-               AND NOT (
-                    manifest.committed_at_ms IS NULL
-                    AND manifest.intent_at_ms <= $2
-                    AND (
-                        manifest.owner_kind IS NULL
-                        OR (
-                            manifest.owner_kind = 'turn'
-                            AND EXISTS (
-                                SELECT 1 FROM lash_runtime_turn_commits AS turn_commit
-                                WHERE turn_commit.session_id = manifest.session_id
-                                  AND turn_commit.turn_id <> manifest.owner_id
-                                  AND turn_commit.committed_at_ms > manifest.intent_at_ms
-                            )
-                        )
-                        {process_dead}
-                    )
-               )
-             LIMIT 1"
-        )
+        crate::attachments::live_attachment_ref_sql(self.process_registry_shared)
     }
 }
 
@@ -587,36 +555,8 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         // supersedes a turn owner, a missing process row proves a process owner
         // was pruned, and only unscoped host puts use age alone.
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        let process_dead = if self.process_registry_shared {
-            "OR (
-                manifest.owner_kind = 'process'
-                AND NOT EXISTS (
-                    SELECT 1
-                    FROM lash_processes AS process
-                    WHERE process.process_id = manifest.owner_id
-                )
-            )"
-        } else {
-            ""
-        };
-        let delete_sql = format!(
-            "DELETE FROM lash_attachment_manifest AS manifest
-             WHERE manifest.committed_at_ms IS NULL
-               AND manifest.intent_at_ms <= $1
-               AND (
-                    manifest.owner_kind IS NULL
-                    OR (
-                        manifest.owner_kind = 'turn'
-                        AND EXISTS (
-                            SELECT 1
-                            FROM lash_runtime_turn_commits AS turn_commit
-                            WHERE turn_commit.session_id = manifest.session_id
-                              AND turn_commit.turn_id <> manifest.owner_id
-                              AND turn_commit.committed_at_ms > manifest.intent_at_ms
-                        )
-                    )
-                    {process_dead}
-               )"
+        let delete_sql = crate::attachments::forget_aged_uncommitted_attachment_intents_sql(
+            self.process_registry_shared,
         );
         let cutoff = clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
         sqlx::query(&delete_sql)

@@ -1294,6 +1294,95 @@ async fn postgres_attachment_owner_cold_replay_conformance_when_configured() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_error_when_configured()
+{
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres unknown attachment-owner regression: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    sqlx::query(
+        "ALTER TABLE lash_attachment_manifest
+         DROP CONSTRAINT lash_attachment_manifest_owner_kind_check",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("drop owner-kind CHECK for corruption injection");
+    sqlx::query(
+        "INSERT INTO lash_attachment_manifest
+         (attachment_id, session_id, canonical_uri, intent_at_ms,
+          committed_at_ms, owner_kind, owner_id)
+         VALUES ('unknown-owner', 'unknown-attachment-owner',
+                 'lash-attachment://unknown', 0, NULL, 'unknown', 'owner')",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("insert unknown owner kind");
+
+    let store = storage.session_store("unknown-attachment-owner");
+    let result = lash_core::AttachmentManifest::list_uncommitted(&store, 0);
+
+    sqlx::query("DELETE FROM lash_attachment_manifest WHERE attachment_id = 'unknown-owner'")
+        .execute(storage.pool())
+        .await
+        .expect("remove corrupt owner-kind row");
+    sqlx::query(
+        "ALTER TABLE lash_attachment_manifest
+         ADD CONSTRAINT lash_attachment_manifest_owner_kind_check
+         CHECK (owner_kind IN ('turn', 'process'))",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("restore owner-kind CHECK");
+
+    let error = result.expect_err("unknown Postgres attachment owner kind must refuse");
+    assert!(
+        matches!(
+            error,
+            StoreError::StoredDataCorrupt {
+                record_kind: "AttachmentManifest owner kind",
+                ref message,
+            } if message == "unknown attachment owner kind `unknown`"
+        ),
+        "Postgres must return the canonical attachment-owner corruption refusal, got {error:?}"
+    );
+}
+
+#[test]
+fn postgres_attachment_owner_kind_sql_derives_from_the_enum() {
+    let sources = [
+        (
+            "attachments.rs",
+            include_str!("../src/postgres/attachments.rs"),
+        ),
+        (
+            "runtime_persistence.rs",
+            include_str!("../src/postgres/runtime_persistence.rs"),
+        ),
+        (
+            "session_factory.rs",
+            include_str!("../src/postgres/session_factory.rs"),
+        ),
+    ];
+    let raw_sites = sources
+        .into_iter()
+        .flat_map(|(name, source)| {
+            ["turn", "process"].into_iter().flat_map(move |value| {
+                source
+                    .match_indices(&format!("owner_kind = '{value}'"))
+                    .map(move |(offset, _)| format!("{name}:{offset}:{value}"))
+                    .collect::<Vec<_>>()
+            })
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        raw_sites.is_empty(),
+        "Postgres owner-kind SQL literals must derive from AttachmentOwnerKind::as_str; found {raw_sites:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_process_prune_deletes_owned_session_stores_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(

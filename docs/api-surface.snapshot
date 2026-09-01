@@ -1782,6 +1782,7 @@ lash::persistence::AttachmentOwnerKind
 lash::persistence::AttachmentOwnerKind::Process
 lash::persistence::AttachmentOwnerKind::Turn
 lash::persistence::AttachmentOwnerKind::as_str
+lash::persistence::AttachmentOwnerKind::from_wire_str
 lash::persistence::AttachmentReclamationFailure
 lash::persistence::AttachmentReclamationPolicy
 lash::persistence::AttachmentReclamationPolicy::empty_root_set
@@ -8361,6 +8362,7 @@ lash::testing::checkpoint_observer::CheckpointUsageWrite::input_tokens
 lash::testing::checkpoint_observer::CheckpointUsageWrite::output_tokens
 lash::testing::checkpoint_observer::CheckpointUsageWrite::reasoning_output_tokens
 lash::testing::checkpoint_observer::CheckpointWriteCollector
+lash::testing::checkpoint_observer::CheckpointWriteCollector::committed_attachment_ids
 lash::testing::checkpoint_observer::CheckpointWriteCollector::events
 lash::testing::checkpoint_observer::CheckpointWriteCollector::push
 lash::testing::checkpoint_observer::CheckpointWriteCollector::runtime_commit_budget

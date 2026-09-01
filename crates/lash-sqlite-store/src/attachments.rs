@@ -320,16 +320,20 @@ impl lash_core::ProcessExecutionEnvStore for Store {
 /// Shared by the targeted probe and the condemn CAS so the fence and the probe
 /// cannot drift apart.
 fn live_ref_exists_sql(process_registry_attached: bool) -> String {
+    let turn_owner_kind = AttachmentOwnerKind::Turn.as_str();
     let process_dead = if process_registry_attached {
-        "OR (
-            manifest.owner_kind = 'process'
+        let process_owner_kind = AttachmentOwnerKind::Process.as_str();
+        format!(
+            "OR (
+            manifest.owner_kind = '{process_owner_kind}'
             AND NOT EXISTS (
                 SELECT 1 FROM process_registry.processes AS process
                 WHERE process.process_id = manifest.owner_id
             )
         )"
+        )
     } else {
-        ""
+        String::new()
     };
     format!(
         "SELECT 1 FROM attachment_manifest AS manifest
@@ -340,7 +344,7 @@ fn live_ref_exists_sql(process_registry_attached: bool) -> String {
                 AND (
                     manifest.owner_kind IS NULL
                     OR (
-                        manifest.owner_kind = 'turn'
+                        manifest.owner_kind = '{turn_owner_kind}'
                         AND EXISTS (
                             SELECT 1 FROM runtime_turn_commits AS turn_commit
                             WHERE turn_commit.session_id = manifest.session_id
@@ -670,17 +674,17 @@ impl AttachmentManifest for Store {
                                     u64_from_sql("AttachmentManifest", "committed_at_ms", value)
                                 })
                                 .transpose()?,
-                            owner_kind: match owner_kind.as_deref() {
-                                Some("turn") => Some(AttachmentOwnerKind::Turn),
-                                Some("process") => Some(AttachmentOwnerKind::Process),
-                                None => None,
-                                Some(value) => {
-                                    return Err(sqlite_conversion_error(stored_data_corrupt(
-                                        "AttachmentManifest owner kind",
-                                        format_args!("unknown value `{value}`"),
-                                    )));
-                                }
-                            },
+                            owner_kind: owner_kind
+                                .as_deref()
+                                .map(|value| {
+                                    AttachmentOwnerKind::from_wire_str(value).ok_or_else(|| {
+                                        sqlite_conversion_error(stored_data_corrupt(
+                                            "AttachmentManifest owner kind",
+                                            format_args!("unknown attachment owner kind `{value}`"),
+                                        ))
+                                    })
+                                })
+                                .transpose()?,
                             owner_id,
                         })
                     })?;
@@ -704,18 +708,22 @@ impl AttachmentManifest for Store {
                     // The attached process DB makes the NOT EXISTS predicate part
                     // of this same SQLite statement/transaction, avoiding a
                     // read-process-then-forget race across the per-session topology.
+                    let turn_owner_kind = AttachmentOwnerKind::Turn.as_str();
                     let process_dead = if process_registry_attached {
-                        "OR (
-                            manifest.owner_kind = 'process'
+                        let process_owner_kind = AttachmentOwnerKind::Process.as_str();
+                        format!(
+                            "OR (
+                            manifest.owner_kind = '{process_owner_kind}'
                             AND NOT EXISTS (
                                 SELECT 1 FROM process_registry.processes AS process
                                 WHERE process.process_id = manifest.owner_id
                             )
                         )"
+                        )
                     } else {
                         // Without a configured process registry, conservatively
                         // retain process-owned rows rather than guess liveness.
-                        ""
+                        String::new()
                     };
                     let sql = format!(
                         "DELETE FROM attachment_manifest AS manifest
@@ -724,7 +732,7 @@ impl AttachmentManifest for Store {
                            AND (
                                 manifest.owner_kind IS NULL
                                 OR (
-                                    manifest.owner_kind = 'turn'
+                                    manifest.owner_kind = '{turn_owner_kind}'
                                     AND EXISTS (
                                         SELECT 1 FROM runtime_turn_commits AS turn_commit
                                         WHERE turn_commit.session_id = manifest.session_id

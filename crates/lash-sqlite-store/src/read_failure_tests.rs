@@ -263,6 +263,41 @@ async fn corrupt_non_msgpack_blob_surfaces_stored_data_corrupt_from_get_blob() {
 }
 
 #[tokio::test]
+async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("unknown-attachment-owner.db");
+    let store = Store::open(&path).await.expect("open store");
+    store
+        .bind_session("unknown-attachment-owner")
+        .expect("bind store");
+    let raw = rusqlite::Connection::open(&path).expect("open raw connection");
+    raw.pragma_update(None, "ignore_check_constraints", true)
+        .expect("allow unknown durable enum injection");
+    raw.execute(
+        "INSERT INTO attachment_manifest
+         (attachment_id, session_id, canonical_uri, intent_at_ms,
+          committed_at_ms, owner_kind, owner_id)
+         VALUES ('unknown-owner', 'unknown-attachment-owner',
+                 'lash-attachment://unknown', 0, NULL, 'unknown', 'owner')",
+        [],
+    )
+    .expect("insert unknown owner kind");
+
+    let error = lash_core::AttachmentManifest::list_uncommitted(&store, 0)
+        .expect_err("unknown SQLite attachment owner kind must refuse");
+    assert!(
+        matches!(
+            error,
+            StoreError::StoredDataCorrupt {
+                record_kind: "AttachmentManifest owner kind",
+                ref message,
+            } if message == "unknown attachment owner kind `unknown`"
+        ),
+        "SQLite must return the canonical attachment-owner corruption refusal, got {error:?}"
+    );
+}
+
+#[tokio::test]
 async fn malformed_durable_rows_surface_typed_corruption() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("corrupt.db");

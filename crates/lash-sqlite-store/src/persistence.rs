@@ -1231,10 +1231,15 @@ impl SessionCommitStore for Store {
                             "UPDATE attachment_manifest
                                  SET committed_at_ms = COALESCE(committed_at_ms, ?1)
                                  WHERE session_id = ?2
-                                   AND owner_kind = 'turn'
+                                   AND owner_kind = ?4
                                    AND owner_id = ?3
                                    AND committed_at_ms IS NULL",
-                            params![now as i64, commit.session_id, turn_id],
+                            params![
+                                now as i64,
+                                commit.session_id,
+                                turn_id,
+                                AttachmentOwnerKind::Turn.as_str()
+                            ],
                         )
                         .map_err(sqlite_error)?;
                     }
