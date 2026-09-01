@@ -546,6 +546,11 @@ struct ProductEventHistory {
     events: Vec<ProductEvent>,
     #[serde(default)]
     event_ids: BTreeSet<String>,
+    /// UI-owned user rows that have been correlated with durable turn-input
+    /// provenance. This survives frame-scoped read models, which may no longer
+    /// expose the old frame's messages on a later `/api/state` read.
+    #[serde(default)]
+    committed_user_turn_ids: BTreeSet<String>,
 }
 
 impl ProductEventHistory {
@@ -809,6 +814,26 @@ impl SessionEventRegistry {
         let Some(history) = histories.get_mut(session_id) else {
             return;
         };
+        let committed_user_turn_ids = history
+            .events
+            .iter()
+            .filter_map(|event| match &event.item {
+                StreamItem::Message { message } => {
+                    workbench_turn_id_from_user_message_id(&message.id)
+                }
+                StreamItem::TurnInput { .. }
+                | StreamItem::ModelCallRecorded { .. }
+                | StreamItem::Done { .. } => None,
+            })
+            .filter(|turn_id| committed_input_turn_ids.contains(*turn_id))
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+        let committed_status_before = history.committed_user_turn_ids.len();
+        history
+            .committed_user_turn_ids
+            .extend(committed_user_turn_ids);
+        let committed_status_changed =
+            history.committed_user_turn_ids.len() != committed_status_before;
         let before = history.events.len();
         history.events.retain(|event| match &event.item {
             StreamItem::Message { message } => {
@@ -817,7 +842,8 @@ impl SessionEventRegistry {
                     // once the turn commits anywhere in the session graph.
                     // Until then they remain optimistic and retire with a turn
                     // that is no longer active (FIG-1000, FIG-1062).
-                    active_turn_ids.contains(turn_id) || committed_input_turn_ids.contains(turn_id)
+                    active_turn_ids.contains(turn_id)
+                        || history.committed_user_turn_ids.contains(turn_id)
                 } else if let Some(turn_id) =
                     workbench_turn_id_from_assistant_message_id(&message.id)
                 {
@@ -840,7 +866,7 @@ impl SessionEventRegistry {
             | StreamItem::ModelCallRecorded { .. }
             | StreamItem::Done { turn_id: None, .. } => true,
         });
-        if history.events.len() != before {
+        if history.events.len() != before || committed_status_changed {
             self.persist_snapshot(&histories);
         }
     }
