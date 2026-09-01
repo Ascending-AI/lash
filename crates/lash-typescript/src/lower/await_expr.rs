@@ -64,6 +64,9 @@ impl Lowerer {
             }
             _ => None,
         };
+        let aggregate_process_handle = promise_kind
+            .as_ref()
+            .is_some_and(|(_, value)| self.aggregate_contains_process_handle(value));
         let (mode, lowered) = self.with_await(|lowerer| {
             if let Some((mode, value)) = promise_kind {
                 let lowered = if mode == "allSettled" && is_async_map(value) {
@@ -84,7 +87,9 @@ impl Lowerer {
         {
             return Ok(lowered);
         }
-        if mode.is_some() && has_unsupported_aggregate_effect(&lowered) {
+        if mode.is_some()
+            && (aggregate_process_handle || has_unsupported_aggregate_effect(&lowered))
+        {
             return Err(Diagnostic::with_repair(
                 DiagnosticCode::AwaitUnsupported,
                 "Promise.all/allSettled currently aggregate tool promises and resolved values; process and timer promises require separate await expressions",
@@ -160,6 +165,38 @@ impl Lowerer {
             "drop the `await`: this value is already settled",
             None,
         ))
+    }
+
+    fn aggregate_contains_process_handle(&self, value: &Expr) -> bool {
+        let Expr::Array(items) = value else {
+            return false;
+        };
+        items.iter().any(|item| match item {
+            ArrayElement::Value(value) | ArrayElement::Spread(value) => {
+                self.expr_may_be_process_handle(value)
+            }
+        })
+    }
+
+    fn expr_may_be_process_handle(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Ident(name) => self
+                .binding(name)
+                .is_ok_and(|binding| binding.role == BindingRole::ProcessHandle),
+            Expr::Assign { value, .. } => self.expr_may_be_process_handle(value),
+            Expr::Logical { left, right, .. } => {
+                self.expr_may_be_process_handle(left) || self.expr_may_be_process_handle(right)
+            }
+            Expr::Conditional {
+                consequent,
+                alternate,
+                ..
+            } => {
+                self.expr_may_be_process_handle(consequent)
+                    || self.expr_may_be_process_handle(alternate)
+            }
+            _ => false,
+        }
     }
 }
 
