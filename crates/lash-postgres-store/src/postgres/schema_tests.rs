@@ -6,12 +6,12 @@ fn current_destructive_cutover_has_no_migration_arm() {
         SCHEMA_MIGRATIONS
             .iter()
             .all(|migration| migration.to != SCHEMA_VERSION),
-        "component 71 must reject every pre-cutover schema rather than migrate it"
+        "component 72 must reject every pre-cutover schema rather than migrate it"
     );
 
     let predecessor = SCHEMA_MIGRATIONS
         .iter()
-        .find(|migration| migration.from == 68 && migration.to == 70)
+        .find(|migration| migration.from == 68 && migration.to == 71)
         .expect("the historical component 68 refusal boundary must remain declared");
     assert!(
         predecessor.is_recreate_boundary(),
@@ -20,7 +20,7 @@ fn current_destructive_cutover_has_no_migration_arm() {
 
     let declared = SCHEMA_MIGRATIONS
         .iter()
-        .find(|migration| migration.from == 64 && migration.to == 70)
+        .find(|migration| migration.from == 64 && migration.to == 71)
         .expect("the historical component 64 creation-only migration must remain declared");
 
     assert_eq!(
@@ -121,7 +121,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
     });
     SchemaReport {
         schema: Some("public".to_string()),
-        expected_version: 70,
+        expected_version: 71,
         found_version: Some(53),
         findings,
     }
@@ -132,7 +132,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
 fn published_53_findings() -> Vec<SchemaFinding> {
     vec![
         SchemaFinding::VersionMismatch {
-            expected: 70,
+            expected: 71,
             found: Some(53),
         },
         SchemaFinding::UnexpectedColumn {

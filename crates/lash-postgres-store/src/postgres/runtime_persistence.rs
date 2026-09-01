@@ -957,8 +957,8 @@ impl SessionCommitStore for PostgresSessionStore {
             })?;
             sqlx::query(
                 "INSERT INTO lash_usage_deltas (
-                    session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, entry_json
-                 ) VALUES ($1, $2, $3, $4, $5, $6)
+                    session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                  ON CONFLICT (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
                  DO NOTHING",
             )
@@ -971,7 +971,13 @@ impl SessionCommitStore for PostgresSessionStore {
                 )
             })?)
             .bind(&entry.identity.payload_hash)
-            .bind(encode_json(&entry.entry)?)
+            .bind(&entry.entry.source)
+            .bind(&entry.entry.model)
+            .bind(entry.entry.usage.input_tokens)
+            .bind(entry.entry.usage.output_tokens)
+            .bind(entry.entry.usage.cache_read_input_tokens)
+            .bind(entry.entry.usage.cache_write_input_tokens)
+            .bind(entry.entry.usage.reasoning_output_tokens)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;

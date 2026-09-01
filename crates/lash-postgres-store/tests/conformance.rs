@@ -1498,7 +1498,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 71, "Postgres component schema pin");
+    assert_eq!(current_version, 72, "Postgres component schema pin");
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
          WHERE table_schema = 'public'

@@ -667,18 +667,27 @@ pub(crate) async fn load_usage_deltas_tx(
     session_id: &str,
 ) -> Result<Vec<TokenLedgerEntry>, StoreError> {
     let rows = sqlx::query(
-        "SELECT entry_json FROM lash_usage_deltas WHERE session_id = $1 ORDER BY seq ASC",
+        "SELECT source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
+         FROM lash_usage_deltas WHERE session_id = $1 ORDER BY seq ASC",
     )
     .bind(session_id)
     .fetch_all(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    rows.into_iter()
-        .map(|row| {
-            let json: String = row.get(0);
-            store_decode_json(&json, "usage delta")
+    Ok(rows
+        .into_iter()
+        .map(|row| TokenLedgerEntry {
+            source: row.get(0),
+            model: row.get(1),
+            usage: lash_core::TokenUsage {
+                input_tokens: row.get(2),
+                output_tokens: row.get(3),
+                cache_read_input_tokens: row.get(4),
+                cache_write_input_tokens: row.get(5),
+                reasoning_output_tokens: row.get(6),
+            },
         })
-        .collect()
+        .collect())
 }
 
 pub(crate) async fn load_graph_tx(

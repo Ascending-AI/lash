@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 41,
+  "fixture_schema_version": 42,
   "head_revision": 3,
   "node_ids_in_read_order": [
     "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940",
