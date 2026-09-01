@@ -30,6 +30,108 @@ pub(super) enum QueuedWorkRunAttemptOutcome {
     Contended,
 }
 
+enum RetryState {
+    Progress {
+        pass: u32,
+    },
+    Transient {
+        pass: u32,
+        attempt: u32,
+        retry_after: Duration,
+    },
+    Contended {
+        pass: u32,
+        passes: u32,
+        retry_after: Duration,
+        started: tokio::time::Instant,
+        heartbeat: tokio::time::Instant,
+    },
+}
+
+impl RetryState {
+    fn pass(&self) -> u32 {
+        match self {
+            Self::Progress { pass }
+            | Self::Transient { pass, .. }
+            | Self::Contended { pass, .. } => *pass,
+        }
+    }
+
+    fn into_transient(self, retry_initial: Duration) -> Self {
+        match self {
+            Self::Transient {
+                pass,
+                attempt,
+                retry_after,
+            } => Self::Transient {
+                pass,
+                attempt,
+                retry_after,
+            },
+            Self::Progress { pass } | Self::Contended { pass, .. } => Self::Transient {
+                pass,
+                attempt: 1,
+                retry_after: retry_initial,
+            },
+        }
+    }
+
+    fn into_contended(
+        self,
+        now: tokio::time::Instant,
+        retry_initial: Duration,
+        slow_wake_threshold: Duration,
+    ) -> Self {
+        match self {
+            Self::Contended {
+                pass,
+                passes,
+                retry_after,
+                started,
+                heartbeat,
+            } => Self::Contended {
+                pass,
+                passes: passes.saturating_add(1),
+                retry_after,
+                started,
+                heartbeat,
+            },
+            Self::Progress { pass } | Self::Transient { pass, .. } => Self::Contended {
+                pass,
+                passes: 1,
+                retry_after: retry_initial,
+                started: now,
+                heartbeat: now + slow_wake_threshold,
+            },
+        }
+    }
+
+    fn advance_backoff(&mut self, retry_max: Duration) {
+        match self {
+            Self::Transient {
+                attempt,
+                retry_after,
+                ..
+            } => {
+                *retry_after = (*retry_after).saturating_mul(2).min(retry_max);
+                *attempt = attempt.saturating_add(1);
+            }
+            Self::Contended { retry_after, .. } => {
+                *retry_after = (*retry_after).saturating_mul(2).min(retry_max);
+            }
+            Self::Progress { .. } => unreachable!("progress has no retry backoff"),
+        }
+    }
+
+    fn advance_pass(&mut self) {
+        match self {
+            Self::Progress { pass }
+            | Self::Transient { pass, .. }
+            | Self::Contended { pass, .. } => *pass = pass.saturating_add(1),
+        }
+    }
+}
+
 #[cfg(test)]
 struct TestDispatchFuture<F> {
     dispatch: tracing::Dispatch,
@@ -170,16 +272,10 @@ impl QueuedWorkTaskDriver {
 
     pub(super) async fn run_demand(&self, mut demand: QueuedWorkDemand) {
         let work_cadence = self.inner.work_cadence.clone();
-        let mut pass = 1_u32;
-        let mut transient_attempt = 1_u32;
-        let mut transient_retry_after = work_cadence.retry_initial;
-        let mut contended_passes = 0_u32;
-        let mut contended_retry_after = work_cadence.retry_initial;
-        let mut contended_since = None;
-        let mut next_contention_heartbeat = None;
+        let mut retry_state = RetryState::Progress { pass: 1 };
         loop {
             let reason = demand.reason();
-            let result = self.run_attempt(&demand, &reason, pass).await;
+            let result = self.run_attempt(&demand, &reason, retry_state.pass()).await;
             match result {
                 None => return,
                 Some(Ok(
@@ -188,14 +284,10 @@ impl QueuedWorkTaskDriver {
                     return;
                 }
                 Some(Ok(QueuedWorkRunAttemptOutcome::Progress)) => {
-                    transient_attempt = 1;
-                    transient_retry_after = work_cadence.retry_initial;
-                    contended_passes = 0;
-                    contended_retry_after = work_cadence.retry_initial;
-                    contended_since = None;
-                    next_contention_heartbeat = None;
+                    retry_state = RetryState::Progress {
+                        pass: retry_state.pass().saturating_add(1),
+                    };
                     self.merge_rerun(&mut demand);
-                    pass = pass.saturating_add(1);
                     continue;
                 }
                 Some(Ok(QueuedWorkRunAttemptOutcome::Contended)) => {
@@ -203,21 +295,28 @@ impl QueuedWorkTaskDriver {
                     // hydration. Keep that expensive poll bounded and visible,
                     // while preserving an independent full error-retry budget
                     // for the commit race that commonly follows lease release.
-                    transient_attempt = 1;
-                    transient_retry_after = work_cadence.retry_initial;
-                    contended_passes = contended_passes.saturating_add(1);
                     let now = tokio::time::Instant::now();
-                    let started = *contended_since.get_or_insert(now);
-                    let heartbeat = next_contention_heartbeat
-                        .get_or_insert(started + self.inner.work_cadence.slow_wake_threshold);
+                    retry_state = retry_state.into_contended(
+                        now,
+                        work_cadence.retry_initial,
+                        work_cadence.slow_wake_threshold,
+                    );
+                    let RetryState::Contended {
+                        passes,
+                        started,
+                        heartbeat,
+                        ..
+                    } = &mut retry_state
+                    else {
+                        unreachable!("contention creates contended retry state")
+                    };
                     if now >= *heartbeat {
                         let event = QueuedWorkWakeContended {
                             session_id: demand.session_id.clone(),
                             reason: reason.clone(),
-                            contended_passes,
-                            contended_ms: now.duration_since(started).as_millis() as u64,
-                            threshold_ms: self.inner.work_cadence.slow_wake_threshold.as_millis()
-                                as u64,
+                            contended_passes: *passes,
+                            contended_ms: now.duration_since(*started).as_millis() as u64,
+                            threshold_ms: work_cadence.slow_wake_threshold.as_millis() as u64,
                             available_permits: self.inner.scheduler.available_permits(),
                             admission_limit: self.inner.scheduler.admission_limit,
                         };
@@ -235,9 +334,13 @@ impl QueuedWorkTaskDriver {
                         );
                         *heartbeat = now + self.inner.work_cadence.slow_wake_threshold;
                     }
+                    let retry_after = match &retry_state {
+                        RetryState::Contended { retry_after, .. } => *retry_after,
+                        _ => unreachable!("contention creates contended retry state"),
+                    };
                     if !self
                         .wait_for_retry(bounded_multiplicative_jitter(
-                            contended_retry_after,
+                            retry_after,
                             work_cadence.retry_initial,
                             work_cadence.retry_max,
                         ))
@@ -245,18 +348,21 @@ impl QueuedWorkTaskDriver {
                     {
                         return;
                     }
-                    contended_retry_after = contended_retry_after
-                        .saturating_mul(2)
-                        .min(work_cadence.retry_max);
+                    retry_state.advance_backoff(work_cadence.retry_max);
                     self.merge_rerun(&mut demand);
-                    pass = pass.saturating_add(1);
+                    retry_state.advance_pass();
                     continue;
                 }
                 Some(Err(err)) => {
-                    contended_passes = 0;
-                    contended_retry_after = work_cadence.retry_initial;
-                    contended_since = None;
-                    next_contention_heartbeat = None;
+                    retry_state = retry_state.into_transient(work_cadence.retry_initial);
+                    let (transient_attempt, transient_retry_after) = match &retry_state {
+                        RetryState::Transient {
+                            attempt,
+                            retry_after,
+                            ..
+                        } => (*attempt, *retry_after),
+                        _ => unreachable!("an error creates transient retry state"),
+                    };
                     let disposition = match err.class {
                         QueuedWorkRunErrorClass::Terminal => QueuedWorkWakeOutcome::Terminal,
                         QueuedWorkRunErrorClass::Transient
@@ -327,12 +433,9 @@ impl QueuedWorkTaskDriver {
                     {
                         return;
                     }
-                    transient_retry_after = transient_retry_after
-                        .saturating_mul(2)
-                        .min(work_cadence.retry_max);
-                    transient_attempt = transient_attempt.saturating_add(1);
+                    retry_state.advance_backoff(work_cadence.retry_max);
                     self.merge_rerun(&mut demand);
-                    pass = pass.saturating_add(1);
+                    retry_state.advance_pass();
                 }
             }
         }
