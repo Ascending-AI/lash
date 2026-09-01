@@ -42,6 +42,17 @@
             {
               "case": "unsupported_stop",
               "status": 200,
+              "request_match": {
+                "body": {
+                  "stop": {
+                    "present": false
+                  },
+                  "stop_sequences": {
+                    "present": false
+                  }
+                },
+                "headers": {}
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -147,18 +158,7 @@
               ],
               "body": null,
               "close_after_events": false,
-              "expected_finish_reason": "completed",
-              "request_match": {
-                "body": {
-                  "stop": {
-                    "present": false
-                  },
-                  "stop_sequences": {
-                    "present": false
-                  }
-                },
-                "headers": {}
-              }
+              "expected_finish_reason": "completed"
             }
           ]
         },
@@ -170,6 +170,17 @@
             {
               "case": "unsupported_stop",
               "status": 200,
+              "request_match": {
+                "body": {
+                  "stop": {
+                    "present": false
+                  },
+                  "stop_sequences": {
+                    "present": false
+                  }
+                },
+                "headers": {}
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -275,18 +286,7 @@
               ],
               "body": null,
               "close_after_events": false,
-              "expected_finish_reason": "completed",
-              "request_match": {
-                "body": {
-                  "stop": {
-                    "present": false
-                  },
-                  "stop_sequences": {
-                    "present": false
-                  }
-                },
-                "headers": {}
-              }
+              "expected_finish_reason": "completed"
             }
           ]
         },
@@ -298,6 +298,17 @@
             {
               "case": "unsupported_stop",
               "status": 200,
+              "request_match": {
+                "body": {
+                  "stop": {
+                    "present": false
+                  },
+                  "stop_sequences": {
+                    "present": false
+                  }
+                },
+                "headers": {}
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -400,18 +411,7 @@
               ],
               "body": null,
               "close_after_events": false,
-              "expected_finish_reason": "completed",
-              "request_match": {
-                "body": {
-                  "stop": {
-                    "present": false
-                  },
-                  "stop_sequences": {
-                    "present": false
-                  }
-                },
-                "headers": {}
-              }
+              "expected_finish_reason": "completed"
             }
           ]
         }
@@ -448,6 +448,9 @@
             {
               "case": "literal_present",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -563,6 +566,9 @@
             {
               "case": "literal_present",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -678,6 +684,9 @@
             {
               "case": "literal_present",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -798,6 +807,9 @@
             {
               "case": "stop",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -886,6 +898,9 @@
             {
               "case": "tool",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -976,6 +991,9 @@
             {
               "case": "length",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -1064,6 +1082,9 @@
             {
               "case": "content_filter",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -1163,6 +1184,9 @@
             {
               "case": "stop",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -1228,6 +1252,9 @@
             {
               "case": "tool",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -1300,6 +1327,9 @@
             {
               "case": "length",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -1365,6 +1395,9 @@
             {
               "case": "content_filter",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -1435,6 +1468,9 @@
             {
               "case": "stop",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -1494,6 +1530,9 @@
             {
               "case": "tool",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -1582,6 +1621,9 @@
             {
               "case": "length",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -1641,6 +1683,9 @@
             {
               "case": "content_filter",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -1705,6 +1750,9 @@
             {
               "case": "stop",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -1815,6 +1863,9 @@
             {
               "case": "tool",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -1923,6 +1974,9 @@
             {
               "case": "length",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -2036,6 +2090,9 @@
             {
               "case": "content_filter",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -2154,6 +2211,9 @@
             {
               "case": "stop",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -2264,6 +2324,9 @@
             {
               "case": "tool",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -2372,6 +2435,9 @@
             {
               "case": "length",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -2485,6 +2551,9 @@
             {
               "case": "content_filter",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -2603,6 +2672,9 @@
             {
               "case": "stop",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -2710,6 +2782,9 @@
             {
               "case": "tool",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -2815,6 +2890,9 @@
             {
               "case": "length",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -2925,6 +3003,9 @@
             {
               "case": "content_filter",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -3048,6 +3129,9 @@
             {
               "case": "missing_terminal",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -3128,6 +3212,9 @@
             {
               "case": "missing_terminal",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -3186,6 +3273,9 @@
             {
               "case": "missing_terminal",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -3233,6 +3323,9 @@
             {
               "case": "missing_terminal",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -3312,6 +3405,9 @@
             {
               "case": "missing_terminal",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -3391,6 +3487,9 @@
             {
               "case": "missing_terminal",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -3478,6 +3577,9 @@
             {
               "case": "empty_deltas",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -3579,6 +3681,9 @@
             {
               "case": "empty_terminal_chunks",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -3673,6 +3778,9 @@
             {
               "case": "split_reasoning_tool",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -3830,6 +3938,9 @@
             {
               "case": "empty_deltas",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -3922,6 +4033,9 @@
             {
               "case": "empty_terminal_chunks",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -4006,6 +4120,9 @@
             {
               "case": "split_reasoning_tool",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -4134,6 +4251,9 @@
             {
               "case": "empty_deltas",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -4209,6 +4329,9 @@
             {
               "case": "empty_terminal_chunks",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -4282,6 +4405,9 @@
             {
               "case": "split_reasoning_tool",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -4427,6 +4553,9 @@
             {
               "case": "empty_deltas",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -4547,6 +4676,9 @@
             {
               "case": "empty_terminal_chunks",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -4667,6 +4799,9 @@
             {
               "case": "split_reasoning_tool",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -4860,6 +4995,9 @@
             {
               "case": "empty_deltas",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -4980,6 +5118,9 @@
             {
               "case": "empty_terminal_chunks",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -5100,6 +5241,9 @@
             {
               "case": "split_reasoning_tool",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -5293,6 +5437,9 @@
             {
               "case": "empty_deltas",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -5410,6 +5557,9 @@
             {
               "case": "empty_terminal_chunks",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -5527,6 +5677,9 @@
             {
               "case": "split_reasoning_tool",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -5725,6 +5878,9 @@
             {
               "case": "reasoning_rendered",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -5874,6 +6030,9 @@
             {
               "case": "reasoning_rendered",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -5995,6 +6154,9 @@
             {
               "case": "reasoning_rendered",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -6104,6 +6266,9 @@
             {
               "case": "reasoning_rendered",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -6299,6 +6464,9 @@
             {
               "case": "reasoning_rendered",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -6494,6 +6662,9 @@
             {
               "case": "reasoning_rendered",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -6694,6 +6865,9 @@
             {
               "case": "response_identity",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -6782,6 +6956,9 @@
             {
               "case": "failed_response",
               "status": 400,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -6811,6 +6988,9 @@
             {
               "case": "response_identity",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -6876,6 +7056,9 @@
             {
               "case": "failed_response",
               "status": 400,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -6909,6 +7092,9 @@
             {
               "case": "response_identity",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -6968,6 +7154,9 @@
             {
               "case": "failed_response",
               "status": 400,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7001,6 +7190,9 @@
             {
               "case": "response_identity",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7111,6 +7303,9 @@
             {
               "case": "failed_response",
               "status": 400,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7133,6 +7328,9 @@
             {
               "case": "buffered_response_identity",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7166,6 +7364,9 @@
             {
               "case": "response_identity",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7276,6 +7477,9 @@
             {
               "case": "failed_response",
               "status": 400,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7298,6 +7502,9 @@
             {
               "case": "buffered_response_identity",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7331,6 +7538,9 @@
             {
               "case": "response_identity",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7438,6 +7648,9 @@
             {
               "case": "failed_response",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7506,6 +7719,9 @@
             {
               "case": "served_model_conflict",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7554,6 +7770,9 @@
             {
               "case": "served_model_conflict",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7598,6 +7817,9 @@
             {
               "case": "served_model_conflict",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7653,6 +7875,9 @@
             {
               "case": "served_model_conflict",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7701,6 +7926,9 @@
             {
               "case": "served_model_conflict",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7749,6 +7977,9 @@
             {
               "case": "served_model_conflict",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7805,6 +8036,9 @@
             {
               "case": "attempt_1",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7827,6 +8061,9 @@
             {
               "case": "attempt_2",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7849,6 +8086,9 @@
             {
               "case": "attempt_3_success",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7942,6 +8182,9 @@
             {
               "case": "attempt_1",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7964,6 +8207,9 @@
             {
               "case": "attempt_2",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -7986,6 +8232,9 @@
             {
               "case": "attempt_3_success",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -8056,6 +8305,9 @@
             {
               "case": "attempt_1",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -8078,6 +8330,9 @@
             {
               "case": "attempt_2",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -8100,6 +8355,9 @@
             {
               "case": "attempt_3_success",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -8164,6 +8422,9 @@
             {
               "case": "attempt_1",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -8186,6 +8447,9 @@
             {
               "case": "attempt_2",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -8208,6 +8472,9 @@
             {
               "case": "attempt_3_success",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -8323,6 +8590,9 @@
             {
               "case": "attempt_1",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -8345,6 +8615,9 @@
             {
               "case": "attempt_2",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -8367,6 +8640,9 @@
             {
               "case": "attempt_3_success",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -8482,6 +8758,9 @@
             {
               "case": "attempt_1",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -8515,6 +8794,9 @@
             {
               "case": "attempt_2",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",
@@ -8548,6 +8830,9 @@
             {
               "case": "attempt_3_success",
               "status": 200,
+              "request_match": {
+                "any": true
+              },
               "headers": [
                 {
                   "name": "content-type",

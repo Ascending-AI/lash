@@ -47,6 +47,7 @@ def recording(
     return {
         "case": case,
         "status": status,
+        "request_match": {"any": True},
         "headers": [
             {"name": "content-type", "value": "text/event-stream; charset=utf-8"},
             {"name": "x-request-id", "value": request_id},
@@ -62,6 +63,7 @@ def recording(
 def transport_error(case: str) -> dict[str, object]:
     return {
         "case": case,
+        "request_match": {"any": True},
         "transport_error": f"{case} before response establishment",
         "retryable": True,
     }

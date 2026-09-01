@@ -228,8 +228,7 @@ impl RecordingExchange {
             if !body.is_empty() {
                 timeline.push(ProviderWireEvent::Chunk {
                     at: response_finished_at,
-                    data: Some(body),
-                    bytes: None,
+                    payload: crate::provider::ProviderWireChunkPayload::Data(body),
                 });
             }
             timeline.push(match stream_error {
@@ -682,6 +681,7 @@ mod tests {
             ])),
         });
         let request_match = ProviderWireRequestMatch {
+            any: false,
             body: [(
                 "messages".to_string(),
                 JsonMatcher {

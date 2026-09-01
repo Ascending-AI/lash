@@ -23,7 +23,7 @@ pub struct ProviderWireScript {
     pub name: String,
     pub provider_kind: String,
     pub endpoint: ProviderWireEndpoint,
-    #[serde(default, rename = "request_match")]
+    #[serde(rename = "request_match")]
     pub request_match: ProviderWireRequestMatch,
     #[serde(default)]
     timeline: Vec<ProviderWireEvent>,
@@ -53,8 +53,24 @@ impl Clone for ProviderWireScript {
 
 impl ProviderWireScript {
     pub fn from_json_str(input: &str) -> Result<Self, LlmTransportError> {
-        let script: Self = serde_json::from_str(input).map_err(|err| {
+        let value: Value = serde_json::from_str(input).map_err(|err| {
             LlmTransportError::new(format!("Invalid Provider Wire Script JSON: {err}"))
+                .with_kind(ProviderFailureKind::Validation)
+        })?;
+        let source = value
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("<unnamed>");
+        let script: Self = serde_json::from_value(value.clone()).map_err(|err| {
+            let context = first_chunk_event_index(&value).map_or_else(
+                || format!("Provider Wire Script `{source}` failed to parse"),
+                |index| {
+                    format!(
+                        "Provider Wire Script `{source}` chunk event at index {index} failed to parse"
+                    )
+                },
+            );
+            LlmTransportError::new(format!("{context}: {err}"))
                 .with_kind(ProviderFailureKind::Validation)
         })?;
         script.validate()?;
@@ -104,6 +120,7 @@ impl ProviderWireScript {
                 self.name
             )));
         }
+        self.request_match.validate(&self.name)?;
         let mut previous_at = 0;
         for (index, event) in self.timeline.iter().enumerate() {
             let at = event.at();
@@ -164,13 +181,50 @@ pub struct ProviderWireHeader {
     pub value: String,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderWireRequestMatch {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub any: bool,
     #[serde(default)]
     pub body: BTreeMap<String, JsonMatcher>,
     #[serde(default)]
     pub headers: BTreeMap<String, HeaderMatcher>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
+impl Default for ProviderWireRequestMatch {
+    fn default() -> Self {
+        Self::any()
+    }
+}
+
+impl ProviderWireRequestMatch {
+    pub fn any() -> Self {
+        Self {
+            any: true,
+            body: BTreeMap::new(),
+            headers: BTreeMap::new(),
+        }
+    }
+
+    fn validate(&self, script_name: &str) -> Result<(), LlmTransportError> {
+        let has_predicates = !self.body.is_empty() || !self.headers.is_empty();
+        if self.any && has_predicates {
+            return Err(script_validation_error(format!(
+                "Provider Wire Script `{script_name}` request matcher cannot combine `any` with predicates"
+            )));
+        }
+        if !self.any && !has_predicates {
+            return Err(script_validation_error(format!(
+                "Provider Wire Script `{script_name}` request matcher must contain a predicate or explicit `any: true`"
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -217,10 +271,7 @@ pub enum ProviderWireEvent {
     Chunk {
         #[serde(default)]
         at: u64,
-        #[serde(default)]
-        data: Option<String>,
-        #[serde(default)]
-        bytes: Option<Vec<u8>>,
+        payload: ProviderWireChunkPayload,
     },
     Sse {
         #[serde(default)]
@@ -260,6 +311,22 @@ pub enum ProviderWireEvent {
         #[serde(default)]
         retryable: Option<bool>,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderWireChunkPayload {
+    Data(String),
+    Bytes(Vec<u8>),
+}
+
+impl ProviderWireChunkPayload {
+    fn into_bytes(self) -> Bytes {
+        match self {
+            Self::Data(data) => Bytes::from(data),
+            Self::Bytes(bytes) => Bytes::from(bytes),
+        }
+    }
 }
 
 impl ProviderWireEvent {
@@ -427,11 +494,11 @@ impl BodyPlan {
                     });
                     streamed_steps.push(StreamStep::Chunk { event_index, bytes });
                 }
-                ProviderWireEvent::Chunk { data, bytes, .. } => {
+                ProviderWireEvent::Chunk { payload, .. } => {
                     streamed = true;
                     streamed_steps.push(StreamStep::Chunk {
                         event_index,
-                        bytes: chunk_bytes(script_name, data.clone(), bytes.clone())?,
+                        bytes: payload.clone().into_bytes(),
                     });
                 }
                 ProviderWireEvent::Sse { data, .. } => {
@@ -1204,6 +1271,10 @@ fn match_request(
         )));
     }
 
+    if script.request_match.any {
+        return Ok(());
+    }
+
     for (name, matcher) in &script.request_match.headers {
         let values = request
             .headers
@@ -1392,21 +1463,15 @@ fn header_vec(headers: Vec<ProviderWireHeader>) -> Vec<(String, String)> {
         .collect()
 }
 
-fn chunk_bytes(
-    script_name: &str,
-    data: Option<String>,
-    bytes: Option<Vec<u8>>,
-) -> Result<Bytes, LlmTransportError> {
-    match (data, bytes) {
-        (Some(data), None) => Ok(Bytes::from(data)),
-        (None, Some(bytes)) => Ok(Bytes::from(bytes)),
-        (Some(_), Some(_)) => Err(script_validation_error(format!(
-            "Provider Wire Script `{script_name}` chunk event must use either `data` or `bytes`, not both"
-        ))),
-        (None, None) => Err(script_validation_error(format!(
-            "Provider Wire Script `{script_name}` chunk event must include `data` or `bytes`"
-        ))),
-    }
+fn first_chunk_event_index(value: &Value) -> Option<usize> {
+    value
+        .get("timeline")
+        .and_then(Value::as_array)
+        .and_then(|timeline| {
+            timeline
+                .iter()
+                .position(|event| event.get("event").and_then(Value::as_str) == Some("chunk"))
+        })
 }
 
 fn disconnect_error(message: Option<String>, retryable: Option<bool>) -> LlmTransportError {
@@ -1816,6 +1881,7 @@ mod tests {
               "name": "non-monotonic",
               "provider_kind": "openai-compatible",
               "endpoint": { "method": "POST", "path": "/chat/completions" },
+              "request_match": { "any": true },
               "timeline": [
                 { "at": 10, "event": "response_start", "status": 200 },
                 { "at": 5, "event": "end" }
@@ -1845,7 +1911,7 @@ mod tests {
     #[test]
     fn provider_wire_script_rejects_chunk_before_response_start() {
         let err = ProviderWireScript::from_json_str(&wire_script_json(json!([
-            { "event": "chunk", "data": "premature" },
+            { "event": "chunk", "payload": { "data": "premature" } },
             { "event": "response_start", "status": 200 },
             { "event": "end" }
         ])))
@@ -1854,6 +1920,83 @@ mod tests {
         assert_eq!(err.kind, ProviderFailureKind::Validation);
         assert!(err.message.contains("chunk"));
         assert!(err.message.contains("before response_start"));
+    }
+
+    #[test]
+    fn provider_wire_script_rejects_empty_chunk_payload_at_load_with_path_and_index() {
+        let input = json!({
+            "schema": PROVIDER_WIRE_SCRIPT_SCHEMA,
+            "name": "provider-scripts/witness-empty-chunk.json",
+            "provider_kind": "openai-compatible",
+            "endpoint": { "method": "POST", "path": "/chat/completions" },
+            "request_match": { "any": true },
+            "timeline": [
+                { "event": "response_start", "status": 200 },
+                { "event": "chunk" },
+                { "event": "end" }
+            ]
+        })
+        .to_string();
+
+        let err = ProviderWireScript::from_json_str(&input)
+            .expect_err("a chunk without a payload must fail while loading");
+
+        assert_eq!(err.kind, ProviderFailureKind::Validation);
+        assert!(
+            err.message
+                .contains("provider-scripts/witness-empty-chunk.json")
+        );
+        assert!(err.message.contains("chunk event at index 1"));
+    }
+
+    #[test]
+    fn provider_wire_script_rejects_both_chunk_payloads_at_load_with_path_and_index() {
+        let input = json!({
+            "schema": PROVIDER_WIRE_SCRIPT_SCHEMA,
+            "name": "provider-scripts/witness-both-chunk-payloads.json",
+            "provider_kind": "openai-compatible",
+            "endpoint": { "method": "POST", "path": "/chat/completions" },
+            "request_match": { "any": true },
+            "timeline": [
+                { "event": "response_start", "status": 200 },
+                { "event": "chunk", "data": "text", "bytes": [116, 101, 120, 116] },
+                { "event": "end" }
+            ]
+        })
+        .to_string();
+
+        let err = ProviderWireScript::from_json_str(&input)
+            .expect_err("a chunk with both payload alternatives must fail while loading");
+
+        assert_eq!(err.kind, ProviderFailureKind::Validation);
+        assert!(
+            err.message
+                .contains("provider-scripts/witness-both-chunk-payloads.json")
+        );
+        assert!(err.message.contains("chunk event at index 1"));
+    }
+
+    #[test]
+    fn provider_wire_script_rejects_empty_request_match_at_load() {
+        let input = json!({
+            "schema": PROVIDER_WIRE_SCRIPT_SCHEMA,
+            "name": "provider-scripts/witness-empty-request-match.json",
+            "provider_kind": "openai-compatible",
+            "endpoint": { "method": "POST", "path": "/chat/completions" },
+            "request_match": {},
+            "timeline": [{ "event": "transport_error", "message": "fixture error" }]
+        })
+        .to_string();
+
+        let err = ProviderWireScript::from_json_str(&input)
+            .expect_err("an empty request matcher must fail while loading");
+
+        assert_eq!(err.kind, ProviderFailureKind::Validation);
+        assert!(
+            err.message
+                .contains("provider-scripts/witness-empty-request-match.json")
+        );
+        assert!(err.message.contains("request matcher"));
     }
 
     #[test]
@@ -1963,8 +2106,7 @@ mod tests {
         let timeline = vec![
             ProviderWireEvent::Chunk {
                 at: 0,
-                data: Some("premature".to_string()),
-                bytes: None,
+                payload: ProviderWireChunkPayload::Data("premature".to_string()),
             },
             ProviderWireEvent::ResponseStart {
                 at: 0,
@@ -1974,7 +2116,7 @@ mod tests {
             ProviderWireEvent::End { at: 0 },
         ];
         let json_error = ProviderWireScript::from_json_str(&wire_script_json(json!([
-            { "event": "chunk", "data": "premature" },
+            { "event": "chunk", "payload": { "data": "premature" } },
             { "event": "response_start", "status": 200 },
             { "event": "end" }
         ])))
@@ -2003,7 +2145,7 @@ mod tests {
             { "event": "response_start", "status": 200 },
             { "event": "body", "data": "first" },
             { "event": "body", "data": "second" },
-            { "event": "chunk", "data": "tail" },
+            { "event": "chunk", "payload": { "data": "tail" } },
             { "event": "end" }
         ])))
         .expect("streaming body script");
@@ -2064,6 +2206,7 @@ mod tests {
             "name": "invalid-shape",
             "provider_kind": "openai-compatible",
             "endpoint": { "method": "POST", "path": "/chat/completions" },
+            "request_match": { "any": true },
             "timeline": timeline
         })
         .to_string()

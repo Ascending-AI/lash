@@ -66,9 +66,9 @@ pub use artifacts::{
     GeneratedSimProfileReport, ScriptHashManifest,
 };
 pub use provider::{
-    ProviderWireEndpoint, ProviderWireEvent, ProviderWireProvenance, ProviderWireProvenanceKind,
-    ProviderWireRequestMatch, ProviderWireScript, ScriptedLlmHttpTransport,
-    ScriptedTransportSchedule,
+    ProviderWireChunkPayload, ProviderWireEndpoint, ProviderWireEvent, ProviderWireProvenance,
+    ProviderWireProvenanceKind, ProviderWireRequestMatch, ProviderWireScript,
+    ScriptedLlmHttpTransport, ScriptedTransportSchedule,
 };
 pub use recording::{ProviderRecordingConfig, RecordingLlmHttpTransport};
 pub use runner::{
