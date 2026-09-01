@@ -536,8 +536,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// removing its unread owner columns. Existing catalogs are rejected rather
 /// than migrated.
 /// Version 49 constrains pending-turn-input state and scope correlation while
-/// removing the unread claim-owner-liveness column. Existing catalogs are
-/// rejected rather than migrated.
+/// removing the unread claim-owner-liveness column. SQL CHECK NULL semantics
+/// let ingress JSON without a `scope` key pass both checks; serde cannot emit
+/// that shape, so the behavior is identical across backends. Existing
+/// catalogs are rejected rather than migrated.
 pub(crate) const SCHEMA_VERSION: i32 = 49;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
@@ -1271,6 +1273,9 @@ mod check_constraint_tests {
         let core = Connection::open_in_memory().expect("open durable-core constraint fixture");
         core.execute_batch(SCHEMA)
             .expect("create durable-core constraint fixture");
+        // The three illegal scope/state pairs must name the correlation CHECK.
+        // An ingress_json without a scope key passes both CHECKs under SQL NULL
+        // semantics; serde cannot emit it, so both backends behave identically.
         assert_check_rejects(
             &core,
             "INSERT INTO pending_turn_inputs (
@@ -1289,6 +1294,27 @@ mod check_constraint_tests {
              ) VALUES (
                  'bad-turn-input-pair', 'session', '{\"scope\":\"next_turn\"}',
                  'pending_active', '{}', 0
+             )",
+            "ck_pending_turn_inputs_state_ingress",
+        );
+        assert_check_rejects(
+            &core,
+            "INSERT INTO pending_turn_inputs (
+                 input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+             ) VALUES (
+                 'bad-turn-input-accepted-pair', 'session', '{\"scope\":\"next_turn\"}',
+                 'accepted', '{}', 0
+             )",
+            "ck_pending_turn_inputs_state_ingress",
+        );
+        assert_check_rejects(
+            &core,
+            "INSERT INTO pending_turn_inputs (
+                 input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+             ) VALUES (
+                 'bad-turn-input-deferred-pair', 'session',
+                 '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
+                 'deferred_next_turn', '{}', 0
              )",
             "ck_pending_turn_inputs_state_ingress",
         );
