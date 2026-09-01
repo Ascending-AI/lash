@@ -246,7 +246,7 @@ async fn async_main() -> AnyhowResult<()> {
     let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.join("attachments"),
     )) as Arc<dyn lash::persistence::AttachmentStore>;
-    let runtime_host_config = apply_workbench_lease_timings(
+    let mut runtime_host_config = apply_workbench_lease_timings(
         lash::durability::RuntimeHostConfig::new(
             turn_deployment.effect_host(),
             Arc::clone(&attachment_store),
@@ -255,6 +255,8 @@ async fn async_main() -> AnyhowResult<()> {
             lash::QueuedWorkBatchingConfig::new(1024),
         ),
     );
+    runtime_host_config.tracing.trace_sink = Some(Arc::clone(&trace_sink));
+    runtime_host_config.tracing.trace_level = TraceLevel::Extended;
 
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
@@ -281,9 +283,7 @@ async fn async_main() -> AnyhowResult<()> {
         .provider(provider)
         .model(model_spec)
         .store_factory(Arc::clone(&core_store_factory))
-        .trigger_store(Arc::clone(&trigger_store))
-        .trace_sink(Arc::clone(&trace_sink))
-        .trace_level(TraceLevel::Extended);
+        .trigger_store(Arc::clone(&trigger_store));
     let builder = if let Some(tool_provider) =
         dev_provider_scenario.and_then(failure_provider::DevProviderScenario::tool_provider)
     {

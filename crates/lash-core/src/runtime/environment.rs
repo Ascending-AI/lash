@@ -125,14 +125,15 @@ impl RuntimeEnvironmentBuilder {
         // explicitly named in-memory core so the choice is visible in source.
         // The `lash` facade always overrides this via `with_runtime_host_config`
         // and rejects builds that never named their stores.
+        let core = RuntimeHostConfig::in_memory(commit_budget, queued_work_batching);
         Self {
             env: RuntimeEnvironment {
                 plugin_host: None,
                 process_registry: None,
-                trigger_store: Some(Arc::new(crate::InMemoryTriggerStore::default())),
+                trigger_store: None,
                 session_store_factory: None,
                 work: RuntimeWork::sessions_only(Arc::new(NoQueuedWork::new())),
-                core: RuntimeHostConfig::in_memory(commit_budget, queued_work_batching),
+                core,
             },
         }
     }
@@ -278,7 +279,12 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
-    pub fn build(self) -> RuntimeEnvironment {
+    pub fn build(mut self) -> RuntimeEnvironment {
+        if self.env.trigger_store.is_none() {
+            self.env.trigger_store = Some(Arc::new(crate::InMemoryTriggerStore::with_clock(
+                Arc::clone(&self.env.core.clock),
+            )));
+        }
         self.env
     }
 }
@@ -369,6 +375,34 @@ mod tests {
 
         assert_eq!(env.core.tracing.trace_level, TraceLevel::Extended);
         assert!(!env.core.control.termination.treat_missing_done_as_failure);
+    }
+
+    #[tokio::test]
+    async fn default_trigger_store_uses_the_resolved_core_clock() {
+        const NOW_MS: u64 = 4_200_000;
+        let clock: Arc<dyn crate::Clock> = Arc::new(crate::testing::TestClock::new(NOW_MS));
+        let core = RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_clock(Arc::clone(&clock));
+
+        let env = RuntimeEnvironment::builder(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_runtime_host_config(core)
+        .build();
+        let trigger_store = env.trigger_store.expect("default trigger store");
+        let receipt = trigger_store.ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+            "fig1982.clock",
+            "resolved-core-clock",
+            serde_json::Value::Null,
+            "fig1982:resolved-core-clock",
+        ));
+
+        let receipt = receipt.await.expect("ingest clock probe");
+        assert_eq!(receipt.occurrence.occurred_at_ms, NOW_MS);
     }
 
     #[test]

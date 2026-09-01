@@ -5,7 +5,8 @@ impl LashCoreBuilder {
     /// durability dependencies to have been named.
     pub(super) fn resolve_runtime_host_config(&mut self) -> Result<RuntimeHostConfig> {
         if let Some(base) = self.runtime_host_config.take() {
-            return Ok(self.apply_core_overrides(base));
+            self.reject_runtime_host_config_conflicts()?;
+            return Ok(base);
         }
         let effect_host = self
             .effect_host
@@ -35,6 +36,37 @@ impl LashCoreBuilder {
             queued_work_batching,
         );
         Ok(self.apply_core_overrides(core))
+    }
+
+    fn reject_runtime_host_config_conflicts(&self) -> Result<()> {
+        for (configured, field) in [
+            (self.effect_host.is_some(), "effect_host"),
+            (self.attachment_store.is_some(), "attachment_store"),
+            (self.process_env_store.is_some(), "process_env_store"),
+            (self.commit_budget.is_some(), "commit_budget"),
+            (self.max_attachment_bytes.is_some(), "max_attachment_bytes"),
+            (self.queued_work_batching.is_some(), "queued_work_batching"),
+            (
+                self.process_wake_delivery_policy.is_some(),
+                "process_wake_delivery_policy",
+            ),
+            (self.prompt.is_some(), "prompt"),
+            (self.trace_sink.is_some(), "trace_sink"),
+            (self.trace_level.is_some(), "trace_level"),
+            (self.trace_context.is_some(), "trace_context"),
+            (self.termination.is_some(), "termination"),
+            (self.lease_timings.is_some(), "lease_timings"),
+            (self.clock.is_some(), "clock"),
+            (
+                self.process_tool_visibility_filter.is_some(),
+                "process_tool_visibility_filter",
+            ),
+        ] {
+            if configured {
+                return Err(EmbedError::RuntimeHostConfigConflict { field });
+            }
+        }
+        Ok(())
     }
 
     /// Apply benign + still-set dependency overrides on top of a base core.

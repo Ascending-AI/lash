@@ -853,7 +853,8 @@ pub struct LashCoreBuilder {
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     native_substrate: NativeSubstrateConfig,
     trigger_store: Option<Arc<dyn lash_core::TriggerStore>>,
-    // Benign core overrides applied on top of the resolved core.
+    // Core fields applied while constructing a config from individual builder
+    // setters. They conflict with a whole-config override when duplicated.
     prompt: Option<PromptLayer>,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_level: Option<lash_trace::TraceLevel>,

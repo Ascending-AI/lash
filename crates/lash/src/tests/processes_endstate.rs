@@ -209,7 +209,7 @@ fn process_test_core(
     registry: Arc<dyn lash_core::ProcessRegistry>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
 ) -> Result<LashCore> {
-    explicit_ephemeral_facets(LashCore::rlm_builder(
+    LashCore::rlm_builder(
         crate::TurnBudget::Unbounded,
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -219,7 +219,7 @@ fn process_test_core(
                 .build(),
             artifact_store,
         ),
-    ))
+    )
     .provider(mock_provider())
     .model(mock_model_spec())
     .store_factory(Arc::new(
@@ -227,13 +227,19 @@ fn process_test_core(
     ))
     .trigger_store(trigger_store)
     .process_registry(registry)
+    .without_queued_work()
     .advanced()
     .runtime_host_config({
-        let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        let config = lash_core::facade_support::RuntimeHostConfig::new(
+            Arc::new(
+                lash_core::facade_support::NativeEffectHost::default()
+                    .allow_process_lifetime_completion_keys(),
+            ),
+            Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+            process_env_store.clone(),
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         );
-        config.durability.process_env_store = process_env_store;
         config
     })
     .build(crate::testing::runtime_lease_owner())
@@ -1205,7 +1211,7 @@ fn process_test_core_with_sink(
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     sink: Arc<dyn lash_core::facade_support::ProcessEventSink>,
 ) -> Result<LashCore> {
-    explicit_ephemeral_facets(LashCore::rlm_builder(
+    LashCore::rlm_builder(
         crate::TurnBudget::Unbounded,
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -1215,7 +1221,7 @@ fn process_test_core_with_sink(
                 .build(),
             artifact_store,
         ),
-    ))
+    )
     .provider(mock_provider())
     .model(mock_model_spec())
     .store_factory(Arc::new(
@@ -1224,13 +1230,19 @@ fn process_test_core_with_sink(
     .trigger_store(trigger_store)
     .process_registry(registry)
     .process_event_sink(sink)
+    .without_queued_work()
     .advanced()
     .runtime_host_config({
-        let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        let config = lash_core::facade_support::RuntimeHostConfig::new(
+            Arc::new(
+                lash_core::facade_support::NativeEffectHost::default()
+                    .allow_process_lifetime_completion_keys(),
+            ),
+            Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+            process_env_store.clone(),
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         );
-        config.durability.process_env_store = process_env_store;
         config
     })
     .build(crate::testing::runtime_lease_owner())

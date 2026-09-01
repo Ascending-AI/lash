@@ -84,6 +84,15 @@ pub enum EmbedError {
     /// Returned when queued-work batching has not been configured.
     MissingQueuedWorkBatching,
     #[error(
+        "runtime host config conflicts with builder field `{field}`; configure this value in exactly one place"
+    )]
+    /// Returned when a whole runtime host config and a duplicated builder
+    /// field were both supplied.
+    RuntimeHostConfigConflict {
+        /// Builder field that duplicated a value in the runtime host config.
+        field: &'static str,
+    },
+    #[error(
         "queued-work composition is required; call .with_native_queued_work(), .with_queued_work(...), or .without_queued_work()"
     )]
     /// Returned when the host did not choose how queued work is executed.
@@ -284,6 +293,7 @@ impl EmbedError {
             | Self::MissingProcessEnvStore
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
+            | Self::RuntimeHostConfigConflict { .. }
             | Self::MissingQueuedWorkSource
             | Self::NativeQueuedWorkRequiresStoreFactory
             | Self::StoreSessionMismatch { .. }

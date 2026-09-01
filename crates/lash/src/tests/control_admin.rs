@@ -36,6 +36,18 @@ impl lash_core::facade_support::ProcessToolVisibilityFilter for HideAllProcessTo
     }
 }
 
+fn explicit_runtime_host_config() -> RuntimeHostConfig {
+    RuntimeHostConfig::new(
+        Arc::new(
+            crate::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
+        ),
+        Arc::new(crate::persistence::InMemoryAttachmentStore::new()),
+        Arc::new(crate::persistence::InMemoryProcessExecutionEnvStore::new()),
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    )
+}
+
 impl lash_core::facade_support::PluginOperation for NonblockingObservationQuery {
     const NAME: &'static str = "test.nonblocking_observation_query";
     const DESCRIPTION: &'static str =
@@ -599,19 +611,16 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
 
 #[tokio::test]
 async fn processes_cancel_cancels_visible_process() -> Result<()> {
-    let runtime_host = RuntimeHostConfig::in_memory(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    );
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+    let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .without_queued_work()
         .advanced()
-        .runtime_host_config(runtime_host)
+        .runtime_host_config(explicit_runtime_host_config())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-cancel").open().await?;
     session
@@ -654,19 +663,18 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
 
 #[tokio::test]
 async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+    let mut runtime_host = explicit_runtime_host_config();
+    runtime_host.control.process_tool_visibility_filter = Some(Arc::new(HideAllProcessTools));
+    let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .process_tool_visibility_filter(Arc::new(HideAllProcessTools))
+        .without_queued_work()
         .advanced()
-        .runtime_host_config(RuntimeHostConfig::in_memory(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-        ))
+        .runtime_host_config(runtime_host)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-filter-bypass").open().await?;
     for process_id in ["host-filter-signal", "host-filter-cancel"] {
@@ -734,15 +742,12 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
 
 #[tokio::test]
 async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
-    let runtime_host = RuntimeHostConfig::in_memory(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    );
+    let runtime_host = explicit_runtime_host_config();
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
     let watched = lash_core::facade_support::watch_process_registry(registry);
     let wiring = lash_core::ProcessWorkWiring::new(watched, Arc::new(NoopProcessWork));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+    let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
