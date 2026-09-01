@@ -565,7 +565,7 @@ impl ProductEventHistory {
     }
 }
 
-const PRODUCT_EVENT_LOG_FORMAT_VERSION: u32 = 1;
+const PRODUCT_EVENT_LOG_FORMAT_VERSION: u32 = 2;
 
 #[derive(Serialize)]
 struct PersistedProductEventLog<'a> {
