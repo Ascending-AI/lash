@@ -707,12 +707,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
     ) -> std::result::Result<lash_core::PendingTurnInput, lash_core::store::StoreError> {
         let mut seq = self.pending_turn_input_seq.lock_recover();
         *seq += 1;
-        let state = match input.ingress {
-            lash_core::TurnInputIngress::ActiveTurn { .. } => {
-                lash_core::TurnInputState::PendingActive
-            }
-            lash_core::TurnInputIngress::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
-        };
+        let state = input.ingress.initial_state();
         let stored = lash_core::PendingTurnInput {
             input_id: input
                 .input_id

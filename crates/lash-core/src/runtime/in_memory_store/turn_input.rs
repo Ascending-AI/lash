@@ -148,10 +148,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         let input_id = draft
             .input_id
             .unwrap_or_else(|| format!("recording-ti-{next_seq}"));
-        let state = match draft.ingress {
-            crate::TurnInputIngress::ActiveTurn { .. } => crate::TurnInputState::PendingActive,
-            crate::TurnInputIngress::NextTurn => crate::TurnInputState::DeferredNextTurn,
-        };
+        let state = draft.ingress.initial_state();
         let stored = crate::PendingTurnInput {
             input_id,
             session_id: draft.session_id,

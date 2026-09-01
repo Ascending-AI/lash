@@ -1444,7 +1444,7 @@ pub(crate) async fn load_pending_turn_input(
         "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                 state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                 claim_owner_id, claim_owner_incarnation_id,
-                claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                claim_token, claim_session_lease_generation
          FROM lash_pending_turn_inputs
          WHERE session_id = $1 AND input_id = $2",
     )
@@ -1471,7 +1471,7 @@ pub(crate) async fn load_pending_turn_input_row_by_target_tx(
             "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                         state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                         claim_owner_id, claim_owner_incarnation_id,
-                        claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                        claim_token, claim_session_lease_generation
                  FROM lash_pending_turn_inputs
                  WHERE session_id = $1 AND input_id = $2{for_update}"
         ))
@@ -1484,7 +1484,7 @@ pub(crate) async fn load_pending_turn_input_row_by_target_tx(
             "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                         state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                         claim_owner_id, claim_owner_incarnation_id,
-                        claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                        claim_token, claim_session_lease_generation
                  FROM lash_pending_turn_inputs
                  WHERE session_id = $1 AND source_key = $2{for_update}"
         ))
@@ -1556,7 +1556,6 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
                      claim_id = NULL,
                      claim_owner_id = NULL,
                      claim_owner_incarnation_id = NULL,
-                     claim_owner_liveness_json = NULL,
                      claim_token = NULL,
                      claim_session_lease_generation = 0
                  WHERE session_id = $1 AND input_id = $2",

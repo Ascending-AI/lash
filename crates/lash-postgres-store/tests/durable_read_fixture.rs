@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 68);
+    assert_eq!(PostgresStorage::schema_version(), 69);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -168,28 +168,24 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .await
         .expect("connect to refresh refusal fixture catalog");
     sqlx::raw_sql(
-        "ALTER TABLE lash_queued_work_batches
-             DROP CONSTRAINT IF EXISTS ck_queued_work_batches_work_kind,
-             DROP CONSTRAINT IF EXISTS ck_queued_work_batches_delivery_policy,
-             DROP CONSTRAINT IF EXISTS ck_queued_work_batches_claim_id_token_all_or_none,
-             DROP COLUMN IF EXISTS claim_owner_id,
-             DROP COLUMN IF EXISTS claim_owner_incarnation_id,
-             DROP COLUMN IF EXISTS claim_owner_liveness_json,
-             ADD CONSTRAINT ck_queued_work_batches_work_kind
-                 CHECK (work_kind IN ('turn', 'control')),
-             ADD CONSTRAINT ck_queued_work_batches_delivery_policy
-                 CHECK (delivery_policy IN ('earliest_safe_boundary',
-                                             'after_current_turn_commit')),
-             ADD CONSTRAINT ck_queued_work_batches_claim_id_token_all_or_none
-                 CHECK ((claim_id IS NULL AND claim_token IS NULL)
-                     OR (claim_id IS NOT NULL AND claim_token IS NOT NULL));
+        "ALTER TABLE lash_pending_turn_inputs
+             DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_state,
+             DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_state_ingress,
+             ADD CONSTRAINT ck_pending_turn_inputs_state
+                 CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted',
+                                  'cancelled', 'completed')),
+             ADD CONSTRAINT ck_pending_turn_inputs_state_ingress
+                 CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn'
+                         AND state IN ('pending_active', 'accepted', 'cancelled', 'completed'))
+                     OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
+                         AND state IN ('deferred_next_turn', 'cancelled', 'completed')));
          UPDATE lash_schema_versions
-            SET version = 68
+            SET version = 69
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)
     .await
-    .expect("refresh refusal fixture queued-work catalog");
+    .expect("refresh refusal fixture pending-input and process-lease catalog");
     pool.close().await;
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await

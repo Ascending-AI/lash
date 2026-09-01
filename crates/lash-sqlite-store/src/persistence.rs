@@ -139,7 +139,6 @@ const TURN_INPUT_SETTLEMENT_ASSIGNMENTS: &str = "state = ?3,
                                      claim_id = NULL,
                                      claim_owner_id = NULL,
                                      claim_owner_incarnation_id = NULL,
-                                     claim_owner_liveness_json = NULL,
                                      claim_token = NULL,
                                      claim_session_lease_generation = 0";
 
@@ -1189,7 +1188,6 @@ impl SessionCommitStore for Store {
                                      claim_id = NULL,
                                      claim_owner_id = NULL,
                                      claim_owner_incarnation_id = NULL,
-                                     claim_owner_liveness_json = NULL,
                                      claim_token = NULL,
                                      claim_session_lease_generation = 0
                                  WHERE session_id = ?1 AND input_id = ?2",
@@ -2891,14 +2889,7 @@ impl TurnInputStore for Store {
                             nonce,
                         )
                     });
-                    let state = match draft.ingress {
-                        lash_core::TurnInputIngress::ActiveTurn { .. } => {
-                            lash_core::TurnInputState::PendingActive
-                        }
-                        lash_core::TurnInputIngress::NextTurn => {
-                            lash_core::TurnInputState::DeferredNextTurn
-                        }
-                    };
+                    let state = draft.ingress.initial_state();
                     tx.execute(
                         "INSERT INTO pending_turn_inputs (
                             input_id, session_id, source_key, ingress_json, state,
@@ -2945,7 +2936,7 @@ impl TurnInputStore for Store {
                                 "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                                         state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                                         claim_owner_id, claim_owner_incarnation_id,
-                                        claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                                        claim_token, claim_session_lease_generation
                                  FROM pending_turn_inputs
                                  WHERE session_id = ?1
                                    AND state IN (?2, ?3)
@@ -3094,7 +3085,7 @@ impl TurnInputStore for Store {
                                     "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                                             state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                                             claim_owner_id, claim_owner_incarnation_id,
-                                            claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                                            claim_token, claim_session_lease_generation
                                      FROM pending_turn_inputs
                                      WHERE session_id = ?1 AND enqueue_seq >= ?2
                                      ORDER BY enqueue_seq ASC",
@@ -3193,7 +3184,6 @@ impl TurnInputStore for Store {
                          claim_id = NULL,
                          claim_owner_id = NULL,
                          claim_owner_incarnation_id = NULL,
-                         claim_owner_liveness_json = NULL,
                          claim_token = NULL,
                          claim_session_lease_generation = 0
                      WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3",
@@ -3321,7 +3311,6 @@ fn abandon_turn_input_claims_statement(
                  claim_id = NULL,
                  claim_owner_id = NULL,
                  claim_owner_incarnation_id = NULL,
-                 claim_owner_liveness_json = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0
              WHERE (session_id, claim_id, claim_token) IN ("
@@ -3489,7 +3478,6 @@ fn cancel_pending_turn_input_row_conn(
                      claim_id = NULL,
                      claim_owner_id = NULL,
                      claim_owner_incarnation_id = NULL,
-                     claim_owner_liveness_json = NULL,
                      claim_token = NULL,
                      claim_session_lease_generation = 0
                  WHERE session_id = ?1 AND input_id = ?2",
@@ -3797,7 +3785,7 @@ fn claim_pending_turn_inputs_sqlite_conn(
             "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                         state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                         claim_owner_id, claim_owner_incarnation_id,
-                        claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                        claim_token, claim_session_lease_generation
                  FROM pending_turn_inputs
                  WHERE session_id = ?
                    AND (state = ? OR (? AND state = {accepted_state}))
@@ -3854,7 +3842,6 @@ fn claim_pending_turn_inputs_sqlite_conn(
         "turn_input_claim_fencing_token",
         selected.iter().map(|(row, _)| row.claim_fencing_token),
     )?;
-    let liveness_json: Option<&str> = None;
     let state_after_claim = match &mode {
         lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputState::Accepted,
         lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
@@ -3868,15 +3855,14 @@ fn claim_pending_turn_inputs_sqlite_conn(
                      claim_id = ?4,
                      claim_owner_id = ?5,
                      claim_owner_incarnation_id = ?6,
-                     claim_owner_liveness_json = ?7,
-                     claim_token = ?8,
-                     claim_fencing_token = ?10,
-                     claim_session_lease_generation = ?9
+                     claim_token = ?7,
+                     claim_fencing_token = ?9,
+                     claim_session_lease_generation = ?8
                  WHERE session_id = ?1
                    AND input_id = ?2
                    AND (
                         claim_token IS NULL
-                        OR claim_session_lease_generation <> ?9
+                        OR claim_session_lease_generation <> ?8
                    )",
                 params![
                     session_id,
@@ -3885,7 +3871,6 @@ fn claim_pending_turn_inputs_sqlite_conn(
                     lease.claim_id,
                     owner.owner_id.as_str(),
                     owner.incarnation_id.as_str(),
-                    liveness_json,
                     lease.lease_token,
                     sql_session_lease_generation(lease.session_lease_generation)?,
                     sql_fencing_token,
@@ -3949,7 +3934,7 @@ async fn claim_pending_turn_inputs_sqlite(
                     "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                             state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                             claim_owner_id, claim_owner_incarnation_id,
-                            claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                            claim_token, claim_session_lease_generation
                      FROM pending_turn_inputs
                      WHERE session_id = ?
                        AND (state = ? OR (? AND state = {accepted_state}))
@@ -4006,7 +3991,6 @@ async fn claim_pending_turn_inputs_sqlite(
                 "turn_input_claim_fencing_token",
                 selected.iter().map(|(row, _)| row.claim_fencing_token),
             )?;
-            let liveness_json: Option<&str> = None;
             let state_after_claim = match &mode {
                 lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
                     lash_core::TurnInputState::Accepted
@@ -4026,15 +4010,14 @@ async fn claim_pending_turn_inputs_sqlite(
                              claim_id = ?4,
                              claim_owner_id = ?5,
                              claim_owner_incarnation_id = ?6,
-                             claim_owner_liveness_json = ?7,
-                             claim_token = ?8,
-                             claim_fencing_token = ?10,
-                             claim_session_lease_generation = ?9
+                             claim_token = ?7,
+                             claim_fencing_token = ?9,
+                             claim_session_lease_generation = ?8
                          WHERE session_id = ?1
                            AND input_id = ?2
                            AND (
                                 claim_token IS NULL
-                                OR claim_session_lease_generation <> ?9
+                                OR claim_session_lease_generation <> ?8
                            )",
                         params![
                             session_id,
@@ -4043,7 +4026,6 @@ async fn claim_pending_turn_inputs_sqlite(
                             lease.claim_id,
                             owner.owner_id.as_str(),
                             owner.incarnation_id.as_str(),
-                            liveness_json,
                             lease.lease_token,
                             sql_session_lease_generation(lease.session_lease_generation)?,
                             sql_fencing_token,
@@ -4392,7 +4374,6 @@ fn defer_orphaned_active_turn_inputs_conn(
                  claim_id = NULL,
                  claim_owner_id = NULL,
                  claim_owner_incarnation_id = NULL,
-                 claim_owner_liveness_json = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0
              WHERE session_id = ?1 AND input_id = ?2",

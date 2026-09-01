@@ -650,7 +650,6 @@ impl ProcessRegistry for PostgresProcessRegistry {
             "UPDATE lash_process_leases
              SET lease_owner_id = NULL,
                  lease_owner_incarnation_id = NULL,
-                 lease_owner_liveness_json = NULL,
                  lease_token = NULL,
                  lease_claimed_at_ms = 0,
                  lease_expires_at_ms = 0

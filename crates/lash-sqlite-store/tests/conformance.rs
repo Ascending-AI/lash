@@ -1028,7 +1028,7 @@ async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_s
     };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash process registry schema"));
-    assert!(message.contains("supports schema version 26"));
+    assert!(message.contains("supports schema version 27"));
     assert!(message.contains("delete the process registry database and start fresh"));
 }
 

@@ -523,12 +523,7 @@ impl SqliteRuntimeReplayWorld {
             .map_err(|err| SqliteReplayError::Runtime(err.to_string()))?;
         self.queued_inputs
             .insert(event.boundary_id.clone(), acceptance.input_id.clone());
-        let input_state = match acceptance.ingress {
-            lash_core::TurnInputIngress::ActiveTurn { .. } => {
-                lash_core::TurnInputState::PendingActive
-            }
-            lash_core::TurnInputIngress::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
-        };
+        let input_state = acceptance.ingress.initial_state();
         Ok(json!({
             "session": event.actor_alias,
             "queued_ingress": true,

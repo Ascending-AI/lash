@@ -266,7 +266,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 68 constrains queued-work vocabulary and claim correlation while
 // removing its unread owner columns. Component-67 databases are rejected at
 // open; there is deliberately no migration arm.
-const SCHEMA_VERSION: i32 = 68;
+// Version 69 constrains pending-turn-input state and scope correlation while
+// removing the remaining unread owner-liveness columns. Component-68 databases
+// are rejected at open; there is deliberately no migration arm.
+const SCHEMA_VERSION: i32 = 69;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

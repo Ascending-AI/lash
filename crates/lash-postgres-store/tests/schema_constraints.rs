@@ -62,6 +62,30 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
 
     assert_check_rejects(
         &mut connection,
+        "INSERT INTO lash_pending_turn_inputs (
+             input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+         ) VALUES (
+             'bad-turn-input-state', 'session',
+             '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
+             'waiting', '{}', 0
+         )",
+        "ck_pending_turn_inputs_state",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_pending_turn_inputs (
+             input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+         ) VALUES (
+             'bad-turn-input-pair', 'session', '{\"scope\":\"next_turn\"}',
+             'pending_active', '{}', 0
+         )",
+        "ck_pending_turn_inputs_state_ingress",
+    )
+    .await;
+
+    assert_check_rejects(
+        &mut connection,
         "INSERT INTO lash_session_execution_leases (session_id, lease_token)
          VALUES ('partial-identity', 'token-without-executor')",
         "ck_session_execution_leases_identity_all_or_none",

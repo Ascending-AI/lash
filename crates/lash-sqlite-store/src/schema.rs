@@ -339,10 +339,11 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     claim_id          TEXT,
     claim_owner_id    TEXT,
     claim_owner_incarnation_id TEXT,
-    claim_owner_liveness_json TEXT,
     claim_token       TEXT,
     claim_fencing_token INTEGER NOT NULL DEFAULT 0,
     claim_session_lease_generation INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
+    CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK ((json_extract(ingress_json, '$.scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR (json_extract(ingress_json, '$.scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
     UNIQUE (session_id, source_key)
         ON CONFLICT IGNORE
 );
@@ -534,7 +535,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// Version 48 constrains queued-work vocabulary and claim correlation while
 /// removing its unread owner columns. Existing catalogs are rejected rather
 /// than migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 48;
+/// Version 49 constrains pending-turn-input state and scope correlation while
+/// removing the unread claim-owner-liveness column. Existing catalogs are
+/// rejected rather than migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 49;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -699,7 +703,6 @@ CREATE TABLE IF NOT EXISTS process_leases (
     process_id       TEXT PRIMARY KEY,
     lease_owner_id   TEXT,
     lease_owner_incarnation_id TEXT,
-    lease_owner_liveness_json TEXT,
     lease_token      TEXT,
     lease_fencing_token  INTEGER NOT NULL DEFAULT 0,
     lease_claimed_at_ms  INTEGER NOT NULL DEFAULT 0,
@@ -774,7 +777,9 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 // Version 25 switches durable process identities to domain-tagged BLAKE3.
 // Version 26 adds DDL-enforced process status, wake state/discard reason, and
 // tool-intent kind vocabularies. Existing process registries are rejected.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 26;
+/// Version 27 removes the unread process-lease owner-liveness column. Existing
+/// process registries are rejected rather than migrated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 27;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1056,7 +1061,7 @@ fn prepare_versioned_schema_at_version<'connection>(
         return Ok(tx);
     }
     // Deliberately historical: tests pin the 43-to-44 migration, but the arm is
-    // unreachable for production opens now that SCHEMA_VERSION is 48.
+    // unreachable for production opens now that SCHEMA_VERSION is 49.
     if database == SqliteDatabase::DurableCore && user_version == 43 && schema_version == 44 {
         tx.execute_batch(SESSION_43_TO_44_MIGRATION)?;
         tx.execute_batch(database.schema())?;
@@ -1266,6 +1271,27 @@ mod check_constraint_tests {
         let core = Connection::open_in_memory().expect("open durable-core constraint fixture");
         core.execute_batch(SCHEMA)
             .expect("create durable-core constraint fixture");
+        assert_check_rejects(
+            &core,
+            "INSERT INTO pending_turn_inputs (
+                 input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+             ) VALUES (
+                 'bad-turn-input-state', 'session',
+                 '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
+                 'waiting', '{}', 0
+             )",
+            "ck_pending_turn_inputs_state",
+        );
+        assert_check_rejects(
+            &core,
+            "INSERT INTO pending_turn_inputs (
+                 input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+             ) VALUES (
+                 'bad-turn-input-pair', 'session', '{\"scope\":\"next_turn\"}',
+                 'pending_active', '{}', 0
+             )",
+            "ck_pending_turn_inputs_state_ingress",
+        );
         assert_check_rejects(
             &core,
             "INSERT INTO session_meta (session_id, relation_kind)
