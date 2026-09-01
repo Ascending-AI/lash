@@ -16,6 +16,35 @@ fn registration(id: &str) -> ProcessRegistration {
 }
 
 #[test]
+fn process_event_old_system_time_json_is_rejected() {
+    let record = ProcessRecord::from_registration(registration("process-old-time-shape"));
+    let plan = prepare_process_event_append(
+        &record,
+        ProcessEventAppendRequest::new("process.caller_departed", serde_json::Value::Null)
+            .with_replay_key("process-old-time-shape:caller-departed"),
+        1,
+        None,
+        None,
+        1_700_000_000_000,
+        None,
+    )
+    .expect("prepare process event");
+    let ProcessEventAppendPlan::Insert { event, .. } = plan else {
+        panic!("new process event should insert");
+    };
+    let mut json = serde_json::to_value(event).expect("encode process event");
+    json["occurred_at"] = serde_json::json!({
+        "secs_since_epoch": 1_700_000_000,
+        "nanos_since_epoch": 0,
+    });
+
+    assert!(
+        serde_json::from_value::<ProcessEvent>(json).is_err(),
+        "the pre-cutover SystemTime shape must not decode as an epoch-ms process event"
+    );
+}
+
+#[test]
 fn process_wake_input_from_event_payload_prefers_text_field() {
     let payload = serde_json::json!({
         "text": "ready",
@@ -304,14 +333,13 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
     let ProcessEventAppendPlan::Replay {
         event,
         repair_record,
-        occurred_at_ms,
         ..
     } = replayed
     else {
         panic!("terminal event replay should replay");
     };
     assert_eq!(event.sequence, 1);
-    assert_eq!(occurred_at_ms, 42);
+    assert_eq!(event.occurred_at, 42);
     assert!(matches!(
         repair_record.as_ref().map(|record| record.status),
         Some(ProcessStatus::Completed)

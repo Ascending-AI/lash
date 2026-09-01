@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 72);
+    assert_eq!(PostgresStorage::schema_version(), 73);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -173,6 +173,22 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .connect(&fixture_database_url)
         .await
         .expect("connect to refresh refusal fixture catalog");
+    sqlx::raw_sql(
+        "UPDATE lash_process_events
+            SET event_json = jsonb_set(
+                event_json::jsonb,
+                '{occurred_at}',
+                to_jsonb(
+                    ((event_json::jsonb #>> '{occurred_at,secs_since_epoch}')::bigint * 1000)
+                    + ((event_json::jsonb #>> '{occurred_at,nanos_since_epoch}')::bigint / 1000000)
+                )
+            )::text
+          WHERE jsonb_typeof(event_json::jsonb -> 'occurred_at') = 'object';
+         ALTER TABLE lash_process_events DROP COLUMN IF EXISTS occurred_at_ms;",
+    )
+    .execute(&pool)
+    .await
+    .expect("cut prior fixture process events over to epoch milliseconds");
     sqlx::query("DROP TABLE lash_usage_deltas")
         .execute(&pool)
         .await
@@ -194,7 +210,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
                      OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
                          AND state IN ('deferred_next_turn', 'cancelled', 'completed')));
          UPDATE lash_schema_versions
-            SET version = 72
+            SET version = 73
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)

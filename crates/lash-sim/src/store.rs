@@ -873,8 +873,7 @@ impl ModelStore {
                         wake: lash_core::facade_support::ProcessWake {
                             input: format!("wake for {session}"),
                         },
-                        occurred_at: std::time::UNIX_EPOCH
-                            + std::time::Duration::from_millis(event.at),
+                        occurred_at_ms: event.at,
                     },
                 )
                 .expect("sim process wake delivery request is deterministic and valid");

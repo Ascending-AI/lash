@@ -278,7 +278,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 72 replaces the usage-delta JSON blob with typed usage columns.
 // Component-71 databases contain the removed blob rows and are rejected at
 // open; there is deliberately no migration arm.
-const SCHEMA_VERSION: i32 = 72;
+// Version 73 stores process-event time only in the event JSON as epoch
+// milliseconds and removes the unread companion column. Component-72
+// databases are rejected at open; there is deliberately no migration arm.
+const SCHEMA_VERSION: i32 = 73;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

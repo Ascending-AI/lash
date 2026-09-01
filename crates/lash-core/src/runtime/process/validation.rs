@@ -12,7 +12,6 @@ use super::model::{
     AbandonRequest, ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessStarted,
     ProcessStatus, RecoveryContract, WaitState,
 };
-use super::time::{epoch_ms_from_system_time, system_time_from_epoch_ms};
 
 pub fn validate_generic_process_event_append(
     request: &ProcessEventAppendRequest,
@@ -36,13 +35,11 @@ pub enum ProcessEventAppendPlan {
         event: ProcessEvent,
         projected_record: ProcessRecord,
         wake_delivery: Option<ProcessWakeDelivery>,
-        occurred_at_ms: u64,
     },
     Replay {
         event: ProcessEvent,
         repair_record: Option<ProcessRecord>,
         wake_delivery: Option<ProcessWakeDelivery>,
-        occurred_at_ms: u64,
     },
 }
 
@@ -412,10 +409,10 @@ pub fn apply_process_event_projection(
         apply_process_status_projection(
             record,
             ProcessStatus::from_terminal(terminal),
-            epoch_ms_from_system_time(event.occurred_at),
+            event.occurred_at,
         );
     } else {
-        record.updated_at_ms = epoch_ms_from_system_time(event.occurred_at);
+        record.updated_at_ms = event.occurred_at;
     }
     Ok(())
 }
@@ -485,7 +482,6 @@ pub fn prepare_process_event_append(
         if existing.event_type == request.event_type
             && crate::identity_json::payloads_equal(&existing.payload, &request.payload)
         {
-            let occurred_at_ms = epoch_ms_from_system_time(existing.occurred_at);
             let repair_record = if last_event_sequence == Some(existing.sequence) {
                 repair_lifecycle_projection(record, &existing)?
             } else {
@@ -505,7 +501,6 @@ pub fn prepare_process_event_append(
                 event: existing,
                 repair_record,
                 wake_delivery,
-                occurred_at_ms,
             });
         }
         return Err(PluginError::Session(format!(
@@ -554,7 +549,6 @@ pub fn prepare_process_event_append(
             status: record.status,
         });
     }
-    let occurred_at = system_time_from_epoch_ms(occurred_at_ms);
     let event = ProcessEvent {
         process_id: process_id.to_string(),
         sequence,
@@ -567,7 +561,7 @@ pub fn prepare_process_event_append(
             request.replay,
         ),
         semantics: semantics.clone(),
-        occurred_at,
+        occurred_at: occurred_at_ms,
     };
     let mut projected_record = record.clone();
     apply_process_event_projection(&mut projected_record, &event)?;
@@ -593,7 +587,6 @@ pub fn prepare_process_event_append(
         event,
         projected_record,
         wake_delivery,
-        occurred_at_ms,
     })
 }
 
@@ -607,7 +600,7 @@ fn prepare_wake_delivery(
     sequence: u64,
     event_type: String,
     event_invocation: crate::RuntimeInvocation,
-    occurred_at: std::time::SystemTime,
+    occurred_at: u64,
     wake: Option<super::events::ProcessWake>,
     wake_session_id: Option<&str>,
 ) -> Result<Option<ProcessWakeDelivery>, PluginError> {
@@ -640,7 +633,7 @@ fn prepare_wake_delivery(
             }
         },
         wake,
-        occurred_at,
+        occurred_at_ms: occurred_at,
     })
     .map(Some)
 }

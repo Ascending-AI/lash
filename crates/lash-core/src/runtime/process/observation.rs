@@ -11,7 +11,6 @@ use super::model::{
     ProcessStarted, ProcessStatus, RecoveryContract, SessionScope, WaitState,
 };
 use super::registry::ProcessRegistry;
-use super::time::epoch_ms_from_system_time;
 
 #[derive(Clone)]
 pub struct ProcessWorkObserver {
@@ -317,7 +316,7 @@ impl From<ProcessEvent> for ObservedProcessEvent {
         Self {
             sequence: event.sequence,
             event_type: event.event_type,
-            occurred_at_ms: epoch_ms_from_system_time(event.occurred_at),
+            occurred_at_ms: event.occurred_at,
             payload: event.payload,
         }
     }

@@ -16,7 +16,6 @@ mod service;
 mod testing;
 #[cfg(test)]
 mod tests;
-mod time;
 mod validation;
 mod wake;
 
@@ -73,7 +72,6 @@ pub use registry::{
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
 #[cfg(any(test, feature = "testing"))]
 pub use testing::*;
-pub use time::{current_epoch_ms, epoch_ms_from_system_time, system_time_from_epoch_ms};
 pub use validation::{
     ProcessEventAppendPlan, ProcessStartPlan, ProcessTransition, ProcessTransitionPlan,
     allocate_process_event_sequence, apply_process_event_projection,
@@ -81,6 +79,10 @@ pub use validation::{
     prepare_process_registration, prepare_process_start, prepare_process_transition,
     process_registration_fingerprint, require_event_replay, validate_generic_process_event_append,
 };
+
+pub fn current_epoch_ms() -> u64 {
+    <crate::SystemClock as crate::Clock>::timestamp_ms(&crate::SystemClock)
+}
 pub use wake::{
     ProcessWakeDeliveryRequest, process_wake_delivery, process_wake_input_from_event_payload,
     process_wake_turn_cause, process_wake_turn_text,
