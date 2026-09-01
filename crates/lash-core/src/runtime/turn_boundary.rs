@@ -624,7 +624,10 @@ mod tests {
     use crate::runtime::tests::helpers::{FixedAttachmentRoots, RecordingStore};
     use crate::session_model::{ConversationRecord, MessageRole, Part};
     use crate::store::SessionExecutionLeaseStore;
-    use crate::{Message, SessionGraph, TokenUsage, shared_parts};
+    use crate::{
+        AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, TokenUsage,
+        shared_parts,
+    };
     use lash_sansio::core_support::MessageSequenceCoreSupport;
     use lash_sansio::sync::MutexExt;
     const UNBOUNDED: crate::TurnBudget = crate::TurnBudget::Unbounded;
@@ -780,6 +783,12 @@ mod tests {
         }
         state
     }
+    fn frame_key(material: &str) -> FrameKey {
+        FrameKey::from_caller_material(material).expect("non-empty frame material")
+    }
+    fn frame_request(frame_key: FrameKey, reason: AgentFrameReason) -> OpenAgentFrameRequest {
+        OpenAgentFrameRequest::new(frame_key, reason)
+    }
     async fn leased_boundary(
         store: &RecordingStore,
         state: RuntimeSessionState,
@@ -814,8 +823,7 @@ mod tests {
         let mut state = state_with_graph(graph);
         state.ensure_agent_frame_initialized();
         let previous_frame_node_id = state.current_frame_node_id.clone();
-        let frame_key =
-            crate::FrameKey::from_caller_material("frame-2").expect("non-empty caller material");
+        let frame_key = frame_key("frame-2");
         let seed_node = crate::SessionAppendNode::message(crate::PluginMessage::text(
             MessageRole::User,
             "seed message",
@@ -895,7 +903,7 @@ mod tests {
         state.session_graph = SessionGraph::from_nodes(nodes, leaf_node_id)
             .expect("frame-compaction fixture graph is valid");
         state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
-        let frame_id = "frame-compaction".to_string();
+        let frame_key = frame_key("frame-compaction");
         let seed_node = crate::SessionAppendNode::message(
             crate::PluginMessage::text(MessageRole::Assistant, "Compaction summary:\nold work")
                 .with_origin(crate::MessageOrigin::Plugin {
@@ -903,17 +911,12 @@ mod tests {
                     transient: false,
                 }),
         );
-
         let opened = super::super::open_agent_frame_in_state_with_clock(
             &mut state,
-            crate::OpenAgentFrameRequest::new(
-                frame_id.clone(),
-                crate::AgentFrameReason::compaction(),
-            )
-            .with_initial_nodes(vec![seed_node.clone()]),
+            frame_request(frame_key.clone(), AgentFrameReason::compaction())
+                .with_initial_nodes(vec![seed_node.clone()]),
             &crate::SystemClock,
         );
-
         assert!(opened.opened);
         assert_eq!(
             state.current_frame_node_id.as_deref(),
@@ -960,11 +963,8 @@ mod tests {
 
         let replay = super::super::open_agent_frame_in_state_with_clock(
             &mut state,
-            crate::OpenAgentFrameRequest::new(
-                frame_id.clone(),
-                crate::AgentFrameReason::compaction(),
-            )
-            .with_initial_nodes(vec![seed_node]),
+            frame_request(frame_key, AgentFrameReason::compaction())
+                .with_initial_nodes(vec![seed_node]),
             &crate::SystemClock,
         );
         assert!(!replay.opened);
@@ -984,20 +984,20 @@ mod tests {
         state.ensure_agent_frame_initialized_with_clock(&clock);
         let frame_a = super::super::open_agent_frame_in_state_with_clock(
             &mut state,
-            crate::OpenAgentFrameRequest::new("frame-a", crate::AgentFrameReason::new("frame-a")),
+            frame_request(frame_key("frame-a"), AgentFrameReason::new("frame-a")),
             &clock,
         );
         assert!(frame_a.opened);
         let frame_b = super::super::open_agent_frame_in_state_with_clock(
             &mut state,
-            crate::OpenAgentFrameRequest::new("frame-b", crate::AgentFrameReason::new("frame-b")),
+            frame_request(frame_key("frame-b"), AgentFrameReason::new("frame-b")),
             &clock,
         );
         assert!(frame_b.opened);
 
         let switched = super::super::open_agent_frame_in_state_with_clock(
             &mut state,
-            crate::OpenAgentFrameRequest::new("frame-a", crate::AgentFrameReason::new("frame-a"))
+            frame_request(frame_key("frame-a"), AgentFrameReason::new("frame-a"))
                 .with_initial_nodes(vec![crate::SessionAppendNode::message(
                     crate::PluginMessage::text(MessageRole::Assistant, "new frame-a seed"),
                 )]),

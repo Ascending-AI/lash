@@ -10,7 +10,8 @@ const FRAME_KEY_VERSION: u8 = 2;
 ///
 /// Construct a key from either a stable tool call site with
 /// [`FrameKey::from_call_site`] or explicit caller-owned material with
-/// [`FrameKey::from_caller_material`]. There is deliberately no raw-string
+/// [`FrameKey::from_caller_material`]. Lash runtime compaction uses
+/// [`FrameKey::from_compaction_material`]. There is deliberately no raw-string
 /// constructor: callers name a frame, while Lash owns the resulting identity.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct FrameKey(String);
@@ -49,6 +50,18 @@ impl FrameKey {
             return Err(FrameKeyError::EmptyCallerMaterial);
         }
         Ok(Self::derive(1, [material]))
+    }
+
+    /// Derives the replay-stable key for a runtime compaction boundary.
+    ///
+    /// The three inputs are length-delimited independently so callers cannot
+    /// assemble or ambiguously concatenate durable key bytes themselves.
+    pub fn from_compaction_material(
+        session_id: &str,
+        boundary_id: &str,
+        previous_frame_node_id: &str,
+    ) -> Self {
+        Self::derive(2, [session_id, boundary_id, previous_frame_node_id])
     }
 
     /// Returns the derived key consumed by Lash's durable frame-id derivation.
@@ -165,6 +178,25 @@ mod tests {
             reused.as_str(),
             "frame-key/v2/fe671c9a9b3ab71d456f809a0be6d1f9dbe3306aeda6af2881a30f836cba62b5"
         );
+    }
+
+    #[test]
+    fn compaction_material_is_stable_and_boundary_specific() {
+        let first = FrameKey::from_compaction_material("session", "turn", "frame-before");
+
+        assert_eq!(
+            first,
+            FrameKey::from_compaction_material("session", "turn", "frame-before")
+        );
+        assert_eq!(
+            first.as_str(),
+            "frame-key/v2/c72af05c2980ca4fc9221f68a297a9706ee80c7058d82ba82ca1e7d8ff69a755"
+        );
+        assert_ne!(
+            first,
+            FrameKey::from_compaction_material("session", "turn", "frame-after")
+        );
+        assert!(FrameKey::is_derived(first.as_str()));
     }
 
     #[test]

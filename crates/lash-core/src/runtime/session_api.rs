@@ -453,7 +453,7 @@ impl LashRuntime {
         else {
             return Ok(false);
         };
-        let frame_id = compaction_frame_id(
+        let frame_key = compaction_frame_key(
             &self.state.session_id,
             &compaction_boundary,
             self.state
@@ -463,7 +463,7 @@ impl LashRuntime {
         );
         let result = self
             .open_agent_frame(
-                crate::OpenAgentFrameRequest::new(frame_id, crate::AgentFrameReason::compaction())
+                crate::OpenAgentFrameRequest::new(frame_key, crate::AgentFrameReason::compaction())
                     .with_initial_nodes(compaction.initial_nodes),
             )
             .await
@@ -1074,12 +1074,12 @@ fn runtime_error_from_session_command_refresh(error: SessionError) -> RuntimeErr
     }
 }
 
-fn compaction_frame_id(
+fn compaction_frame_key(
     session_id: &str,
     boundary_id: &str,
     previous_frame_node_id: &str,
-) -> String {
-    format!("{session_id}:frame:compaction:{boundary_id}:after:{previous_frame_node_id}")
+) -> crate::FrameKey {
+    crate::FrameKey::from_compaction_material(session_id, boundary_id, previous_frame_node_id)
 }
 
 pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
@@ -1091,13 +1091,13 @@ pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
 
 #[cfg(test)]
 mod tests {
-    use super::compaction_frame_id;
+    use super::compaction_frame_key;
 
     #[test]
     fn compaction_frame_identity_is_replay_stable() {
-        let first = compaction_frame_id("session", "turn", "frame-before");
-        let replay = compaction_frame_id("session", "turn", "frame-before");
-        let next = compaction_frame_id("session", "turn", "frame-after");
+        let first = compaction_frame_key("session", "turn", "frame-before");
+        let replay = compaction_frame_key("session", "turn", "frame-before");
+        let next = compaction_frame_key("session", "turn", "frame-after");
 
         assert_eq!(first, replay);
         assert_ne!(first, next);

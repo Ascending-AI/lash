@@ -150,6 +150,7 @@ lash::FrameKey
 lash::FrameKey::as_str
 lash::FrameKey::from_call_site
 lash::FrameKey::from_caller_material
+lash::FrameKey::from_compaction_material
 lash::GenerationOverlay
 lash::GenerationOverlay::Merge
 lash::GenerationOverlay::Merge::0
@@ -2940,7 +2941,6 @@ lash::plugins::AgentFrameAssignment::from_policy
 lash::plugins::AgentFrameAssignment::plugin_options
 lash::plugins::AgentFrameAssignment::policy
 lash::plugins::AgentFrameAssignment::usage_source
-lash::plugins::AgentFrameId
 lash::plugins::AgentFrameReason
 lash::plugins::AgentFrameReason::as_str
 lash::plugins::AgentFrameReason::initial

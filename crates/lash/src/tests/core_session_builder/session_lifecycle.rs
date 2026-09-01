@@ -138,8 +138,12 @@ fn conflicting_reopen_state(session_id: &str) -> RuntimeSessionState {
         ))
     };
     state.ensure_agent_frame_initialized();
-    let frame_key = format!("conflicting-frame-{session_id}");
-    let frame_node_id = lash_core::facade_support::frame_node_id(session_id, &frame_key);
+    let frame_key = lash_core::FrameKey::from_caller_material(&format!(
+        "conflicting-frame-{session_id}"
+    ))
+    .expect("non-empty frame material");
+    let frame_node_id =
+        lash_core::facade_support::frame_node_id(session_id, frame_key.as_str());
     let mut nodes = state.session_graph.nodes.clone();
     nodes.push(lash_core::SessionNodeRecord {
         node_id: frame_node_id.to_string(),

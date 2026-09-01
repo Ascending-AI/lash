@@ -1042,11 +1042,13 @@ impl RuntimeSessionState {
             return;
         }
         let assignment = crate::AgentFrameAssignment::from_policy(self.policy.clone());
-        let frame_key = "initial-frame";
-        let frame_node_id = crate::session_graph::frame_node_id(&self.session_id, frame_key);
+        let frame_key = crate::FrameKey::from_caller_material("initial-frame")
+            .expect("the initial frame material is non-empty");
+        let frame_node_id =
+            crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str());
         self.session_graph.append_frame_open_with_id_at(
             frame_node_id.to_string(),
-            frame_key.to_string(),
+            frame_key,
             crate::AgentFrameReason::initial(),
             assignment,
             self.protocol_turn_options.clone(),
@@ -1066,11 +1068,13 @@ impl RuntimeSessionState {
     ) {
         self.policy = assignment.policy.clone();
         self.protocol_turn_options = protocol_turn_options.clone();
-        let frame_key = "initial-frame";
-        let frame_node_id = crate::session_graph::frame_node_id(&self.session_id, frame_key);
+        let frame_key = crate::FrameKey::from_caller_material("initial-frame")
+            .expect("the initial frame material is non-empty");
+        let frame_node_id =
+            crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str());
         self.session_graph.append_frame_open_with_id_at(
             frame_node_id.to_string(),
-            frame_key.to_string(),
+            frame_key,
             crate::AgentFrameReason::initial(),
             assignment,
             protocol_turn_options,
@@ -1386,18 +1390,6 @@ pub(super) fn open_agent_frame_in_state_with_clock(
     clock: &dyn crate::Clock,
 ) -> crate::OpenAgentFrameResult {
     state.ensure_agent_frame_initialized_with_clock(clock);
-    if request.frame_id.trim().is_empty() {
-        return crate::OpenAgentFrameResult {
-            frame_node_id: state
-                .current_frame_node_id
-                .clone()
-                .map(crate::FrameNodeId::into_inner)
-                .unwrap_or_default(),
-            opened: false,
-            initial_node_ids: Vec::new(),
-        };
-    }
-
     let previous = state.current_agent_frame().cloned();
     let mut assignment = previous
         .as_ref()
@@ -1405,10 +1397,11 @@ pub(super) fn open_agent_frame_in_state_with_clock(
         .unwrap_or_else(|| crate::AgentFrameAssignment::from_policy(state.policy.clone()));
     assignment.policy = state.policy.clone();
     let protocol_turn_options = state.protocol_turn_options.clone();
-    let frame_node_id = crate::session_graph::frame_node_id(&state.session_id, &request.frame_id);
+    let frame_node_id =
+        crate::session_graph::frame_node_id(&state.session_id, request.frame_key.as_str());
     let opened = state.session_graph.append_frame_open_with_id_at(
         frame_node_id.to_string(),
-        request.frame_id.clone(),
+        request.frame_key.clone(),
         request.reason,
         assignment,
         protocol_turn_options,
@@ -1441,7 +1434,7 @@ pub(super) fn open_agent_frame_in_state_with_clock(
     let initial_node_ids = append_session_nodes_to_state_with_clock(
         state,
         &request.initial_nodes,
-        &request.frame_id,
+        request.frame_key.as_str(),
         clock,
     );
     crate::OpenAgentFrameResult {

@@ -512,7 +512,8 @@ impl RuntimeCommit {
         for (ordinal, node) in self.graph.nodes.iter().enumerate() {
             let expected = match &node.payload {
                 crate::SessionNodePayload::FrameOpen { frame_key, .. } => {
-                    crate::session_graph::frame_node_id(&self.session_id, frame_key).into_inner()
+                    crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str())
+                        .into_inner()
                 }
                 _ => {
                     derive_history_node_id(&self.session_id, &completed.operation, ordinal as u64)?

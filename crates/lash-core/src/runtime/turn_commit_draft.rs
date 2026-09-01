@@ -182,7 +182,11 @@ mod tests {
         );
         let opened = super::super::state::open_agent_frame_in_state_with_clock(
             &mut state,
-            OpenAgentFrameRequest::new("compacted", AgentFrameReason::compaction()),
+            OpenAgentFrameRequest::new(
+                crate::FrameKey::from_caller_material("compacted")
+                    .expect("non-empty frame material"),
+                AgentFrameReason::compaction(),
+            ),
             &clock,
         );
         assert!(opened.opened);

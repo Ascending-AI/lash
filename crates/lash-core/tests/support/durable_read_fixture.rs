@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 39;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 40;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -1199,7 +1199,11 @@ fn assert_graph_payloads(nodes: &[lash_core::SessionNodeRecord]) {
             assignment,
             protocol_turn_options,
         } => {
-            assert_eq!(frame_key, "initial-frame");
+            assert_eq!(
+                frame_key,
+                &lash_core::FrameKey::from_caller_material("initial-frame")
+                    .expect("non-empty initial frame material")
+            );
             assert_eq!(reason.as_str(), "initial");
             assert_eq!(assignment.policy.model.id, "");
             assert_eq!(assignment.policy.recorded_provider_id(), "");

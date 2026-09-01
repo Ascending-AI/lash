@@ -221,13 +221,11 @@ pub enum SessionPluginSource {
     CurrentSessionFork,
 }
 
-pub type AgentFrameId = String;
-
 /// Durable identity of a frame-open node in the session graph.
 ///
-/// This is distinct from [`AgentFrameId`], which is the caller-provided key
-/// material used to derive this value. Its transparent representation preserves
-/// the existing serialized string bytes, including the empty no-frame sentinel.
+/// This is distinct from [`crate::FrameKey`], the checked key used to derive
+/// this value. Its transparent representation preserves the existing serialized
+/// string bytes, including the empty no-frame sentinel.
 #[repr(transparent)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -478,16 +476,16 @@ impl AgentFrameRecord {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OpenAgentFrameRequest {
-    pub frame_id: AgentFrameId,
+    pub frame_key: crate::FrameKey,
     pub reason: AgentFrameReason,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub initial_nodes: Vec<SessionAppendNode>,
 }
 
 impl OpenAgentFrameRequest {
-    pub fn new(frame_id: impl Into<AgentFrameId>, reason: AgentFrameReason) -> Self {
+    pub fn new(frame_key: crate::FrameKey, reason: AgentFrameReason) -> Self {
         Self {
-            frame_id: frame_id.into(),
+            frame_key,
             reason,
             initial_nodes: Vec::new(),
         }
