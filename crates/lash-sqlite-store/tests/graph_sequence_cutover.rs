@@ -1,4 +1,36 @@
-use lash_sqlite_store::Store;
+use lash_sqlite_store::{SESSION_SCHEMA_VERSION, Store};
+
+const RETAINED_PRIOR_DURABLE_CORE_GENERATION: i32 = 48;
+
+#[tokio::test]
+async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
+    let dir = tempfile::tempdir().expect("SQLite predecessor-refusal tempdir");
+    let path = dir.path().join("durable-core.db");
+    drop(
+        Store::open(&path)
+            .await
+            .expect("create current SQLite catalog"),
+    );
+
+    let connection = rusqlite::Connection::open(&path).expect("open SQLite predecessor fixture");
+    connection
+        .pragma_update(None, "user_version", RETAINED_PRIOR_DURABLE_CORE_GENERATION)
+        .expect("stamp retained SQLite durable-core predecessor");
+    drop(connection);
+
+    let error = Store::open(&path)
+        .await
+        .err()
+        .expect("the retained SQLite durable-core predecessor must be refused at open")
+        .to_string();
+    assert!(
+        error.contains(&format!("supports schema version {SESSION_SCHEMA_VERSION}"))
+            && error.contains(&format!(
+                "database reports version {RETAINED_PRIOR_DURABLE_CORE_GENERATION}"
+            )),
+        "the predecessor refusal must identify expected and found versions: {error}"
+    );
+}
 
 #[tokio::test]
 async fn sqlite_41_graph_sequence_shape_is_rejected_without_migration() {

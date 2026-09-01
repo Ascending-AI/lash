@@ -301,6 +301,12 @@ const RETIRED_HARD_CUTOVER_COLUMNS: &[(&str, &str)] = &[("lash_graph_nodes", "se
 /// are deliberately inapplicable at open: `apply_schema_migration` only selects
 /// a row whose `to` equals the running build's `SCHEMA_VERSION`.
 ///
+/// These rows are an admission catalog, not a history of shipped edges. Older
+/// source declarations are retargeted to the last retained catalog endpoint as
+/// destructive cutovers advance: the recent history is a refusal-only 66 -> 67
+/// edge followed by the 67 -> 68 and 68 -> 69 hard cutovers, not a direct
+/// migration from every `from` below to its current `to`.
+///
 /// The version-bump recreation harness
 /// (`runbooks/restate-postgres-workers/src/bin/version_bump.rs`) pins its
 /// fixtures to this table's newest generation: `MIGRATION_FLOOR_VERSION` (the

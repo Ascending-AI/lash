@@ -29,6 +29,8 @@ use harness::{
     ScratchSchema, assert_mutation_is_rejected, pool_with_search_path, postgres_server_version_num,
 };
 
+const RETAINED_PRIOR_COMPONENT_GENERATION: i32 = 68;
+
 /// Append-request replay depends on one durable receipt per session and turn.
 /// Dropping the receipt table's primary key would silently admit conflicting
 /// identities for the same append operation.
@@ -980,6 +982,40 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
             "the version boundary must dominate the incompatible queued-work shape: {rendered}"
         );
     }
+    scratch.cleanup().await;
+}
+
+/// The retained immediate predecessor is the catalog the next hard cutover
+/// author edits. Pinning its refusal directly prevents that retained-generation
+/// update from silently targeting an older synthetic witness instead.
+#[tokio::test]
+async fn postgres_retained_prior_component_is_refused_at_open() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping retained Postgres predecessor refusal: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(&format!(
+            "UPDATE lash_schema_versions
+                SET version = {RETAINED_PRIOR_COMPONENT_GENERATION}
+              WHERE component = 'lash-postgres-store'"
+        ))
+        .await;
+
+    let error = PostgresStorage::from_pool(scratch.pool.clone())
+        .await
+        .err()
+        .unwrap_or_else(|| {
+            panic!("component {RETAINED_PRIOR_COMPONENT_GENERATION} must be refused at open")
+        });
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains(&format!("version {RETAINED_PRIOR_COMPONENT_GENERATION}"))
+            && rendered.contains(&format!("expected {}", PostgresStorage::schema_version())),
+        "the predecessor refusal must identify found and expected versions: {rendered}"
+    );
+
     scratch.cleanup().await;
 }
 
