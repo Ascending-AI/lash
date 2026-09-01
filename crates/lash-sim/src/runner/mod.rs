@@ -21,7 +21,7 @@ use lash_protocol_standard::scenario_contracts::STANDARD_PROTOCOL_SCENARIO_CONTR
 use lash_provider_anthropic::AnthropicProvider;
 use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_openai::{CodexProvider, OpenAiCompatibleProvider, OpenAiProvider};
-use lash_rlm_types::{RlmCreateExtras, RlmProtocolEvent, RlmTermination};
+use lash_rlm_types::{RlmProtocolEvent, RlmTermination, RlmTurnOptions};
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};

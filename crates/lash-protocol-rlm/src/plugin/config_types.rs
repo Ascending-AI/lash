@@ -90,10 +90,16 @@ pub struct MemoryBound(Option<NonZeroU64>);
 impl MemoryBound {
     /// A finite logical heap limit, in bytes.
     ///
+    /// Named for the engine's own `ExecutionBound::logical_bytes`, and named
+    /// *logical* on purpose: the ceiling is metered by the Lashlang heap size
+    /// schedule, not by the allocator or by RSS. A host reading `bytes(..)` at
+    /// a call site had to know which axis the value landed on to know what it
+    /// meant; this one says so.
+    ///
     /// # Panics
     ///
     /// Panics when `bytes` is zero.
-    pub const fn bytes(bytes: u64) -> Self {
+    pub const fn logical_bytes(bytes: u64) -> Self {
         match NonZeroU64::new(bytes) {
             Some(bytes) => Self(Some(bytes)),
             None => panic!("memory limit must be non-zero"),
@@ -108,7 +114,7 @@ impl MemoryBound {
     /// Panics when `mebibytes` is zero or the byte count overflows `u64`.
     pub const fn mebibytes(mebibytes: u64) -> Self {
         match mebibytes.checked_mul(1024 * 1024) {
-            Some(bytes) => Self::bytes(bytes),
+            Some(bytes) => Self::logical_bytes(bytes),
             None => panic!("memory limit in mebibytes overflows a byte count"),
         }
     }
@@ -395,9 +401,13 @@ mod tests {
             serde_json::to_value(lashlang::ExecutionBound::millis(30_000))
                 .expect("engine deadline")
         );
+        // Spelled in bytes on both sides (FIG-1979). The engine's bound type is
+        // one type for two axes, so `instructions(..)` would produce an equal
+        // wire value here while stating the wrong unit — a congruence proof
+        // that reads as a transposed limit is worse than none.
         assert_eq!(
             serde_json::to_value(memory_limit).expect("protocol memory limit"),
-            serde_json::to_value(lashlang::ExecutionBound::instructions(64 * 1024 * 1024))
+            serde_json::to_value(lashlang::ExecutionBound::logical_bytes(64 * 1024 * 1024))
                 .expect("engine memory limit")
         );
 
@@ -426,12 +436,12 @@ mod tests {
         assert_eq!(InstructionBound::unbounded().limit(), None);
 
         assert_eq!(
-            MemoryBound::bytes(64 * 1024 * 1024).limit(),
+            MemoryBound::logical_bytes(64 * 1024 * 1024).limit(),
             NonZeroU64::new(64 * 1024 * 1024)
         );
         assert_eq!(
             MemoryBound::mebibytes(64),
-            MemoryBound::bytes(64 * 1024 * 1024)
+            MemoryBound::logical_bytes(64 * 1024 * 1024)
         );
         assert_eq!(MemoryBound::unbounded().limit(), None);
 
@@ -477,7 +487,7 @@ mod tests {
                 }) as fn(),
             ),
             ("memory limit must be non-zero", || {
-                MemoryBound::bytes(0);
+                MemoryBound::logical_bytes(0);
             }),
             ("memory limit must be non-zero", || {
                 MemoryBound::mebibytes(0);

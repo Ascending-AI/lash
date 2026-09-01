@@ -39,6 +39,10 @@ fn model_selection_requires_model_and_variant_together() {
     if cfg!(feature = "rlm") {
         t.pass("tests/ui/durable_builder_without_advanced.rs");
         t.pass("tests/ui/rlm_facade_boundary_types_are_public.rs");
+        // FIG-1979: the dialect has one carrier, and a memory limit cannot be
+        // spelled as an instruction budget.
+        t.compile_fail("tests/ui/rlm_turn_options_cannot_name_a_dialect.rs");
+        t.compile_fail("tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs");
     }
 }
 

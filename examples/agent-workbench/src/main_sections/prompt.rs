@@ -16,19 +16,23 @@
 
 /// Which dialect's tutorials belong in this turn's prompt.
 ///
-/// Read from the resolved protocol turn options, which is the same value
-/// `resolve_rlm_session_dialect` hands the executor: a recorded pin if the
-/// session has one, otherwise what the host asked for at open, otherwise the
-/// ratified default. Absent or undecodable options read as the default, which
-/// is how every pre-dialect session reads.
+/// The dialect is session scope (ADR 0066, FIG-1979). This resolves it at
+/// plugin build by the same rule the RLM plugin build uses — the session's
+/// durable bag plus its create options — so the tutorials can never name a
+/// different language from the execution section. It is deliberately not read
+/// from a prompt hook's effective options: those are the session bag with the
+/// host's per-turn override shallow-merged over it, so a raw `{"dialect": ...}`
+/// key on a turn would win there.
+///
+/// The decode is strict. A bag that does not decode is a refusal the operator
+/// sees, never the default: an undecodable bag read as Lashlang would inject
+/// three complete Lashlang programs into a TypeScript session's prompt, which
+/// is the exact failure this function exists to prevent.
 pub(crate) fn tutorial_dialect(
-    options: &lash::runtime::ProtocolTurnOptions,
-) -> lash::rlm::RlmDialect {
-    options
-        .decode::<lash_rlm_types::RlmCreateExtras>()
-        .ok()
-        .and_then(|extras| extras.dialect)
-        .unwrap_or_default()
+    ctx: &lash::plugins::PluginSessionContext,
+) -> Result<lash::rlm::RlmDialect, lash::plugins::PluginError> {
+    lash::rlm::rlm_plugin_session_dialect(ctx)
+        .map_err(|err| lash::plugins::PluginError::Session(err.to_string()))
 }
 
 pub(crate) fn workbench_prompt(dialect: lash::rlm::RlmDialect) -> &'static str {

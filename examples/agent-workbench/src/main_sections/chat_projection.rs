@@ -341,6 +341,7 @@ fn transcript_tools(
 
 fn transcript_rows_from_committed(
     read_view: &lash::persistence::SessionReadView,
+    recorded_dialect: lash::rlm::RlmDialect,
     user_replacements: &BTreeMap<String, ChatMessage>,
     protocol_state_message_ids: &BTreeSet<String>,
     rlm_reply_ids: &BTreeSet<String>,
@@ -348,15 +349,11 @@ fn transcript_rows_from_committed(
     // The label comes from the dialect the session recorded, not from this
     // process's ambient configuration: the recorded pin is what the executor
     // actually ran, and the two differ exactly when a store outlives a config
-    // change — the case a language label exists to disambiguate.
-    let language = {
-        use lash::rlm::RlmSessionReadViewExt as _;
-        read_view
-            .rlm_config()
-            .dialect
-            .unwrap_or_default()
-            .language_id()
-    };
+    // change — the case a language label exists to disambiguate. The value is
+    // read once, strictly, by the request handler and handed down; a renderer
+    // that decoded it again would have to answer a decode failure with a
+    // default, which is the substitution FIG-1979 removed.
+    let language = recorded_dialect.language_id();
     read_view
         .chronological_projection()
         .into_entries()
@@ -432,6 +429,7 @@ struct ChatProjection {
 fn project_chat(
     state: &AppState,
     read_view: &lash::persistence::SessionReadView,
+    recorded_dialect: lash::rlm::RlmDialect,
     active_turns: &[lash::TurnAddress],
     committed_input_turn_ids: &BTreeSet<String>,
     current_frame_input_turn_ids: &BTreeSet<String>,
@@ -487,6 +485,7 @@ fn project_chat(
         .collect::<Vec<_>>();
     transcript.extend(transcript_rows_from_committed(
         read_view,
+        recorded_dialect,
         &user_replacements,
         &protocol_state_message_ids,
         &rlm_reply_ids,

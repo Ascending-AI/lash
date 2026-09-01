@@ -30,10 +30,10 @@ async fn app_state(
     } = read_state_projection(&state, &session_id, !active_turns.is_empty()).await?;
     // The badge reads the dialect this session recorded, from the same read
     // view the transcript labels its cells from (FIG-1306).
-    let recorded_dialect = {
-        use lash::rlm::RlmSessionReadViewExt as _;
-        read_view.rlm_config().dialect.unwrap_or_default()
-    };
+    // Strict (FIG-1979): a recorded bag that does not decode is an error the
+    // operator sees, never a default dialect quietly labelling the transcript.
+    let recorded_dialect = lash::rlm::rlm_session_dialect(read_view.protocol_turn_options())
+        .map_err(AppError::internal)?;
     let active_turn_ids = active_turns
         .iter()
         .map(|address| address.turn_id.clone())
@@ -84,6 +84,7 @@ async fn app_state(
     } = project_chat(
         &state,
         &read_view,
+        recorded_dialect,
         &active_turns,
         &committed_input_turn_ids,
         &current_frame_input_turn_ids,

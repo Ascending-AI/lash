@@ -112,9 +112,12 @@ async fn rlm_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<
     };
 
     let stated = Some(RlmDialect::Typescript);
-    assert_eq!(typescript.rlm_config().dialect, stated);
+    // The read is strict: a bag that does not decode is an error, never an
+    // empty config that would resolve every fact to a default the session is
+    // not running.
+    assert_eq!(typescript.rlm_config()?.dialect, stated);
     assert!(RlmSessionConfig::new().is_empty());
-    let recorded = typescript.rlm_config();
+    let recorded = typescript.rlm_config()?;
     assert_eq!(recorded.termination, None);
 
     // `assert` is host code: compare the read against what you require.

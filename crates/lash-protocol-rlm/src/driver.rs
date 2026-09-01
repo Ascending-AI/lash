@@ -12,7 +12,7 @@ use lash_core::{
     TurnDriverConfig, TurnDriverPreamble,
 };
 use lash_lashlang_runtime::LashlangSurface;
-use lash_rlm_types::{RlmCreateExtras, RlmFinalAnswerFormat, RlmTermination};
+use lash_rlm_types::{RlmFinalAnswerFormat, RlmTermination, RlmTurnOptions};
 
 use crate::dialect::{LashlangDialect, RlmDialect};
 #[cfg(test)]
@@ -381,7 +381,7 @@ fn required_output_block(termination: &RlmTermination) -> Option<String> {
 }
 
 fn final_answer_format_prompt(
-    options: &RlmCreateExtras,
+    options: &RlmTurnOptions,
     vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> Option<String> {
     let termination = options.effective_termination();
@@ -551,7 +551,7 @@ pub(crate) fn render_conformance_history_message(
 mod tests {
     /// These fixtures cover the Lashlang wording; the cross-dialect walker in
     /// `dialect::prompt_walker_tests` covers both.
-    fn final_answer_format_prompt_test(options: &RlmCreateExtras) -> Option<String> {
+    fn final_answer_format_prompt_test(options: &RlmTurnOptions) -> Option<String> {
         final_answer_format_prompt(
             options,
             crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
@@ -707,7 +707,7 @@ mod tests {
             session_id: "prefix-stability".to_string(),
             turn_id: "prefix-stability-turn".to_string(),
             emit_llm_trace: false,
-            termination: lash_core::ProtocolTurnOptions::typed(RlmCreateExtras::default())
+            termination: lash_core::ProtocolTurnOptions::typed(RlmTurnOptions::default())
                 .expect("RLM options"),
             turn_limit_final_message: Arc::new(|message_id, max_turns| {
                 let dialect = LashlangDialect::prompt_only(LashlangSurface::default());
@@ -1501,8 +1501,7 @@ mod tests {
 
     #[test]
     fn final_answer_format_guidance_renders_markdown_for_unstructured_turns() {
-        let guidance = final_answer_format_prompt_test(&RlmCreateExtras {
-            dialect: None,
+        let guidance = final_answer_format_prompt_test(&RlmTurnOptions {
             termination: Some(RlmTermination::FinishRequired { schema: None }),
             final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
         })
@@ -1514,8 +1513,7 @@ mod tests {
 
     #[test]
     fn final_answer_format_guidance_honors_custom_text_and_raw_suppression() {
-        let custom = final_answer_format_prompt_test(&RlmCreateExtras {
-            dialect: None,
+        let custom = final_answer_format_prompt_test(&RlmTurnOptions {
             termination: Some(RlmTermination::Natural),
             final_answer_format: Some(RlmFinalAnswerFormat::Custom {
                 guidance: "  Finish concise release-note Markdown.  ".to_string(),
@@ -1525,8 +1523,7 @@ mod tests {
         assert_eq!(custom, "Finish concise release-note Markdown.");
 
         assert!(
-            final_answer_format_prompt_test(&RlmCreateExtras {
-                dialect: None,
+            final_answer_format_prompt_test(&RlmTurnOptions {
                 termination: Some(RlmTermination::FinishRequired { schema: None }),
                 final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
             })
@@ -1536,8 +1533,7 @@ mod tests {
 
     #[test]
     fn required_output_schema_suppresses_final_answer_format_guidance() {
-        let guidance = final_answer_format_prompt_test(&RlmCreateExtras {
-            dialect: None,
+        let guidance = final_answer_format_prompt_test(&RlmTurnOptions {
             termination: Some(RlmTermination::FinishRequired {
                 schema: Some(serde_json::json!({ "type": "object" })),
             }),

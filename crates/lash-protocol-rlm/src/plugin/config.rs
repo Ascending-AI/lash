@@ -157,7 +157,10 @@ mod tests {
             InstructionBound::instructions(1_000_000)
         );
         assert_eq!(config.wall_clock, WallClockBound::secs(30));
-        assert_eq!(config.memory_limit, MemoryBound::bytes(64 * 1024 * 1024));
+        assert_eq!(
+            config.memory_limit,
+            MemoryBound::logical_bytes(64 * 1024 * 1024)
+        );
     }
 
     #[test]

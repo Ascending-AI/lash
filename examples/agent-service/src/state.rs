@@ -304,26 +304,48 @@ pub(crate) fn rlm_dialect_from_env() -> Result<lash::rlm::RlmDialect, String> {
     Ok(lash::rlm::RlmDialect::from_env()?.unwrap_or_default())
 }
 
-/// The dialect a turn actually resolved, for prompt copy that has to be written
-/// in one language.
+/// The dialect this session will run, for prompt copy that has to be written in
+/// one language.
 ///
-/// ADR 0063: host copy follows the session's own dialect. This reads the same
-/// resolved options the executor is handed, so a store that outlived a
+/// ADR 0063: host copy follows the session's own dialect. This is resolved at
+/// plugin build from the session's durable bag plus its create options — the
+/// same resolution the RLM plugin build performs — so a store that outlived a
 /// configuration change is described in the dialect it is running rather than
-/// the one this process was started with.
-pub(crate) fn rlm_dialect_from_turn_options(
-    options: &lash::runtime::ProtocolTurnOptions,
-) -> lash::rlm::RlmDialect {
-    options
-        .decode::<lash_rlm_types::RlmCreateExtras>()
-        .ok()
-        .and_then(|extras| extras.dialect)
-        .unwrap_or_default()
+/// the one this process was started with, and the host's copy can never name a
+/// different language from the execution section.
+///
+/// It is deliberately not read from a prompt hook's effective options: those
+/// are the session bag with the host's per-turn override shallow-merged over
+/// it, so a raw `{"dialect": ...}` key on a turn would win there (FIG-1979).
+///
+/// The decode is strict. A malformed or unknown language id is a refusal, not
+/// the default: silently substituting Lashlang is the very substitution
+/// `RlmDialect::from_language_id` refuses by design, and it would word the
+/// board prompt in one dialect while the cells executed the other.
+pub(crate) fn rlm_session_dialect(
+    ctx: &lash::plugins::PluginSessionContext,
+) -> Result<lash::rlm::RlmDialect, lash::plugins::PluginError> {
+    lash::rlm::rlm_plugin_session_dialect(ctx)
+        .map_err(|err| lash::plugins::PluginError::Session(err.to_string()))
 }
 
 #[cfg(test)]
 mod dialect_pin_tests {
     use super::*;
+
+    fn system_text(request: &lash::provider::LlmRequest) -> String {
+        request
+            .messages
+            .iter()
+            .filter(|message| message.role == lash::provider::LlmRole::System)
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                lash::provider::LlmContentBlock::Text { text, .. } => Some(text.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     fn mock_model_spec() -> ModelSpec {
         ModelSpec::builder("mock-model")
@@ -337,6 +359,13 @@ mod dialect_pin_tests {
             .kind("agent-service-dialect-pin")
             .build()
             .into_handle();
+        test_core_with_provider(data_dir, provider).await
+    }
+
+    async fn test_core_with_provider(
+        data_dir: &std::path::Path,
+        provider: lash::provider::ProviderHandle,
+    ) -> LashCore {
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
@@ -411,6 +440,100 @@ mod dialect_pin_tests {
                 AgentServiceDurability::Local,
                 rlm_dialect,
             )
+        }
+    }
+
+    /// FIG-1979: a raw per-turn `dialect` key cannot re-word the host prompt.
+    ///
+    /// The typed per-turn options bag has no dialect field, but the merge
+    /// underneath it is an untyped shallow key-extend of the host's per-turn
+    /// override over the session bag, so a raw `{"dialect": ...}` key *does*
+    /// reach the prompt hook's effective options. A host that read its dialect
+    /// there would word the board in Lashlang for a turn whose cells execute
+    /// TypeScript — the exact disagreement this ticket removes. The host reads
+    /// the durable session bag once, at plugin build, instead.
+    #[tokio::test]
+    async fn a_per_turn_dialect_key_cannot_re_word_the_board_prompt() {
+        use lash::rlm::RlmTurnBuilderExt as _;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let data_dir = temp.path();
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let provider = lash::testing::TestProvider::builder()
+            .kind("agent-service-dialect-smuggle")
+            .complete({
+                let seen = Arc::clone(&seen);
+                move |request: lash::provider::LlmRequest| {
+                    let seen = Arc::clone(&seen);
+                    async move {
+                        seen.lock_recover().push(system_text(&request));
+                        Ok(lash::provider::LlmResponse {
+                            parts: vec![lash::direct::LlmOutputPart::Text {
+                                text: "<typescript>\nfinish(\"done\");\n</typescript>".to_string(),
+                                response_meta: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..lash::provider::LlmResponse::default()
+                        })
+                    }
+                }
+            })
+            .build()
+            .into_handle();
+        let core = test_core_with_provider(data_dir, provider).await;
+
+        let typescript = state_with_dialect(
+            &core,
+            AppDb::open(&data_dir.join("app-smuggle.db")).expect("app db"),
+            lash::rlm::RlmDialect::Typescript,
+        );
+        let session = typescript
+            .open_session("smuggled-chat", mock_model_spec())
+            .await
+            .expect("the open pins the chat to TypeScript");
+
+        session
+            .turn(lash::TurnInput::text("play"))
+            .require_finish()
+            .expect("finish requirement")
+            .run()
+            .await
+            .expect("the honest turn runs");
+
+        // The attack: a raw per-turn override naming the other dialect.
+        let attack = lash::runtime::ProtocolTurnOptions::from_payload(
+            serde_json::json!({ "dialect": "lashlang" }),
+        );
+        let attacked = session
+            .turn(lash::TurnInput::text("switch me"))
+            .protocol_turn_options(attack)
+            // `require_finish` writes through the same seam and merges
+            // shallowly, so the attack has to survive it — otherwise this turn
+            // would carry no override and the test would measure nothing.
+            .require_finish()
+            .expect("finish requirement");
+        // That the key really does survive to the prompt hook is not assumed:
+        // it is what makes this test red against a host that reads the hook's
+        // effective options, and the same seam is asserted directly on the
+        // public builder in the facade's own `rlm_dialect` suite.
+        attacked.run().await.expect("the attacked turn runs");
+        drop(session);
+
+        let prompts = seen.lock_recover().clone();
+        assert_eq!(
+            prompts.len(),
+            2,
+            "both turns must have reached the provider"
+        );
+        for prompt in &prompts {
+            assert!(
+                prompt.contains("outside the typescript cell"),
+                "the board prompt must stay in the session's dialect: {prompt}"
+            );
+            assert!(
+                !prompt.contains("outside the lashlang block"),
+                "a per-turn dialect key must not re-word the board prompt: {prompt}"
+            );
         }
     }
 

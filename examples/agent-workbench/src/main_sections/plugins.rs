@@ -80,8 +80,15 @@ impl PluginFactory for WorkbenchPluginFactory {
         ]
     }
 
-    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+        // Resolved once here, by the same rule the RLM plugin build uses. The
+        // prompt hook is given the session bag with the host's per-turn
+        // override shallow-merged over it, so a raw per-turn
+        // `{"dialect": ...}` key would win there and hand a TypeScript session
+        // three complete Lashlang programs (FIG-1979).
+        let dialect = tutorial_dialect(ctx)?;
         Ok(Arc::new(WorkbenchSessionPlugin {
+            dialect,
             tavily_api_key: self.tavily_api_key.clone(),
             mail_world: self.mail_world.clone(),
             derived_notes: self.derived_notes.clone(),
@@ -94,6 +101,7 @@ impl PluginFactory for WorkbenchPluginFactory {
 }
 
 struct WorkbenchSessionPlugin {
+    dialect: lash::rlm::RlmDialect,
     tavily_api_key: String,
     mail_world: mail::MailWorld,
     derived_notes: WorkbenchDerivedNotes,
@@ -111,13 +119,14 @@ impl SessionPlugin for WorkbenchSessionPlugin {
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         let mail_world = self.mail_world.clone();
         let deferred_preview = self.deferred_tools.clone();
-        reg.prompt().contribute(Arc::new(move |ctx| {
+        // ADR 0063: the host's worked examples are written in the dialect the
+        // session recorded, not this process's configuration and not anything a
+        // turn asked for. The value was resolved at plugin build from the
+        // durable session options.
+        let prompt = workbench_prompt(self.dialect);
+        reg.prompt().contribute(Arc::new(move |_ctx| {
             let mail_world = mail_world.clone();
             let deferred_preview = deferred_preview.clone();
-            // ADR 0063: the host's worked examples are written in the dialect
-            // the executor is actually serving this turn, read from its own
-            // execution section rather than from this process's configuration.
-            let prompt = workbench_prompt(tutorial_dialect(&ctx.protocol_turn_options));
             Box::pin(async move {
                 let mut contributions = vec![PromptContribution::environment(
                     "Agent Workbench",

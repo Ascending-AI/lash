@@ -450,7 +450,7 @@ async fn the_typed_read_reports_what_the_session_recorded_and_restating_it_is_a_
         .open()
         .await?;
 
-    let recorded = session.rlm_config();
+    let recorded = session.rlm_config().expect("recorded config decodes");
     assert_eq!(recorded.dialect, Some(RlmDialect::Typescript));
     assert_eq!(
         recorded.final_answer_format,
@@ -497,7 +497,7 @@ async fn a_guarded_write_lands_on_an_unrecorded_fact_and_leaves_the_rest_alone()
     );
     assert_eq!(written.dialect, Some(RlmDialect::Typescript));
     assert_eq!(
-        session.rlm_config(),
+        session.rlm_config().expect("recorded config decodes"),
         written,
         "the write is visible through the read half of the pair"
     );
@@ -581,7 +581,7 @@ async fn a_guarded_write_that_disagrees_is_refused_with_a_typed_conflict() -> Re
     assert_eq!(recorded, RlmDialect::Typescript);
     assert_eq!(requested, RlmDialect::Lashlang);
     assert_eq!(
-        session.rlm_config().dialect,
+        session.rlm_config().expect("recorded config decodes").dialect,
         Some(RlmDialect::Typescript),
         "a refused write leaves the recorded fact exactly as it was"
     );
@@ -603,7 +603,7 @@ async fn a_post_open_dialect_is_compared_against_the_running_default_never_writt
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-unrecorded-dialect").open().await?;
     assert_eq!(
-        session.rlm_config().dialect,
+        session.rlm_config().expect("recorded config decodes").dialect,
         Some(RlmDialect::Lashlang),
         "a host that states no dialect gets the default recorded at its first open"
     );
@@ -612,7 +612,7 @@ async fn a_post_open_dialect_is_compared_against_the_running_default_never_writt
         .set_rlm_config_if_unset(crate::rlm::RlmSessionConfig::new().dialect(RlmDialect::Lashlang))
         .await
         .expect("stating the dialect the session is running is a no-op");
-    assert_eq!(agreed, session.rlm_config());
+    assert_eq!(agreed, session.rlm_config().expect("recorded config decodes"));
 
     let error = session
         .set_rlm_config_if_unset(crate::rlm::RlmSessionConfig::new().dialect(RlmDialect::Typescript))
@@ -663,7 +663,7 @@ async fn a_guarded_write_survives_a_cold_reopen() -> Result<()> {
     session.close().await?;
 
     let reopened = core.session("rlm-write-roundtrip").open().await?;
-    let recorded = reopened.rlm_config();
+    let recorded = reopened.rlm_config().expect("recorded config decodes");
     assert_eq!(
         recorded.termination,
         Some(crate::rlm::RlmTermination::FinishRequired { schema: None }),
