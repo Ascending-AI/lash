@@ -103,6 +103,35 @@ fn many_garbage_producing_cells_do_not_grow_the_persisted_state(
     );
 }
 
+/// Alternating cell shapes must not retain each lowering's generated
+/// TypeScript bindings.
+///
+/// The low-temporary cell leaves the previous high-temporary cell's scratch
+/// names untouched, while the high-temporary cell exercises several lowering
+/// temporaries in one shape. Sampling only after each high cell makes the
+/// contract explicit: the same live data and lowering shape must produce the
+/// same persisted state throughout the session.
+pub(super) fn alternating_low_and_high_temporary_cells_do_not_grow_the_persisted_state() {
+    const ROUNDS: usize = 12;
+    const WARMUP: usize = 3;
+    // Raw TypeScript is required because no Cell variant expresses this repeated-filter lowering shape.
+    const HIGH_TEMPORARY_CELL: &str = "const high = [1,2,3].filter(value=>value>=0).filter(value=>value>=0).filter(value=>value>=0).filter(value=>value>=0);";
+
+    let mut session = Session::open(Dialect::Typescript, HarnessMode::Resident);
+    let mut high_sizes = Vec::with_capacity(ROUNDS);
+    for round in 0..ROUNDS {
+        session.run_ok("const low = 1;");
+        session.run_ok(&format!("{HIGH_TEMPORARY_CELL} // round {round}"));
+        high_sizes.push(session.persisted_bytes());
+    }
+
+    let settled = high_sizes[WARMUP];
+    assert!(
+        high_sizes[WARMUP..].iter().all(|size| *size == settled),
+        "alternating low/high temporary cells grew persisted state: {high_sizes:?}"
+    );
+}
+
 /// Dropping a binding gives its bytes back.
 ///
 /// The complement of the leak regression: a session that never shrinks is a
@@ -227,6 +256,11 @@ mod typescript {
             DIALECT,
             HarnessMode::RestartBetweenCells,
         );
+    }
+
+    #[test]
+    fn alternating_low_and_high_temporary_cells_do_not_grow_the_persisted_state() {
+        super::alternating_low_and_high_temporary_cells_do_not_grow_the_persisted_state();
     }
 
     #[test]
