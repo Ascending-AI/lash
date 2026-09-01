@@ -1842,6 +1842,8 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
     );
 }
 
+mod single_gate;
+
 #[tokio::test]
 async fn dispatch_rejects_hidden_tool_before_contract_resolution() {
     let contracts_resolved = Arc::new(AtomicUsize::new(0));

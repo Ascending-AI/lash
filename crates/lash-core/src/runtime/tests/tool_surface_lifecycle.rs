@@ -332,6 +332,56 @@ async fn park_resume_restores_tool_and_subagent_authority() {
 }
 
 #[tokio::test]
+async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authority() {
+    let hidden = DynamicToolSpec::new(
+        "tool:persisted_broader",
+        "persisted_broader",
+        "visible only under the broader persisted authority",
+    );
+    let surface = Arc::new(DynamicToolSurface::new(vec![hidden.clone()]));
+    let provider: Arc<dyn crate::ToolProvider> = surface;
+    let plugin_host = dynamic_plugin_host(provider);
+    let plugins = plugin_host
+        .build_session_with_parent(
+            "persisted-broader",
+            None,
+            crate::plugin::SessionCreationConfig {
+                authority: hidden_authority(hidden.name),
+                ..Default::default()
+            },
+        )
+        .expect("narrower live-authority plugin session");
+    let store = Arc::new(RecordingStore::default());
+    let owner = crate::LeaseOwnerIdentity::opaque("persisted-worker", "persisted-boot");
+    let mut runtime = LashRuntime::from_persistent_embedded_state(
+        standard_test_policy(),
+        test_host_config(),
+        crate::PersistentRuntimeServices::new(plugins, store),
+        root_state("persisted-broader"),
+        owner.clone(),
+    )
+    .await
+    .expect("initial narrower-authority runtime");
+    assert!(
+        !catalog_names(&runtime).contains(&hidden.name.to_string()),
+        "the live session-open authority must start narrower"
+    );
+
+    runtime.stamp_live_plugin_state();
+    runtime.state.authority = Box::default();
+    let parked = runtime.park().await.expect("persist broader authority");
+    let resumed = LashRuntime::resume(parked, &runtime_environment(plugin_host), owner)
+        .await
+        .expect("resume broader persisted authority");
+
+    let names = catalog_names(&resumed);
+    assert!(
+        names.contains(&hidden.name.to_string()),
+        "persisted broader authority must win; live narrowing is ignored: {names:?}"
+    );
+}
+
+#[tokio::test]
 async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes() {
     let session_id = "filter-session";
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());

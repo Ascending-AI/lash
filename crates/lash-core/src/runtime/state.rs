@@ -609,9 +609,9 @@ impl RuntimeCheckpointComponents {
 /// Durable authority inputs required to reconstruct a session on another worker.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeSessionAuthority {
-    #[serde(default, skip_serializing_if = "crate::SessionToolAccess::is_default")]
+    #[serde(default)]
     pub tool_access: crate::SessionToolAccess,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub subagent: Option<crate::SubagentSessionContext>,
 }
 
@@ -689,6 +689,8 @@ impl RuntimeSessionState {
     /// Builds a `RuntimeSessionState` from snapshot data for protocol and process-engine
     /// implementors while materializing or restoring protocol session state.
     pub fn from_snapshot(snapshot: SessionSnapshot) -> Self {
+        // Authority deliberately defaults here and must be restored by apply_session_head;
+        // consuming a snapshot without the subsequent head apply would widen authority.
         let checkpoint_components = RuntimeCheckpointComponents::from_snapshot(&snapshot);
         let agent_frames = snapshot
             .session_graph

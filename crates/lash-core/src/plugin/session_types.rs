@@ -784,10 +784,6 @@ pub struct SessionToolAccess {
 }
 
 impl SessionToolAccess {
-    pub(crate) fn is_default(&self) -> bool {
-        self.tools.is_empty() && self.hidden_tools.is_empty()
-    }
-
     /// Lets protocol implementors apply the session's persisted tool-hiding policy by exact name.
     pub fn hides(&self, name: &str) -> bool {
         self.hidden_tools.contains(name)

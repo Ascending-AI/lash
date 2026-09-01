@@ -428,8 +428,18 @@ fn boxed_runtime_authority_keeps_flat_json_and_legacy_defaults() {
     object.remove("subagent");
     let legacy: RuntimeSessionState =
         serde_json::from_value(value).expect("legacy authority-free runtime state");
-    assert!(legacy.authority.tool_access.is_default());
+    assert_eq!(
+        legacy.authority.tool_access,
+        crate::SessionToolAccess::default()
+    );
     assert!(legacy.authority.subagent.is_none());
+
+    let current = serde_json::to_value(RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+    )))
+    .expect("serialize current runtime state");
+    assert_eq!(current.get("tool_access"), Some(&serde_json::json!({})));
+    assert_eq!(current.get("subagent"), Some(&serde_json::Value::Null));
 }
 
 #[test]

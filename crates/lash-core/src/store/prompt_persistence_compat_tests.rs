@@ -30,6 +30,14 @@ fn legacy_config_keeps_prompt_absence_distinct() {
         old_writer_object.remove("generation").is_some(),
         "the compatibility probe also strips the field introduced by FIG-1895"
     );
+    assert!(
+        old_writer_object.remove("tool_access").is_some(),
+        "the compatibility probe strips authority made explicit by FIG-1954"
+    );
+    assert!(
+        old_writer_object.remove("subagent").is_some(),
+        "the compatibility probe strips subagent authority made explicit by FIG-1954"
+    );
     assert_eq!(
         old_writer_value,
         serde_json::json!({
@@ -76,6 +84,23 @@ fn legacy_config_without_authority_decodes_as_unrestricted_root() {
 
     assert_eq!(restored.tool_access, crate::SessionToolAccess::default());
     assert_eq!(restored.subagent, None);
+}
+
+#[test]
+fn current_config_serializes_default_authority_explicitly() {
+    let value = serde_json::to_value(crate::PersistedSessionConfig {
+        provider_id: "stored-provider".to_string(),
+        model: crate::ModelSpec::default(),
+        turn_budget: crate::TurnBudget::Unbounded,
+        prompt: Some(crate::PromptLayer::new()),
+        generation: crate::GenerationOptions::default(),
+        tool_access: crate::SessionToolAccess::default(),
+        subagent: None,
+    })
+    .expect("serialize current config");
+
+    assert_eq!(value.get("tool_access"), Some(&serde_json::json!({})));
+    assert_eq!(value.get("subagent"), Some(&serde_json::Value::Null));
 }
 
 #[test]
