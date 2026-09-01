@@ -702,6 +702,58 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn soft_budget_warning_clamps_to_the_session_context_window() {
+        let session = test_session(RlmProtocolPluginConfig {
+            continue_as_soft_warn_tokens: Some(100_000),
+            ..RlmProtocolPluginConfig::builder()
+                .instruction_limit(crate::plugin::InstructionBound::unbounded())
+                .wall_clock(crate::plugin::WallClockBound::unbounded())
+                .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
+                .build()
+        });
+        let policy = lash_core::SessionPolicy {
+            model: lash_core::ModelSpec::builder("realistic-41k-model")
+                .context_window_tokens(41_000)
+                .build()
+                .expect("model limits"),
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        };
+        let state = lash_core::SessionSnapshot {
+            token_usage: lash_core::TokenUsage {
+                input_tokens: 40_999,
+                ..Default::default()
+            },
+            ..lash_core::SessionSnapshot::new(policy)
+        };
+
+        let directives = session
+            .soft_warn_directives(lash_core::plugin::CheckpointHookContext {
+                session_id: "root".to_string(),
+                checkpoint: lash_core::CheckpointKind::AfterWork,
+                state: lash_core::SessionReadView::from_snapshot(&state),
+                sessions: Arc::new(NoopPromptManager),
+                session_lifecycle: Arc::new(NoopPromptManager),
+                session_graph: Arc::new(NoopPromptManager),
+            })
+            .expect("warning directives");
+
+        assert_eq!(directives.len(), 1);
+        let lash_core::plugin::TurnPluginDirective::Ambient(
+            lash_core::plugin::PluginDirective::EmitRuntimeEvents { events },
+        ) = &directives[0]
+        else {
+            panic!("budget warning must be a runtime event");
+        };
+        let lash_core::PluginRuntimeEvent::Status { detail, .. } = &events[0] else {
+            panic!("budget warning should use a typed status runtime event");
+        };
+        assert_eq!(
+            detail.as_deref(),
+            Some("40999 tokens used; warn at 40999; choose frame switch path")
+        );
+    }
+
     /// A bag that records no dialect still belongs to a session running the
     /// default one, so a post-open statement is compared against that default
     /// and refused when it disagrees -- never written.
