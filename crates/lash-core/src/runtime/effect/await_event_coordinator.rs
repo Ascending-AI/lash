@@ -389,6 +389,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
                 if let Some(deadline) = deadline {
                     clock.sleep_until(deadline).await;
                 } else {
+                    // This arm must never resolve; a resolvable default would silently give a no-deadline waiter a timeout it never had.
                     std::future::pending().await
                 }
             };
