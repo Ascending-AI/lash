@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use crate::bot::channel::{Disposition, ReplySource};
-use crate::bot::ledger::{ProviderFailure, Stage};
+use crate::bot::ledger::{DetailWrite, ProviderFailure, Stage};
 use crate::bot::runtime::{session_id, thread_session_id};
 use crate::bot::tools::{CHANNEL_HISTORY, LIST_CHANNELS};
 
@@ -923,7 +923,7 @@ async fn recovery_records_the_applied_turns_boundary_after_a_later_turn_commits(
             Stage::Replied,
             Stage::Accepted,
             None,
-            None,
+            DetailWrite::Keep,
         )
         .await
         .expect("rewind older event to the crash window");

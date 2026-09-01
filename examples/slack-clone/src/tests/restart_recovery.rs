@@ -13,7 +13,7 @@ use axum::response::IntoResponse as _;
 use axum::routing::post;
 
 use crate::bot::channel::{Disposition, ReplySource};
-use crate::bot::ledger::{EventLedger, KIND_APP_MENTION, KIND_MESSAGE, Stage};
+use crate::bot::ledger::{DetailWrite, EventLedger, KIND_APP_MENTION, KIND_MESSAGE, Stage};
 use crate::bot::runtime::session_id;
 use crate::bot::{ledger, webhook};
 use crate::store::SqliteHandle;
@@ -174,7 +174,7 @@ async fn a_reply_owed_at_crash_time_is_posted_by_the_next_boots_recovery_pass() 
             Stage::Accepted,
             Stage::ReplyPending,
             None,
-            Some("Recovered answer.".to_string()),
+            DetailWrite::Set("Recovered answer.".to_string()),
         )
         .await
         .expect("record the owed reply");
@@ -248,7 +248,7 @@ async fn a_crash_between_posting_and_recording_does_not_produce_a_second_reply()
             Stage::Replied,
             Stage::ReplyPending,
             None,
-            Some("Posted once.".to_string()),
+            DetailWrite::Set("Posted once.".to_string()),
         )
         .await
         .expect("rewind the ledger");
@@ -563,7 +563,7 @@ async fn a_reply_lost_with_its_process_is_recovered_from_the_committed_transcrip
             Stage::Replied,
             Stage::Accepted,
             None,
-            None,
+            DetailWrite::Keep,
         )
         .await
         .expect("rewind the ledger");
@@ -1192,7 +1192,7 @@ async fn reply_lost_still_reports_a_committed_turn_that_produced_no_text() {
             Stage::Folded,
             Stage::Accepted,
             None,
-            None,
+            DetailWrite::Keep,
         )
         .await
         .expect("rewind the ledger");

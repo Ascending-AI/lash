@@ -152,6 +152,74 @@ impl Stage {
     }
 }
 
+/// Closed vocabulary of reason codes stored in the ledger detail column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EventReason {
+    AppAuthoredMessage,
+    NoAuthor,
+    SupersededByAppMention,
+    AdmissionTextUnavailable,
+    ThreadSessionRetired,
+    ThreadRootNotProcessed,
+    ThreadRootNotAvailable,
+    EmptyModelReply,
+    ReplyLostAfterCommit,
+}
+
+impl EventReason {
+    /// Exact wire/storage name.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AppAuthoredMessage => "app_authored_message",
+            Self::NoAuthor => "no_author",
+            Self::SupersededByAppMention => "superseded_by_app_mention",
+            Self::AdmissionTextUnavailable => "admission_text_unavailable",
+            Self::ThreadSessionRetired => "thread_session_retired",
+            Self::ThreadRootNotProcessed => "thread_root_not_processed",
+            Self::ThreadRootNotAvailable => "thread_root_not_available",
+            Self::EmptyModelReply => "empty_model_reply",
+            Self::ReplyLostAfterCommit => "reply_lost_after_commit",
+        }
+    }
+
+    /// Parse a stored reason code without changing unknown historical detail.
+    pub fn parse(raw: &str) -> Option<Self> {
+        Some(match raw {
+            "app_authored_message" => Self::AppAuthoredMessage,
+            "no_author" => Self::NoAuthor,
+            "superseded_by_app_mention" => Self::SupersededByAppMention,
+            "admission_text_unavailable" => Self::AdmissionTextUnavailable,
+            "thread_session_retired" => Self::ThreadSessionRetired,
+            "thread_root_not_processed" => Self::ThreadRootNotProcessed,
+            "thread_root_not_available" => Self::ThreadRootNotAvailable,
+            "empty_model_reply" => Self::EmptyModelReply,
+            "reply_lost_after_commit" => Self::ReplyLostAfterCommit,
+            _ => return None,
+        })
+    }
+}
+
+/// How an advance writes the nullable detail column.
+#[derive(Debug)]
+pub enum DetailWrite {
+    /// Leave the existing detail unchanged.
+    Keep,
+    /// Replace the existing detail with this value.
+    Set(String),
+    /// Set the existing detail to SQL `NULL`.
+    Clear,
+}
+
+impl DetailWrite {
+    fn sql_parts(self) -> (i64, Option<String>) {
+        match self {
+            Self::Keep => (0, None),
+            Self::Set(detail) => (1, Some(detail)),
+            Self::Clear => (2, None),
+        }
+    }
+}
+
 /// Typed provider failure retained by the operator-facing event ledger.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderFailure {
@@ -436,21 +504,28 @@ impl EventLedger {
         from: Stage,
         to: Stage,
         reply_ts: Option<String>,
-        detail: Option<String>,
+        detail: DetailWrite,
     ) -> Result<bool> {
         self.database
             .call(move |connection| {
+                let (detail_mode, detail_value) = detail.sql_parts();
                 let updated = connection.execute(
                     "UPDATE handled_events
                      SET stage = ?3, reply_ts = COALESCE(?4, reply_ts),
-                         detail = COALESCE(?5, detail), updated_at = ?6
+                         detail = CASE ?5
+                             WHEN 0 THEN detail
+                             WHEN 1 THEN ?6
+                             WHEN 2 THEN NULL
+                         END,
+                         updated_at = ?7
                      WHERE event_id = ?1 AND stage = ?2",
                     params![
                         event_id,
                         from.as_str(),
                         to.as_str(),
                         reply_ts,
-                        detail,
+                        detail_mode,
+                        detail_value,
                         now_seconds(),
                     ],
                 )?;
@@ -674,7 +749,7 @@ mod tests {
                     Stage::Accepted,
                     Stage::Folded,
                     None,
-                    None
+                    DetailWrite::Keep,
                 )
                 .await
                 .expect("advance")
@@ -693,7 +768,7 @@ mod tests {
                     Stage::Accepted,
                     Stage::Replied,
                     Some("1.2".to_string()),
-                    None,
+                    DetailWrite::Keep,
                 )
                 .await
                 .expect("advance")
@@ -707,7 +782,7 @@ mod tests {
                     Stage::Accepted,
                     Stage::ReplyPending,
                     None,
-                    Some("stale text".to_string()),
+                    DetailWrite::Set("stale text".to_string()),
                 )
                 .await
                 .expect("advance")
@@ -723,6 +798,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn advance_can_clear_existing_detail() {
+        let (_scratch, ledger) = ledger().await;
+        claim(&ledger, "Ev1").await;
+        ledger
+            .advance(
+                "Ev1".to_string(),
+                Stage::Accepted,
+                Stage::ReplyPending,
+                None,
+                DetailWrite::Set("owed reply".to_string()),
+            )
+            .await
+            .expect("record reply debt");
+        ledger
+            .advance(
+                "Ev1".to_string(),
+                Stage::ReplyPending,
+                Stage::Replied,
+                Some("1.2".to_string()),
+                DetailWrite::Clear,
+            )
+            .await
+            .expect("clear reply debt");
+        let record = ledger
+            .get("Ev1".to_string())
+            .await
+            .expect("get")
+            .expect("row");
+        assert_eq!(record.detail, None, "settled reply debt must be cleared");
+    }
+
+    #[tokio::test]
     async fn unfinished_lists_only_the_resumable_stages() {
         let (_scratch, ledger) = ledger().await;
         for event_id in ["Ev1", "Ev2", "Ev3"] {
@@ -734,7 +841,7 @@ mod tests {
                 Stage::Accepted,
                 Stage::Replied,
                 None,
-                None,
+                DetailWrite::Keep,
             )
             .await
             .expect("advance");
@@ -744,7 +851,7 @@ mod tests {
                 Stage::Accepted,
                 Stage::ReplyPending,
                 None,
-                Some("owed".to_string()),
+                DetailWrite::Set("owed".to_string()),
             )
             .await
             .expect("advance");
@@ -756,5 +863,24 @@ mod tests {
             .map(|record| record.event_id)
             .collect();
         assert_eq!(unfinished, ["Ev1", "Ev3"]);
+    }
+
+    #[test]
+    fn event_reasons_round_trip_their_stored_strings() {
+        let reasons = [
+            EventReason::AppAuthoredMessage,
+            EventReason::NoAuthor,
+            EventReason::SupersededByAppMention,
+            EventReason::AdmissionTextUnavailable,
+            EventReason::ThreadSessionRetired,
+            EventReason::ThreadRootNotProcessed,
+            EventReason::ThreadRootNotAvailable,
+            EventReason::EmptyModelReply,
+            EventReason::ReplyLostAfterCommit,
+        ];
+        for reason in reasons {
+            assert_eq!(EventReason::parse(reason.as_str()), Some(reason));
+        }
+        assert_eq!(EventReason::parse("not-a-reason"), None);
     }
 }

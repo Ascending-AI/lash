@@ -34,7 +34,8 @@ use lash::{
 use tokio::sync::RwLock;
 
 use super::ledger::{
-    Claim, EventLedger, EventRecord, KIND_APP_MENTION, KIND_MESSAGE, ProviderFailure, Stage,
+    Claim, DetailWrite, EventLedger, EventReason, EventRecord, KIND_APP_MENTION, KIND_MESSAGE,
+    ProviderFailure, Stage,
 };
 use super::runtime::session_id;
 use super::slack_api::{ChatPostMessageRequest, SlackApi, find_posted_reply};
@@ -57,9 +58,6 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(2);
 /// whose owner died just after a renewal, with margin, and finite so a genuinely
 /// stuck row is reported instead of retried forever.
 pub const DEFERRED_RETRY_DEADLINE: Duration = Duration::from_secs(120);
-const THREAD_ROOT_NOT_PROCESSED: &str = "thread_root_not_processed";
-const THREAD_ROOT_NOT_AVAILABLE: &str = "thread_root_not_available";
-
 /// The app's own identity in the workspace, from `auth.test`.
 #[derive(Clone, Debug)]
 pub struct BotIdentity {
@@ -340,12 +338,12 @@ impl ChannelBot {
                 record.stage.as_str()
             );
             match &outcome {
-                Disposition::Deferred { event_id, .. }
-                | Disposition::RecoverableFailure {
-                    event_id,
-                    reason: THREAD_ROOT_NOT_PROCESSED,
-                    ..
-                } => report.deferred.push(event_id.clone()),
+                Disposition::Deferred { event_id, .. } => report.deferred.push(event_id.clone()),
+                Disposition::RecoverableFailure {
+                    event_id, reason, ..
+                } if *reason == EventReason::ThreadRootNotProcessed.as_str() => {
+                    report.deferred.push(event_id.clone());
+                }
                 _ => {}
             }
             report.settled.push(outcome);
@@ -396,7 +394,9 @@ impl ChannelBot {
                     _ => {
                         let remaining = deadline.saturating_sub(started.elapsed());
                         let root_wait_budget =
-                            if record.detail.as_deref() == Some(THREAD_ROOT_NOT_AVAILABLE) {
+                            if record.detail.as_deref().and_then(EventReason::parse)
+                                == Some(EventReason::ThreadRootNotAvailable)
+                            {
                                 Duration::ZERO
                             } else {
                                 self.thread_root_wait_budget().min(remaining)
@@ -504,12 +504,12 @@ impl ChannelBot {
                 claim.record(),
                 Stage::Ignored,
                 None,
-                Some(reason.to_string()),
+                DetailWrite::Set(reason.as_str().to_string()),
             )
             .await?;
             return Ok(Disposition::Ignored {
                 event_id: envelope.event_id,
-                reason,
+                reason: reason.as_str(),
             });
         }
 
@@ -552,12 +552,12 @@ impl ChannelBot {
                 record,
                 Stage::Ignored,
                 None,
-                Some("admission_text_unavailable".to_string()),
+                DetailWrite::Set(EventReason::AdmissionTextUnavailable.as_str().to_string()),
             )
             .await?;
             return Ok(Disposition::Ignored {
                 event_id: record.event_id.clone(),
-                reason: "admission_text_unavailable",
+                reason: EventReason::AdmissionTextUnavailable.as_str(),
             });
         };
         let is_mention = record.kind == KIND_APP_MENTION;
@@ -566,8 +566,13 @@ impl ChannelBot {
             && resuming
             && let Some(reply_ts) = self.already_posted(record).await?
         {
-            self.settle(record, Stage::Replied, Some(reply_ts.clone()), None)
-                .await?;
+            self.settle(
+                record,
+                Stage::Replied,
+                Some(reply_ts.clone()),
+                DetailWrite::Clear,
+            )
+            .await?;
             return Ok(Disposition::Duplicate {
                 event_id: record.event_id.clone(),
                 stage: Stage::Replied,
@@ -592,12 +597,12 @@ impl ChannelBot {
                         record,
                         Stage::Ignored,
                         None,
-                        Some("thread_session_retired".to_string()),
+                        DetailWrite::Set(EventReason::ThreadSessionRetired.as_str().to_string()),
                     )
                     .await?;
                     return Ok(Disposition::Ignored {
                         event_id: record.event_id.clone(),
-                        reason: "thread_session_retired",
+                        reason: EventReason::ThreadSessionRetired.as_str(),
                     });
                 }
                 threads::ThreadSessionOpen::AdmissionContended => {
@@ -610,12 +615,20 @@ impl ChannelBot {
                 }
                 threads::ThreadSessionOpen::RootNotProcessed => {
                     return self
-                        .fail_missing_thread_root(record, is_mention, THREAD_ROOT_NOT_PROCESSED)
+                        .fail_missing_thread_root(
+                            record,
+                            is_mention,
+                            EventReason::ThreadRootNotProcessed,
+                        )
                         .await;
                 }
                 threads::ThreadSessionOpen::RootNotAvailable => {
                     return self
-                        .fail_missing_thread_root(record, is_mention, THREAD_ROOT_NOT_AVAILABLE)
+                        .fail_missing_thread_root(
+                            record,
+                            is_mention,
+                            EventReason::ThreadRootNotAvailable,
+                        )
                         .await;
                 }
             }
@@ -664,7 +677,8 @@ impl ChannelBot {
                 )
                 .await?;
             }
-            self.settle(record, Stage::Folded, None, None).await?;
+            self.settle(record, Stage::Folded, None, DetailWrite::Keep)
+                .await?;
             return Ok(Disposition::Folded {
                 event_id: record.event_id.clone(),
                 channel: record.channel_id.clone(),
@@ -681,9 +695,9 @@ impl ChannelBot {
         &self,
         record: &EventRecord,
         notify_user: bool,
-        detail: &'static str,
+        detail: EventReason,
     ) -> Result<Disposition> {
-        let copy: &str = if detail == THREAD_ROOT_NOT_AVAILABLE {
+        let copy: &str = if detail == EventReason::ThreadRootNotAvailable {
             "I can’t find the message this thread started from, so I can’t answer right \
              now. If it reaches me later, I’ll follow up here."
         } else {
@@ -698,7 +712,7 @@ impl ChannelBot {
                 record.stage,
                 record.stage,
                 None,
-                Some(detail.to_string()),
+                DetailWrite::Set(detail.as_str().to_string()),
             )
             .await?
         {
@@ -744,7 +758,7 @@ impl ChannelBot {
             event_id: record.event_id.clone(),
             channel: record.channel_id.clone(),
             notified,
-            reason: detail,
+            reason: detail.as_str(),
         })
     }
 
@@ -804,13 +818,13 @@ impl ChannelBot {
                 record,
                 Stage::Folded,
                 None,
-                Some("empty_model_reply".to_string()),
+                DetailWrite::Set(EventReason::EmptyModelReply.as_str().to_string()),
             )
             .await?;
             return Ok(Disposition::Silent {
                 event_id: record.event_id.clone(),
                 channel: record.channel_id.clone(),
-                reason: "empty_model_reply",
+                reason: EventReason::EmptyModelReply.as_str(),
             });
         };
         self.owe_and_post(record, reply, ReplySource::Turn).await
@@ -881,7 +895,7 @@ impl ChannelBot {
                     record,
                     Stage::Ignored,
                     None,
-                    Some("reply_lost_after_commit".to_string()),
+                    DetailWrite::Set(EventReason::ReplyLostAfterCommit.as_str().to_string()),
                 )
                 .await?;
                 Ok(Disposition::ReplyLost {
@@ -918,7 +932,7 @@ impl ChannelBot {
                 record.stage,
                 Stage::ReplyPending,
                 None,
-                Some(reply.clone()),
+                DetailWrite::Set(reply.clone()),
             )
             .await?
         {
@@ -931,7 +945,7 @@ impl ChannelBot {
                 Stage::ReplyPending,
                 Stage::Replied,
                 Some(reply_ts.clone()),
-                None,
+                DetailWrite::Clear,
             )
             .await?;
         Ok(Disposition::Replied {
@@ -945,8 +959,13 @@ impl ChannelBot {
     /// Pay off a recorded reply debt, or discover it was already paid.
     async fn settle_reply_debt(&self, record: &EventRecord) -> Result<Disposition> {
         if let Some(reply_ts) = self.already_posted(record).await? {
-            self.settle(record, Stage::Replied, Some(reply_ts.clone()), None)
-                .await?;
+            self.settle(
+                record,
+                Stage::Replied,
+                Some(reply_ts.clone()),
+                DetailWrite::Clear,
+            )
+            .await?;
             return Ok(Disposition::Duplicate {
                 event_id: record.event_id.clone(),
                 stage: Stage::Replied,
@@ -958,7 +977,7 @@ impl ChannelBot {
                 record,
                 Stage::Ignored,
                 None,
-                Some("reply_lost_after_commit".to_string()),
+                DetailWrite::Set(EventReason::ReplyLostAfterCommit.as_str().to_string()),
             )
             .await?;
             return Ok(Disposition::ReplyLost {
@@ -967,8 +986,13 @@ impl ChannelBot {
             });
         };
         let reply_ts = self.post_reply(record, &reply).await?;
-        self.settle(record, Stage::Replied, Some(reply_ts.clone()), None)
-            .await?;
+        self.settle(
+            record,
+            Stage::Replied,
+            Some(reply_ts.clone()),
+            DetailWrite::Clear,
+        )
+        .await?;
         Ok(Disposition::Replied {
             event_id: record.event_id.clone(),
             channel: record.channel_id.clone(),
@@ -1004,7 +1028,7 @@ impl ChannelBot {
         record: &EventRecord,
         to: Stage,
         reply_ts: Option<String>,
-        detail: Option<String>,
+        detail: DetailWrite,
     ) -> Result<()> {
         if !self
             .ledger
@@ -1067,17 +1091,23 @@ impl ChannelBot {
                 if message.bot_id.is_some() {
                     // Including the bot's own replies. Without this guard the
                     // bot answers itself, forever.
-                    return (KIND_MESSAGE, Intent::Ignore("app_authored_message"));
+                    return (
+                        KIND_MESSAGE,
+                        Intent::Ignore(EventReason::AppAuthoredMessage),
+                    );
                 }
                 if message.user.is_none() {
-                    return (KIND_MESSAGE, Intent::Ignore("no_author"));
+                    return (KIND_MESSAGE, Intent::Ignore(EventReason::NoAuthor));
                 }
                 if events::mentions(&message.text, &self.identity.bot_user_id) {
                     // Slack sends both a `message` and an `app_mention` for a
                     // mention, under two `event_id`s. Deduplication cannot help
                     // here — the ids genuinely differ — so the bot picks the
                     // event whose meaning is unambiguous and drops the other.
-                    return (KIND_MESSAGE, Intent::Ignore("superseded_by_app_mention"));
+                    return (
+                        KIND_MESSAGE,
+                        Intent::Ignore(EventReason::SupersededByAppMention),
+                    );
                 }
                 (KIND_MESSAGE, Intent::Ambient)
             }
@@ -1257,5 +1287,5 @@ enum Intent {
     /// Remember it.
     Ambient,
     /// Neither.
-    Ignore(&'static str),
+    Ignore(EventReason),
 }
