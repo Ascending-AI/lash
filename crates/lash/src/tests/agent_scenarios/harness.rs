@@ -31,6 +31,7 @@ pub(super) struct AgentScenario {
     pub(super) install_subagents: bool,
     pub(super) install_shell_processes: bool,
     pub(super) max_turns: Option<usize>,
+    pub(super) precompleted_process: Option<(String, lash_core::ProcessAwaitOutput)>,
     pub(super) expected_contracts: AgentScenarioExpectations,
 }
 
@@ -47,6 +48,7 @@ impl AgentScenario {
             install_subagents: false,
             install_shell_processes: false,
             max_turns: None,
+            precompleted_process: None,
             expected_contracts: AgentScenarioExpectations::default(),
         }
     }
@@ -92,6 +94,15 @@ impl AgentScenario {
 
     pub(super) fn max_turns(mut self, max_turns: usize) -> Self {
         self.max_turns = Some(max_turns);
+        self
+    }
+
+    pub(super) fn precompleted_process(
+        mut self,
+        process_id: impl Into<String>,
+        output: lash_core::ProcessAwaitOutput,
+    ) -> Self {
+        self.precompleted_process = Some((process_id.into(), output));
         self
     }
 
@@ -169,6 +180,8 @@ pub(super) struct AgentScenarioRun {
     /// commit order. Observed at the store seam, never reconstructed.
     pub(super) checkpoint_writes:
         Vec<lash_core::testing::checkpoint_observer::CheckpointWriteEvent>,
+    /// Attachment roots submitted by the root turn's runtime-checkpoint commit.
+    pub(super) committed_attachment_ids: Vec<lash_core::AttachmentId>,
 }
 
 struct AgentScenarioSetup {
@@ -330,6 +343,33 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         .max_turns(case.max_turns)
         .build()?;
     let session = runtime.core.session(&case.session_id).open().await?;
+    if let Some((process_id, output)) = case.precompleted_process.clone() {
+        runtime
+            .process_registry
+            .register_process_with_observers(
+                lash_core::ProcessRegistration::new(
+                    process_id.clone(),
+                    lash_core::ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    lash_core::RecoveryContract::ExternallyOwned,
+                    lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
+                        &case.session_id,
+                    )),
+                )
+                .with_identity(lash_core::ProcessIdentity::new("test.awaited-child")),
+                std::slice::from_ref(&case.session_id),
+            )
+            .await?;
+        runtime
+            .process_registry
+            .complete_process(
+                &process_id,
+                output,
+                lash_core::ProcessCompletionAuthority::external_owner(),
+            )
+            .await?;
+    }
     let events = Arc::new(RecordingEvents::default());
 
     let turn_output = session
@@ -359,6 +399,10 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         prompt_captures: runtime.prompt_captures_snapshot(),
         final_process_list,
         checkpoint_writes: runtime.checkpoint_writes.events(),
+        committed_attachment_ids: runtime
+            .checkpoint_writes
+            .committed_attachment_ids(&case.session_id, 0)
+            .unwrap_or_default(),
     };
 
     if let Some(expected) = &case.expected_final_value {
@@ -725,6 +769,10 @@ impl AgentSessionTurnProcessScenario {
             prompt_captures: runtime.prompt_captures_snapshot(),
             final_process_list,
             checkpoint_writes: runtime.checkpoint_writes.events(),
+            committed_attachment_ids: runtime
+                .checkpoint_writes
+                .committed_attachment_ids(self.session_id, 0)
+                .unwrap_or_default(),
         };
         assert_eq!(run.prompt_captures.len(), 1);
         assert_all_processes_terminal(&run.final_process_list);

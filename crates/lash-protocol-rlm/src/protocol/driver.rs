@@ -992,6 +992,8 @@ fn tool_call_event(record: ToolCallRecord) -> SessionStreamEvent {
 fn bounded_exec_tool_call_records(
     calls: &[lash_core::ExecutedCall],
 ) -> (Vec<ToolCallRecord>, Option<OmittedToolCalls>) {
+    // HostBridge supplies execution-index order, so concurrent dispatch keeps a
+    // deterministic host-record order and first-128 retention boundary.
     let records = calls
         .iter()
         .filter_map(|call| call.host_record.as_ref())

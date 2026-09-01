@@ -133,6 +133,24 @@ impl<'run> HostBridge<'run> {
         Ok(())
     }
 
+    fn consume_recorded_reply(
+        &self,
+        index: usize,
+        operation: &str,
+        reply: ToolInvocationReply,
+    ) -> Result<FlowValue, ExecutionHostError> {
+        let outcome = if reply.output.is_success() {
+            lash_core::ExecutedCallOutcome::Ok
+        } else {
+            lash_core::ExecutedCallOutcome::Err
+        };
+        let (result, host_record) = self.consume_reply(operation, reply);
+        if let Some(host_record) = host_record {
+            self.record_executed_call(index, operation.to_string(), outcome, Some(host_record))?;
+        }
+        result
+    }
+
     pub(super) fn into_collected(self) -> CollectedExecutionOutput {
         let mut calls = self.calls.into_inner().recover();
         calls.sort_by_key(|(index, _)| *index);
@@ -902,10 +920,16 @@ impl HostBridge<'_> {
                 .start_child_process(prepared.registration, LASHLANG_ENGINE_KIND, prepared.label)
                 .await
         };
-        self.consume_reply("start_process", reply).0
+        let (result, host_record) = self.consume_reply("start_process", reply);
+        debug_assert!(
+            host_record.is_none(),
+            "start_process must remain record-free"
+        );
+        result
     }
 
     async fn await_handle(&self, handle: FlowValue) -> Result<FlowValue, ExecutionHostError> {
+        let index = self.next_index();
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.await_handle");
             self.ctx
@@ -915,10 +939,11 @@ impl HostBridge<'_> {
                 )
                 .await
         };
-        self.consume_reply("await_handle", reply).0
+        self.consume_recorded_reply(index, "await_handle", reply)
     }
 
     async fn cancel_handle(&self, handle: FlowValue) -> Result<FlowValue, ExecutionHostError> {
+        let index = self.next_index();
         let reply = self
             .ctx
             .cancel_tool_handle(
@@ -926,10 +951,11 @@ impl HostBridge<'_> {
                 handle_to_json(&handle).await?,
             )
             .await;
-        self.consume_reply("cancel_handle", reply).0
+        self.consume_recorded_reply(index, "cancel_handle", reply)
     }
 
     async fn signal_run(&self, signal: ProcessSignal) -> Result<FlowValue, ExecutionHostError> {
+        let index = self.next_index();
         let handle = handle_to_json(&signal.run).await?;
         let payload = handle_to_json(&signal.payload).await?;
         let reply = self
@@ -941,9 +967,9 @@ impl HostBridge<'_> {
                 payload,
             )
             .await;
-        self.consume_reply("signal_run", reply).0?;
-        // `signal_run` evaluates to null in the language; the appended event is
-        // recorded as a tool call but not surfaced as the expression value.
+        self.consume_recorded_reply(index, "signal_run", reply)?;
+        // `signal_run` evaluates to null in the language; its executed-call host
+        // record is retained without becoming the expression value.
         Ok(FlowValue::Null)
     }
 
