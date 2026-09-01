@@ -45,7 +45,9 @@ use super::super::envelope::{
     ProcessCommand, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectOutcome,
 };
 use super::super::group::{
-    EffectGroupHandle, GroupSettlement, GroupWakePolicy, LoserPolicy, RuntimeEffectGroup,
+    EffectGroupHandle, EffectGroupRecordAccessor, GroupSettlement, GroupWakePolicy, LoserPolicy,
+    RuntimeEffectGroup, await_cancelled_error, child_cancelled_error, closed_group_error,
+    exhausted_group_error, fence_reopen, group_shape_error,
 };
 use super::super::group_drain::GroupExecutors;
 use super::control::{
@@ -373,6 +375,7 @@ pub(crate) struct NativeEffectGroups {
 /// One open group: its shape, its settlement record, and the wake that tells
 /// blocked callers a new rank exists.
 struct NativeEffectGroup {
+    group_key: String,
     children: usize,
     /// Held for reopen fencing only. The host deliberately does **not** branch on
     /// the wake rule: `await_next_settlement` serves rank `consumed + 1`
@@ -424,9 +427,28 @@ impl NativeSettlement {
     }
 }
 
+impl EffectGroupRecordAccessor for NativeEffectGroup {
+    fn group_key(&self) -> &str {
+        &self.group_key
+    }
+
+    fn children(&self) -> usize {
+        self.children
+    }
+
+    fn wake(&self) -> GroupWakePolicy {
+        self.wake
+    }
+
+    fn loser_disposition(&self) -> LoserPolicy {
+        self.declared
+    }
+}
+
 impl NativeEffectGroup {
     fn new(group: &RuntimeEffectGroup) -> Self {
         Self {
+            group_key: group.group_key().to_string(),
             children: group.children().len(),
             wake: group.wake(),
             declared: group.loser_disposition(),
@@ -439,48 +461,6 @@ impl NativeEffectGroup {
             }),
             settled: Notify::new(),
         }
-    }
-
-    /// Refuses a reopen whose shape disagrees with the group already recorded
-    /// under this key.
-    ///
-    /// A shrunk child vec under one key silently renumbers every rank above the
-    /// truncation, and a changed wake rule or disposition is a changed journaled
-    /// identity — neither of which the per-child envelope-hash fence can see
-    /// from inside this process, because the native substrate records no envelopes.
-    fn fence_reopen(&self, group: &RuntimeEffectGroup) -> Result<(), RuntimeEffectControllerError> {
-        if self.children != group.children().len() {
-            return Err(group_shape_error(format!(
-                "durable effect group {} is open with {} children but was reopened \
-                 with {}; a changed child count renumbers every rank above the \
-                 change, so the settlements already consumed would no longer name \
-                 the children that produced them",
-                group.group_key(),
-                self.children,
-                group.children().len()
-            )));
-        }
-        if self.wake != group.wake() {
-            return Err(group_shape_error(format!(
-                "durable effect group {} is open under wake rule {:?} but was \
-                 reopened under {:?}; the wake rule is journaled identity and a \
-                 reopen may not change it",
-                group.group_key(),
-                self.wake,
-                group.wake()
-            )));
-        }
-        if self.declared != group.loser_disposition() {
-            return Err(group_shape_error(format!(
-                "durable effect group {} declared loser disposition {:?} at open \
-                 but was reopened declaring {:?}; the declared disposition is what \
-                 a drain of this group applies, so a reopen may not restate it",
-                group.group_key(),
-                self.declared,
-                group.loser_disposition()
-            )));
-        }
-        Ok(())
     }
 }
 
@@ -590,14 +570,14 @@ impl NativeEffectGroups {
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         let handle = EffectGroupHandle::new(&group);
         if let Some(existing) = groups.open.read_recover().get(group.group_key()).cloned() {
-            existing.fence_reopen(&group)?;
+            fence_reopen(&group, existing.as_ref())?;
             return Ok(handle);
         }
         let resolved = Self::resolve_children(executors, &group)?;
         let state = {
             let mut open = groups.open.write_recover();
             if let Some(existing) = open.get(group.group_key()) {
-                existing.fence_reopen(&group)?;
+                fence_reopen(&group, existing.as_ref())?;
                 return Ok(handle);
             }
             let state = Arc::new(NativeEffectGroup::new(&group));
@@ -684,12 +664,7 @@ impl NativeEffectGroups {
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         let state = groups.lookup(handle.group_key())?;
         if handle.is_exhausted() {
-            return Err(group_shape_error(format!(
-                "durable effect group {} has all {} settlements consumed; check \
-                 is_exhausted() before awaiting rather than awaiting past the group",
-                handle.group_key(),
-                handle.children()
-            )));
+            return Err(exhausted_group_error(handle));
         }
         loop {
             let notified = state.settled.notified();
@@ -714,15 +689,9 @@ impl NativeEffectGroups {
             }
             tokio::select! {
                 () = cancel.cancelled() => {
-                    return Err(RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
-                        format!(
-                            "the await of settlement {} of durable effect group {} \
-                             was cancelled; the group's rank is untouched and a \
-                             later await resumes at the same settlement",
-                            handle.consumed() + 1,
-                            handle.group_key()
-                        ),
+                    return Err(await_cancelled_error(
+                        handle.group_key(),
+                        handle.consumed() + 1,
                     ));
                 }
                 () = &mut notified => {}
@@ -859,27 +828,4 @@ impl NativeEffectGroups {
             .map(|settled| (settled.position, settled.sequence, settled.outcome.is_ok()))
             .collect()
     }
-}
-
-fn group_shape_error(message: impl Into<String>) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(RuntimeErrorCode::RuntimeEffectGroupShape, message)
-}
-
-fn closed_group_error(group_key: &str) -> RuntimeEffectControllerError {
-    group_shape_error(format!(
-        "durable effect group {group_key} is closed to its caller; a closed group's \
-         remaining children settle under host ownership and the caller may not \
-         observe them"
-    ))
-}
-
-fn child_cancelled_error(group_key: &str, position: usize) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(
-        RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
-        format!(
-            "child {position} of durable effect group {group_key} was cancelled by \
-             the group's declared loser disposition; the cancellation is this \
-             child's terminal"
-        ),
-    )
 }

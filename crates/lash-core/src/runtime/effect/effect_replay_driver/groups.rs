@@ -80,9 +80,30 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use super::*;
+pub(super) use crate::runtime::effect::group::group_shape_error;
 use crate::runtime::effect::group::{
-    EffectGroupHandle, EffectGroupMembership, GroupSettlement, LoserPolicy, RuntimeEffectGroup,
+    EffectGroupHandle, EffectGroupRecordAccessor, GroupSettlement, GroupWakePolicy, LoserPolicy,
+    RuntimeEffectGroup, await_cancelled_error, closed_group_error, exhausted_group_error,
+    fence_reopen,
 };
+
+impl EffectGroupRecordAccessor for EffectGroupRecord {
+    fn group_key(&self) -> &str {
+        &self.group_key
+    }
+
+    fn children(&self) -> usize {
+        self.children
+    }
+
+    fn wake(&self) -> GroupWakePolicy {
+        self.wake
+    }
+
+    fn loser_disposition(&self) -> LoserPolicy {
+        self.loser_disposition
+    }
+}
 
 /// How long a caller parked on rank `n` waits before re-reading the journal.
 ///
@@ -543,12 +564,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             .get(handle.group_key())
             .ok_or_else(|| closed_group_error(handle.group_key()))?;
         if handle.is_exhausted() {
-            return Err(group_shape_error(format!(
-                "durable effect group {} has all {} settlements consumed; check \
-                 is_exhausted() before awaiting rather than awaiting past the group",
-                handle.group_key(),
-                handle.children()
-            )));
+            return Err(exhausted_group_error(handle));
         }
         loop {
             let notified = state.settled.notified();
@@ -575,15 +591,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             }
             tokio::select! {
                 () = cancel.cancelled() => {
-                    return Err(RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
-                        format!(
-                            "the await of settlement {rank} of durable effect group {} \
-                             was cancelled; the group's rank is untouched and a later \
-                             await resumes at the same settlement",
-                            handle.group_key()
-                        ),
-                    ));
+                    return Err(await_cancelled_error(handle.group_key(), rank));
                 }
                 () = &mut notified => {}
                 () = self.clock.sleep(SETTLEMENT_POLL) => {}
@@ -732,70 +740,6 @@ fn replay_keys_of(group: &RuntimeEffectGroup) -> Result<Vec<String>, RuntimeEffe
         .collect()
 }
 
-/// Refuses a reopen whose shape disagrees with the group already recorded under
-/// this key.
-fn fence_reopen(
-    opening: &EffectGroupRecord,
-    persisted: &EffectGroupRecord,
-) -> Result<(), RuntimeEffectControllerError> {
-    if opening.children != persisted.children {
-        return Err(group_shape_error(format!(
-            "durable effect group {} is recorded with {} children but was reopened \
-             with {}; a changed child count renumbers every rank above the change, \
-             so the settlements already consumed would no longer name the children \
-             that produced them",
-            opening.group_key, persisted.children, opening.children
-        )));
-    }
-    if opening.wake != persisted.wake {
-        return Err(group_shape_error(format!(
-            "durable effect group {} is recorded under wake rule {:?} but was \
-             reopened under {:?}; the wake rule is journaled identity and a reopen \
-             may not change it",
-            opening.group_key, persisted.wake, opening.wake
-        )));
-    }
-    if opening.loser_disposition != persisted.loser_disposition {
-        return Err(group_shape_error(format!(
-            "durable effect group {} declared loser disposition {:?} at open but was \
-             reopened declaring {:?}; the declared disposition is what a drain of \
-             this group applies, so a reopen may not restate it",
-            opening.group_key, persisted.loser_disposition, opening.loser_disposition
-        )));
-    }
-    Ok(())
-}
-
-/// The terminal a cancelled group child journals.
-///
-/// Named the same way and carrying the same code as the in-memory reference
-/// host's, because a caller reading a cancelled child's outcome must not be able
-/// to tell which tier ran it.
-pub(super) fn child_cancelled_error(
-    membership: Option<&EffectGroupMembership>,
-) -> RuntimeEffectControllerError {
-    let (group_key, position) = match membership {
-        Some(membership) => (membership.group_key.as_str(), membership.position),
-        // Unreachable through `dispatch_group_children`, whose children are
-        // group members by construction. Kept honest rather than panicking: the
-        // cancellation is still this effect's terminal whatever the envelope
-        // says.
-        None => ("<ungrouped>", 0),
-    };
-    RuntimeEffectControllerError::new(
-        RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
-        format!(
-            "child {position} of durable effect group {group_key} was cancelled by \
-             the group's declared loser disposition; the cancellation is this \
-             child's terminal"
-        ),
-    )
-}
-
-pub(super) fn group_shape_error(message: impl Into<String>) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(RuntimeErrorCode::RuntimeEffectGroupShape, message)
-}
-
 /// A drain refusal a caller fixes by waiting, not by changing anything.
 ///
 /// Distinct from [`group_shape_error`] on purpose. "This host is still working
@@ -805,12 +749,4 @@ pub(super) fn group_shape_error(message: impl Into<String>) -> RuntimeEffectCont
 /// identify is a seam a host gets wrong once and then works around.
 pub(super) fn drain_deferred_error(message: impl Into<String>) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(RuntimeErrorCode::RuntimeEffectGroupDrainDeferred, message)
-}
-
-fn closed_group_error(group_key: &str) -> RuntimeEffectControllerError {
-    group_shape_error(format!(
-        "durable effect group {group_key} is closed to its caller; a closed group's \
-         remaining children settle under host ownership and the caller may not \
-         observe them"
-    ))
 }

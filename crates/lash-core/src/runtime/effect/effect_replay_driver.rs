@@ -85,6 +85,7 @@ use super::executor::{
     AwaitEventKey, AwaitEventWaitIdentity, EffectJournalRetirement, ExecutionScope, Resolution,
     ResolveOutcome, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
 };
+use super::group::child_cancelled_error;
 use super::group_drain::GroupExecutors;
 /// The durable group shape this port's backends implement, re-exported so a
 /// backend imports the whole effect-journal vocabulary from one place.
@@ -1256,8 +1257,15 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                             tokio::pin!(execution);
                             tokio::select! {
                                 biased;
-                                () = cancel.cancelled() => Err(groups::child_cancelled_error(
-                                    cancel_membership.as_deref(),
+                                () = cancel.cancelled() => Err(child_cancelled_error(
+                                    cancel_membership
+                                        .as_deref()
+                                        .map_or("<ungrouped>", |membership| {
+                                            membership.group_key.as_str()
+                                        }),
+                                    cancel_membership
+                                        .as_deref()
+                                        .map_or(0, |membership| membership.position),
                                 )),
                                 result = &mut execution => result,
                             }

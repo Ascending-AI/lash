@@ -269,8 +269,130 @@ impl RuntimeEffectGroup {
     }
 }
 
-fn group_shape_error(message: impl Into<String>) -> RuntimeEffectControllerError {
+/// The common group facts a host records and later fences on reopen.
+pub(crate) trait EffectGroupRecordAccessor {
+    /// The group's durable identity.
+    fn group_key(&self) -> &str;
+
+    /// The number of children recorded for the group.
+    fn children(&self) -> usize;
+
+    /// The wake rule recorded for the group.
+    fn wake(&self) -> GroupWakePolicy;
+
+    /// The loser disposition recorded for the group.
+    fn loser_disposition(&self) -> LoserPolicy;
+}
+
+impl EffectGroupRecordAccessor for RuntimeEffectGroup {
+    fn group_key(&self) -> &str {
+        self.group_key()
+    }
+
+    fn children(&self) -> usize {
+        self.children().len()
+    }
+
+    fn wake(&self) -> GroupWakePolicy {
+        self.wake()
+    }
+
+    fn loser_disposition(&self) -> LoserPolicy {
+        self.loser_disposition()
+    }
+}
+
+/// Refuses a reopen whose recorded group facts disagree with the offered ones.
+pub(crate) fn fence_reopen<Opening, Persisted>(
+    opening: &Opening,
+    persisted: &Persisted,
+) -> Result<(), RuntimeEffectControllerError>
+where
+    Opening: EffectGroupRecordAccessor,
+    Persisted: EffectGroupRecordAccessor,
+{
+    if opening.children() != persisted.children() {
+        return Err(group_shape_error(format!(
+            "durable effect group {} is recorded with {} children but was reopened \
+             with {}; a changed child count renumbers every rank above the change, \
+             so the settlements already consumed would no longer name the children \
+             that produced them",
+            opening.group_key(),
+            persisted.children(),
+            opening.children()
+        )));
+    }
+    if opening.wake() != persisted.wake() {
+        return Err(group_shape_error(format!(
+            "durable effect group {} is recorded under wake rule {:?} but was \
+             reopened under {:?}; the wake rule is journaled identity and a reopen \
+             may not change it",
+            opening.group_key(),
+            persisted.wake(),
+            opening.wake()
+        )));
+    }
+    if opening.loser_disposition() != persisted.loser_disposition() {
+        return Err(group_shape_error(format!(
+            "durable effect group {} declared loser disposition {:?} at open but was \
+             reopened declaring {:?}; the declared disposition is what a drain of \
+             this group applies, so a reopen may not restate it",
+            opening.group_key(),
+            persisted.loser_disposition(),
+            opening.loser_disposition()
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn group_shape_error(message: impl Into<String>) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(crate::RuntimeErrorCode::RuntimeEffectGroupShape, message)
+}
+
+/// Refuses an await after the caller consumed every recorded settlement.
+pub(crate) fn exhausted_group_error(handle: &EffectGroupHandle) -> RuntimeEffectControllerError {
+    group_shape_error(format!(
+        "durable effect group {} has all {} settlements consumed; check \
+         is_exhausted() before awaiting rather than awaiting past the group",
+        handle.group_key(),
+        handle.children()
+    ))
+}
+
+/// Refuses an await cancellation without advancing the caller's cursor.
+pub(crate) fn await_cancelled_error(group_key: &str, rank: usize) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(
+        crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
+        format!(
+            "the await of settlement {rank} of durable effect group {group_key} \
+             was cancelled; the group's rank is untouched and a later await resumes \
+             at the same settlement"
+        ),
+    )
+}
+
+/// Reports the terminal recorded for a child cancelled by its group policy.
+pub(crate) fn child_cancelled_error(
+    group_key: &str,
+    position: usize,
+) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(
+        crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
+        format!(
+            "child {position} of durable effect group {group_key} was cancelled by \
+             the group's declared loser disposition; the cancellation is this \
+             child's terminal"
+        ),
+    )
+}
+
+/// Refuses access to a group that is closed to its caller.
+pub(crate) fn closed_group_error(group_key: &str) -> RuntimeEffectControllerError {
+    group_shape_error(format!(
+        "durable effect group {group_key} is closed to its caller; a closed group's \
+         remaining children settle under host ownership and the caller may not \
+         observe them"
+    ))
 }
 
 /// Refuses an effect that carries group membership on a path that cannot honor
