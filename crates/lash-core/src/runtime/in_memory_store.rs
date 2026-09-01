@@ -25,6 +25,7 @@ mod reads;
 mod receipts;
 mod session_binding;
 mod session_execution_lease;
+use session_execution_lease::{InMemorySessionExecutionLease, Lease};
 mod state_version;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -44,44 +45,6 @@ struct InMemoryQueuedBatch {
     claim_owner: Option<crate::LeaseOwnerIdentity>,
     claim_fencing_token: u64,
     claim_session_lease_generation: u64,
-}
-
-#[derive(Clone)]
-enum Lease {
-    Free,
-    Held {
-        owner: crate::LeaseOwnerIdentity,
-        executor_id: String,
-        lease_token: String,
-        claimed_at_epoch_ms: u64,
-        lease_term_ms: u64,
-        expires_at_epoch_ms: u64,
-    },
-}
-
-#[derive(Clone)]
-struct InMemorySessionExecutionLease {
-    lease: Lease,
-    fencing_token: u64,
-}
-
-#[derive(Clone, Copy)]
-struct HeldLeaseFields<'a> {
-    owner: &'a crate::LeaseOwnerIdentity,
-    executor_id: &'a str,
-    lease_token: &'a str,
-    claimed_at_epoch_ms: u64,
-    lease_term_ms: u64,
-    expires_at_epoch_ms: u64,
-}
-
-impl Default for InMemorySessionExecutionLease {
-    fn default() -> Self {
-        Self {
-            lease: Lease::Free,
-            fencing_token: 0,
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -119,64 +82,6 @@ fn turn_input_settlement_matches(
                     )
             }
         }
-}
-
-impl InMemorySessionExecutionLease {
-    fn is_held(&self) -> bool {
-        matches!(&self.lease, Lease::Held { .. })
-    }
-
-    fn is_live(&self, now: u64) -> bool {
-        matches!(
-            &self.lease,
-            Lease::Held {
-                expires_at_epoch_ms,
-                ..
-            } if *expires_at_epoch_ms > now
-        )
-    }
-
-    fn is_held_by(&self, owner: &crate::LeaseOwnerIdentity, executor_id: &str) -> bool {
-        matches!(
-            &self.lease,
-            Lease::Held {
-                owner: current_owner,
-                executor_id: current_executor_id,
-                ..
-            } if current_owner.same_incarnation(owner) && current_executor_id == executor_id
-        )
-    }
-
-    fn lease_token_matches(&self, lease_token: &str) -> bool {
-        matches!(
-            &self.lease,
-            Lease::Held {
-                lease_token: current_lease_token,
-                ..
-            } if current_lease_token == lease_token
-        )
-    }
-
-    fn held_fields(&self) -> Option<HeldLeaseFields<'_>> {
-        match &self.lease {
-            Lease::Free => None,
-            Lease::Held {
-                owner,
-                executor_id,
-                lease_token,
-                claimed_at_epoch_ms,
-                lease_term_ms,
-                expires_at_epoch_ms,
-            } => Some(HeldLeaseFields {
-                owner,
-                executor_id,
-                lease_token,
-                claimed_at_epoch_ms: *claimed_at_epoch_ms,
-                lease_term_ms: *lease_term_ms,
-                expires_at_epoch_ms: *expires_at_epoch_ms,
-            }),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -470,16 +375,9 @@ impl InMemorySessionStore {
         let leases = self.session_execution_leases.lock_recover();
         crate::store::session_execution_lease::require_current_session_execution_lease(
             session_id,
-            leases.get(session_id).map(|current| {
-                let held = current.held_fields();
-                crate::store::session_execution_lease::SessionExecutionLeaseFenceFacts {
-                    owner: held.map(|fields| fields.owner),
-                    executor_id: held.map(|fields| fields.executor_id),
-                    lease_token: held.map(|fields| fields.lease_token),
-                    fencing_token: current.fencing_token,
-                    expires_at_epoch_ms: held.map_or(0, |fields| fields.expires_at_epoch_ms),
-                }
-            }),
+            leases
+                .get(session_id)
+                .map(InMemorySessionExecutionLease::fence_facts),
             fence,
             now,
         )
