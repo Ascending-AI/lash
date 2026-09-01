@@ -1208,7 +1208,9 @@ fn lazy_contract_dispatch_context(
 /// Build a dispatch context where the provider's tool is authority-hidden,
 /// so it is removed from the Tool Catalog (non-membership) and rejected before
 /// contract resolution.
-fn hidden_member_dispatch_context(provider: Arc<dyn ToolProvider>) -> ToolDispatchContext<'static> {
+fn authority_hidden_dispatch_context(
+    provider: Arc<dyn ToolProvider>,
+) -> ToolDispatchContext<'static> {
     let (event_tx, _event_rx) = mpsc::channel(8);
     let mut tool_access = crate::SessionToolAccess::default();
     tool_access.hidden_tools.insert("hidden".to_string());
@@ -1228,6 +1230,15 @@ fn hidden_member_dispatch_context(provider: Arc<dyn ToolProvider>) -> ToolDispat
         },
     )
     .expect("plugin session");
+    assert!(
+        plugins
+            .tool_registry()
+            .export_state()
+            .iter()
+            .find(|(_, entry)| entry.manifest().name == "hidden")
+            .is_some_and(|(_, entry)| entry.is_member()),
+        "authority hiding must not rewrite the registry's curation bit"
+    );
     let tools = plugins.tools();
     let tool_catalog = plugins
         .resolved_tool_catalog("session")
@@ -1840,7 +1851,7 @@ async fn dispatch_rejects_hidden_tool_before_contract_resolution() {
         executed: Arc::clone(&executed),
     });
     let outcome = dispatch_tool_call(
-        &hidden_member_dispatch_context(provider),
+        &authority_hidden_dispatch_context(provider),
         "hidden".to_string(),
         json!({ "value": "ok" }),
     )

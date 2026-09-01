@@ -623,7 +623,7 @@ impl crate::plugin::SessionPlugin for MemoryProbePlugin {
 }
 
 #[tokio::test]
-async fn forked_child_session_keeps_hidden_live_tool_non_executable_across_rebuild() {
+async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebuild() {
     let plugin_host = crate::PluginHost::new(vec![Arc::new(MemoryProbeFactory)]);
     let plugin_session = plugin_host.build_session("root").expect("plugins");
     let mut runtime = LashRuntime::from_embedded_state(

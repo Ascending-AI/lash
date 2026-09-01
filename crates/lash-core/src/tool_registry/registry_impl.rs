@@ -179,7 +179,7 @@ impl ToolRegistry {
     ) -> Result<Self, ReconfigureError> {
         let registry = if include_base_tools {
             self.refresh_sources()?;
-            self.fork_with_state(self.export_state())?
+            self.pin_current_surface()
         } else {
             Self::empty()
         };
@@ -190,11 +190,22 @@ impl ToolRegistry {
         Ok(registry)
     }
 
+    /// Admit each live source once, compose the session overlay, and freeze
+    /// the resulting surface for one model request.
+    pub(crate) fn pin_session_surface(
+        &self,
+        include_base_tools: bool,
+        context_providers: Vec<Arc<dyn ToolProvider>>,
+    ) -> Result<Self, ReconfigureError> {
+        let registry = self.compose_session_catalog(include_base_tools, context_providers)?;
+        Ok(registry.pin_current_surface())
+    }
+
     pub(crate) fn upsert_source(
         &self,
         source: Arc<dyn ToolSourceExecutor>,
     ) -> Result<u64, ReconfigureError> {
-        self.reconcile_source(source, SourceReconcilePolicy::RejectExternalConflicts)
+        self.reconcile_source(source)
     }
 
     pub(crate) fn remove_source_id(&self, source_id: &str) -> Result<u64, ReconfigureError> {
@@ -227,13 +238,51 @@ impl ToolRegistry {
         &self,
         source: Arc<dyn ToolSourceExecutor>,
     ) -> Result<u64, ReconfigureError> {
-        self.reconcile_source(source, SourceReconcilePolicy::OverlayReplacingConflicts)
+        let source_key = source.source_key();
+        let manifests = source
+            .advertised_tools()
+            .into_iter()
+            .map(|manifest| manifest_with_compact_contract(source.as_ref(), manifest))
+            .collect::<Vec<_>>();
+        validate_unique_manifests(&manifests)?;
+
+        let mut next_state = self.state.read_recover().clone();
+        let curated = next_state
+            .surface
+            .by_id
+            .iter()
+            .map(|(id, entry)| (id.clone(), entry.member))
+            .collect::<BTreeMap<_, _>>();
+        let previous = export_tool_state_entries(&next_state.surface);
+        for manifest in manifests {
+            let id = manifest.id.clone();
+            insert_advertised_entry(
+                &mut next_state.surface,
+                &source_key,
+                source.registration_kind(),
+                manifest,
+                Some(&source_key),
+            )?;
+            if let Some(member) = curated.get(&id)
+                && let Some(entry) = next_state.surface.get_mut(&id)
+            {
+                entry.member = *member;
+            }
+        }
+        next_state.surface.debug_assert_invariant();
+        if export_tool_state_entries(&next_state.surface) != previous {
+            next_state.generation = reconciled_generation(next_state.generation, true)?;
+        }
+
+        self.sources.write_recover().insert(source_key, source);
+        let generation = next_state.generation;
+        *self.state.write_recover() = next_state;
+        Ok(generation)
     }
 
     fn reconcile_source(
         &self,
         source: Arc<dyn ToolSourceExecutor>,
-        policy: SourceReconcilePolicy,
     ) -> Result<u64, ReconfigureError> {
         let source_key = source.source_key();
         let mut sources = self
@@ -251,13 +300,11 @@ impl ToolRegistry {
         }
         sources.insert(source_key.clone(), Arc::clone(&source));
         let snapshot = self.export_state();
-        let preferred_source_key = (policy == SourceReconcilePolicy::OverlayReplacingConflicts)
-            .then_some(&source_key);
         let reconciled = reconcile_tool_state_entries(
             snapshot.entries(),
             &sources,
             ReconcileMode::LiveSurface,
-            preferred_source_key,
+            None,
         )?;
 
         self.sources
@@ -300,6 +347,20 @@ impl ToolRegistry {
             state.generation = reconciled_generation(state.generation, true)?;
         }
         Ok(state.generation)
+    }
+
+    fn pin_current_surface(&self) -> Self {
+        let sources = self
+            .sources
+            .read_recover()
+            .iter()
+            .map(|(key, source)| (key.clone(), Arc::clone(source)))
+            .collect();
+        let state = self.state.read_recover().clone();
+        Self {
+            sources: Arc::new(RwLock::new(sources)),
+            state: Arc::new(RwLock::new(state)),
+        }
     }
 
     pub(crate) fn fork_with_state(&self, snapshot: ToolState) -> Result<Self, ReconfigureError> {

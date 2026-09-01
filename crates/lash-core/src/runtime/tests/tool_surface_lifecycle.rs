@@ -1136,6 +1136,72 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
     assert!(!names.contains(&curated.name.to_string()));
     assert!(!names.contains(&hidden.name.to_string()));
     assert_executes_by_id(&child, discovered.id).await;
+    drop(child);
+
+    manager
+        .set_tool_membership(&handle.session_id, &[hidden.name.to_string()], false)
+        .await
+        .expect("explicitly curate the authority-hidden tool out");
+    manager
+        .set_tool_membership(&handle.session_id, &[hidden.name.to_string()], true)
+        .await
+        .expect("explicitly restore host curation");
+    let child = child_handle.runtime.lock().await;
+    assert!(
+        child
+            .tool_state()
+            .expect("child state after explicit re-add")
+            .get(&crate::ToolId::from(hidden.id))
+            .expect("hidden child entry after explicit re-add")
+            .is_member(),
+        "authority policy must not silently undo set_tool_membership(true)"
+    );
+    assert!(
+        !catalog_names(&child).contains(&hidden.name.to_string()),
+        "authority still suppresses a host-curated member from the effective surface"
+    );
+}
+
+#[tokio::test]
+async fn broader_authority_fork_regains_parent_hidden_tool() {
+    let hidden = DynamicToolSpec::new(
+        "tool:broader_fork",
+        "broader_fork",
+        "hidden only from the parent",
+    );
+    let provider: Arc<dyn crate::ToolProvider> =
+        Arc::new(DynamicToolSurface::new(vec![hidden.clone()]));
+    let plugin_host = dynamic_plugin_host(provider);
+    let parent = build_hidden_session(plugin_host.as_ref(), "narrow-parent", hidden.name, None);
+    assert!(
+        parent
+            .tool_registry()
+            .export_state()
+            .get(&crate::ToolId::from(hidden.id))
+            .expect("parent hidden entry")
+            .is_member(),
+        "the parent's authority must not become inherited curation"
+    );
+
+    let child = parent
+        .fork_for_child_session(
+            "broader-child",
+            Some("narrow-parent".to_string()),
+            crate::plugin::SessionCreationConfig::default(),
+        )
+        .expect("fork with broader child authority");
+    let session = crate::Session::new(crate::RuntimeServices::new(child), "broader-child")
+        .await
+        .expect("broader child session");
+    let surface = session
+        .pin_tool_surface("broader-child", &crate::SessionToolAccess::default(), None)
+        .expect("broader child request surface");
+
+    assert!(
+        surface.tool_catalog().has_callable_tool(hidden.name),
+        "the child re-derives authority instead of inheriting the parent's hide"
+    );
+    assert!(surface.tools().resolve_manifest(hidden.name).is_some());
 }
 
 #[tokio::test]

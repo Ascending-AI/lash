@@ -136,7 +136,7 @@ impl ToolProviderSource {
     fn new(id: impl Into<String>, providers: Vec<Arc<dyn ToolProvider>>) -> Self {
         Self {
             id: id.into(),
-            tools: RwLock::new(ToolProviderIndex::from_providers(&providers)),
+            tools: RwLock::new(ToolProviderIndex::default()),
             providers,
         }
     }

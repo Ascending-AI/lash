@@ -187,9 +187,3 @@ pub struct ToolRegistry {
     sources: Arc<RwLock<BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>>>,
     state: Arc<RwLock<ToolRegistryState>>,
 }
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceReconcilePolicy {
-    RejectExternalConflicts,
-    OverlayReplacingConflicts,
-}
