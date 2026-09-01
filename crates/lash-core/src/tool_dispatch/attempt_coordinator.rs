@@ -339,7 +339,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
             .controller()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
-                    invocation,
+                    invocation.clone(),
                     crate::RuntimeEffectCommand::ToolAttempt {
                         call: call.clone(),
                         execution_grant: execution_grant.clone(),
@@ -417,6 +417,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                     return CoordinatedToolInvocation {
                         launch: match settle_terminal_attempt(
                             context,
+                            &invocation,
                             intent_drain_slot.take(),
                             child_trace_hook.as_ref(),
                             recorded_call_id.as_deref(),
@@ -445,6 +446,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                     return CoordinatedToolInvocation {
                         launch: match settle_terminal_attempt(
                             context,
+                            &invocation,
                             intent_drain_slot.take(),
                             child_trace_hook.as_ref(),
                             recorded_call_id.as_deref(),
@@ -510,6 +512,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
 /// when this body ends, on every path out of it.
 async fn settle_terminal_attempt(
     context: &ToolDispatchContext<'_>,
+    minting_emission: &RuntimeInvocation,
     intent_drain_slot: Option<IntentDrainGuard>,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
     recorded_call_id: Option<&str>,
@@ -520,9 +523,15 @@ async fn settle_terminal_attempt(
     if let Some(slot) = &intent_drain_slot {
         slot.begin_final_drain().await;
     }
-    let intent_outcomes =
-        super::execute_final_tool_intents(context, recorded_call_id, &intents, child_trace_hook)
-            .await?;
+    let mut intent_context = context.clone();
+    intent_context.parent_invocation = Some(minting_emission.clone());
+    let intent_outcomes = super::execute_final_tool_intents(
+        &intent_context,
+        recorded_call_id,
+        &intents,
+        child_trace_hook,
+    )
+    .await?;
     project_recorded_intent_outcomes(&mut record.output, &intent_outcomes);
     context.recorded_intent_outcomes.record(&intent_outcomes);
     // Discharges the drain slot, where both former bodies called

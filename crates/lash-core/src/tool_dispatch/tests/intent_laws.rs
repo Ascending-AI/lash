@@ -253,6 +253,81 @@ async fn public_coordinator_redrive_is_byte_stable_after_live_terminal_mutation(
 }
 
 #[tokio::test]
+async fn tool_intent_outcome_replay_is_scoped_to_its_minting_emission() {
+    let event_type = "intent.emission.recovered";
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let controller = Arc::new(IntentReplayController::new(None));
+    let mut first_emission = fixed_intent_dispatch_context(
+        Arc::clone(&controller),
+        Arc::clone(&registry),
+        recorded_event_intents(&[event_type]),
+        Arc::clone(&calls),
+    );
+    first_emission.parent_invocation = Some(intent_law_batch_parent("emission-turn-n"));
+
+    let refused = run_fixed_intent_attempt(&first_emission).await;
+    assert!(
+        matches!(
+            refused.intent_outcomes.as_slice(),
+            [crate::ToolIntentExecutionOutcome::Refused {
+                kind: crate::ToolIntentKind::EmitProcessEvent,
+                refusal: crate::ToolIntentRefusalReason::CommandFailed { .. },
+                ..
+            }]
+        ),
+        "the first emission must retain its terminal validation refusal: {:?}",
+        refused.intent_outcomes
+    );
+
+    register_intent_law_target(&registry, &[event_type]).await;
+    let mut later_emission = first_emission.clone();
+    later_emission.parent_invocation = Some(intent_law_batch_parent("emission-turn-n-plus-1"));
+
+    let recovered = run_fixed_intent_attempt(&later_emission).await;
+    assert!(
+        matches!(
+            recovered.intent_outcomes.as_slice(),
+            [crate::ToolIntentExecutionOutcome::Executed {
+                kind: crate::ToolIntentKind::EmitProcessEvent,
+                ..
+            }]
+        ),
+        "the later emission must reach validation instead of replaying the old refusal: {:?}",
+        recovered.intent_outcomes
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "distinct emissions execute two provider attempts"
+    );
+
+    let recovered_bytes = serde_json::to_vec(&recovered).expect("serialize recovered outcome");
+    let replayed = run_fixed_intent_attempt(&later_emission).await;
+    assert_eq!(
+        serde_json::to_vec(&replayed).expect("serialize replayed outcome"),
+        recovered_bytes,
+        "the same emission must replay its recorded outcome byte-for-byte"
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "same-emission replay must not execute another provider attempt"
+    );
+    assert_eq!(
+        registry
+            .events_after("intent-law-target", 0)
+            .await
+            .expect("read recovered target events")
+            .iter()
+            .filter(|event| event.event_type == event_type)
+            .count(),
+        1,
+        "same-emission replay must not duplicate the realized command"
+    );
+}
+
+#[tokio::test]
 async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_evidence() {
     let event_types = ["intent.refusal.first"];
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
@@ -431,12 +506,12 @@ async fn controller_abort_during_intent_drain_aborts_the_turn_batch() {
     );
 
     let error = Box::pin(execution.execute_prepared_tool_batch_launches(
-            batch,
-            intent_law_batch_parent("replacement-abort-parent"),
-            std::collections::HashMap::new(),
-        ))
-        .await
-        .expect_err("controller abort must escape the intent drain and abort the turn batch");
+        batch,
+        intent_law_batch_parent("replacement-abort-parent"),
+        std::collections::HashMap::new(),
+    ))
+    .await
+    .expect_err("controller abort must escape the intent drain and abort the turn batch");
 
     assert_eq!(error.code, crate::RuntimeErrorCode::WorkerReplacementAbort);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -647,14 +722,9 @@ async fn parent_end_policies_are_literal_and_redrive_stable() {
             })
             .collect(),
     );
-    let outcomes = execute_final_tool_intents(
-        &context,
-        Some("parent-policy-call"),
-        &intents,
-        None,
-    )
-    .await
-    .expect("parent-end intents execute");
+    let outcomes = execute_final_tool_intents(&context, Some("parent-policy-call"), &intents, None)
+        .await
+        .expect("parent-end intents execute");
     assert!(
         outcomes
             .iter()

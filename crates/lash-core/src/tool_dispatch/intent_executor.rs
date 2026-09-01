@@ -324,12 +324,17 @@ async fn execute_one(
             identity.replay_key.clone(),
         )
     });
-    parent.replay = Some(crate::RuntimeReplay {
-        key: identity.replay_key.clone(),
-        attribution: Some(crate::RuntimeReplayAttribution::ToolIntent(
-            identity.clone(),
-        )),
-    });
+    let attribution = Some(crate::RuntimeReplayAttribution::ToolIntent(
+        identity.clone(),
+    ));
+    if let Some(replay) = parent.replay.as_mut() {
+        replay.attribution = attribution;
+    } else {
+        parent.replay = Some(crate::RuntimeReplay {
+            key: identity.replay_key.clone(),
+            attribution,
+        });
+    }
     let scope = crate::ProcessOpScope::new(context.effect_controller.scoped())
         .with_parent_invocation(Some(parent))
         .with_agent_frame_id(Some(context.agent_frame_id.clone()));
