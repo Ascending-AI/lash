@@ -25,6 +25,39 @@ impl AttachmentOwnerKind {
             Self::Process => "process",
         }
     }
+
+    /// Parses the stable snake-case owner class persisted by attachment-manifest stores.
+    pub fn from_wire_str(value: &str) -> Option<Self> {
+        match value {
+            "turn" => Some(Self::Turn),
+            "process" => Some(Self::Process),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod attachment_owner_kind_tests {
+    use super::AttachmentOwnerKind;
+
+    #[test]
+    fn attachment_owner_kind_wire_values_match_the_persisted_sql_encoding() {
+        assert_eq!(AttachmentOwnerKind::Turn.as_str(), "turn");
+        assert_eq!(AttachmentOwnerKind::Process.as_str(), "process");
+    }
+
+    #[test]
+    fn attachment_owner_kind_wire_decoder_refuses_unknown_values() {
+        assert_eq!(
+            AttachmentOwnerKind::from_wire_str("turn"),
+            Some(AttachmentOwnerKind::Turn)
+        );
+        assert_eq!(
+            AttachmentOwnerKind::from_wire_str("process"),
+            Some(AttachmentOwnerKind::Process)
+        );
+        assert_eq!(AttachmentOwnerKind::from_wire_str("unknown"), None);
+    }
 }
 
 /// A pending attachment write recorded *before* the bytes hit the

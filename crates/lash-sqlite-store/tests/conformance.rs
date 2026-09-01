@@ -2509,6 +2509,8 @@ async fn sqlite_sleep_replay_returns_after_recorded_due_time() {
     assert!(matches!(replayed, RuntimeEffectOutcome::Sleep));
 }
 
+#[path = "conformance/attachment_owner_kind.rs"]
+mod attachment_owner_kind;
 #[path = "conformance/process_retention.rs"]
 mod process_retention;
 
