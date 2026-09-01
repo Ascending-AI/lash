@@ -107,6 +107,8 @@ lash::EmbedError::RemoteProtocol
 lash::EmbedError::RemoteProtocol::0
 lash::EmbedError::Runtime
 lash::EmbedError::Runtime::0
+lash::EmbedError::RuntimeHostConfigConflict
+lash::EmbedError::RuntimeHostConfigConflict::field
 lash::EmbedError::SelectedQueuedWorkDrainRefused
 lash::EmbedError::SelectedQueuedWorkDrainRefused::cause
 lash::EmbedError::Session
@@ -3966,6 +3968,8 @@ lash::prelude::EmbedError::RemoteProtocol
 lash::prelude::EmbedError::RemoteProtocol::0
 lash::prelude::EmbedError::Runtime
 lash::prelude::EmbedError::Runtime::0
+lash::prelude::EmbedError::RuntimeHostConfigConflict
+lash::prelude::EmbedError::RuntimeHostConfigConflict::field
 lash::prelude::EmbedError::SelectedQueuedWorkDrainRefused
 lash::prelude::EmbedError::SelectedQueuedWorkDrainRefused::cause
 lash::prelude::EmbedError::Session

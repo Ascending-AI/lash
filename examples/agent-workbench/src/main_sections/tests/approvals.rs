@@ -28,8 +28,25 @@ async fn approval_test_core(
         .with_lashlang_abilities(workbench_lashlang_abilities()),
         artifact_store,
     );
+    let provider_id = provider.kind().to_string();
+    let mut runtime_host_config = lash::durability::RuntimeHostConfig::new(
+        effect_host,
+        Arc::new(lash::persistence::FileAttachmentStore::new(
+            data_dir.join("attachments"),
+        )),
+        process_env_store,
+        lash::CommitBudget::bounded(1024 * 1024, 512),
+        lash::QueuedWorkBatchingConfig::new(1),
+    );
+    runtime_host_config.providers.provider_resolver = Arc::new(
+        lash_core::facade_support::SingleProviderResolver::new(provider),
+    );
     LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-        .provider(provider)
+        .session_spec(
+            lash::SessionSpec::new()
+                .provider_id(provider_id)
+                .turn_budget(lash::TurnBudget::Unbounded),
+        )
         .model(test_model())
         .store_factory(Arc::new(
             lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
@@ -40,15 +57,7 @@ async fn approval_test_core(
         .trigger_store(trigger_store)
         .without_queued_work()
         .advanced()
-        .runtime_host_config(lash::durability::RuntimeHostConfig::new(
-            effect_host,
-            Arc::new(lash::persistence::FileAttachmentStore::new(
-                data_dir.join("attachments"),
-            )),
-            process_env_store,
-            lash::CommitBudget::bounded(1024 * 1024, 512),
-            lash::QueuedWorkBatchingConfig::new(1),
-        ))
+        .runtime_host_config(runtime_host_config)
         .build(crate::test_core_owner())
         .expect("build approval test core")
 }

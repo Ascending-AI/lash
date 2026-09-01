@@ -26,6 +26,7 @@ croner = { workspace = true }
 dotenvy = "0.15"
 futures-util = { workspace = true }
 lash = { workspace = true, features = ["rlm"] }
+lash-core = { workspace = true }
 lash-http-transport = { workspace = true }
 lashlang = { workspace = true }
 lash-plugin-process-controls = { workspace = true, features = ["lashlang"] }
@@ -53,7 +54,6 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-lash-core = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
 lash-llm-tools = { workspace = true }
 lash = { workspace = true, features = ["rlm", "testing"] }

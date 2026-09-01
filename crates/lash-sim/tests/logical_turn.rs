@@ -178,18 +178,26 @@ fn standard_core_with_attachment_policy(
     trace: Arc<RecordingTraceSink>,
     attachment_source_policy: Arc<dyn lash_core::test_support::AttachmentSourcePolicy>,
 ) -> lash::LashCore {
+    let provider_id = provider.kind().to_string();
     let mut runtime_host_config = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
     .with_attachment_source_policy(attachment_source_policy);
+    runtime_host_config.providers.provider_resolver = Arc::new(
+        lash_core::facade_support::SingleProviderResolver::new(provider),
+    );
     runtime_host_config.tracing.trace_sink = Some(trace);
 
     lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .store_factory(Arc::new(
             lash::persistence::InMemorySessionStoreFactory::new(),
         ))
-        .provider(provider)
+        .session_spec(
+            lash::SessionSpec::new()
+                .provider_id(provider_id)
+                .turn_budget(lash::TurnBudget::Unbounded),
+        )
         .model(model())
         .tools(tools)
         .without_queued_work()
@@ -226,6 +234,39 @@ fn whole_runtime_host_config_rejects_queued_work_batching_override() {
         error,
         lash::EmbedError::RuntimeHostConfigConflict {
             field: "queued_work_batching"
+        }
+    ));
+}
+
+#[test]
+fn whole_runtime_host_config_rejects_provider_resolver_override() {
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("logical-turn-provider-resolver-conflict")
+        .complete(|_| async { Ok(text_response("unused")) })
+        .build()
+        .into_handle();
+    let result = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .provider(provider)
+        .model(model())
+        .without_queued_work()
+        .advanced()
+        .runtime_host_config(lash_core::facade_support::RuntimeHostConfig::in_memory(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        ))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "logical-turn-provider-resolver-conflict-test",
+            "logical-turn-provider-resolver-conflict-test-boot",
+        ));
+
+    let error = match result {
+        Ok(_) => panic!("duplicate provider resolver configuration must fail"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error,
+        lash::EmbedError::RuntimeHostConfigConflict {
+            field: "provider_resolver"
         }
     ));
 }

@@ -57,6 +57,7 @@ impl LashCoreBuilder {
             (self.termination.is_some(), "termination"),
             (self.lease_timings.is_some(), "lease_timings"),
             (self.clock.is_some(), "clock"),
+            (self.provider.is_some(), "provider_resolver"),
             (
                 self.process_tool_visibility_filter.is_some(),
                 "process_tool_visibility_filter",
@@ -117,6 +118,10 @@ impl LashCoreBuilder {
         }
         if let Some(clock) = self.clock.take() {
             core.clock = clock;
+        }
+        if let Some(provider) = self.provider.clone() {
+            core.providers.provider_resolver =
+                Arc::new(facade_support::SingleProviderResolver::new(provider));
         }
         if let Some(filter) = self.process_tool_visibility_filter.take() {
             core.control.process_tool_visibility_filter = Some(filter);
