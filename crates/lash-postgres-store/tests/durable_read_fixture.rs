@@ -149,6 +149,9 @@ async fn regenerate_postgres_durable_fixture() {
     drop_fixture_schema(&database_url).await;
 }
 
+/// At current head these catalog ALTERs are effectively a no-op: the remaining
+/// component-68 difference is dropped owner-liveness columns already reflected
+/// in the committed fixture.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "refreshes only the refusal fixture catalog; preserves its component-v1 checkpoint"]
 async fn regenerate_postgres_prior_component_fixture_catalog() {
