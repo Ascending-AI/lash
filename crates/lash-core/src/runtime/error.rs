@@ -31,6 +31,12 @@ pub enum RuntimeErrorCode {
     /// either drives the row or finds it settled and replays the original
     /// commit's receipt rather than duplicating it (ADR 0069 §6).
     TurnInputSettlementSuperseded,
+    /// A replayed acceptance was already settled, but the durable application
+    /// records needed to reconstruct its original turn-input set were missing,
+    /// unreadable, or inconsistent. Retrying unchanged cannot repair the
+    /// history; an operator must restore the application records before
+    /// redriving the same turn.
+    TurnInputRedriveSetUnavailable,
     /// The store aborted a commit before publication because transactional
     /// write authority was contended. Retrying the same operation unchanged is
     /// safe; reloading or rebasing is not required.
@@ -471,6 +477,7 @@ impl RuntimeErrorCode {
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
             Self::SessionExecutionLaneBusy => "session_execution_lane_busy",
             Self::TurnInputSettlementSuperseded => "turn_input_settlement_superseded",
+            Self::TurnInputRedriveSetUnavailable => "turn_input_redrive_set_unavailable",
             Self::StoreCommitContended => "store_commit_contended",
             Self::StoreCommitNodeBudgetExceeded => "store_commit_node_budget_exceeded",
             Self::StoreCommitByteBudgetExceeded => "store_commit_byte_budget_exceeded",
@@ -711,6 +718,7 @@ impl RuntimeErrorCode {
                 | Self::EffectPanicked
                 | Self::MissingExecutionScopeId
                 | Self::ExecutionScopeTurnIdMismatch
+                | Self::TurnInputRedriveSetUnavailable
                 | Self::QueuedWorkRowExceedsContextWindow
                 | Self::StoreCommitNodeBudgetExceeded
                 | Self::StoreCommitByteBudgetExceeded
@@ -834,6 +842,7 @@ impl RuntimeErrorCode {
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
             "session_execution_lane_busy" => Self::SessionExecutionLaneBusy,
             "turn_input_settlement_superseded" => Self::TurnInputSettlementSuperseded,
+            "turn_input_redrive_set_unavailable" => Self::TurnInputRedriveSetUnavailable,
             "store_commit_contended" => Self::StoreCommitContended,
             "store_commit_node_budget_exceeded" => Self::StoreCommitNodeBudgetExceeded,
             "store_commit_byte_budget_exceeded" => Self::StoreCommitByteBudgetExceeded,
@@ -1240,6 +1249,7 @@ mod tests {
             | RuntimeErrorCode::EffectPanicked
             | RuntimeErrorCode::MissingExecutionScopeId
             | RuntimeErrorCode::ExecutionScopeTurnIdMismatch
+            | RuntimeErrorCode::TurnInputRedriveSetUnavailable
             | RuntimeErrorCode::QueuedWorkRowExceedsContextWindow
             | RuntimeErrorCode::StoreCommitNodeBudgetExceeded
             | RuntimeErrorCode::StoreCommitByteBudgetExceeded
@@ -1380,6 +1390,7 @@ mod tests {
             RuntimeErrorCode::SessionExecutionLeaseLost,
             RuntimeErrorCode::SessionExecutionLaneBusy,
             RuntimeErrorCode::TurnInputSettlementSuperseded,
+            RuntimeErrorCode::TurnInputRedriveSetUnavailable,
             RuntimeErrorCode::StoreCommitContended,
             RuntimeErrorCode::StoreCommitNodeBudgetExceeded,
             RuntimeErrorCode::StoreCommitByteBudgetExceeded,

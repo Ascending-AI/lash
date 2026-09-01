@@ -7983,6 +7983,7 @@ lash::runtime::RuntimeErrorCode::TurnControlPeekOutcome
 lash::runtime::RuntimeErrorCode::TurnControlUnknownOrRevoked
 lash::runtime::RuntimeErrorCode::TurnControlWaitCancelled
 lash::runtime::RuntimeErrorCode::TurnControlWaitTimeout
+lash::runtime::RuntimeErrorCode::TurnInputRedriveSetUnavailable
 lash::runtime::RuntimeErrorCode::TurnInputSettlementSuperseded
 lash::runtime::RuntimeErrorCode::TurnStreamJoin
 lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout
@@ -8361,6 +8362,7 @@ lash::testing::checkpoint_observer::CheckpointUsageWrite::input_tokens
 lash::testing::checkpoint_observer::CheckpointUsageWrite::output_tokens
 lash::testing::checkpoint_observer::CheckpointUsageWrite::reasoning_output_tokens
 lash::testing::checkpoint_observer::CheckpointWriteCollector
+lash::testing::checkpoint_observer::CheckpointWriteCollector::committed_attachment_ids
 lash::testing::checkpoint_observer::CheckpointWriteCollector::events
 lash::testing::checkpoint_observer::CheckpointWriteCollector::push
 lash::testing::checkpoint_observer::CheckpointWriteCollector::runtime_commit_budget

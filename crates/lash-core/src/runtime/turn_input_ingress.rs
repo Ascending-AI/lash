@@ -527,6 +527,14 @@ impl UnclaimedTurnInputs {
         turn_id: &crate::TurnId,
         committed_message_id: &str,
     ) {
+        if !self.applications.is_empty() {
+            debug_assert!(self.applications.iter().all(|application| {
+                application.turn_id == *turn_id
+                    && application.committed_message_id == committed_message_id
+                    && application.checkpoint.is_none()
+            }));
+            return;
+        }
         self.applications = initial_turn_applications(&self.inputs, turn_id, committed_message_id);
     }
 }
