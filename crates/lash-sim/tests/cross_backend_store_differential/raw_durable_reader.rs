@@ -1,4 +1,5 @@
 use super::*;
+use sqlx::Row as _;
 
 type PendingTurnInputClaimRow = (String, i64, String, Option<String>, i64, Option<i64>);
 
@@ -295,11 +296,13 @@ impl RawDurableReader {
                         },
                     )
                     .collect();
-                let usage_rows: Vec<String> = sqlx::query_scalar(
-                    "SELECT entry_json
-                     FROM lash_usage_deltas
-                     WHERE session_id = $1
-                     ORDER BY seq ASC",
+                let usage_rows = sqlx::query(
+                    "SELECT source, model, input_tokens, output_tokens,
+                                cache_read_input_tokens, cache_write_input_tokens,
+                                reasoning_output_tokens
+                         FROM lash_usage_deltas
+                         WHERE session_id = $1
+                         ORDER BY seq ASC",
                 )
                 .bind(session_id)
                 .fetch_all(pool)
@@ -307,10 +310,18 @@ impl RawDurableReader {
                 .expect("read Postgres usage deltas");
                 let usage_deltas = usage_rows
                     .into_iter()
-                    .map(|entry_json| {
-                        usage_delta_observation(
-                            serde_json::from_str(&entry_json).expect("decode Postgres usage delta"),
-                        )
+                    .map(|row| {
+                        usage_delta_observation(TokenLedgerEntry {
+                            source: row.get(0),
+                            model: row.get(1),
+                            usage: TokenUsage {
+                                input_tokens: row.get(2),
+                                output_tokens: row.get(3),
+                                cache_read_input_tokens: row.get(4),
+                                cache_write_input_tokens: row.get(5),
+                                reasoning_output_tokens: row.get(6),
+                            },
+                        })
                     })
                     .collect();
                 let session_meta = store
