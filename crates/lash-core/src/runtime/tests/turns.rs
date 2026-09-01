@@ -2224,6 +2224,7 @@ fn journal_replay_host(
 struct JournalRedriveStore {
     inner: Arc<RecordingStore>,
     application_history_available: bool,
+    foreign_checkpoint_application: Option<(String, crate::TurnId)>,
 }
 
 #[async_trait::async_trait]
@@ -2245,11 +2246,20 @@ impl crate::store::RuntimePersistenceDecorator for JournalRedriveStore {
         session_id: &str,
     ) -> Result<Vec<crate::TurnInputApplication>, crate::StoreError> {
         if self.application_history_available {
-            return crate::store::TurnInputStore::list_turn_input_applications(
+            let mut applications = crate::store::TurnInputStore::list_turn_input_applications(
                 self.inner.as_ref(),
                 session_id,
             )
-            .await;
+            .await?;
+            if let Some((input_id, turn_id)) = &self.foreign_checkpoint_application {
+                let application = applications
+                    .iter_mut()
+                    .find(|application| application.input_id == *input_id)
+                    .expect("foreign checkpoint application input is retained");
+                application.turn_id = turn_id.clone();
+                application.checkpoint = Some(crate::CheckpointKind::BeforeCompletion);
+            }
+            return Ok(applications);
         }
         Err(crate::StoreError::Backend(
             "simulated unavailable turn-input application history".to_string(),
@@ -3807,6 +3817,7 @@ async fn checkpoint_injected_turn_redrive_replays_the_original_commit_identity()
     let replay_store: Arc<dyn crate::RuntimePersistence> = Arc::new(JournalRedriveStore {
         inner: Arc::clone(&store),
         application_history_available: true,
+        foreign_checkpoint_application: None,
     });
     let replayed = Box::pin(redrive_checkpoint_injected_turn(
         replay_store,
@@ -3846,6 +3857,7 @@ async fn checkpoint_injected_turn_redrive_refuses_when_application_history_is_un
     let unavailable: Arc<dyn crate::RuntimePersistence> = Arc::new(JournalRedriveStore {
         inner: Arc::clone(&store),
         application_history_available: false,
+        foreign_checkpoint_application: None,
     });
 
     let error = Box::pin(redrive_checkpoint_injected_turn(
@@ -3871,6 +3883,40 @@ async fn checkpoint_injected_turn_redrive_refuses_when_application_history_is_un
             .message
             .contains("restore turn-input application history, then redrive the same turn"),
         "the refusal must name the operator recovery step: {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn journaled_acceptance_applied_by_a_foreign_turn_refuses_before_commit() {
+    let turn_id = "checkpoint-injected-redrive-foreign-application";
+    let store = Arc::new(RecordingStore::default());
+    let controller: Arc<dyn crate::RuntimeEffectController> =
+        Arc::new(JournalReplayEffectController::default());
+    let (input, acceptance) = commit_checkpoint_injected_turn_for_redrive(
+        Arc::clone(&store),
+        Arc::clone(&controller),
+        turn_id,
+    )
+    .await;
+    let foreign: Arc<dyn crate::RuntimePersistence> = Arc::new(JournalRedriveStore {
+        inner: Arc::clone(&store),
+        application_history_available: true,
+        foreign_checkpoint_application: Some((
+            acceptance.input_id,
+            crate::TurnId::from("foreign-turn"),
+        )),
+    });
+
+    let error = Box::pin(redrive_checkpoint_injected_turn(
+        foreign, controller, turn_id, input,
+    ))
+    .await
+    .expect_err("a foreign checkpoint application must stop before commit");
+
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::TurnInputRedriveSetUnavailable,
+        "a journaled acceptance applied at another turn's checkpoint must be refused before commit, not surface StoreCommitFailed"
     );
 }
 

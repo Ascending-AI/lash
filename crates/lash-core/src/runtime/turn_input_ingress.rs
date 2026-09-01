@@ -526,16 +526,27 @@ impl UnclaimedTurnInputs {
         &mut self,
         turn_id: &crate::TurnId,
         committed_message_id: &str,
-    ) {
+    ) -> Result<(), crate::RuntimeError> {
         if !self.applications.is_empty() {
-            debug_assert!(self.applications.iter().all(|application| {
+            if !self.applications.iter().all(|application| {
                 application.turn_id == *turn_id
                     && application.committed_message_id == committed_message_id
                     && application.checkpoint.is_none()
-            }));
-            return;
+            }) {
+                return Err(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::TurnInputRedriveSetUnavailable,
+                    format!(
+                        "cannot apply retained turn-input redrive set for session `{}` as the \
+                         initial group of turn `{turn_id}`: its durable applications belong to \
+                         another turn or checkpoint",
+                        self.session_id
+                    ),
+                ));
+            }
+            return Ok(());
         }
         self.applications = initial_turn_applications(&self.inputs, turn_id, committed_message_id);
+        Ok(())
     }
 }
 
@@ -603,13 +614,14 @@ impl TurnInputDrive {
         &mut self,
         turn_id: &crate::TurnId,
         committed_message_id: &str,
-    ) {
+    ) -> Result<(), crate::RuntimeError> {
         match self {
             Self::Claimed(claim) => {
                 claim.record_initial_turn_application(turn_id, committed_message_id);
+                Ok(())
             }
             Self::Unclaimed(unclaimed) => {
-                unclaimed.record_initial_turn_application(turn_id, committed_message_id);
+                unclaimed.record_initial_turn_application(turn_id, committed_message_id)
             }
         }
     }

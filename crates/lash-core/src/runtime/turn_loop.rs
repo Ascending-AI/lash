@@ -3365,7 +3365,8 @@ impl LashRuntime {
         }
         let mut initial_turn_input_applications = Vec::new();
         for claim in &mut turn_input_claims {
-            claim.record_initial_turn_application(&crate::TurnId::from(&trace_turn_id), &user_id);
+            claim
+                .record_initial_turn_application(&crate::TurnId::from(&trace_turn_id), &user_id)?;
             initial_turn_input_applications.extend(claim.applications().to_vec());
         }
         if !initial_turn_input_applications.is_empty() {
