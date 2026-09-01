@@ -853,7 +853,8 @@ pub struct LashCoreBuilder {
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     native_substrate: NativeSubstrateConfig,
     trigger_store: Option<Arc<dyn lash_core::TriggerStore>>,
-    // Benign core overrides applied on top of the resolved core.
+    // Core fields applied while constructing a config from individual builder
+    // setters. They conflict with a whole-config override when duplicated.
     prompt: Option<PromptLayer>,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_level: Option<lash_trace::TraceLevel>,
@@ -1189,16 +1190,12 @@ impl LashCoreBuilder {
         };
         let policy = self.session_spec.resolve_against(&base_policy);
 
-        let mut core = self.resolve_runtime_host_config()?;
+        let core = self.resolve_runtime_host_config()?;
         let process_event_sink = self.process_event_sink.clone();
         let process_work_source = self
             .process_work_source
             .clone()
             .resolve(Arc::clone(&core.clock), process_event_sink.clone());
-        if let Some(provider) = self.provider.clone() {
-            core.providers.provider_resolver =
-                Arc::new(facade_support::SingleProviderResolver::new(provider));
-        }
         let plugin_factories = if let Some(plugin_host) = self.plugin_host {
             plugin_host.factories().to_vec()
         } else {

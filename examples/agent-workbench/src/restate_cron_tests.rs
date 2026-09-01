@@ -830,7 +830,7 @@ struct ContendedRuntimePersistence {
 }
 
 #[async_trait::async_trait]
-impl lash_test_internals::store::RuntimePersistenceDecorator for ContendedRuntimePersistence {
+impl lash::persistence::RuntimePersistenceDecorator for ContendedRuntimePersistence {
     fn inner(&self) -> &(dyn lash::persistence::RuntimePersistence + '_) {
         self.inner.as_ref()
     }

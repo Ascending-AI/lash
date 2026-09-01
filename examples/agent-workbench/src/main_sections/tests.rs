@@ -1332,24 +1332,29 @@ finish initial
                 .with_lashlang_abilities(workbench_lashlang_abilities()),
             artifact_store_for_core,
         );
+        let runtime_host_config = lash::durability::RuntimeHostConfig::new(
+            Arc::new(lash::durability::NativeEffectHost::default()),
+            Arc::new(lash::persistence::FileAttachmentStore::new(
+                data_dir.join("attachments"),
+            )),
+            process_env_store,
+            lash::CommitBudget::bounded(1024 * 1024, 512),
+            lash::QueuedWorkBatchingConfig::new(1),
+        );
         let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .with_native_queued_work()
             .provider(provider)
+            .session_spec(
+                lash::SessionSpec::new()
+                    .turn_budget(lash::TurnBudget::Unbounded),
+            )
             .model(model)
             .store_factory(Arc::clone(&core_store_factory))
             .plugin(Arc::new(WorkbenchPluginFactory::new("")))
             .process_registry(Arc::clone(&process_registry))
             .trigger_store(trigger_store)
             .advanced()
-            .runtime_host_config(lash::durability::RuntimeHostConfig::new(
-                Arc::new(lash::durability::NativeEffectHost::default()),
-                Arc::new(lash::persistence::FileAttachmentStore::new(
-                    data_dir.join("attachments"),
-                )),
-                process_env_store,
-                lash::CommitBudget::bounded(1024 * 1024, 512),
-                lash::QueuedWorkBatchingConfig::new(1),
-            ))
+            .runtime_host_config(runtime_host_config)
             .build(crate::test_core_owner())
             .expect("build core");
         let process_observer = core
@@ -2331,22 +2336,27 @@ finish initial
                 .with_lashlang_abilities(workbench_lashlang_abilities()),
             artifact_store,
         );
+        let runtime_host_config = lash::durability::RuntimeHostConfig::new(
+            Arc::new(lash::durability::NativeEffectHost::default()),
+            attachment_store,
+            process_env_store,
+            lash::CommitBudget::bounded(1024 * 1024, 512),
+            lash::QueuedWorkBatchingConfig::new(1),
+        );
         LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .with_native_queued_work()
             .provider(provider)
+            .session_spec(
+                lash::SessionSpec::new()
+                    .turn_budget(lash::TurnBudget::Unbounded),
+            )
             .model(model)
             .store_factory(session_store_factory)
             .plugin(Arc::new(WorkbenchPluginFactory::new("")))
             .process_registry(process_registry)
             .trigger_store(trigger_store)
             .advanced()
-            .runtime_host_config(lash::durability::RuntimeHostConfig::new(
-                Arc::new(lash::durability::NativeEffectHost::default()),
-                attachment_store,
-                process_env_store,
-                lash::CommitBudget::bounded(1024 * 1024, 512),
-                lash::QueuedWorkBatchingConfig::new(1),
-            ))
+            .runtime_host_config(runtime_host_config)
             .build(crate::test_core_owner())
             .expect("build core")
     }

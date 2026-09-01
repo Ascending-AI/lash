@@ -203,13 +203,35 @@ async fn wait_for_terminal(
     .await
 }
 
+fn process_runtime_host_config(
+    process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
+    provider: ProviderHandle,
+) -> lash_core::facade_support::RuntimeHostConfig {
+    let mut config = lash_core::facade_support::RuntimeHostConfig::new(
+        Arc::new(
+            lash_core::facade_support::NativeEffectHost::default()
+                .allow_process_lifetime_completion_keys(),
+        ),
+        Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+        process_env_store,
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    );
+    config.providers.provider_resolver = Arc::new(
+        lash_core::facade_support::SingleProviderResolver::new(provider),
+    );
+    config
+}
+
 fn process_test_core(
     artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore>,
     trigger_store: Arc<dyn lash_core::TriggerStore>,
     registry: Arc<dyn lash_core::ProcessRegistry>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
 ) -> Result<LashCore> {
-    explicit_ephemeral_facets(LashCore::rlm_builder(
+    let provider = mock_provider();
+    let provider_id = provider.kind().to_string();
+    LashCore::rlm_builder(
         crate::TurnBudget::Unbounded,
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -219,23 +241,21 @@ fn process_test_core(
                 .build(),
             artifact_store,
         ),
-    ))
-    .provider(mock_provider())
+    )
+    .session_spec(
+        crate::SessionSpec::new()
+            .provider_id(provider_id)
+            .turn_budget(crate::TurnBudget::Unbounded),
+    )
     .model(mock_model_spec())
     .store_factory(Arc::new(
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
     .trigger_store(trigger_store)
     .process_registry(registry)
+    .without_queued_work()
     .advanced()
-    .runtime_host_config({
-        let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-        );
-        config.durability.process_env_store = process_env_store;
-        config
-    })
+    .runtime_host_config(process_runtime_host_config(process_env_store, provider))
     .build(crate::testing::runtime_lease_owner())
 }
 
@@ -1205,7 +1225,9 @@ fn process_test_core_with_sink(
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     sink: Arc<dyn lash_core::facade_support::ProcessEventSink>,
 ) -> Result<LashCore> {
-    explicit_ephemeral_facets(LashCore::rlm_builder(
+    let provider = mock_provider();
+    let provider_id = provider.kind().to_string();
+    LashCore::rlm_builder(
         crate::TurnBudget::Unbounded,
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -1215,8 +1237,12 @@ fn process_test_core_with_sink(
                 .build(),
             artifact_store,
         ),
-    ))
-    .provider(mock_provider())
+    )
+    .session_spec(
+        crate::SessionSpec::new()
+            .provider_id(provider_id)
+            .turn_budget(crate::TurnBudget::Unbounded),
+    )
     .model(mock_model_spec())
     .store_factory(Arc::new(
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
@@ -1224,15 +1250,9 @@ fn process_test_core_with_sink(
     .trigger_store(trigger_store)
     .process_registry(registry)
     .process_event_sink(sink)
+    .without_queued_work()
     .advanced()
-    .runtime_host_config({
-        let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-        );
-        config.durability.process_env_store = process_env_store;
-        config
-    })
+    .runtime_host_config(process_runtime_host_config(process_env_store, provider))
     .build(crate::testing::runtime_lease_owner())
 }
 

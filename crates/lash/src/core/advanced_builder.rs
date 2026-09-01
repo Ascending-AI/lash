@@ -9,6 +9,9 @@ pub struct AdvancedLashCoreBuilder {
 
 impl AdvancedLashCoreBuilder {
     /// Configures the runtime host config and returns the updated builder.
+    ///
+    /// Fields also configured through the regular builder are rejected by
+    /// [`LashCoreBuilder::build`]; configure each host-config field once.
     pub fn runtime_host_config(mut self, core: facade_support::RuntimeHostConfig) -> Self {
         self.builder.runtime_host_config = Some(core);
         self
