@@ -186,6 +186,26 @@ rejection_test!(
     "const s = 'a,b'; s.notAMethod(',');",
     Code::MethodUnsupported
 );
+
+#[test]
+fn shadowed_module_root_names_the_shadowing_binding() {
+    let shadowed = lash_typescript::validate("const text = {}; text.sha256({});")
+        .expect_err("a bound module root should explain the shadowing");
+    assert_eq!(shadowed.code, Code::MethodUnsupported);
+    assert_eq!(
+        shadowed.message,
+        "local binding `text` shadows module `text`; rename the binding or call the module before binding"
+    );
+
+    let ordinary = lash_typescript::validate("const xs = [['a']]; xs[0].notAMethod();")
+        .expect_err("a non-module-shaped receiver should keep the method diagnostic");
+    assert_eq!(ordinary.code, Code::MethodUnsupported);
+    assert_eq!(
+        ordinary.message,
+        "method `notAMethod` is not in the TypeScript runtime surface"
+    );
+}
+
 rejection_test!(
     rejects_unknown_method_on_chained_receiver,
     "'abc'.repeat(2).notAMethod(10, 'x');",

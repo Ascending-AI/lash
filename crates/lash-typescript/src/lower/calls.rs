@@ -684,9 +684,13 @@ impl Lowerer {
                 "random",
             ))));
         }
-        let receiver_is_module_authority = module_path(object)
-            .and_then(|path| path.first().cloned())
-            .is_some_and(|root| !self.has_binding(&root) && !is_ecma_global_namespace(&root));
+        let module_root = module_path(object).and_then(|path| path.first().cloned());
+        let receiver_is_module_authority = module_root
+            .as_ref()
+            .is_some_and(|root| !self.has_binding(root) && !is_ecma_global_namespace(root));
+        let receiver_shadows_module_authority = module_root
+            .as_deref()
+            .filter(|root| self.has_binding(root) && !is_ecma_global_namespace(root));
         if !receiver_is_module_authority
             && let Some(lowered) = self.lower_regexp_method(object, method, args)?
         {
@@ -1006,13 +1010,20 @@ impl Lowerer {
             || has_literal_stdlib_receiver(object)
             || (!receiver_is_module_authority && !is_instance_stdlib_method(method))
         {
-            let name = match ecma_owner {
-                Some(owner) => format!("{owner}.{method}"),
-                None => method.to_string(),
+            let message = if let Some(root) = receiver_shadows_module_authority {
+                format!(
+                    "local binding `{root}` shadows module `{root}`; rename the binding or call the module before binding"
+                )
+            } else {
+                let name = match ecma_owner {
+                    Some(owner) => format!("{owner}.{method}"),
+                    None => method.to_string(),
+                };
+                format!("method `{name}` is not in the TypeScript runtime surface")
             };
             return Err(Diagnostic::refusal(
                 DiagnosticCode::MethodUnsupported,
-                format!("method `{name}` is not in the TypeScript runtime surface"),
+                message,
                 None,
             ));
         }
