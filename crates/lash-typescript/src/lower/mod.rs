@@ -45,8 +45,9 @@ pub(crate) fn accepted_instance_methods() -> &'static [&'static str] {
 pub(crate) const GENERATED_BINDING_PREFIX: &str = "__typescript_";
 
 pub(crate) fn lower(program: &adapter::Program) -> Result<LashProgram, Diagnostic> {
-    lower_with_ambient(
+    lower_with_context(
         program,
+        &std::collections::BTreeSet::new(),
         &std::collections::BTreeSet::new(),
         &std::collections::BTreeSet::new(),
     )
@@ -77,8 +78,23 @@ pub(crate) fn lower_with_ambient(
     ambient: &std::collections::BTreeSet<String>,
     process_handles: &std::collections::BTreeSet<String>,
 ) -> Result<LashProgram, Diagnostic> {
+    lower_with_context(
+        program,
+        ambient,
+        process_handles,
+        &std::collections::BTreeSet::new(),
+    )
+}
+
+pub(crate) fn lower_with_context(
+    program: &adapter::Program,
+    ambient: &std::collections::BTreeSet<String>,
+    process_handles: &std::collections::BTreeSet<String>,
+    module_authority_roots: &std::collections::BTreeSet<String>,
+) -> Result<LashProgram, Diagnostic> {
     let mut lowerer = Lowerer {
         root_scope_depth: 2,
+        module_authority_roots: module_authority_roots.clone(),
         ..Lowerer::default()
     };
     let mut ambient_scope = Scope::default();
@@ -169,6 +185,7 @@ struct Lowerer {
     process_depth: usize,
     declarations: Vec<Declaration>,
     intrinsic_global_slots: BTreeSet<String>,
+    module_authority_roots: BTreeSet<String>,
     allow_uninitialized_declaration_capture: bool,
 }
 

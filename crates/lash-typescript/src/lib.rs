@@ -109,10 +109,20 @@ pub fn link(
     source: &str,
     host: &lashlang::LashlangHostEnvironment,
 ) -> Result<lashlang::LinkedModule, Diagnostic> {
-    // The host environment already carries the session's live globals, so
-    // linking a cell reads them from the same place the linker will.
-    let program =
-        parse_with_globals_and_process_handles(source, &host.globals, &host.process_handles)?;
+    // The host environment already carries the session globals and module
+    // catalog, so lowering reads them from the same surface the linker will.
+    let normalized = adapter::parse(source)?;
+    let module_authority_roots = host
+        .resources
+        .module_instances()
+        .filter_map(|(_, module)| module.path.first().cloned())
+        .collect();
+    let program = lower::lower_with_context(
+        &normalized,
+        &host.globals,
+        &host.process_handles,
+        &module_authority_roots,
+    )?;
     lashlang::LinkedModule::link_with_dialect(
         program,
         host,

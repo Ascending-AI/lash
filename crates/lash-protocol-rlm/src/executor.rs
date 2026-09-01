@@ -364,6 +364,7 @@ async fn execute_code_inner(
                     &host_environment.process_handles,
                 )
                 .map_err(|error| {
+                    let error = refine_typescript_method_diagnostic(code, &host_environment, error);
                     (
                         typescript_feedback_kind(&error),
                         lash_typescript::format_diagnostic(code, &error),
@@ -691,6 +692,24 @@ fn typescript_feedback_kind(
         crate::feedback::RlmFeedbackKind::Policy
     } else {
         crate::feedback::RlmFeedbackKind::Error
+    }
+}
+
+/// Re-lowers method failures with the host catalog that the cache-oriented
+/// parse entry point does not accept. Valid cells still take the single-parse
+/// path; only a method diagnostic pays this retry to distinguish a real module
+/// shadow from an ordinary local receiver.
+fn refine_typescript_method_diagnostic(
+    source: &str,
+    host: &lashlang::LashlangHostEnvironment,
+    error: lash_typescript::Diagnostic,
+) -> lash_typescript::Diagnostic {
+    if error.code != lash_typescript::DiagnosticCode::MethodUnsupported {
+        return error;
+    }
+    match lash_typescript::link(source, host) {
+        Err(contextual) if contextual.code == error.code => contextual,
+        _ => error,
     }
 }
 
@@ -1517,6 +1536,50 @@ mod tests {
             "{diagnostic}"
         );
         assert!(diagnostic.contains("\nhint: "), "{diagnostic}");
+    }
+
+    #[test]
+    fn typescript_method_diagnostics_consult_the_link_time_module_catalog() {
+        let mut catalog = lashlang::LashlangHostCatalog::new();
+        catalog
+            .add_module_operation(
+                ["text"],
+                "TextModule",
+                "sha256",
+                "tool:text/sha256",
+                lashlang::TypeExpr::Any,
+                lashlang::TypeExpr::Any,
+            )
+            .expect("text module operation");
+        let environment =
+            lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
+                .with_globals(["text"]);
+
+        let shadowed_source = "text.sha256({});";
+        let shadowed = lash_typescript::parse_with_globals_and_process_handles(
+            shadowed_source,
+            &environment.globals,
+            &environment.process_handles,
+        )
+        .expect_err("the cache parse does not carry the module catalog");
+        let shadowed = refine_typescript_method_diagnostic(shadowed_source, &environment, shadowed);
+        assert_eq!(
+            shadowed.message,
+            "local binding `text` shadows module `text`; rename the binding or call the module before binding"
+        );
+
+        let ordinary_source = "const s = 'a,b'; s.notAMethod(',');";
+        let ordinary = lash_typescript::parse_with_globals_and_process_handles(
+            ordinary_source,
+            &environment.globals,
+            &environment.process_handles,
+        )
+        .expect_err("an ordinary local method remains unsupported");
+        let ordinary = refine_typescript_method_diagnostic(ordinary_source, &environment, ordinary);
+        assert_eq!(
+            ordinary.message,
+            "method `notAMethod` is not in the TypeScript runtime surface"
+        );
     }
     use crate::projection::{
         ProjectionRef, ProjectionRegistry, flow_record_to_json_value, flow_record_to_tool_args,

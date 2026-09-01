@@ -186,6 +186,45 @@ rejection_test!(
     "const s = 'a,b'; s.notAMethod(',');",
     Code::MethodUnsupported
 );
+
+#[test]
+fn shadowed_module_root_names_the_shadowing_binding() {
+    let mut catalog = lashlang::LashlangHostCatalog::new();
+    catalog
+        .add_module_operation(
+            ["text"],
+            "TextModule",
+            "sha256",
+            "tool:text/sha256",
+            lashlang::TypeExpr::Any,
+            lashlang::TypeExpr::Any,
+        )
+        .expect("text module operation");
+    let environment =
+        lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
+            .with_globals(["text"]);
+    let shadowed = lash_typescript::link("text.sha256({});", &environment)
+        .expect_err("a session binding shadowing a real module root should explain the shadowing");
+    assert_eq!(shadowed.code, Code::MethodUnsupported);
+    assert_eq!(
+        shadowed.message,
+        "local binding `text` shadows module `text`; rename the binding or call the module before binding"
+    );
+
+    for ordinary_source in [
+        "const s = 'a,b'; s.notAMethod(',');",
+        "function f(items) { return items.notAMethod(); }",
+    ] {
+        let ordinary = lash_typescript::link(ordinary_source, &environment)
+            .expect_err("an ordinary local should keep the method diagnostic");
+        assert_eq!(ordinary.code, Code::MethodUnsupported);
+        assert_eq!(
+            ordinary.message,
+            "method `notAMethod` is not in the TypeScript runtime surface"
+        );
+    }
+}
+
 rejection_test!(
     rejects_unknown_method_on_chained_receiver,
     "'abc'.repeat(2).notAMethod(10, 'x');",
