@@ -62,7 +62,7 @@ impl ProviderWireScript {
             .and_then(Value::as_str)
             .unwrap_or("<unnamed>");
         let script: Self = serde_json::from_value(value.clone()).map_err(|err| {
-            let context = first_chunk_event_index(&value).map_or_else(
+            let context = failing_timeline_event_index(&value).map_or_else(
                 || format!("Provider Wire Script `{source}` failed to parse"),
                 |index| {
                     format!(
@@ -107,7 +107,7 @@ impl ProviderWireScript {
         }
     }
 
-    fn validate(&self) -> Result<(), LlmTransportError> {
+    pub(crate) fn validate(&self) -> Result<(), LlmTransportError> {
         if self.schema != PROVIDER_WIRE_SCRIPT_SCHEMA {
             return Err(script_validation_error(format!(
                 "Provider Wire Script `{}` uses unsupported schema `{}`",
@@ -1463,14 +1463,16 @@ fn header_vec(headers: Vec<ProviderWireHeader>) -> Vec<(String, String)> {
         .collect()
 }
 
-fn first_chunk_event_index(value: &Value) -> Option<usize> {
+fn failing_timeline_event_index(value: &Value) -> Option<usize> {
     value
         .get("timeline")
         .and_then(Value::as_array)
         .and_then(|timeline| {
-            timeline
-                .iter()
-                .position(|event| event.get("event").and_then(Value::as_str) == Some("chunk"))
+            timeline.iter().enumerate().find_map(|(index, event)| {
+                serde_json::from_value::<ProviderWireEvent>(event.clone())
+                    .err()
+                    .map(|_| index)
+            })
         })
 }
 
@@ -1932,6 +1934,7 @@ mod tests {
             "request_match": { "any": true },
             "timeline": [
                 { "event": "response_start", "status": 200 },
+                { "event": "chunk", "payload": { "data": "valid" } },
                 { "event": "chunk" },
                 { "event": "end" }
             ]
@@ -1946,7 +1949,7 @@ mod tests {
             err.message
                 .contains("provider-scripts/witness-empty-chunk.json")
         );
-        assert!(err.message.contains("chunk event at index 1"));
+        assert!(err.message.contains("chunk event at index 2"));
     }
 
     #[test]
@@ -1959,6 +1962,7 @@ mod tests {
             "request_match": { "any": true },
             "timeline": [
                 { "event": "response_start", "status": 200 },
+                { "event": "chunk", "payload": { "data": "valid" } },
                 { "event": "chunk", "data": "text", "bytes": [116, 101, 120, 116] },
                 { "event": "end" }
             ]
@@ -1973,7 +1977,7 @@ mod tests {
             err.message
                 .contains("provider-scripts/witness-both-chunk-payloads.json")
         );
-        assert!(err.message.contains("chunk event at index 1"));
+        assert!(err.message.contains("chunk event at index 2"));
     }
 
     #[test]
