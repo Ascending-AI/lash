@@ -179,6 +179,7 @@ impl InMemorySessionStore {
 mod tests {
     use crate::SessionStoreFactory;
     use crate::runtime::in_memory_store::InMemorySessionStoreFactory;
+    use crate::session_graph::SharedJsonValue;
     use crate::testing::conformance::{
         append_conformance_event_node, commit_conformance_state, session_store_request,
     };
@@ -208,6 +209,71 @@ mod tests {
             .collect::<Vec<_>>();
         ids.sort();
         ids
+    }
+
+    #[tokio::test]
+    async fn delete_rebuild_failure_preserves_global_session_heads() {
+        let factory = InMemorySessionStoreFactory::new();
+        let session_id = "delete-rebuild-failure";
+        let request = session_store_request(
+            session_id,
+            "delete-rebuild-failure-model",
+            crate::SessionRelation::Root,
+        );
+        factory
+            .create_store(&request)
+            .await
+            .expect("create delete test store");
+        let root = crate::SessionNodeRecord {
+            node_id: "delete-root".to_string(),
+            parent_node_id: None,
+            timestamp: "2026-09-01T00:00:00Z".to_string(),
+            payload: crate::SessionNodePayload::Plugin {
+                plugin_type: "delete-rebuild-failure".to_string(),
+                body: SharedJsonValue::new(serde_json::json!({"node": "root"})),
+            },
+        };
+        let child = crate::SessionNodeRecord {
+            node_id: "delete-child".to_string(),
+            parent_node_id: Some(root.node_id.clone()),
+            timestamp: "2026-09-01T00:00:01Z".to_string(),
+            payload: crate::SessionNodePayload::Plugin {
+                plugin_type: "delete-rebuild-failure".to_string(),
+                body: SharedJsonValue::new(serde_json::json!({"node": "child"})),
+            },
+        };
+        *factory.global_session_graph.lock_recover() =
+            crate::SessionGraph::from_nodes(vec![root.clone(), child], Some(root.node_id.clone()))
+                .expect("seed valid graph");
+        factory
+            .global_session_heads
+            .lock_recover()
+            .insert(session_id.to_string(), Some(root.node_id.clone()));
+        factory.global_node_owners.lock_recover().extend([
+            (root.node_id.clone(), session_id.to_string()),
+            ("delete-child".to_string(), "other-session".to_string()),
+        ]);
+        factory
+            .tombstoned_node_ids
+            .lock_recover()
+            .insert("delete-child".to_string());
+
+        let store = factory
+            .raw_store_for_testing(session_id)
+            .expect("concrete delete test store");
+        let error = store
+            .reclaim_history_for_delete(session_id)
+            .expect_err("dangling parent must fail the rebuild");
+
+        assert!(matches!(
+            error,
+            crate::StoreError::InvalidGraphParent { .. }
+        ));
+        assert_eq!(
+            factory.global_session_heads.lock_recover().get(session_id),
+            Some(&Some(root.node_id)),
+            "a failed rebuild must leave global session heads unchanged"
+        );
     }
 
     /// Unpinning a pinned leaf *after* its owning session was deleted tombstones a
