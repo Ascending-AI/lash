@@ -513,6 +513,8 @@ pub mod facade_support {
     pub use crate::store::LeaseTimingsError;
     pub use crate::store::SessionHead;
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
+    #[doc(hidden)]
+    pub use crate::tool_intent::legacy_tool_intent_v1_lookup_key;
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
     pub use crate::tool_provider::ToolTriggerClient;
     pub use crate::tool_registry::PLUGIN_TOOL_SOURCE_ID;

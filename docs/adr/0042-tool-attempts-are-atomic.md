@@ -133,11 +133,14 @@ unconditional: every recorded attempt body receives the sealed, controller-free
 `ToolOutcomeDone` and versioned `ToolIntents`; a deferred attempt returns
 `ToolAttemptOutcome::Pending`, whose type cannot carry intents. Lash records the
 final attempt first, then admits and drains its declarations in source order.
-Retries discard non-final declarations. Each v1 declaration derives one stable
-identity from `(session_id, execution_scope_id, tool_call_id, intent_index)`;
-the execution-scope component is the turn id in turn scope and the process id
-in process scope. FIG-1203 remains the rebase point for frame-key-grade call
-identity.
+Retries discard non-final declarations. Each v1 protocol declaration derives
+one stable v2 replay identity from `(session_id, execution_scope_id,
+tool_call_id, intent_index, minting_emission_replay_key)`; the execution-scope
+component is the turn id in turn scope and the process id in process scope, and
+the minting-emission component is the durable final-attempt invocation that
+recorded the declaration. Host-submitted declarations have no minting-emission
+component but use the same `tool-intent:v2:` family. FIG-1203 remains the rebase
+point for frame-key-grade call identity.
 
 Realization is journal-first. The recorded intent issues exactly one process
 command with its identity-derived replay key. It does not re-read visibility,
@@ -195,7 +198,15 @@ identical, changed-reason, and concurrent cancellation duplicates,
 ordinal-addressed tier every external submit is a new engine invocation rather
 than a key lookup, so a host must not treat a second invocation as an ingress
 idempotency retry; `checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes`
-pins replay only within the owning Restate invocation. The law
+pins replay only within the owning Restate invocation. The v2 identity family
+is a deliberate replay-format cutover from the pre-emission-scoped
+`tool-intent:v1:` family. A continuation that finds a v1 row while requesting
+its v2 successor returns the typed
+`tool_intent_replay_key_format_cutover` refusal and requires a fresh
+post-cutover invocation; it never treats that row as absent and executes the
+command again. Restate retains the legacy ordinal lookup label long enough to
+consume and validate an in-flight v1 row, while the canonical envelope and all
+newly captured corpus outcomes carry v2 identities. The law
 `crash_after_admission_redrives_to_exactly_one_realization` durably records the
 mock admission's canonical envelope hash before its injected crash, rejects a
 changed-payload redrive, and realizes the originally admitted command once, while

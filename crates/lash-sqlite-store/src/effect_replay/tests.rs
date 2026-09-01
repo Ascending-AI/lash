@@ -41,6 +41,99 @@ async fn row_store() -> SqliteEffectReplayRowStore {
     }
 }
 
+#[tokio::test]
+async fn strict_replay_refuses_a_pre_cutover_tool_intent_row_without_reexecution() {
+    let scope = ExecutionScope::turn("cutover-session", "cutover-turn");
+    let controller = SqliteRuntimeEffectController::memory(scope)
+        .await
+        .expect("open the in-memory effect journal");
+    let v2_identity = lash_core::derive_tool_intent_identity(
+        "cutover-session",
+        "cutover-turn",
+        Some("cutover-call"),
+        0,
+    )
+    .expect("derive the v2 identity");
+    let v2_invocation = lash_core::RuntimeInvocation {
+        replay: Some(lash_core::RuntimeReplay {
+            key: v2_identity.replay_key.clone(),
+            attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
+                v2_identity.clone(),
+            )),
+        }),
+        ..lash_core::RuntimeInvocation::effect(
+            lash_core::RuntimeScope::for_turn("cutover-session", "cutover-turn", 0, 0),
+            "cutover-effect",
+            lash_core::RuntimeEffectKind::ExecCode,
+            v2_identity.replay_key.clone(),
+        )
+    };
+    let v1_replay_key = lash_core::facade_support::legacy_tool_intent_v1_lookup_key(&v2_invocation)
+        .expect("derive the pre-cutover lookup key");
+    let mut v1_identity = v2_identity;
+    v1_identity.replay_key = v1_replay_key.clone();
+    let v1_invocation = lash_core::RuntimeInvocation {
+        replay: Some(lash_core::RuntimeReplay {
+            key: v1_replay_key,
+            attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(v1_identity)),
+        }),
+        ..v2_invocation.clone()
+    };
+    let command = lash_core::RuntimeEffectCommand::ExecCode {
+        language: "cutover-witness".to_string(),
+        code: "return 1".to_string(),
+    };
+    let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let outcome = || lash_core::RuntimeEffectOutcome::ExecCode {
+        result: Box::new(Ok(lash_core::ExecResponse {
+            observations: Vec::new(),
+            calls: Vec::new(),
+            printed_images: Vec::new(),
+            error: None,
+            duration_ms: 0,
+            degraded_bindings: Vec::new(),
+            terminal_finish: None,
+        })),
+    };
+
+    let first_executions = Arc::clone(&executions);
+    controller
+        .execute_effect(
+            lash_core::RuntimeEffectEnvelope::new(v1_invocation, command.clone()),
+            lash_core::RuntimeEffectLocalExecutor::testing(move |_| async move {
+                first_executions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(outcome())
+            }),
+        )
+        .await
+        .expect("seed the pre-cutover row");
+
+    controller.start_replay();
+    let replay_executions = Arc::clone(&executions);
+    let error = controller
+        .execute_effect(
+            lash_core::RuntimeEffectEnvelope::new(v2_invocation, command),
+            lash_core::RuntimeEffectLocalExecutor::testing(move |_| async move {
+                replay_executions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(outcome())
+            }),
+        )
+        .await
+        .expect_err("the v1 row cannot satisfy a v2 strict replay");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::ToolIntentReplayKeyFormatCutover
+    );
+    assert!(error.message.contains("tool-intent:v1:"));
+    assert!(error.message.contains("tool-intent:v2:"));
+    assert_eq!(
+        executions.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "strict replay must refuse before invoking the local executor again"
+    );
+}
+
 fn group_record() -> EffectGroupRecord {
     EffectGroupRecord {
         group_key: GROUP.to_string(),

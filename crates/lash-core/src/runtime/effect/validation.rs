@@ -172,6 +172,16 @@ pub fn validate_replayed_effect_envelope(
             format!("failed to decode reconstructed canonical envelope: {err}"),
         )
     })?;
+    if let Some((recorded_key, reconstructed_key)) =
+        tool_intent_key_format_cutover(&recorded_value, &reconstructed_value)
+    {
+        return Err(
+            super::effect_replay_driver::tool_intent_replay_key_format_cutover(
+                recorded_key,
+                reconstructed_key,
+            ),
+        );
+    }
     let mut differences = Vec::new();
     collect_differences(
         "",
@@ -217,6 +227,18 @@ pub fn validate_replayed_effect_envelope(
         ),
     )
     .with_summary(summary))
+}
+
+fn tool_intent_key_format_cutover<'a>(
+    recorded: &'a Value,
+    reconstructed: &'a Value,
+) -> Option<(&'a str, &'a str)> {
+    const IDENTITY_REPLAY_KEY: &str = "/invocation/replay/attribution/identity/replay_key";
+    let recorded_key = recorded.pointer(IDENTITY_REPLAY_KEY)?.as_str()?;
+    let reconstructed_key = reconstructed.pointer(IDENTITY_REPLAY_KEY)?.as_str()?;
+    (recorded_key.starts_with("tool-intent:v1:")
+        && reconstructed_key.starts_with("tool-intent:v2:"))
+    .then_some((recorded_key, reconstructed_key))
 }
 
 fn render_divergent_paths(summary: &RuntimeEffectReplayMismatchReport) -> String {

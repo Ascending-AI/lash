@@ -608,6 +608,28 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .map_err(effect_sqlite_error)
     }
 
+    async fn replay_row_exists(
+        &self,
+        scope_id: &str,
+        replay_key: &str,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        let scope_id = scope_id.to_string();
+        let replay_key = replay_key.to_string();
+        self.conn
+            .call(move |connection| {
+                connection.query_row(
+                    "SELECT EXISTS(
+                         SELECT 1 FROM runtime_effect_replay
+                         WHERE scope_id = ?1 AND replay_key = ?2
+                     )",
+                    params![scope_id, replay_key],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .map_err(effect_sqlite_error)
+    }
+
     /// Writes the terminal and, for a grouped child, allocates its settlement
     /// rank — in the normative order (N1).
     ///

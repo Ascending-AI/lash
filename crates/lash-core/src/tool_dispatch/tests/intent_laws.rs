@@ -189,17 +189,20 @@ async fn crash_redrive_law(pause: IntentPausePoint) {
 
 #[tokio::test]
 async fn crash_after_result_commit_redrives_the_recorded_intent_batch() {
-    crash_redrive_law(IntentPausePoint::AfterToolAttemptCommit).await;
+    Box::pin(crash_redrive_law(IntentPausePoint::AfterToolAttemptCommit)).await;
 }
 
 #[tokio::test]
 async fn crash_mid_drain_redrives_the_committed_prefix_and_finishes_the_suffix() {
-    crash_redrive_law(IntentPausePoint::BeforeProcessCommand(2)).await;
+    Box::pin(crash_redrive_law(IntentPausePoint::BeforeProcessCommand(2))).await;
 }
 
 #[tokio::test]
 async fn crash_mid_intent_replays_the_command_committed_before_its_reply() {
-    crash_redrive_law(IntentPausePoint::AfterProcessCommandCommit(1)).await;
+    Box::pin(crash_redrive_law(
+        IntentPausePoint::AfterProcessCommandCommit(1),
+    ))
+    .await;
 }
 
 #[tokio::test]
@@ -1047,8 +1050,9 @@ fn executed_trigger_outcome(
 #[tokio::test]
 async fn crash_after_result_commit_emits_the_recorded_trigger_exactly_once() {
     use crate::TriggerStore as _;
-    let (store, subscription, redriven) =
-        crashed_trigger_intent_redrive(IntentPausePoint::AfterToolAttemptCommit, async |store| {
+    let (store, subscription, redriven) = Box::pin(crashed_trigger_intent_redrive(
+        IntentPausePoint::AfterToolAttemptCommit,
+        async |store| {
             assert_eq!(
                 store
                     .list_occurrences(crate::TriggerOccurrenceFilter::default())
@@ -1058,8 +1062,9 @@ async fn crash_after_result_commit_emits_the_recorded_trigger_exactly_once() {
                 0,
                 "no occurrence may exist before the recorded declaration drains"
             );
-        })
-        .await;
+        },
+    ))
+    .await;
 
     let (_, occurrence_id) = executed_trigger_outcome(&redriven);
     let occurrences = store
@@ -1184,7 +1189,7 @@ async fn public_coordinator_redrive_is_byte_stable_for_the_recorded_trigger_emis
 #[tokio::test]
 async fn crash_after_delivery_start_neither_re_emits_nor_changes_the_recorded_outcome() {
     use crate::TriggerStore as _;
-    let (store, subscription, redriven) = crashed_trigger_intent_redrive(
+    let (store, subscription, redriven) = Box::pin(crashed_trigger_intent_redrive(
         IntentPausePoint::AfterProcessCommandCommit(1),
         async |store| {
             let occurrences = store
@@ -1206,7 +1211,7 @@ async fn crash_after_delivery_start_neither_re_emits_nor_changes_the_recorded_ou
                 "the crash lands after the delivery start commits"
             );
         },
-    )
+    ))
     .await;
 
     let (result, occurrence_id) = executed_trigger_outcome(&redriven);

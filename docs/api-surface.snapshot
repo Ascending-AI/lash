@@ -8041,6 +8041,7 @@ lash::runtime::RuntimeErrorCode::ToolCatalogResolutionFailed
 lash::runtime::RuntimeErrorCode::ToolCompletionKeyMissingCallId
 lash::runtime::RuntimeErrorCode::ToolCompletionKeyProcessLifetime
 lash::runtime::RuntimeErrorCode::ToolDeferralNotDeclared
+lash::runtime::RuntimeErrorCode::ToolIntentReplayKeyFormatCutover
 lash::runtime::RuntimeErrorCode::TransientCancelWatch
 lash::runtime::RuntimeErrorCode::TransientTerminalPublication
 lash::runtime::RuntimeErrorCode::TriggerStoreUnavailable

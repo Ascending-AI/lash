@@ -728,10 +728,10 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
             .expect("execute intent batch");
     assert_eq!(outcomes.len(), 4, "one typed outcome per intent");
     let literal_ids = [
-        "tool-intent:v1:blake3:fa76f136a996c94029681d3115e19813ddd90a1fb98fdf39782fb1fb2d28a11a",
-        "tool-intent:v1:blake3:485de7468d8439a7bc2386d6a65ce394f005f6104640e8352f97520f45932d7b",
-        "tool-intent:v1:blake3:761b8f28e9b59f5ed0a9894d5aa51652ad7d63b91efcc62004dc88d3f2d7148a",
-        "tool-intent:v1:blake3:0e1b74123e6d826a319823f97cdbe1647f0918d454a9fdec817c2e55685ac5ad",
+        "tool-intent:v2:blake3:06404a7267c11e95e26c0911398d8e4881ae846fd7e962be54aec5aefa88ab74",
+        "tool-intent:v2:blake3:f6a0238ac5cd935c4e90ba7aea76793abbea968361e0d5df0fec1a576615d291",
+        "tool-intent:v2:blake3:4d9e09cb0742c6bd58ba1fc01b712b4b74bb762edad0e708fb18a19db960f888",
+        "tool-intent:v2:blake3:e93de6b5ba860968e4ab3c339cfe2f77f49aa384c4e6ede22853541e103e1ac4",
     ];
     let actual_ids = outcomes
         .iter()
