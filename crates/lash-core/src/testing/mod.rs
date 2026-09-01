@@ -779,6 +779,12 @@ pub async fn coordinate_tool_provider_with_services(
         .prepared_call(&call)
         .cancellation_token(Some(tokio_util::sync::CancellationToken::new()))
         .build();
+    let turn_cancel_wait = dispatch.effect_controller.scoped().turn_cancel_wait(
+        tool_context
+            .cancellation_token()
+            .cloned()
+            .unwrap_or_default(),
+    );
     let coordinated = crate::tool_dispatch::coordinate_tool_invocation(
         dispatch.as_ref(),
         call.clone(),
@@ -788,7 +794,7 @@ pub async fn coordinate_tool_provider_with_services(
             parent: parent_invocation,
             replay_suffix: call.call_id.clone(),
         },
-        tool_context.cancellation_token().cloned(),
+        &turn_cancel_wait,
         None,
         None,
         |completion_key| {

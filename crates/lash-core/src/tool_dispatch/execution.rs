@@ -288,7 +288,14 @@ pub(crate) async fn coordinate_prepared_tool_call_launch_with_execution_context<
 ) -> ToolCallLaunch {
     let retry_policy =
         super::retry::resolve_retry_policy(context, &prepared.tool_id, execution_grant.as_deref());
-    let cancellation = tool_context.cancellation_token().cloned();
+    let turn_cancel_wait = Box::new(
+        context.effect_controller.scoped().turn_cancel_wait(
+            tool_context
+                .cancellation_token()
+                .cloned()
+                .unwrap_or_default(),
+        ),
+    );
     let dispatch = Arc::new(context.clone());
     super::coordinate_tool_invocation(
         context,
@@ -298,7 +305,7 @@ pub(crate) async fn coordinate_prepared_tool_call_launch_with_execution_context<
         super::ToolAttemptEffectIdentity::Scalar {
             parent: context.parent_invocation.clone(),
         },
-        cancellation,
+        turn_cancel_wait.as_ref(),
         None,
         None,
         |completion_key| {

@@ -8,11 +8,13 @@
 
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Captures the wait shape each `AwaitEvent` effect asks the host for.
 #[derive(Default)]
 struct AwaitShapeRecorder {
     waits: std::sync::Mutex<Vec<(bool, Option<crate::ExecutionScope>)>>,
+    sleeps: std::sync::Mutex<Vec<(bool, Option<crate::ExecutionScope>)>>,
 }
 
 impl crate::AwaitEventResolver for AwaitShapeRecorder {}
@@ -28,6 +30,13 @@ impl crate::RuntimeEffectController for AwaitShapeRecorder {
             &envelope.command,
             crate::RuntimeEffectCommand::AwaitEvent { .. }
         ) {
+            if matches!(&envelope.command, crate::RuntimeEffectCommand::Sleep { .. }) {
+                let options = local_executor.into_sleep_options();
+                self.sleeps
+                    .lock_recover()
+                    .push((options.observe_turn_cancel, options.turn_cancel_scope));
+                return Ok(crate::RuntimeEffectOutcome::Sleep);
+            }
             return local_executor.execute(envelope).await;
         }
         let options = local_executor.into_await_event_options()?;
@@ -38,6 +47,35 @@ impl crate::RuntimeEffectController for AwaitShapeRecorder {
         Ok(crate::RuntimeEffectOutcome::AwaitEvent {
             resolution: crate::Resolution::Ok(serde_json::json!({"done": true})),
         })
+    }
+}
+
+struct ScalarRetryTool {
+    definition: crate::ToolDefinition,
+    attempts: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for ScalarRetryTool {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![self.definition.manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
+    }
+
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+            crate::ToolOutcome::retryable_failure(
+                crate::ToolFailureClass::External,
+                "retryable",
+                "retry witness failure",
+                Some(1),
+            )
+        } else {
+            crate::ToolOutcome::ok(serde_json::json!({"ok": true}))
+        }
     }
 }
 
@@ -122,5 +160,59 @@ async fn deferred_tool_await_inside_a_process_body_attaches_no_turn_cancel_gate(
     assert_eq!(
         scope, None,
         "no scope means no gate to register, whatever the host does with the flag"
+    );
+}
+
+/// Drives the scalar production call site through a retry so the retry sleep
+/// receives its trio from the owning turn execution.
+#[tokio::test]
+async fn scalar_retry_sleep_attaches_the_owning_turn_cancel_gate() {
+    let definition = crate::ToolDefinition::raw(
+        "tool:scalar-retry-witness",
+        "scalar_retry_witness",
+        "scalar retry witness",
+        crate::ToolDefinition::default_input_schema(),
+        serde_json::json!({"type": "object"}),
+    )
+    .with_retry_policy(crate::ToolRetryPolicy::safe(2, 1, 1));
+    let provider = Arc::new(ScalarRetryTool {
+        definition: definition.clone(),
+        attempts: AtomicUsize::new(0),
+    });
+    let recorder = Arc::new(AwaitShapeRecorder::default());
+    let scoped = crate::ScopedEffectController::shared(
+        Arc::clone(&recorder) as Arc<dyn crate::RuntimeEffectController>,
+        turn_scope(),
+    )
+    .expect("valid turn scope");
+    let context = crate::testing::TestExecutionContextBuilder::new()
+        .plugin_factories(Vec::new())
+        .provider(provider)
+        .tool_catalog(crate::ToolCatalog::from_tool_definitions(vec![
+            definition.clone(),
+        ]))
+        .borrowed_effect_controller(scoped)
+        .build()
+        .into_runtime();
+
+    let reply = context
+        .call_tool_by_id(
+            "scalar-retry-call".to_string(),
+            definition.manifest.id,
+            serde_json::json!({}),
+            0,
+        )
+        .await;
+    assert!(
+        reply
+            .record
+            .expect("scalar tool record")
+            .output
+            .is_success()
+    );
+    assert_eq!(
+        *recorder.sleeps.lock_recover(),
+        vec![(true, Some(turn_scope()))],
+        "the scalar retry sleep must use the owning turn execution's trio"
     );
 }

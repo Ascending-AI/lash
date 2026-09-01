@@ -1,6 +1,39 @@
 use super::*;
 use std::sync::Arc;
 
+#[cfg(test)]
+#[path = "tool/turn_cancel_gate_tests.rs"]
+mod turn_cancel_gate_tests;
+
+async fn await_pending_process_tool(
+    effect_controller: &dyn crate::RuntimeEffectController,
+    clock: Arc<dyn crate::Clock>,
+    invocation: crate::RuntimeInvocation,
+    pending: crate::tool_dispatch::PendingToolDispatchOutcome,
+    turn_cancel_wait: &crate::runtime::TurnCancelWait,
+) -> Result<crate::Resolution, crate::PluginError> {
+    let outcome = effect_controller
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::AwaitEvent { key: pending.key },
+            ),
+            crate::RuntimeEffectLocalExecutor::await_event_under(
+                turn_cancel_wait,
+                pending
+                    .pending
+                    .deadline
+                    .map(|duration| clock.now() + duration),
+                clock,
+            ),
+        )
+        .await
+        .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+    outcome
+        .into_await_event()
+        .map_err(|err| crate::PluginError::Session(err.to_string()))
+}
+
 impl RuntimeSessionServices {
     pub(in crate::runtime::session_manager::process_runners) async fn run_process_tool_call(
         &self,
@@ -46,7 +79,7 @@ impl RuntimeSessionServices {
             .cloned()
             .expect("process tool execution requires process-work wiring");
         let await_parent_invocation = parent_invocation.clone();
-        let await_cancellation = cancellation.clone();
+        let turn_cancel_wait = crate::runtime::TurnCancelWait::unobserved(cancellation.clone());
         let run_context = ProcessRunContext::builder(self)
             .tool_catalog(
                 self.current
@@ -105,7 +138,7 @@ impl RuntimeSessionServices {
                 parent: await_parent_invocation.clone(),
                 process_id: registration.id.clone(),
             },
-            Some(await_cancellation.clone()),
+            &turn_cancel_wait,
             None,
             None,
             |completion_key| {
@@ -157,30 +190,14 @@ impl RuntimeSessionServices {
                         registration.id, pending.tool_name
                     ),
                 );
-                let outcome = Box::pin(
-                    dispatch.effect_controller.controller().execute_effect(
-                        crate::RuntimeEffectEnvelope::new(
-                            invocation,
-                            crate::RuntimeEffectCommand::AwaitEvent { key: pending.key },
-                        ),
-                        crate::RuntimeEffectLocalExecutor::await_event_under(
-                            &dispatch
-                                .effect_controller
-                                .scoped()
-                                .turn_cancel_wait(await_cancellation.clone()),
-                            pending
-                                .pending
-                                .deadline
-                                .map(|duration| dispatch.clock.now() + duration),
-                            std::sync::Arc::clone(&dispatch.clock),
-                        ),
-                    ),
-                )
-                .await
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-                let resolution = outcome
-                    .into_await_event()
-                    .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+                let resolution = Box::pin(await_pending_process_tool(
+                    dispatch.effect_controller.controller(),
+                    Arc::clone(&dispatch.clock),
+                    invocation,
+                    *pending,
+                    &turn_cancel_wait,
+                ))
+                .await?;
                 crate::tool_result::tool_output_from_completion_resolution(resolution)
             }
             crate::tool_dispatch::ToolCallLaunch::ControllerAborted(error) => {
