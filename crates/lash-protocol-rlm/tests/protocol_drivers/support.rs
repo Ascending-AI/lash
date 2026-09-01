@@ -352,8 +352,7 @@ pub(crate) fn exec_response(
                 projection: Default::default(),
             })
             .collect(),
-        tool_calls: Vec::new(),
-        executed_calls: Vec::new(),
+        calls: Vec::new(),
         printed_images: Vec::new(),
         error: error.map(str::to_string),
         duration_ms: 1,

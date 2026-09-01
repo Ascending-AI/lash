@@ -11,8 +11,8 @@ use lash_core::session_model::{
 };
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, ExecResponse, LlmOutputPart, LlmResponse,
-    LlmTerminalReason, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolControl, ToolFailure,
-    ToolFailureClass, ToolValue, facade_support::TurnFinish, facade_support::TurnOutcome,
+    LlmTerminalReason, OmittedToolCalls, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
+    ToolControl, ToolFailure, ToolValue, facade_support::TurnFinish, facade_support::TurnOutcome,
     facade_support::TurnStop, facade_support::append_assistant_text_part,
     facade_support::normalized_response_parts,
 };
@@ -97,7 +97,6 @@ impl Default for RlmDriver {
 
 const MAX_EXEC_TOOL_CALL_RECORDS: usize = 128;
 const MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES: usize = 64 * 1024;
-const EXEC_TOOL_CALL_OVERFLOW_NAME: &str = "lash.exec_tool_call_overflow";
 
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
     fn project_visible_assistant_prose(&self, text: &str) -> String {
@@ -590,16 +589,23 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     )]));
                 }
                 let terminal_outcome = response
-                    .tool_calls
+                    .calls
                     .iter()
+                    .filter_map(|call| call.host_record.as_ref())
                     .find_map(terminal_outcome_from_tool_result);
+                let (host_records, omitted) = bounded_exec_tool_call_records(&response.calls);
                 actions.extend(
-                    bounded_exec_tool_call_records(&response.tool_calls)
+                    host_records
                         .into_iter()
                         .map(tool_call_event)
                         .map(DriverAction::Emit),
                 );
-                (state.calls, state.calls_omitted) = executed_call_ledger(&response.executed_calls);
+                if let Some(summary) = omitted {
+                    actions.push(DriverAction::Emit(SessionStreamEvent::ToolCallsOmitted {
+                        summary,
+                    }));
+                }
+                (state.calls, state.calls_omitted) = executed_call_ledger(&response.calls);
                 state.images.extend(response.printed_images);
                 for observation in response.observations {
                     if !observation.text.is_empty() {
@@ -983,24 +989,43 @@ fn tool_call_event(record: ToolCallRecord) -> SessionStreamEvent {
     }
 }
 
-fn bounded_exec_tool_call_records(records: &[ToolCallRecord]) -> Vec<ToolCallRecord> {
-    let retained_count = records.len().min(MAX_EXEC_TOOL_CALL_RECORDS);
-    let mut bounded = records[..retained_count]
+fn bounded_exec_tool_call_records(
+    calls: &[lash_core::ExecutedCall],
+) -> (Vec<ToolCallRecord>, Option<OmittedToolCalls>) {
+    let records = calls
         .iter()
-        .map(bounded_tool_call_record)
+        .filter_map(|call| call.host_record.as_ref())
+        .collect::<Vec<_>>();
+    let retained_count = records.len().min(MAX_EXEC_TOOL_CALL_RECORDS);
+    let bounded = records[..retained_count]
+        .iter()
+        .map(|record| bounded_tool_call_record(record))
         .collect::<Vec<_>>();
     let omitted = &records[retained_count..];
-    if !omitted.is_empty() {
-        bounded.push(exec_tool_call_overflow_record(omitted));
-    }
-    bounded
+    let summary = (!omitted.is_empty()).then(|| OmittedToolCalls {
+        count: omitted.len(),
+        failures: omitted
+            .iter()
+            .filter(|record| !record.output.is_success())
+            .count(),
+        attachments: omitted
+            .iter()
+            .flat_map(|record| tool_output_attachments(&record.output))
+            .collect(),
+    });
+    (bounded, summary)
 }
 
-fn executed_call_ledger(
-    records: &[lash_core::ExecutedCallRecord],
-) -> (Vec<RlmExecutedCall>, usize) {
+fn executed_call_ledger(records: &[lash_core::ExecutedCall]) -> (Vec<RlmExecutedCall>, usize) {
     let omitted = records.len().saturating_sub(MAX_EXEC_TOOL_CALL_RECORDS);
-    let calls = records.iter().skip(omitted).cloned().collect();
+    let calls = records
+        .iter()
+        .skip(omitted)
+        .map(|call| lash_core::ExecutedCallRecord {
+            operation: call.operation.clone(),
+            outcome: call.outcome,
+        })
+        .collect();
     (calls, omitted)
 }
 
@@ -1098,47 +1123,6 @@ fn omitted_bytes_marker(omitted_bytes: usize) -> ToolValue {
         "omitted_bytes".to_string(),
         ToolValue::untrusted_json(serde_json::json!(omitted_bytes)),
     )]))
-}
-
-fn exec_tool_call_overflow_record(omitted: &[ToolCallRecord]) -> ToolCallRecord {
-    let omitted_failures = omitted
-        .iter()
-        .filter(|record| !record.output.is_success())
-        .count();
-    let attachments = omitted
-        .iter()
-        .flat_map(|record| tool_output_attachments(&record.output))
-        .map(ToolValue::Attachment)
-        .collect();
-    let marker = ToolValue::Object(BTreeMap::from([
-        ("attachments".to_string(), ToolValue::Array(attachments)),
-        (
-            "omitted_failures".to_string(),
-            ToolValue::untrusted_json(serde_json::json!(omitted_failures)),
-        ),
-        (
-            "omitted_records".to_string(),
-            ToolValue::untrusted_json(serde_json::json!(omitted.len())),
-        ),
-    ]));
-    let output = if omitted_failures == 0 {
-        ToolCallOutput::success_tool_value(marker)
-    } else {
-        let mut failure = ToolFailure::runtime(
-            ToolFailureClass::ResourceLimit,
-            "exec_tool_call_records_omitted",
-            "exec tool-call records exceeded the accounting limit",
-        );
-        failure.raw = Some(marker);
-        ToolCallOutput::failure(failure)
-    };
-    ToolCallRecord {
-        call_id: None,
-        tool: EXEC_TOOL_CALL_OVERFLOW_NAME.to_string(),
-        args: serde_json::json!({}),
-        output,
-        duration_ms: 0,
-    }
 }
 
 fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::AttachmentSource> {
@@ -1341,7 +1325,7 @@ mod tests {
     use super::*;
     use lash_core::{
         AttachmentId, AttachmentSource, AttachmentTypeMetadata, MediaType, ToolCancellation,
-        facade_support::AttachmentMeta,
+        ToolFailureClass, facade_support::AttachmentMeta,
     };
 
     fn image_ref(id: &str) -> AttachmentSource {
@@ -1420,6 +1404,19 @@ mod tests {
         }
     }
 
+    fn call(index: usize, output: ToolCallOutput) -> lash_core::ExecutedCall {
+        let outcome = if output.is_success() {
+            lash_core::ExecutedCallOutcome::Ok
+        } else {
+            lash_core::ExecutedCallOutcome::Err
+        };
+        lash_core::ExecutedCall {
+            operation: format!("module.call_{index}"),
+            outcome,
+            host_record: Some(record(index, output)),
+        }
+    }
+
     #[test]
     fn bounded_output_replaces_oversized_scalars_without_losing_structure_or_attachments() {
         let attachment = image_ref("nested-attachment");
@@ -1476,11 +1473,12 @@ mod tests {
             ])),
         };
 
-        let bounded = bounded_exec_tool_call_records(&[
-            record(0, ToolCallOutput::failure(failure)),
-            record(1, ToolCallOutput::cancelled(cancellation)),
+        let (bounded, omitted) = bounded_exec_tool_call_records(&[
+            call(0, ToolCallOutput::failure(failure)),
+            call(1, ToolCallOutput::cancelled(cancellation)),
         ]);
 
+        assert!(omitted.is_none());
         assert_eq!(bounded[0].output.attachments(), vec![failure_attachment]);
         assert_eq!(
             bounded[1].output.attachments(),
@@ -1498,48 +1496,48 @@ mod tests {
     }
 
     #[test]
-    fn overflow_marker_preserves_counts_failure_status_and_omitted_attachments() {
+    fn typed_omission_preserves_counts_failures_and_attachments() {
         let attachment = image_ref("overflow-attachment");
-        let mut records = (0..MAX_EXEC_TOOL_CALL_RECORDS + 3)
-            .map(|index| record(index, ToolCallOutput::success(serde_json::json!(index))))
+        let mut calls = (0..MAX_EXEC_TOOL_CALL_RECORDS + 3)
+            .map(|index| call(index, ToolCallOutput::success(serde_json::json!(index))))
             .collect::<Vec<_>>();
-        records[MAX_EXEC_TOOL_CALL_RECORDS + 1].output =
+        calls[MAX_EXEC_TOOL_CALL_RECORDS + 1] = call(
+            MAX_EXEC_TOOL_CALL_RECORDS + 1,
             ToolCallOutput::failure(ToolFailure::tool(
                 ToolFailureClass::Execution,
                 "recovered_failure",
                 "failure recovered by Lashlang",
-            ));
-        records[MAX_EXEC_TOOL_CALL_RECORDS + 2].output =
-            ToolCallOutput::success_tool_value(ToolValue::Attachment(attachment.clone()));
-
-        let bounded = bounded_exec_tool_call_records(&records);
-
-        assert_eq!(bounded.len(), MAX_EXEC_TOOL_CALL_RECORDS + 1);
-        let marker = bounded.last().expect("overflow marker");
-        assert_eq!(marker.tool, EXEC_TOOL_CALL_OVERFLOW_NAME);
-        assert!(!marker.output.is_success());
-        assert_eq!(marker.output.attachments(), vec![attachment]);
-        let payload = marker.output.value_for_projection();
-        assert_eq!(
-            payload.pointer("/raw/omitted_records"),
-            Some(&serde_json::json!(3))
+            )),
         );
+        calls[MAX_EXEC_TOOL_CALL_RECORDS + 2] = call(
+            MAX_EXEC_TOOL_CALL_RECORDS + 2,
+            ToolCallOutput::success_tool_value(ToolValue::Attachment(attachment.clone())),
+        );
+
+        let (bounded, omitted) = bounded_exec_tool_call_records(&calls);
+
+        assert_eq!(bounded.len(), MAX_EXEC_TOOL_CALL_RECORDS);
         assert_eq!(
-            payload.pointer("/raw/omitted_failures"),
-            Some(&serde_json::json!(1))
+            omitted,
+            Some(OmittedToolCalls {
+                count: 3,
+                failures: 1,
+                attachments: vec![attachment],
+            })
         );
     }
 
     #[test]
     fn executed_call_ledger_elides_arguments_and_keeps_the_diagnostic_tail() {
         let records = (0..MAX_EXEC_TOOL_CALL_RECORDS + 3)
-            .map(|index| lash_core::ExecutedCallRecord {
+            .map(|index| lash_core::ExecutedCall {
                 operation: format!("module.call_{index}"),
                 outcome: if index == MAX_EXEC_TOOL_CALL_RECORDS + 2 {
                     lash_core::ExecutedCallOutcome::Err
                 } else {
                     lash_core::ExecutedCallOutcome::Ok
                 },
+                host_record: None,
             })
             .collect::<Vec<_>>();
 
@@ -1574,16 +1572,17 @@ mod tests {
     }
 
     #[test]
-    fn all_success_overflow_marker_does_not_create_a_failure() {
-        let records = (0..MAX_EXEC_TOOL_CALL_RECORDS + 1)
-            .map(|index| record(index, ToolCallOutput::success(serde_json::json!(index))))
+    fn all_success_omission_does_not_report_a_failure() {
+        let calls = (0..MAX_EXEC_TOOL_CALL_RECORDS + 1)
+            .map(|index| call(index, ToolCallOutput::success(serde_json::json!(index))))
             .collect::<Vec<_>>();
 
-        let marker = bounded_exec_tool_call_records(&records)
-            .pop()
-            .expect("overflow marker");
+        let (bounded, omitted) = bounded_exec_tool_call_records(&calls);
+        let omitted = omitted.expect("typed omission");
 
-        assert!(marker.output.is_success());
-        assert_eq!(marker.output.value_for_projection()["omitted_failures"], 0);
+        assert_eq!(bounded.len(), MAX_EXEC_TOOL_CALL_RECORDS);
+        assert_eq!(omitted.count, 1);
+        assert_eq!(omitted.failures, 0);
+        assert!(omitted.attachments.is_empty());
     }
 }

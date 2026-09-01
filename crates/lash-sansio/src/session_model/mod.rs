@@ -410,6 +410,9 @@ pub enum SessionStreamEvent {
         output: crate::ToolCallOutput,
         duration_ms: u64,
     },
+    /// Typed accounting for host tool records beyond the bounded turn view.
+    #[serde(rename = "tool_calls_omitted")]
+    ToolCallsOmitted { summary: crate::OmittedToolCalls },
     #[serde(rename = "tool_call_start")]
     ToolCallStart {
         #[serde(default, skip_serializing_if = "Option::is_none")]

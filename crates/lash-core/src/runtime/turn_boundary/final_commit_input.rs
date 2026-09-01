@@ -1,11 +1,12 @@
 use crate::store::RuntimePersistence;
-use crate::{PluginSession, ToolCallRecord, TurnOutcome};
+use crate::{OmittedToolCalls, PluginSession, ToolCallRecord, TurnOutcome};
 
 use super::ExecutionStateUpdate;
 
 pub(super) struct FinalCommitInput<'a> {
     pub(super) returned_state: &'a crate::SessionSnapshot,
     pub(super) tool_calls: &'a [ToolCallRecord],
+    pub(super) omitted: Option<&'a OmittedToolCalls>,
     pub(super) plugins: Option<&'a PluginSession>,
     pub(super) execution_state_update: ExecutionStateUpdate,
     pub(super) agent_frame_switch_materializes: bool,

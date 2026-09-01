@@ -947,6 +947,7 @@ fn remote_turn_result_maps_core_semantics() {
             output: lash_core::ToolCallOutput::success(serde_json::json!({ "ok": true })),
             duration_ms: 7,
         }],
+        omitted: None,
         failure_evidence: Vec::new(),
         errors: Vec::new(),
     };
@@ -1110,6 +1111,7 @@ fn assert_terminal_call_record_converts_and_validates(
         children_usage: Vec::new(),
         llm_calls: vec![record],
         tool_calls: Vec::new(),
+        omitted: None,
         failure_evidence: Vec::new(),
         errors: Vec::new(),
     };

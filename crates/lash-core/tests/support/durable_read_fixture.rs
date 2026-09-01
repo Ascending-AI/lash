@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 40;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 41;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -415,8 +415,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                                 max_lines: 2_000,
                             },
                         }],
-                        tool_calls: Vec::new(),
-                        executed_calls: Vec::new(),
+                        calls: Vec::new(),
                         printed_images: Vec::new(),
                         error: None,
                         duration_ms: 887,
@@ -1045,6 +1044,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     };
     let response = result.expect("durable fixture semantic drift: exec effect became an error");
     assert_eq!(response.observations.len(), 1);
+    assert!(response.calls.is_empty());
     assert_eq!(response.observations[0].text, "durable read effect");
     assert_eq!(
         response.observations[0].projection,

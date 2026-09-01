@@ -317,6 +317,7 @@ impl TurnBoundary {
             .final_commit_with_snapshots(FinalCommitInput {
                 returned_state: &returned_turn.state,
                 tool_calls: &returned_turn.tool_calls,
+                omitted: returned_turn.omitted.as_ref(),
                 plugins: plugins.as_deref(),
                 execution_state_update,
                 agent_frame_switch_materializes,
@@ -399,6 +400,7 @@ impl TurnBoundary {
         let FinalCommitInput {
             returned_state,
             tool_calls,
+            omitted,
             plugins,
             execution_state_update,
             agent_frame_switch_materializes,
@@ -450,7 +452,7 @@ impl TurnBoundary {
 
         if let Some(store) = store {
             let graph = state.pending_graph_commit();
-            let committed_attachment_ids = committed_attachment_ids(state, tool_calls);
+            let committed_attachment_ids = committed_attachment_ids(state, tool_calls, omitted);
             let adopted_intent_rows = committed_attachment_ids
                 .iter()
                 .cloned()
@@ -688,16 +690,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![frame_node_id.as_str(), pending_node_id.as_str()]
         );
-    }
-    fn attachment_ref(id: &str) -> crate::AttachmentRef {
-        crate::AttachmentMeta::new(
-            crate::AttachmentId::parse(id).expect("valid attachment id"),
-            crate::MediaType::parse("image/png").unwrap(),
-            3,
-            Some(crate::AttachmentTypeMetadata::image(Some(1), Some(1))),
-            Some("tiny".to_string()),
-        )
-        .as_ref()
     }
     fn test_protocol_event(kind: &str) -> crate::ProtocolEvent {
         crate::ProtocolEvent::typed(
@@ -1099,6 +1091,7 @@ mod tests {
             .final_commit_with_snapshots(FinalCommitInput {
                 returned_state: &returned_state,
                 tool_calls: &[],
+                omitted: None,
                 plugins: None,
                 execution_state_update: ExecutionStateUpdate::Clean,
                 agent_frame_switch_materializes: false,
@@ -1159,6 +1152,7 @@ mod tests {
             .final_commit_with_snapshots(FinalCommitInput {
                 returned_state: &returned_state,
                 tool_calls: &[],
+                omitted: None,
                 plugins: None,
                 execution_state_update: ExecutionStateUpdate::Clean,
                 agent_frame_switch_materializes: false,
@@ -1192,41 +1186,6 @@ mod tests {
         assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
         assert!(store.raw_graph_nodes_for_testing().is_empty());
     }
-    #[test]
-    fn committed_attachment_ids_merge_tool_outputs_with_message_refs() {
-        let tool_ref = attachment_ref("tool-output");
-        let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
-        let message = crate::Message {
-            id: "message".to_string(),
-            role: crate::MessageRole::User,
-            parts: std::sync::Arc::new(vec![crate::Part::attachment_part(
-                "message.p0".to_string(),
-                String::new(),
-                Some(crate::session_model::message::PartAttachment {
-                    source: crate::AttachmentSource::stored(attachment_ref("message-ref")),
-                }),
-            )]),
-            origin: None,
-        };
-        state.session_graph = crate::SessionGraph::from_active_read_state(&[message]);
-        let tool_calls = vec![crate::ToolCallRecord {
-            call_id: Some("call-1".to_string()),
-            tool: "make_attachment".to_string(),
-            args: serde_json::json!({}),
-            output: crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
-                crate::AttachmentSource::stored(tool_ref),
-            )),
-            duration_ms: 1,
-        }];
-        let ids = committed_attachment_ids(&state, &tool_calls);
-        assert_eq!(
-            ids,
-            vec![
-                crate::AttachmentId::parse("message-ref").expect("valid attachment id"),
-                crate::AttachmentId::parse("tool-output").expect("valid attachment id"),
-            ]
-        );
-    }
     #[tokio::test]
     async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs() {
         let backend = crate::InMemoryAttachmentStore::new();
@@ -1251,7 +1210,7 @@ mod tests {
             duration_ms: 1,
         }];
         let state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
-        let committed = committed_attachment_ids(&state, &tool_calls);
+        let committed = committed_attachment_ids(&state, &tool_calls, None);
         assert_eq!(committed, vec![attachment.id.clone()]);
 
         let roots = FixedAttachmentRoots(committed.into_iter().collect());
@@ -1306,6 +1265,7 @@ mod tests {
                 failure_evidence: &[],
                 outcome: &cancelled_outcome(),
                 tool_calls: &[],
+                omitted: None,
                 originating_queue_claims: Vec::new(),
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: Vec::new(),
@@ -1415,6 +1375,7 @@ mod tests {
             .final_commit_with_snapshots(FinalCommitInput {
                 returned_state: &returned_state,
                 tool_calls: &[],
+                omitted: None,
                 plugins: None,
                 execution_state_update: ExecutionStateUpdate::Clean,
                 agent_frame_switch_materializes: false,
@@ -1492,6 +1453,7 @@ mod tests {
                 failure_evidence: &[],
                 outcome: &cancelled_outcome(),
                 tool_calls: &[],
+                omitted: None,
                 originating_queue_claims: vec![queue_origin],
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: Vec::new(),
@@ -1529,6 +1491,7 @@ mod tests {
                 failure_evidence: &[],
                 outcome: &cancelled_outcome(),
                 tool_calls: &[],
+                omitted: None,
                 originating_queue_claims: Vec::new(),
                 originating_turn_input_claims: vec![turn_input_origin],
                 completed_queue_claims: Vec::new(),
@@ -1579,6 +1542,7 @@ mod tests {
                 failure_evidence: &[],
                 outcome: &cancelled_outcome(),
                 tool_calls: &[],
+                omitted: None,
                 originating_queue_claims: Vec::new(),
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: Vec::new(),

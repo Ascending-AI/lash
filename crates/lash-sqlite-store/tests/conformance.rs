@@ -29,6 +29,8 @@ use lash_sqlite_store::{
 };
 use tempfile::TempDir;
 
+const RETAINED_PRIOR_EFFECT_GENERATION: i32 = 15;
+
 #[path = "conformance/direct_turn_acceptance.rs"]
 mod direct_turn_acceptance;
 #[path = "conformance/pre_frame_key.rs"]
@@ -727,8 +729,7 @@ fn exec_outcome(marker: &str) -> RuntimeEffectOutcome {
     RuntimeEffectOutcome::ExecCode {
         result: Box::new(Ok(lash_core::ExecResponse {
             observations: Vec::new(),
-            tool_calls: Vec::new(),
-            executed_calls: Vec::new(),
+            calls: Vec::new(),
             printed_images: Vec::new(),
             error: None,
             duration_ms: 0,
@@ -1223,7 +1224,7 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("pre-canonical-envelope-effects.db");
     let conn = rusqlite::Connection::open(&path).expect("open legacy effect db");
-    conn.pragma_update(None, "user_version", 8)
+    conn.pragma_update(None, "user_version", RETAINED_PRIOR_EFFECT_GENERATION)
         .expect("stamp legacy effect schema");
     drop(conn);
 
@@ -1235,8 +1236,12 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
             Err(error) => error,
         };
     let message = error.to_string();
+    assert_eq!(RETAINED_PRIOR_EFFECT_GENERATION + 1, 16);
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 15"));
+    assert!(message.contains("supports schema version 16"));
+    assert!(message.contains(&format!(
+        "database reports version {RETAINED_PRIOR_EFFECT_GENERATION}"
+    )));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version"
     ));

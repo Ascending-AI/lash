@@ -815,8 +815,7 @@ fn rlm_exec_response(
                 projection: Default::default(),
             })
             .collect(),
-        tool_calls: Vec::new(),
-        executed_calls: Vec::new(),
+        calls: Vec::new(),
         printed_images: Vec::new(),
         error: error.map(str::to_string),
         duration_ms: 1,
@@ -832,15 +831,16 @@ fn rlm_exec_response_with_tool_calls(
     tool_calls: Vec<lash_core::ToolCallRecord>,
     duration_ms: u64,
 ) -> lash_core::ExecResponse {
-    let executed_calls = tool_calls
-        .iter()
-        .map(|call| lash_core::ExecutedCallRecord {
-            operation: format!("tools.{}", call.tool),
-            outcome: if call.output.is_success() {
+    let calls = tool_calls
+        .into_iter()
+        .map(|host_record| lash_core::ExecutedCall {
+            operation: format!("tools.{}", host_record.tool),
+            outcome: if host_record.output.is_success() {
                 lash_core::ExecutedCallOutcome::Ok
             } else {
                 lash_core::ExecutedCallOutcome::Err
             },
+            host_record: Some(host_record),
         })
         .collect();
     lash_core::ExecResponse {
@@ -851,8 +851,7 @@ fn rlm_exec_response_with_tool_calls(
                 projection: Default::default(),
             })
             .collect(),
-        tool_calls,
-        executed_calls,
+        calls,
         printed_images: Vec::new(),
         error: error.map(str::to_string),
         duration_ms,

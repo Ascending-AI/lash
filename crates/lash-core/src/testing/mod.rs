@@ -1269,6 +1269,7 @@ pub fn mock_assembled_turn(session_id: &str, summary: &str) -> AssembledTurn {
         children_usage: Vec::new(),
         llm_calls: Vec::new(),
         tool_calls: Vec::new(),
+        omitted: None,
         failure_evidence: Vec::new(),
         errors: Vec::new(),
         turn_input_acceptance: None,

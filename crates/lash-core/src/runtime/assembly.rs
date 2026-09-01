@@ -567,6 +567,7 @@ fn reconcile_text_snapshot(existing: &mut String, snapshot: &str) {
 
 pub(super) struct TurnAssembler {
     pub(super) tool_calls: Vec<ToolCallRecord>,
+    pub(super) omitted: Option<crate::OmittedToolCalls>,
     pub(super) llm_calls: Vec<crate::LlmCallRecord>,
     pub(super) failure_evidence: Vec<crate::TurnFailureEvidence>,
     pub(super) token_usage: TokenUsage,
@@ -592,6 +593,7 @@ impl TurnAssembler {
     pub(super) fn new() -> Self {
         Self {
             tool_calls: Vec::new(),
+            omitted: None,
             llm_calls: Vec::new(),
             failure_evidence: Vec::new(),
             token_usage: TokenUsage::default(),
@@ -619,6 +621,16 @@ impl TurnAssembler {
                     output: output.clone(),
                     duration_ms: *duration_ms,
                 });
+            }
+            SessionStreamEvent::ToolCallsOmitted { summary } => {
+                let omitted = self.omitted.get_or_insert_with(|| crate::OmittedToolCalls {
+                    count: 0,
+                    failures: 0,
+                    attachments: Vec::new(),
+                });
+                omitted.count = omitted.count.saturating_add(summary.count);
+                omitted.failures = omitted.failures.saturating_add(summary.failures);
+                omitted.attachments.extend(summary.attachments.clone());
             }
             SessionStreamEvent::TokenUsage {
                 usage, cumulative, ..
@@ -753,6 +765,10 @@ impl TurnAssembler {
                 .tool_calls
                 .iter()
                 .any(|record| !record.output.is_success())
+                || self
+                    .omitted
+                    .as_ref()
+                    .is_some_and(|omitted| omitted.failures > 0)
             {
                 TurnOutcome::Stopped(TurnStop::ToolFailure)
             } else {
@@ -789,6 +805,7 @@ impl TurnAssembler {
             children_usage,
             llm_calls: self.llm_calls,
             tool_calls: self.tool_calls,
+            omitted: self.omitted,
             failure_evidence: self.failure_evidence,
             errors: issues,
             // Stamped by the ingress that accepted this turn's input, which

@@ -304,7 +304,7 @@ finish result"#,
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
-        root         exec      cell.ok                 calls=1
+        root         exec      cell.ok                 calls=0
         root         outcome   turn.final_value        value={"ok":true}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23
@@ -456,7 +456,7 @@ finish result"#,
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
-        root         exec      cell.ok                 calls=1
+        root         exec      cell.ok                 calls=0
         root         outcome   turn.final_value        value={"len":2}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
@@ -527,7 +527,7 @@ finish result"#,
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
-        root         exec      cell.ok                 calls=1
+        root         exec      cell.ok                 calls=0
         root         outcome   turn.final_value        value={"parent":"done"}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
@@ -681,7 +681,7 @@ finish { joined: [left_value, right_value] }"#,
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
-        root         exec      cell.ok                 calls=2
+        root         exec      cell.ok                 calls=0
         root         outcome   turn.final_value        value={"joined":["left","right"]}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0

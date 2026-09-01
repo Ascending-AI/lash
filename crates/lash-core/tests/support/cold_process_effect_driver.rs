@@ -92,8 +92,7 @@ fn effect_outcome(marker: &str) -> lash_core::RuntimeEffectOutcome {
     lash_core::RuntimeEffectOutcome::ExecCode {
         result: Box::new(Ok(lash_core::ExecResponse {
             observations: Vec::new(),
-            tool_calls: Vec::new(),
-            executed_calls: Vec::new(),
+            calls: Vec::new(),
             printed_images: Vec::new(),
             error: None,
             duration_ms: 0,

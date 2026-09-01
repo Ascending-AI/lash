@@ -6,13 +6,13 @@ fn current_destructive_cutover_has_no_migration_arm() {
         SCHEMA_MIGRATIONS
             .iter()
             .all(|migration| migration.to != SCHEMA_VERSION),
-        "component 70 must reject every pre-cutover schema rather than migrate it"
+        "component 71 must reject every pre-cutover schema rather than migrate it"
     );
 
     let predecessor = SCHEMA_MIGRATIONS
         .iter()
-        .find(|migration| migration.from == 68 && migration.to == 69)
-        .expect("the historical component 68 to 69 refusal boundary must remain declared");
+        .find(|migration| migration.from == 68 && migration.to == 70)
+        .expect("the historical component 68 refusal boundary must remain declared");
     assert!(
         predecessor.is_recreate_boundary(),
         "component 68 must not migrate into the pending-input cutover"
@@ -20,8 +20,8 @@ fn current_destructive_cutover_has_no_migration_arm() {
 
     let declared = SCHEMA_MIGRATIONS
         .iter()
-        .find(|migration| migration.from == 64 && migration.to == 69)
-        .expect("the historical component 64 to 69 creation-only migration must remain declared");
+        .find(|migration| migration.from == 64 && migration.to == 70)
+        .expect("the historical component 64 creation-only migration must remain declared");
 
     assert_eq!(
         declared.introduced_relations,
@@ -43,7 +43,7 @@ fn component_63_remains_a_recreate_boundary_at_the_blake3_cutover() {
 
     assert!(
         declared.is_recreate_boundary(),
-        "component 63 must not migrate SHA-256 identities into component 69"
+        "component 63 must not migrate SHA-256 identities into the retained predecessor"
     );
 }
 
@@ -69,7 +69,8 @@ fn component_61_is_a_recreate_boundary_without_its_divergence_witness() {
     );
 }
 
-/// The declared 53 -> 69 migration, which every case below perturbs.
+/// The declared component-53 migration into the retained predecessor, which
+/// every case below perturbs.
 fn migration() -> &'static SchemaMigration {
     SCHEMA_MIGRATIONS
         .iter()
@@ -120,7 +121,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
     });
     SchemaReport {
         schema: Some("public".to_string()),
-        expected_version: 69,
+        expected_version: 70,
         found_version: Some(53),
         findings,
     }
@@ -131,7 +132,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
 fn published_53_findings() -> Vec<SchemaFinding> {
     vec![
         SchemaFinding::VersionMismatch {
-            expected: 69,
+            expected: 70,
             found: Some(53),
         },
         SchemaFinding::UnexpectedColumn {

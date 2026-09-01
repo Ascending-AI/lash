@@ -919,7 +919,7 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:ef3744
 -- Data for Name: lash_runtime_effect_replay; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_runtime_effect_replay VALUES ('{"version":2,"kind":"turn","session_id":"durable-read-fixture","execution_id":"durable-read-effect-turn"}', 'durable-read-fixture', 'durable-read-exec-replay', '9394d839f85d7d3079ca2afd7b11b5aaebf0b5b44ef28235ca59195a46d4b8b5', '{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"durable-read-fixture\",\"turn_id\":\"durable-read-effect-turn\",\"turn_index\":7,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"durable-read-exec-effect\",\"kind\":\"exec_code\"},\"replay\":{\"key\":\"durable-read-exec-replay\"}},\"command\":{\"type\":\"exec_code\",\"language\":\"fixture\",\"code\":\"return 887\"}}","hash":"9394d839f85d7d3079ca2afd7b11b5aaebf0b5b44ef28235ca59195a46d4b8b5"}', 'completed', '{"type":"exec_code","result":{"Ok":{"observations":[{"text":"durable read effect","projection":{"truncated":false,"original_chars":19,"projected_chars":19,"original_lines":1,"projected_lines":1,"limit":51200,"limit_mode":"bytes","max_lines":2000}}],"tool_calls":[],"executed_calls":[],"printed_images":[],"error":null,"duration_ms":887,"terminal_finish":{"fixture":887}}}}', NULL, NULL, NULL, 0, NULL, NULL, NULL, 1700000000000, 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_runtime_effect_replay VALUES ('{"version":2,"kind":"turn","session_id":"durable-read-fixture","execution_id":"durable-read-effect-turn"}', 'durable-read-fixture', 'durable-read-exec-replay', '9394d839f85d7d3079ca2afd7b11b5aaebf0b5b44ef28235ca59195a46d4b8b5', '{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"durable-read-fixture\",\"turn_id\":\"durable-read-effect-turn\",\"turn_index\":7,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"durable-read-exec-effect\",\"kind\":\"exec_code\"},\"replay\":{\"key\":\"durable-read-exec-replay\"}},\"command\":{\"type\":\"exec_code\",\"language\":\"fixture\",\"code\":\"return 887\"}}","hash":"9394d839f85d7d3079ca2afd7b11b5aaebf0b5b44ef28235ca59195a46d4b8b5"}', 'completed', '{"type":"exec_code","result":{"Ok":{"observations":[{"text":"durable read effect","projection":{"truncated":false,"original_chars":19,"projected_chars":19,"original_lines":1,"projected_lines":1,"limit":51200,"limit_mode":"bytes","max_lines":2000}}],"calls":[],"printed_images":[],"error":null,"duration_ms":887,"terminal_finish":{"fixture":887}}}}', NULL, NULL, NULL, 0, NULL, NULL, NULL, 1700000000000, 1700000000000);
 
 
 --
@@ -935,7 +935,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 70);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 71);
 
 
 --

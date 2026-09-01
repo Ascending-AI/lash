@@ -530,8 +530,7 @@ impl RuntimeEffectController for RecordingEffectController {
             RuntimeEffectCommand::ExecCode { .. } => Ok(RuntimeEffectOutcome::ExecCode {
                 result: Box::new(Ok(crate::ExecResponse {
                     observations: Vec::new(),
-                    tool_calls: Vec::new(),
-                    executed_calls: Vec::new(),
+                    calls: Vec::new(),
                     printed_images: Vec::new(),
                     error: None,
                     duration_ms: 0,

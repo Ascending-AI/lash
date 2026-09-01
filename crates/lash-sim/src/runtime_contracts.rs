@@ -742,6 +742,7 @@ mod tests {
                 llm_calls: Vec::new(),
                 failure_evidence: Vec::new(),
                 tool_calls: Vec::new(),
+                omitted: None,
                 execution: Default::default(),
                 errors: Vec::new(),
             }

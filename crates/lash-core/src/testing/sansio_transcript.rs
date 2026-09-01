@@ -103,6 +103,14 @@ fn record_stream_event(transcript: &mut Transcript, actor: &str, event: &Session
             }
             transcript.record(entry);
         }
+        SessionStreamEvent::ToolCallsOmitted { summary } => {
+            transcript.record(
+                Entry::new(Kind::Tool, session(), "tool.omitted")
+                    .attr(Attr::int("count", summary.count as u64))
+                    .attr(Attr::int("failures", summary.failures as u64))
+                    .attr(Attr::int("attachments", summary.attachments.len() as u64)),
+            );
+        }
         SessionStreamEvent::Message { text, kind } if kind == "final" => {
             transcript.record(
                 Entry::new(Kind::Outcome, session(), "turn.final_message")
