@@ -62,6 +62,59 @@ fn a_restored_process_handle_is_awaitable_from_a_later_cell() {
 }
 
 #[test]
+fn a_restored_process_handle_never_passes_through_promise_all() {
+    let process_environment = environment(["handle"]).with_process_handles(["handle"]);
+    let error = lash_typescript::link("finish(await Promise.all([handle]));", &process_environment)
+        .expect_err(
+            "Promise.all over a restored process handle must refuse instead of returning it",
+        );
+    assert!(
+        error.to_string().contains("TS_AWAIT_UNSUPPORTED"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_restored_process_handle_aggregate_refusal_is_honest() {
+    let process_environment = environment(["handle"]).with_process_handles(["handle"]);
+
+    for method in ["all", "allSettled"] {
+        let source = format!("finish(await Promise.{method}([handle]));");
+        let error = match lash_typescript::link(&source, &process_environment) {
+            Ok(_) => panic!("Promise.{method} must refuse restored process handles"),
+            Err(error) => error,
+        };
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("process") && rendered.contains("on its own line"),
+            "the refusal must explain the supported direct-await rule: {rendered}"
+        );
+        assert!(
+            !rendered.contains("already settled"),
+            "a live process handle is not already settled: {rendered}"
+        );
+        assert!(
+            !rendered.contains("await supports tools, process handles"),
+            "the refusal must not contradict itself: {rendered}"
+        );
+    }
+}
+
+#[test]
+fn promise_race_over_a_restored_process_handle_refuses_loudly() {
+    let process_environment = environment(["handle"]).with_process_handles(["handle"]);
+    let error = lash_typescript::link(
+        "finish(await Promise.race([handle]));",
+        &process_environment,
+    )
+    .expect_err("Promise.race must refuse before a restored handle can pass through");
+    let rendered = error.to_string();
+    assert!(rendered.contains("Promise.race"), "{rendered}");
+    assert!(rendered.contains("TS_METHOD_UNSUPPORTED"), "{rendered}");
+    assert!(!rendered.contains("already settled"), "{rendered}");
+}
+
+#[test]
 fn a_name_no_one_has_is_still_rejected_at_parse() {
     let environment = environment(["findings"]);
     let error = lash_typescript::link("finish(nowhere);", &environment)
