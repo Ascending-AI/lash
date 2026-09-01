@@ -82,6 +82,14 @@ request-abandon = { tier = "deterministic", model = "scripted-provider" }
 slack-clone-bot = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workflow-editor-authoring = { tier = "deterministic", model = "scripted-provider" }
 
+# Live-model scripted harnesses with deterministic shell oracles. These rows
+# obey dialect parity but are not emitted to the judged-browser shard: the
+# named runner owns the model turn and the oracle owns the verdict.
+[scripted_live_model]
+rlm-smoke-file-edit-bugfix = { dialects = ["lashlang", "typescript"], tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e" }
+rlm-smoke-missing-helper-file = { dialects = ["lashlang", "typescript"], tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e" }
+rlm-smoke-config-contract-edit = { dialects = ["lashlang", "typescript"], tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e" }
+
 # Deterministic, hermetic harnesses that CI executes rather than judges. They
 # make no model call, so they have no dialect to pin and no judged row to pair;
 # listing them here keeps discovery honest without inventing paid twin runs.

@@ -47,6 +47,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
                 "typescript_only",
                 "deterministic_only",
                 "no_rlm_session_only",
+                "scripted_live_model",
             )
             for name in config.get(key, {})
         ]
@@ -72,6 +73,17 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
                 f"`{scenario}` must emit exactly one dialect-neutral row",
             )
             self.assertNotIn(scenario, config["scenarios"])
+
+    def test_scripted_live_model_scenarios_declare_both_dialects(self) -> None:
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        for scenario, entry in config["scripted_live_model"].items():
+            self.assertEqual(
+                entry["dialects"],
+                config["dialects"],
+                f"`{scenario}` must carry both scripted dialect rows",
+            )
+            self.assertEqual(entry["runner"], "just rlm-smoke-e2e")
 
     def test_the_row_total_is_the_stated_arithmetic(self) -> None:
         # The count is cited in the report, the runbook rules and the shard
