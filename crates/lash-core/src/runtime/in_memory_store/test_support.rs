@@ -137,14 +137,15 @@ impl InMemorySessionStore {
                 let row = leases
                     .get(record_id)
                     .expect("session-lease counter snapshot row");
+                let held = row.held_fields();
                 format!(
                     "{}:{:?}:{:?}:{}:{}:{}",
                     row.fencing_token,
-                    row.owner,
-                    row.lease_token,
-                    row.claimed_at_epoch_ms,
-                    row.lease_term_ms,
-                    row.expires_at_epoch_ms
+                    held.map(|fields| fields.owner),
+                    held.map(|fields| fields.lease_token),
+                    held.map_or(0, |fields| fields.claimed_at_epoch_ms),
+                    held.map_or(0, |fields| fields.lease_term_ms),
+                    held.map_or(0, |fields| fields.expires_at_epoch_ms)
                 )
             }
             other => panic!("unsupported in-memory raw counter snapshot field: {other}"),
