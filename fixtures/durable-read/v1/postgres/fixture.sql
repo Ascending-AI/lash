@@ -241,7 +241,6 @@ CREATE TABLE lash_durable_read_fixture.lash_process_events (
     sequence bigint NOT NULL,
     event_type text NOT NULL,
     idempotency_key text,
-    occurred_at_ms bigint NOT NULL,
     event_json text NOT NULL
 );
 
@@ -847,9 +846,9 @@ INSERT INTO lash_durable_read_fixture.lash_process_change_clock VALUES (true, 8)
 -- Data for Name: lash_process_events; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_process_events VALUES ('durable-read-waiting-process', 1, 'process.observer_added', 'process:durable-read-waiting-process:observer:durable-read-fixture:add:registration', 1700000000000, '{"process_id":"durable-read-waiting-process","sequence":1,"event_type":"process.observer_added","payload":{"by":{"kind":"host","operation_id":"registration"},"session":"durable-read-fixture"},"invocation":{"scope":{"session_id":"runtime"},"subject":{"type":"process_event","process_id":"durable-read-waiting-process","sequence":1,"event_type":"process.observer_added"},"caused_by":{"type":"process","process_id":"durable-read-waiting-process"},"replay":{"key":"process:durable-read-waiting-process:observer:durable-read-fixture:add:registration"}},"semantics":{},"occurred_at":{"secs_since_epoch":1700000000,"nanos_since_epoch":0}}');
-INSERT INTO lash_durable_read_fixture.lash_process_events VALUES ('durable-read-waiting-process', 2, 'process.waiting', 'process:durable-read-waiting-process:wait:durable-read-wait-key:since:123:entered', 1700000000000, '{"process_id":"durable-read-waiting-process","sequence":2,"event_type":"process.waiting","payload":{"wait":{"kind":{"event_type":"process.signal.fixture-ready","key":"durable-read-wait-key","kind":"signal","name":"fixture-ready","ordinal":1},"since_ms":123}},"invocation":{"scope":{"session_id":"runtime"},"subject":{"type":"process_event","process_id":"durable-read-waiting-process","sequence":2,"event_type":"process.waiting"},"caused_by":{"type":"process","process_id":"durable-read-waiting-process"},"replay":{"key":"process:durable-read-waiting-process:wait:durable-read-wait-key:since:123:entered"}},"semantics":{},"occurred_at":{"secs_since_epoch":1700000000,"nanos_since_epoch":0}}');
-INSERT INTO lash_durable_read_fixture.lash_process_events VALUES ('durable-read-wake-process', 1, 'fixture.wake', NULL, 1700000000000, '{"process_id":"durable-read-wake-process","sequence":1,"event_type":"fixture.wake","payload":{"wake_input":"durable read wake"},"invocation":{"scope":{"session_id":"runtime"},"subject":{"type":"process_event","process_id":"durable-read-wake-process","sequence":1,"event_type":"fixture.wake"},"caused_by":{"type":"process","process_id":"durable-read-wake-process"}},"semantics":{"wake":{"input":"durable read wake"}},"occurred_at":{"secs_since_epoch":1700000000,"nanos_since_epoch":0}}');
+INSERT INTO lash_durable_read_fixture.lash_process_events VALUES ('durable-read-waiting-process', 1, 'process.observer_added', 'process:durable-read-waiting-process:observer:durable-read-fixture:add:registration', '{"process_id":"durable-read-waiting-process","sequence":1,"event_type":"process.observer_added","payload":{"by":{"kind":"host","operation_id":"registration"},"session":"durable-read-fixture"},"invocation":{"scope":{"session_id":"runtime"},"subject":{"type":"process_event","process_id":"durable-read-waiting-process","sequence":1,"event_type":"process.observer_added"},"caused_by":{"type":"process","process_id":"durable-read-waiting-process"},"replay":{"key":"process:durable-read-waiting-process:observer:durable-read-fixture:add:registration"}},"semantics":{},"occurred_at":1700000000000}');
+INSERT INTO lash_durable_read_fixture.lash_process_events VALUES ('durable-read-waiting-process', 2, 'process.waiting', 'process:durable-read-waiting-process:wait:durable-read-wait-key:since:123:entered', '{"process_id":"durable-read-waiting-process","sequence":2,"event_type":"process.waiting","payload":{"wait":{"kind":{"event_type":"process.signal.fixture-ready","key":"durable-read-wait-key","kind":"signal","name":"fixture-ready","ordinal":1},"since_ms":123}},"invocation":{"scope":{"session_id":"runtime"},"subject":{"type":"process_event","process_id":"durable-read-waiting-process","sequence":2,"event_type":"process.waiting"},"caused_by":{"type":"process","process_id":"durable-read-waiting-process"},"replay":{"key":"process:durable-read-waiting-process:wait:durable-read-wait-key:since:123:entered"}},"semantics":{},"occurred_at":1700000000000}');
+INSERT INTO lash_durable_read_fixture.lash_process_events VALUES ('durable-read-wake-process', 1, 'fixture.wake', NULL, '{"process_id":"durable-read-wake-process","sequence":1,"event_type":"fixture.wake","payload":{"wake_input":"durable read wake"},"invocation":{"scope":{"session_id":"runtime"},"subject":{"type":"process_event","process_id":"durable-read-wake-process","sequence":1,"event_type":"fixture.wake"},"caused_by":{"type":"process","process_id":"durable-read-wake-process"}},"semantics":{"wake":{"input":"durable read wake"}},"occurred_at":1700000000000}');
 
 
 --
@@ -941,7 +940,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 72);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 73);
 
 
 --

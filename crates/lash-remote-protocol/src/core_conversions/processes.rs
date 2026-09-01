@@ -1336,7 +1336,7 @@ impl TryFrom<lash_core::ProcessEvent> for RemoteProcessEvent {
             payload,
             invocation: Some(invocation.into()),
             semantics: semantics.try_into()?,
-            occurred_at_ms: lash_core::facade_support::epoch_ms_from_system_time(occurred_at),
+            occurred_at_ms: occurred_at,
         })
     }
 }
@@ -1366,7 +1366,7 @@ impl TryFrom<RemoteProcessEvent> for lash_core::ProcessEvent {
             payload,
             invocation: invocation.into(),
             semantics: semantics.try_into()?,
-            occurred_at: lash_core::facade_support::system_time_from_epoch_ms(occurred_at_ms),
+            occurred_at: occurred_at_ms,
         })
     }
 }

@@ -472,7 +472,6 @@ pub mod facade_support {
     #[doc(hidden)]
     pub use crate::runtime::effect_replay_driver;
     pub use crate::runtime::ensure_durable_effect_input;
-    pub use crate::runtime::epoch_ms_from_system_time;
     pub use crate::runtime::facade_ops::TurnContextFacadeOps;
     pub use crate::runtime::process_runtime_session_ids;
     pub use crate::runtime::process_signal_event_type;
@@ -495,7 +494,6 @@ pub mod facade_support {
         crate::operational_metrics::record_postgres_pool_acquire_wait(wait, outcome);
     }
     pub use crate::runtime::state::facade_ops::RuntimeSessionStateFacadeOps;
-    pub use crate::runtime::system_time_from_epoch_ms;
     pub use crate::runtime::terminal_append_request;
     pub use crate::runtime::validate_generic_process_event_append;
     pub use crate::runtime::validate_replayed_effect_envelope;

@@ -409,7 +409,7 @@ impl SqliteProcessRegistry {
     ///
     /// Every entry point runs these steps, in this order: replay-key lookup,
     /// wake session id, next sequence number, prepare, the replay-or-insert
-    /// decision, the six-bind event insert, the process save, the parent-end
+    /// decision, the five-bind event insert, the process save, the parent-end
     /// retention, the wake-delivery insert, and the wake allocation floor.
     /// Entry points keep their own prologue, transaction lifetime and outcome
     /// mapping.
@@ -477,7 +477,6 @@ impl SqliteProcessRegistry {
                 event,
                 projected_record,
                 wake_delivery,
-                occurred_at_ms: event_occurred_at_ms,
             } => {
                 match authorization {
                     ProcessEventWriteAuthorization::Preauthorized => {}
@@ -493,16 +492,14 @@ impl SqliteProcessRegistry {
                 }
                 conn.execute(
                     "INSERT INTO process_events (
-                        process_id, sequence, event_type, idempotency_key,
-                        occurred_at_ms, event_json
+                        process_id, sequence, event_type, idempotency_key, event_json
                      )
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
                         process_id,
                         sequence as i64,
                         event.event_type.as_str(),
                         event.invocation.replay_key(),
-                        event_occurred_at_ms as i64,
                         process_encode_json(&event)?,
                     ],
                 )

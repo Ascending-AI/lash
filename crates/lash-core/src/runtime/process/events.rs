@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
@@ -511,7 +510,7 @@ pub struct ProcessEvent {
     pub payload: serde_json::Value,
     pub invocation: crate::RuntimeInvocation,
     pub semantics: ProcessEventSemantics,
-    pub occurred_at: SystemTime,
+    pub occurred_at: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

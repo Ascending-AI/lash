@@ -1,10 +1,7 @@
-use std::time::SystemTime;
-
 use crate::plugin::PluginError;
 
 use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWake, ProcessWakeDelivery};
 use super::model::{ProcessId, SessionId};
-use super::time::epoch_ms_from_system_time;
 
 const PROCESS_WAKE_FAMILY_VERSION: u8 = 1;
 
@@ -94,7 +91,7 @@ pub struct ProcessWakeDeliveryRequest {
     pub process_caused_by: Option<crate::CausalRef>,
     pub authority: crate::QueuedWorkAuthority,
     pub wake: ProcessWake,
-    pub occurred_at: SystemTime,
+    pub occurred_at_ms: u64,
 }
 
 pub fn process_wake_delivery(
@@ -109,7 +106,7 @@ pub fn process_wake_delivery(
         process_caused_by,
         authority,
         wake,
-        occurred_at,
+        occurred_at_ms,
     } = request;
     let wake_id = process_wake_id(target_session_id.as_str(), process_id.as_str(), sequence);
     Ok(ProcessWakeDelivery {
@@ -123,7 +120,7 @@ pub fn process_wake_delivery(
         process_caused_by,
         authority,
         input: wake.input,
-        created_at_ms: epoch_ms_from_system_time(occurred_at),
+        created_at_ms: occurred_at_ms,
     })
 }
 

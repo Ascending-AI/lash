@@ -643,7 +643,6 @@ CREATE TABLE IF NOT EXISTS process_events (
     sequence          INTEGER NOT NULL,
     event_type        TEXT NOT NULL,
     idempotency_key   TEXT,
-    occurred_at_ms    INTEGER NOT NULL,
     event_json        TEXT NOT NULL,
     PRIMARY KEY (process_id, sequence),
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
@@ -784,7 +783,10 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 // tool-intent kind vocabularies. Existing process registries are rejected.
 /// Version 27 removes the unread process-lease owner-liveness column. Existing
 /// process registries are rejected rather than migrated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 27;
+/// Version 28 stores process-event time only in the event JSON as epoch
+/// milliseconds and removes the unread companion column. Existing process
+/// registries are rejected rather than migrated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 28;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (

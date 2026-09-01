@@ -2033,7 +2033,7 @@ fn process_event(process_id: &str) -> lash_core::ProcessEvent {
                 input: "wake".to_string(),
             }),
         },
-        occurred_at: lash_core::facade_support::system_time_from_epoch_ms(12),
+        occurred_at: 12,
     }
 }
 

@@ -540,7 +540,7 @@ impl RuntimeBoundaryHarness {
                 wake: lash_core::facade_support::ProcessWake {
                     input: format!("wake for {session}"),
                 },
-                occurred_at: std::time::UNIX_EPOCH + std::time::Duration::from_millis(event.at),
+                occurred_at_ms: event.at,
             },
         )
         .map_err(|err| RuntimeBoundaryError::new(format!("process wake failed: {err}")))?;
@@ -1501,7 +1501,7 @@ fn worker_failover_work(
             wake: lash_core::facade_support::ProcessWake {
                 input: format!("worker-owned work for {session}"),
             },
-            occurred_at: std::time::UNIX_EPOCH + std::time::Duration::from_millis(occurred_at_ms),
+            occurred_at_ms,
         },
     )
     .map_err(|err| RuntimeBoundaryError::new(format!("build worker-owned work failed: {err}")))
