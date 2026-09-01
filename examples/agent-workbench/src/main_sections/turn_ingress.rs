@@ -100,14 +100,7 @@ async fn admit_turn_input(
         .await
         .map_err(|error| state.session_admission_error(session_id, surface, error))?;
     reject_if_active_turn_settled(state, &acceptance).await?;
-    let accepted_state = match acceptance.ingress {
-        lash::persistence::TurnInputIngress::ActiveTurn { .. } => {
-            lash::persistence::TurnInputState::PendingActive
-        }
-        lash::persistence::TurnInputIngress::NextTurn => {
-            lash::persistence::TurnInputState::DeferredNextTurn
-        }
-    };
+    let accepted_state = acceptance.ingress.initial_state();
     let receipt = TurnInputReceipt {
         accepted: true,
         input_id: acceptance.input_id.clone(),

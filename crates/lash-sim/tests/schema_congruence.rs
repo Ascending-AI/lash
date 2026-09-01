@@ -41,6 +41,16 @@ struct ExpectedConstraint {
 
 const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     expected_constraint(
+        "pending_turn_inputs",
+        "ck_pending_turn_inputs_state",
+        "state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')",
+    ),
+    expected_constraint(
+        "pending_turn_inputs",
+        "ck_pending_turn_inputs_state_ingress",
+        "(json_extract(ingress_json, '$.scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR (json_extract(ingress_json, '$.scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))",
+    ),
+    expected_constraint(
         "queued_work_batches",
         "ck_queued_work_batches_work_kind",
         "work_kind IN ('turn', 'control')",
@@ -108,6 +118,16 @@ const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
 ];
 
 const POSTGRES_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
+    expected_constraint(
+        "lash_pending_turn_inputs",
+        "ck_pending_turn_inputs_state",
+        "state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')",
+    ),
+    expected_constraint(
+        "lash_pending_turn_inputs",
+        "ck_pending_turn_inputs_state_ingress",
+        "((ingress_json::jsonb ->> 'scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR ((ingress_json::jsonb ->> 'scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))",
+    ),
     expected_constraint(
         "lash_queued_work_batches",
         "ck_queued_work_batches_work_kind",
@@ -712,8 +732,52 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     use lash_core::store_backend_support::SessionMetaCodec;
     use lash_core::{
         CausalRef, DeliveryPolicy, ObserverInheritance, ProcessStatus, QueuedWorkKind, SessionMeta,
-        SessionRelation, ToolIntentKind, WakeDeliveryState, WakeDiscardReason,
+        SessionRelation, ToolIntentKind, TurnInputCheckpointBoundary, TurnInputIngress,
+        TurnInputState, WakeDeliveryState, WakeDiscardReason,
     };
+
+    assert_eq!(
+        [
+            TurnInputState::PendingActive,
+            TurnInputState::DeferredNextTurn,
+            TurnInputState::Accepted,
+            TurnInputState::Cancelled,
+            TurnInputState::Completed,
+        ]
+        .map(TurnInputState::as_str),
+        [
+            "pending_active",
+            "deferred_next_turn",
+            "accepted",
+            "cancelled",
+            "completed",
+        ]
+    );
+    let active_ingress =
+        TurnInputIngress::active_turn("turn", TurnInputCheckpointBoundary::AfterWork);
+    let next_ingress = TurnInputIngress::next_turn();
+    assert_eq!(
+        active_ingress.initial_state(),
+        TurnInputState::PendingActive
+    );
+    assert_eq!(
+        next_ingress.initial_state(),
+        TurnInputState::DeferredNextTurn
+    );
+    assert_eq!(
+        serde_json::to_value(&active_ingress)
+            .expect("serialize active-turn ingress")
+            .pointer("/scope")
+            .and_then(serde_json::Value::as_str),
+        Some("active_turn")
+    );
+    assert_eq!(
+        serde_json::to_value(&next_ingress)
+            .expect("serialize next-turn ingress")
+            .pointer("/scope")
+            .and_then(serde_json::Value::as_str),
+        Some("next_turn")
+    );
 
     assert_eq!(
         [QueuedWorkKind::Turn, QueuedWorkKind::Control].map(QueuedWorkKind::as_str),
@@ -903,6 +967,20 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
             | ProcessStatus::CallerDeparted => {}
         }
     }
+    fn exhaustive_turn_input_state(state: TurnInputState) {
+        match state {
+            TurnInputState::PendingActive
+            | TurnInputState::DeferredNextTurn
+            | TurnInputState::Accepted
+            | TurnInputState::Cancelled
+            | TurnInputState::Completed => {}
+        }
+    }
+    fn exhaustive_turn_input_ingress(ingress: &TurnInputIngress) {
+        match ingress {
+            TurnInputIngress::ActiveTurn { .. } | TurnInputIngress::NextTurn => {}
+        }
+    }
     fn exhaustive_queued_work_kind(kind: QueuedWorkKind) {
         match kind {
             QueuedWorkKind::Turn | QueuedWorkKind::Control => {}
@@ -960,6 +1038,8 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
         }
     }
     exhaustive_process_status(ProcessStatus::Running);
+    exhaustive_turn_input_state(TurnInputState::PendingActive);
+    exhaustive_turn_input_ingress(&next_ingress);
     exhaustive_queued_work_kind(QueuedWorkKind::Turn);
     exhaustive_delivery_policy(DeliveryPolicy::EarliestSafeBoundary);
     exhaustive_wake_delivery_state(WakeDeliveryState::Pending);

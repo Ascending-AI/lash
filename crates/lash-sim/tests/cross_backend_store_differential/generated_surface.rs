@@ -1327,27 +1327,25 @@ fn read_sqlite_surface(
         let mut stmt = process
             .prepare(
                 "SELECT process_id, lease_owner_id, lease_owner_incarnation_id,
-                    lease_owner_liveness_json, lease_token, lease_fencing_token,
-                    lease_claimed_at_ms, lease_expires_at_ms
+                    lease_token, lease_fencing_token, lease_claimed_at_ms,
+                    lease_expires_at_ms
              FROM process_leases ORDER BY process_id",
             )
             .unwrap();
         stmt.query_map([], |row| {
             let owner_id: Option<String> = row.get(1)?;
             let incarnation_id: Option<String> = row.get(2)?;
-            let liveness: Option<String> = row.get(3)?;
-            let claimed: i64 = row.get(6)?;
-            let expires: i64 = row.get(7)?;
+            let claimed: i64 = row.get(5)?;
+            let expires: i64 = row.get(6)?;
             Ok(ProcessLeaseObservation {
                 process_id: row.get(0)?,
-                lease_token_present: row.get::<_, Option<String>>(4)?.is_some(),
-                owner: if row.get::<_, Option<String>>(4)?.is_some() {
-                    serde_json::to_value(decode_lease_owner(owner_id, incarnation_id, liveness))
-                        .unwrap()
+                lease_token_present: row.get::<_, Option<String>>(3)?.is_some(),
+                owner: if row.get::<_, Option<String>>(3)?.is_some() {
+                    serde_json::to_value(decode_lease_owner(owner_id, incarnation_id)).unwrap()
                 } else {
                     serde_json::Value::Null
                 },
-                fencing_token: row.get::<_, i64>(5)? as u64,
+                fencing_token: row.get::<_, i64>(4)? as u64,
                 claimed: claimed != 0,
                 ttl_ms: (claimed != 0).then_some((expires - claimed) as u64),
             })
@@ -1580,21 +1578,19 @@ async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
         Option<String>,
         Option<String>,
         Option<String>,
-        Option<String>,
         i64,
         i64,
         i64,
     );
-    let lease_rows: Vec<PgLeaseRow> = sqlx::query_as("SELECT process_id, lease_owner_id, lease_owner_incarnation_id, lease_owner_liveness_json, lease_token, lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms FROM lash_process_leases ORDER BY process_id").fetch_all(pool).await.unwrap();
+    let lease_rows: Vec<PgLeaseRow> = sqlx::query_as("SELECT process_id, lease_owner_id, lease_owner_incarnation_id, lease_token, lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms FROM lash_process_leases ORDER BY process_id").fetch_all(pool).await.unwrap();
     let leases = lease_rows
         .into_iter()
         .map(
-            |(process_id, owner_id, incarnation, liveness, token, fencing, claimed, expires)| {
+            |(process_id, owner_id, incarnation, token, fencing, claimed, expires)| {
                 ProcessLeaseObservation {
                     process_id,
                     owner: if token.is_some() {
-                        serde_json::to_value(decode_lease_owner(owner_id, incarnation, liveness))
-                            .unwrap()
+                        serde_json::to_value(decode_lease_owner(owner_id, incarnation)).unwrap()
                     } else {
                         serde_json::Value::Null
                     },

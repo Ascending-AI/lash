@@ -31,10 +31,6 @@
     "verdict": "deliberately-excluded",
     "reason": "TurnInput includes host-facing content and attachments and has no bounded JsonSchema durability contract yet."
   },
-  "lash_pending_turn_inputs.claim_owner_liveness_json": {
-    "verdict": "not-serialized-struct",
-    "reason": "Reserved compatibility column; current claim writes always bind NULL and projection ignores its value."
-  },
   "lash_processes.record_json": {
     "verdict": "deliberately-excluded",
     "reason": "ProcessRecord spans the durable process model; enrolling its nested specs, waits, provenance, and status is a separate process-schema cutover."
@@ -46,10 +42,6 @@
   "lash_process_wake_deliveries.delivery_json": {
     "verdict": "deliberately-excluded",
     "reason": "WakeDelivery is part of the process wake protocol and must be enrolled with the process carrier family."
-  },
-  "lash_process_leases.lease_owner_liveness_json": {
-    "verdict": "not-serialized-struct",
-    "reason": "Reserved compatibility column; current writes always bind NULL and reads ignore its value."
   },
   "lash_process_segment_handovers.handover_json": {
     "verdict": "deliberately-excluded",

@@ -2835,6 +2835,7 @@ lash::persistence::TurnInputIngress::NextTurn
 lash::persistence::TurnInputIngress::active_turn
 lash::persistence::TurnInputIngress::active_turn_id
 lash::persistence::TurnInputIngress::admits_checkpoint
+lash::persistence::TurnInputIngress::initial_state
 lash::persistence::TurnInputIngress::next_turn
 lash::persistence::TurnInputSettlementClaim
 lash::persistence::TurnInputSettlementClaim::claim_id

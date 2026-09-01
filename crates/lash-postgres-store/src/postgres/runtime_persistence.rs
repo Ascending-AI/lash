@@ -1073,7 +1073,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                         state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                         claim_owner_id, claim_owner_incarnation_id,
-                        claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                        claim_token, claim_session_lease_generation
                  FROM lash_pending_turn_inputs
                  WHERE session_id = $1 AND state = $2
                  ORDER BY enqueue_seq ASC
@@ -1103,7 +1103,6 @@ impl SessionCommitStore for PostgresSessionStore {
                          claim_id = NULL,
                          claim_owner_id = NULL,
                          claim_owner_incarnation_id = NULL,
-                         claim_owner_liveness_json = NULL,
                          claim_token = NULL,
                          claim_session_lease_generation = 0
                      WHERE session_id = $1 AND input_id = $2",
@@ -1394,7 +1393,6 @@ pub(crate) async fn complete_turn_input_claims_tx(
                          claim_id = NULL,
                          claim_owner_id = NULL,
                          claim_owner_incarnation_id = NULL,
-                         claim_owner_liveness_json = NULL,
                          claim_token = NULL,
                          claim_session_lease_generation = 0
                      WHERE session_id = $1
@@ -1415,7 +1413,6 @@ pub(crate) async fn complete_turn_input_claims_tx(
                          claim_id = NULL,
                          claim_owner_id = NULL,
                          claim_owner_incarnation_id = NULL,
-                         claim_owner_liveness_json = NULL,
                          claim_token = NULL,
                          claim_session_lease_generation = 0
                      WHERE session_id = $1
@@ -2662,12 +2659,7 @@ impl TurnInputStore for PostgresSessionStore {
                 enqueue_seq_u64,
             )
         });
-        let state = match draft.ingress {
-            lash_core::TurnInputIngress::ActiveTurn { .. } => {
-                lash_core::TurnInputState::PendingActive
-            }
-            lash_core::TurnInputIngress::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
-        };
+        let state = draft.ingress.initial_state();
         let ingress_json = encode_json(&draft.ingress)?;
         let input_json = encode_json(&draft.input)?;
         let input = if let Some(source_key) = draft.source_key.as_deref() {
@@ -2682,7 +2674,7 @@ impl TurnInputStore for PostgresSessionStore {
                  RETURNING enqueue_seq, input_id, session_id, source_key, ingress_json,
                            state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                            claim_owner_id, claim_owner_incarnation_id,
-                           claim_owner_liveness_json, claim_token, claim_session_lease_generation",
+                           claim_token, claim_session_lease_generation",
             )
             .bind(enqueue_seq)
             .bind(&input_id)
@@ -2748,7 +2740,7 @@ impl TurnInputStore for PostgresSessionStore {
             "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
-                    claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation
              FROM lash_pending_turn_inputs
              WHERE session_id = $1
                AND state IN ($2, $3)
@@ -2854,7 +2846,7 @@ impl TurnInputStore for PostgresSessionStore {
             "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
-                    claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation
              FROM lash_pending_turn_inputs
              WHERE session_id = $1 AND enqueue_seq >= $2
              ORDER BY enqueue_seq ASC
@@ -2937,7 +2929,6 @@ impl TurnInputStore for PostgresSessionStore {
                  claim_id = NULL,
                  claim_owner_id = NULL,
                  claim_owner_incarnation_id = NULL,
-                 claim_owner_liveness_json = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0
              WHERE session_id = $1 AND claim_id = $2 AND claim_token = $3",
@@ -3012,7 +3003,6 @@ impl TurnInputStore for PostgresSessionStore {
                      claim_id = NULL,
                      claim_owner_id = NULL,
                      claim_owner_incarnation_id = NULL,
-                     claim_owner_liveness_json = NULL,
                      claim_token = NULL,
                      claim_session_lease_generation = 0
                  WHERE (session_id, claim_id, claim_token) IN ",
@@ -3742,7 +3732,6 @@ async fn defer_orphaned_active_turn_inputs_tx(
              claim_id = NULL,
              claim_owner_id = NULL,
              claim_owner_incarnation_id = NULL,
-             claim_owner_liveness_json = NULL,
              claim_token = NULL,
              claim_session_lease_generation = 0
          WHERE session_id = $1 AND input_id = $2",
@@ -3798,7 +3787,7 @@ async fn claim_pending_turn_inputs_postgres_tx(
         "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                 state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                 claim_owner_id, claim_owner_incarnation_id,
-                claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                claim_token, claim_session_lease_generation
          FROM lash_pending_turn_inputs
          WHERE session_id = ",
     );
@@ -3863,7 +3852,6 @@ async fn claim_pending_turn_inputs_postgres_tx(
         "turn_input_claim_fencing_token",
         selected.iter().map(|(row, _)| row.claim_fencing_token),
     )?;
-    let liveness_json: Option<&str> = None;
     let state_after_claim = match &mode {
         lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputState::Accepted,
         lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
@@ -3876,15 +3864,14 @@ async fn claim_pending_turn_inputs_postgres_tx(
                  claim_id = $4,
                  claim_owner_id = $5,
                  claim_owner_incarnation_id = $6,
-                 claim_owner_liveness_json = $7,
-                 claim_token = $8,
-                 claim_fencing_token = $10,
-                 claim_session_lease_generation = $9
+                 claim_token = $7,
+                 claim_fencing_token = $9,
+                 claim_session_lease_generation = $8
              WHERE session_id = $1
                AND input_id = $2
                AND (
                     claim_token IS NULL
-                    OR claim_session_lease_generation <> $9
+                    OR claim_session_lease_generation <> $8
                )",
         )
         .bind(session_id)
@@ -3893,7 +3880,6 @@ async fn claim_pending_turn_inputs_postgres_tx(
         .bind(&lease.claim_id)
         .bind(&owner.owner_id)
         .bind(&owner.incarnation_id)
-        .bind(liveness_json)
         .bind(&lease.lease_token)
         .bind(sql_session_lease_generation(
             lease.session_lease_generation,
@@ -3955,7 +3941,7 @@ async fn claim_pending_turn_inputs_postgres(
         "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                 state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                 claim_owner_id, claim_owner_incarnation_id,
-                claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                claim_token, claim_session_lease_generation
          FROM lash_pending_turn_inputs
          WHERE session_id = ",
     );
@@ -4019,7 +4005,6 @@ async fn claim_pending_turn_inputs_postgres(
         "turn_input_claim_fencing_token",
         selected.iter().map(|(row, _)| row.claim_fencing_token),
     )?;
-    let liveness_json: Option<&str> = None;
     let state_after_claim = match &mode {
         lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputState::Accepted,
         lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
@@ -4032,15 +4017,14 @@ async fn claim_pending_turn_inputs_postgres(
                  claim_id = $4,
                  claim_owner_id = $5,
                  claim_owner_incarnation_id = $6,
-                 claim_owner_liveness_json = $7,
-                 claim_token = $8,
-                 claim_fencing_token = $10,
-                 claim_session_lease_generation = $9
+                 claim_token = $7,
+                 claim_fencing_token = $9,
+                 claim_session_lease_generation = $8
              WHERE session_id = $1
                AND input_id = $2
                AND (
                     claim_token IS NULL
-                    OR claim_session_lease_generation <> $9
+                    OR claim_session_lease_generation <> $8
                )",
         )
         .bind(session_id)
@@ -4049,7 +4033,6 @@ async fn claim_pending_turn_inputs_postgres(
         .bind(&lease.claim_id)
         .bind(&owner.owner_id)
         .bind(&owner.incarnation_id)
-        .bind(liveness_json)
         .bind(&lease.lease_token)
         .bind(sql_session_lease_generation(
             lease.session_lease_generation,

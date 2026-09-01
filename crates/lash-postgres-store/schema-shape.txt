@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 68
+version 69
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null
@@ -105,7 +105,6 @@ table lash_pending_turn_inputs
   column claim_id text nullable
   column claim_owner_id text nullable
   column claim_owner_incarnation_id text nullable
-  column claim_owner_liveness_json text nullable
   column claim_session_lease_generation bigint not-null default
   column claim_token text nullable
   column enqueue_seq bigint not-null default
@@ -139,7 +138,6 @@ table lash_process_leases
   column lease_fencing_token bigint not-null default
   column lease_owner_id text nullable
   column lease_owner_incarnation_id text nullable
-  column lease_owner_liveness_json text nullable
   column lease_token text nullable
   column process_id text not-null
   primary-key (process_id)

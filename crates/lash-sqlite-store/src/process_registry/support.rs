@@ -653,7 +653,7 @@ impl SqliteProcessRegistry {
         conn.query_row(
             "SELECT lease_owner_id, lease_token, lease_fencing_token,
                     lease_claimed_at_ms, lease_expires_at_ms,
-                    lease_owner_incarnation_id, lease_owner_liveness_json
+                    lease_owner_incarnation_id
              FROM process_leases
              WHERE process_id = ?1",
             params![process_id],
@@ -699,14 +699,13 @@ impl SqliteProcessRegistry {
         conn.execute(
             "INSERT INTO process_leases (
                 process_id, lease_owner_id, lease_owner_incarnation_id,
-                lease_owner_liveness_json, lease_token, lease_fencing_token,
+                lease_token, lease_fencing_token,
                 lease_claimed_at_ms, lease_expires_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(process_id) DO UPDATE SET
                 lease_owner_id = excluded.lease_owner_id,
                 lease_owner_incarnation_id = excluded.lease_owner_incarnation_id,
-                lease_owner_liveness_json = excluded.lease_owner_liveness_json,
                 lease_token = excluded.lease_token,
                 lease_fencing_token = excluded.lease_fencing_token,
                 lease_claimed_at_ms = excluded.lease_claimed_at_ms,
@@ -715,7 +714,6 @@ impl SqliteProcessRegistry {
                 lease.process_id.as_str(),
                 lease.owner.owner_id.as_str(),
                 lease.owner.incarnation_id.as_str(),
-                Option::<&str>::None,
                 lease.lease_token.as_str(),
                 sql_fencing_token,
                 lease.claimed_at_epoch_ms as i64,

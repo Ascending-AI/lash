@@ -57,11 +57,11 @@ pub(crate) fn pending_turn_input_row_from_sql(
                 Box::new(error),
             )
         })?,
-        claim_token: row.get(13)?,
+        claim_token: row.get(12)?,
         claim_session_lease_generation: u64_from_sql(
             "PendingTurnInput",
             "claim_session_lease_generation",
-            row.get(14)?,
+            row.get(13)?,
         )?,
     })
 }
@@ -91,7 +91,7 @@ pub(crate) fn load_pending_turn_input_by_id_conn(
             "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
-                    claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                    claim_token, claim_session_lease_generation
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2",
             params![session_id, input_id],
@@ -113,7 +113,7 @@ pub(crate) fn load_pending_turn_input_row_by_target_conn(
                 "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                         state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                         claim_owner_id, claim_owner_incarnation_id,
-                        claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                        claim_token, claim_session_lease_generation
                  FROM pending_turn_inputs
                  WHERE session_id = ?1 AND input_id = ?2",
                 params![session_id, input_id],
@@ -126,7 +126,7 @@ pub(crate) fn load_pending_turn_input_row_by_target_conn(
                 "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                         state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                         claim_owner_id, claim_owner_incarnation_id,
-                        claim_owner_liveness_json, claim_token, claim_session_lease_generation
+                        claim_token, claim_session_lease_generation
                  FROM pending_turn_inputs
                  WHERE session_id = ?1 AND source_key = ?2",
                 params![session_id, source_key],

@@ -472,6 +472,7 @@ impl ModelStore {
                     .get("ingress_mode")
                     .and_then(Value::as_str)
                     .unwrap_or("next_turn");
+                // Deliberate vocabulary restatement: keep this drift-pin for prelude item 21.
                 let input_state = if ingress_mode == "active_turn" {
                     "pending_active"
                 } else {

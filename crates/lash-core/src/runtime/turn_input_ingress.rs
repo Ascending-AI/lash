@@ -36,6 +36,15 @@ pub enum TurnInputIngress {
 }
 
 impl TurnInputIngress {
+    /// Derives the only legal initial durable state for this ingress scope.
+    #[must_use]
+    pub fn initial_state(&self) -> TurnInputState {
+        match self {
+            Self::ActiveTurn { .. } => TurnInputState::PendingActive,
+            Self::NextTurn => TurnInputState::DeferredNextTurn,
+        }
+    }
+
     /// Routes an input to an active turn at or after the named checkpoint boundary for turn-input
     /// store implementors.
     pub fn active_turn(

@@ -194,10 +194,11 @@ CREATE TABLE lash_durable_read_fixture.lash_pending_turn_inputs (
     claim_id text,
     claim_owner_id text,
     claim_owner_incarnation_id text,
-    claim_owner_liveness_json text,
     claim_token text,
     claim_fencing_token bigint DEFAULT 0 NOT NULL,
-    claim_session_lease_generation bigint DEFAULT 0 NOT NULL
+    claim_session_lease_generation bigint DEFAULT 0 NOT NULL,
+    CONSTRAINT ck_pending_turn_inputs_state CHECK ((state = ANY (ARRAY['pending_active'::text, 'deferred_next_turn'::text, 'accepted'::text, 'cancelled'::text, 'completed'::text]))),
+    CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK ((((((ingress_json)::jsonb ->> 'scope'::text) = 'active_turn'::text) AND (state = ANY (ARRAY['pending_active'::text, 'accepted'::text, 'cancelled'::text, 'completed'::text]))) OR ((((ingress_json)::jsonb ->> 'scope'::text) = 'next_turn'::text) AND (state = ANY (ARRAY['deferred_next_turn'::text, 'cancelled'::text, 'completed'::text])))))
 );
 
 
@@ -253,7 +254,6 @@ CREATE TABLE lash_durable_read_fixture.lash_process_leases (
     process_id text NOT NULL,
     lease_owner_id text,
     lease_owner_incarnation_id text,
-    lease_owner_liveness_json text,
     lease_token text,
     lease_fencing_token bigint DEFAULT 0 NOT NULL,
     lease_claimed_at_ms bigint DEFAULT 0 NOT NULL,
@@ -827,7 +827,7 @@ INSERT INTO lash_durable_read_fixture.lash_node_anchors VALUES ('n_03531bbc4371c
 -- Data for Name: lash_pending_turn_inputs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (1, 'durable-read-pending-input', 'durable-read-fixture', 'durable-read-input-source', '{"scope":"next_turn"}', 'deferred_next_turn', '{"items":[{"type":"text","text":"durable read pending input"}]}', 1700000000000, NULL, NULL, NULL, NULL, NULL, 0, 0);
+INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (1, 'durable-read-pending-input', 'durable-read-fixture', 'durable-read-input-source', '{"scope":"next_turn"}', 'deferred_next_turn', '{"items":[{"type":"text","text":"durable read pending input"}]}', 1700000000000, NULL, NULL, NULL, NULL, 0, 0);
 
 
 --
@@ -850,7 +850,7 @@ INSERT INTO lash_durable_read_fixture.lash_process_events VALUES ('durable-read-
 -- Data for Name: lash_process_leases; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_process_leases VALUES ('durable-read-waiting-process', 'durable-read-owner', 'durable-read-incarnation', NULL, 'c24ed156949132698a1d17c2e4766521cfd18ab9b7e09b95c44210164e9271cd', 1, 1700000000000, 1700000000100);
+INSERT INTO lash_durable_read_fixture.lash_process_leases VALUES ('durable-read-waiting-process', 'durable-read-owner', 'durable-read-incarnation', 'c24ed156949132698a1d17c2e4766521cfd18ab9b7e09b95c44210164e9271cd', 1, 1700000000000, 1700000000100);
 
 
 --
@@ -935,7 +935,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 68);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 69);
 
 
 --

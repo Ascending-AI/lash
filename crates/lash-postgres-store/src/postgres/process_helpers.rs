@@ -413,7 +413,7 @@ pub(crate) async fn load_process_lease_tx(
     let row = sqlx::query(
         "SELECT lease_owner_id, lease_token, lease_fencing_token,
                 lease_claimed_at_ms, lease_expires_at_ms,
-                lease_owner_incarnation_id, lease_owner_liveness_json
+                lease_owner_incarnation_id
          FROM lash_process_leases
          WHERE process_id = $1
          FOR UPDATE",
@@ -461,14 +461,13 @@ pub(crate) async fn acquire_process_lease_tx(
     sqlx::query(
         "INSERT INTO lash_process_leases (
             process_id, lease_owner_id, lease_owner_incarnation_id,
-            lease_owner_liveness_json, lease_token, lease_fencing_token,
+            lease_token, lease_fencing_token,
             lease_claimed_at_ms, lease_expires_at_ms
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (process_id) DO UPDATE SET
             lease_owner_id = EXCLUDED.lease_owner_id,
             lease_owner_incarnation_id = EXCLUDED.lease_owner_incarnation_id,
-            lease_owner_liveness_json = EXCLUDED.lease_owner_liveness_json,
             lease_token = EXCLUDED.lease_token,
             lease_fencing_token = EXCLUDED.lease_fencing_token,
             lease_claimed_at_ms = EXCLUDED.lease_claimed_at_ms,
@@ -477,7 +476,6 @@ pub(crate) async fn acquire_process_lease_tx(
     .bind(&lease.process_id)
     .bind(&lease.owner.owner_id)
     .bind(&lease.owner.incarnation_id)
-    .bind(Option::<&str>::None)
     .bind(&lease.lease_token)
     .bind(sql_fencing_token)
     .bind(lease.claimed_at_epoch_ms as i64)

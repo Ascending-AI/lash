@@ -1148,12 +1148,10 @@ pub fn process_runtime_session_ids(process_id: &str) -> [String; 2] {
 /// `process_id`; future distributed durable backends use the *same* fields to
 /// coordinate workers that don't share a file system.
 ///
-/// The owner is a full [`LeaseOwnerIdentity`](crate::LeaseOwnerIdentity):
-/// its persisted liveness metadata is what lets a sweeping worker prove a
-/// busy holder is *definitely dead* and reclaim the lease before the TTL
-/// through [`ProcessRegistry::reclaim_process_lease`](super::ProcessRegistry::reclaim_process_lease),
-/// unlike the TTL-fenced session execution lane, which does not persist owner
-/// liveness metadata.
+/// The owner is a full [`LeaseOwnerIdentity`](crate::LeaseOwnerIdentity), whose
+/// owner and incarnation IDs distinguish successive holders. Reclaim remains
+/// TTL- and fencing-token-based through
+/// [`ProcessRegistry::reclaim_process_lease`](super::ProcessRegistry::reclaim_process_lease).
 ///
 /// **This is not single-process theatre.** The owner / fencing-token /
 /// lease-token triple is the public contract that lets any backend detect and
