@@ -63,11 +63,7 @@ impl RecordedToolIntentOutcomeBuffer {
             else {
                 continue;
             };
-            if identity.session_id.is_empty()
-                || identity.execution_scope_id.is_empty()
-                || identity.tool_call_id.is_empty()
-                || !crate::tool_intent::has_v2_tool_intent_replay_key(identity)
-            {
+            let Ok(derived) = crate::rederive_tool_intent_identity(identity) else {
                 tracing::error!(
                     target: "lash::tool_intent",
                     session_id = %identity.session_id,
@@ -75,7 +71,20 @@ impl RecordedToolIntentOutcomeBuffer {
                     tool_call_id = %identity.tool_call_id,
                     intent_index = identity.intent_index,
                     replay_key = %identity.replay_key,
-                    "discarded parent-end action with an invalid or pre-cutover recorded identity"
+                    "discarded parent-end action with an invalid recorded identity"
+                );
+                continue;
+            };
+            if &derived != identity {
+                tracing::error!(
+                    target: "lash::tool_intent",
+                    session_id = %identity.session_id,
+                    execution_scope_id = %identity.execution_scope_id,
+                    tool_call_id = %identity.tool_call_id,
+                    intent_index = identity.intent_index,
+                    replay_key = %identity.replay_key,
+                    expected_replay_key = %derived.replay_key,
+                    "discarded parent-end action whose replay key does not match its full identity"
                 );
                 continue;
             }
@@ -242,11 +251,17 @@ mod parent_end_buffer_tests {
         wrong_key.replay_key = "tool-intent:v1:blake3:pre-cutover".to_string();
         let mut malformed_v2 = valid.clone();
         malformed_v2.replay_key = "tool-intent:v2:blake3:not-a-hash".to_string();
+        let mut wrong_tuple_same_key = valid.clone();
+        wrong_tuple_same_key.intent_index = 1;
+        let mut wrong_emission_same_key = valid.clone();
+        wrong_emission_same_key.minting_emission_replay_key = Some("forged-emission".to_string());
 
         let buffer = RecordedToolIntentOutcomeBuffer::default();
         buffer.record(&[
             outcome(wrong_key, "wrong-key-child"),
             outcome(malformed_v2, "malformed-v2-child"),
+            outcome(wrong_tuple_same_key, "wrong-tuple-child"),
+            outcome(wrong_emission_same_key, "wrong-emission-child"),
             outcome(valid.clone(), "canonical-child"),
             outcome(valid, "conflicting-child"),
         ]);
@@ -266,7 +281,7 @@ mod parent_end_buffer_tests {
                     policy: crate::ProcessParentEndPolicy::Cancel,
                 },
             }],
-            "pre-cutover replay keys and conflicting duplicate sightings must not alter teardown"
+            "malformed, pre-cutover, or tuple-mismatched replay keys and conflicting duplicate sightings must not alter teardown"
         );
     }
 }

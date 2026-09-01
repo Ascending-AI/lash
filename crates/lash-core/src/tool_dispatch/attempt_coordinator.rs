@@ -721,6 +721,7 @@ mod projection_tests {
                 tool_call_id: "call".to_string(),
                 intent_index: 0,
                 replay_key: "replay".to_string(),
+                minting_emission_replay_key: None,
             },
             kind: crate::ToolIntentKind::SignalProcess,
             result: serde_json::json!({ "sequence": sequence }),

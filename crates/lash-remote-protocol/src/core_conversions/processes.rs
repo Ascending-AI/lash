@@ -1036,6 +1036,11 @@ impl From<RemoteRuntimeReplay> for lash_core::runtime::RuntimeReplay {
                             tool_call_id: identity.tool_call_id,
                             intent_index: identity.intent_index,
                             replay_key: identity.replay_key,
+                            // The wire mirror predates the retained emission
+                            // key; mirroring it rides the next protocol bump.
+                            // Journaled outcomes never round-trip through this
+                            // path — they carry locally derived identities.
+                            minting_emission_replay_key: None,
                         },
                     )
                 }

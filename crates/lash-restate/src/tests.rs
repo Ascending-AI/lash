@@ -5369,6 +5369,7 @@ async fn fig1767_journal_entry_byte_sequence_equality() {
                     tool_call_id: "call".to_string(),
                     intent_index: 0,
                     replay_key: "key".to_string(),
+                    minting_emission_replay_key: None,
                 },
                 process_id: "fig1767-proc".to_string(),
                 policy: lash_core::ProcessParentEndPolicy::Cancel,
@@ -5509,6 +5510,7 @@ async fn fig1767_give_up_verdict_redrive_executes_nothing() {
                     tool_call_id: "call".to_string(),
                     intent_index: 0,
                     replay_key: "key".to_string(),
+                    minting_emission_replay_key: None,
                 },
                 process_id: "fig1767-proc".to_string(),
                 policy: lash_core::ProcessParentEndPolicy::Cancel,
@@ -10569,6 +10571,7 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                         "execution_scope_id": "restate-parent-end-turn-1",
                         "tool_call_id": "restate-parent-end-call",
                         "intent_index": 0,
+                        "minting_emission_replay_key": "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1",
                         "replay_key": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244"
                     },
                     "process_id": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244",
@@ -10631,6 +10634,9 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                 tool_call_id: "restate-parent-end-call".to_string(),
                 intent_index: 0,
                 replay_key: "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244".to_string(),
+                minting_emission_replay_key: Some(
+                    "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1".to_string(),
+                ),
             },
             process_id: "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244".to_string(),
         }]
@@ -10713,6 +10719,7 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                             "execution_scope_id": "restate-parent-end-turn-1",
                             "tool_call_id": "restate-parent-end-call",
                             "intent_index": 0,
+                            "minting_emission_replay_key": "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1",
                             "replay_key": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244"
                         },
                         "process_id": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244",
@@ -10732,6 +10739,7 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                             "execution_scope_id": "restate-parent-end-turn-1",
                             "tool_call_id": "restate-parent-end-call",
                             "intent_index": 1,
+                            "minting_emission_replay_key": "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1",
                             "replay_key": "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9"
                         },
                         "process_id": "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9",
@@ -10778,6 +10786,9 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                     tool_call_id: "restate-parent-end-call".to_string(),
                     intent_index: 0,
                     replay_key: "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244".to_string(),
+                    minting_emission_replay_key: Some(
+                        "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1".to_string(),
+                    ),
                 },
                 process_id: "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244".to_string(),
             },
@@ -10788,6 +10799,9 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                     tool_call_id: "restate-parent-end-call".to_string(),
                     intent_index: 1,
                     replay_key: "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9".to_string(),
+                    minting_emission_replay_key: Some(
+                        "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1".to_string(),
+                    ),
                 },
                 process_id: "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9".to_string(),
             },
@@ -14736,13 +14750,8 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
         lash_core::ProcessParentEndPolicy::Cancel
     );
     assert_eq!(
-        lash_core::derive_tool_intent_identity(
-            &segmented_action.identity.session_id,
-            &segmented_action.identity.execution_scope_id,
-            Some(&segmented_action.identity.tool_call_id),
-            segmented_action.identity.intent_index as usize,
-        )
-        .expect("rederive retained segmented identity"),
+        lash_core::rederive_tool_intent_identity(&segmented_action.identity)
+            .expect("rederive retained segmented identity"),
         segmented_action.identity,
         "the retained action carries its full validated identity"
     );

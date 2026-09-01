@@ -229,7 +229,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         )? {
             ProcessTransitionPlan::Unchanged => return Ok(record.record.clone()),
             ProcessTransitionPlan::Append(request) => {
-                self.append_managed_event(record, request).await?;
+                self.append_managed_event(record, *request).await?;
             }
         }
         Ok(record.record.clone())
@@ -943,7 +943,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         )? {
             ProcessTransitionPlan::Unchanged => return Ok(record.record.clone()),
             ProcessTransitionPlan::Append(append) => {
-                self.append_managed_event(record, append).await?;
+                self.append_managed_event(record, *append).await?;
             }
         }
         Ok(record.record.clone())
@@ -962,7 +962,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         {
             ProcessTransitionPlan::Unchanged => return Ok(record.record.clone()),
             ProcessTransitionPlan::Append(append) => {
-                self.append_managed_event(record, append).await?;
+                self.append_managed_event(record, *append).await?;
             }
         }
         Ok(record.record.clone())
@@ -991,7 +991,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         match prepare_process_transition(&record.record, ProcessTransition::EnterWait(wait))? {
             ProcessTransitionPlan::Unchanged => return Ok(record.record.clone()),
             ProcessTransitionPlan::Append(request) => {
-                self.append_managed_event(record, request).await?;
+                self.append_managed_event(record, *request).await?;
             }
         }
         drop(leases);
@@ -1020,7 +1020,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         match prepare_process_transition(&record.record, ProcessTransition::ClearWait)? {
             ProcessTransitionPlan::Unchanged => return Ok(record.record.clone()),
             ProcessTransitionPlan::Append(request) => {
-                self.append_managed_event(record, request).await?;
+                self.append_managed_event(record, *request).await?;
             }
         }
         drop(leases);

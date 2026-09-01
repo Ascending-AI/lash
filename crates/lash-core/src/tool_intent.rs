@@ -298,7 +298,25 @@ fn derive_tool_intent_identity_inner(
         tool_call_id: tool_call_id.to_string(),
         intent_index,
         replay_key,
+        minting_emission_replay_key: minting_emission_replay_key.map(str::to_string),
     })
+}
+
+/// Re-derive an identity from its own durable fields.
+///
+/// The v2 replay key hashes the minting-emission replay key, so the record
+/// retains that input; a record whose `replay_key` does not equal the
+/// re-derived one carries a forged or corrupted identity.
+pub fn rederive_tool_intent_identity(
+    identity: &ToolIntentIdentity,
+) -> Result<ToolIntentIdentity, ToolIntentRefusalReason> {
+    derive_tool_intent_identity_inner(
+        &identity.session_id,
+        &identity.execution_scope_id,
+        Some(&identity.tool_call_id),
+        identity.intent_index as usize,
+        identity.minting_emission_replay_key.as_deref(),
+    )
 }
 
 pub(crate) fn derive_legacy_tool_intent_v1_replay_key(identity: &ToolIntentIdentity) -> String {
@@ -417,6 +435,7 @@ mod tests {
                 tool_call_id: "call-3".to_string(),
                 intent_index: 2,
                 replay_key: "tool-intent:v2:blake3:11066b1512aa6d126c635d3b3dde273ad9e3dfeeea7ae985894652309c7da31c".to_string(),
+                minting_emission_replay_key: None,
             }
         );
     }

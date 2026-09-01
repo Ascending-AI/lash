@@ -1212,7 +1212,7 @@ pub use tool_intent::{
     SignalProcessIntent, StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES,
     TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptOutcome,
     ToolIntent, ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents,
-    ToolOutcomeDone, derive_tool_intent_identity,
+    ToolOutcomeDone, derive_tool_intent_identity, rederive_tool_intent_identity,
 };
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{

@@ -127,7 +127,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 append_process_event_tx(
                     &mut tx,
                     &mut record,
-                    request,
+                    *request,
                     self.clock.timestamp_ms(),
                     self.wake_delivery_config,
                 )
@@ -796,7 +796,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 append_process_event_tx(
                     &mut tx,
                     &mut record,
-                    append,
+                    *append,
                     self.clock.timestamp_ms(),
                     self.wake_delivery_config,
                 )
@@ -821,7 +821,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 return Ok(record);
             }
-            ProcessTransitionPlan::Append(append) => append,
+            ProcessTransitionPlan::Append(append) => *append,
         };
         append_process_event_tx(
             &mut tx,
@@ -856,7 +856,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 return Ok(record);
             }
-            ProcessTransitionPlan::Append(request) => request,
+            ProcessTransitionPlan::Append(request) => *request,
         };
         append_process_event_tx(
             &mut tx,
@@ -888,7 +888,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 return Ok(record);
             }
-            ProcessTransitionPlan::Append(request) => request,
+            ProcessTransitionPlan::Append(request) => *request,
         };
         append_process_event_tx(
             &mut tx,

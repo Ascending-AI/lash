@@ -574,6 +574,7 @@ mod tests {
                 tool_call_id: "call".to_string(),
                 intent_index: 4,
                 replay_key: "tool-intent-v1-literal".to_string(),
+                minting_emission_replay_key: None,
             },
             kind: crate::ToolIntentKind::CancelProcess,
             result: serde_json::json!({"cancelled": true}),

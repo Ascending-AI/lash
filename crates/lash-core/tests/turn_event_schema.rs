@@ -373,6 +373,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                         tool_call_id: "call-1".to_string(),
                         intent_index: 0,
                         replay_key: "tool-intent:v1:blake3:literal".to_string(),
+                        minting_emission_replay_key: None,
                     },
                     kind: ToolIntentKind::StartProcess,
                     result: json!({"process_id": "p-1"}),
