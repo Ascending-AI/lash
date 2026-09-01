@@ -28,16 +28,12 @@ struct ParityRow {
 }
 
 struct ParityTest {
-    name: &'static str,
     _test: fn(),
 }
 
 macro_rules! parity_test {
     ($test:ident) => {
-        ParityTest {
-            name: stringify!($test),
-            _test: $test,
-        }
+        ParityTest { _test: $test }
     };
 }
 
@@ -109,6 +105,16 @@ const PARITY_MATRIX: &[ParityRow] = &[
         lashlang: Disposition::NotExpressed(
             "Lashlang reports a construct outside the language as an unknown name, the same \
              tier as a misspelling, so there is no separate refusal to compose with",
+        ),
+        typescript: Disposition::Expressed,
+    },
+    ParityRow {
+        scenario: "alternating TypeScript temporary cells do not grow persisted state",
+        tests: &[parity_test!(
+            typescript_alternating_low_and_high_temporary_cells_do_not_grow_the_persisted_state
+        )],
+        lashlang: Disposition::NotExpressed(
+            "Lashlang has no TypeScript lowering with alternating low and high temporary cells, so this lowering-specific law has no Lashlang expression",
         ),
         typescript: Disposition::Expressed,
     },
@@ -287,13 +293,6 @@ fn the_parity_matrix_explains_every_gap() {
             "row `{}` has no test proving its scenario",
             row.scenario
         );
-        for test in row.tests {
-            assert!(
-                !test.name.is_empty(),
-                "row `{}` has an empty test linkage",
-                row.scenario
-            );
-        }
         for disposition in [row.lashlang, row.typescript] {
             if let Disposition::NotExpressed(reason) = disposition {
                 assert!(
@@ -309,4 +308,9 @@ fn the_parity_matrix_explains_every_gap() {
             row.scenario
         );
     }
+}
+
+#[test]
+fn typescript_alternating_low_and_high_temporary_cells_do_not_grow_the_persisted_state() {
+    super::gc_boundary::alternating_low_and_high_temporary_cells_do_not_grow_the_persisted_state();
 }
