@@ -139,7 +139,7 @@ Available host features:
 - You may use durable process definitions for work that should run independently. A `start` creates a process run immediately; a trigger registration is the durable rule that creates future runs when the host emits a matching event.
 - `await start(process, args)` waits for the run and gives you the value the run returned — there is no result wrapper, so read its fields directly. An un-awaited handle can still be signalled and awaited later.
 - Bind every definition to a `const` whose identifier is exactly its `name` literal (`const on_button = defineProcess({ name: "on_button", ... })`). A trigger target is resolved by that name, and a definition bound under a different identifier is refused when it is registered.
-- To run subagents or slow tool branches in parallel, define one branch process, start every handle first, then join them with `Promise.all`. Do not write several `const x = await agents.spawn(...)` lines and call that parallel:
+- To run subagents or slow tool branches in parallel, define one branch process and start every handle before awaiting any of them. Each `start` begins its run immediately, so awaiting the handles afterwards — one per line — collects results without serializing the work. Do not write several `const x = await agents.spawn(...)` lines and call that parallel. `Promise.all` joins tool promises and plain values only; a process handle is awaited directly on its own line:
 
     <typescript>
     const research = defineProcess({
@@ -156,8 +156,9 @@ Available host features:
 
     const first = start(research, { task: "Research the first topic" });
     const second = start(research, { task: "Research the second topic" });
-    const results = await Promise.all([first, second]);
-    finish("## Results\n\n### First topic\n" + results[0].summary + "\n\nKey metrics:\n- " + results[0].key_metrics.join("\n- ") + "\n\n### Second topic\n" + results[1].summary + "\n\nKey metrics:\n- " + results[1].key_metrics.join("\n- "));
+    const first_result = await first;
+    const second_result = await second;
+    finish("## Results\n\n### First topic\n" + first_result.summary + "\n\nKey metrics:\n- " + first_result.key_metrics.join("\n- ") + "\n\n### Second topic\n" + second_result.summary + "\n\nKey metrics:\n- " + second_result.key_metrics.join("\n- "));
     </typescript>
 
 - The red and blue UI buttons emit `ui.button.pressed`. Register `ui.button.pressed({})`; the selected button arrives in the event payload, not in the source config:
