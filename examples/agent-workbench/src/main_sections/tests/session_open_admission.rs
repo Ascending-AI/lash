@@ -214,12 +214,10 @@ struct GatedRuntimePersistence {
     gate: Arc<SessionOpenAdmissionGate>,
 }
 
-// The host-facing seam stays on `lash::persistence`; only the test-only
-// delegating implementation trait lacks a facade home.
-use lash_core as lash_test_internals;
-
+// The test-only decorator is still implemented through the host-facing
+// `lash::persistence` facade so this example has no internal-crate imports.
 #[async_trait::async_trait]
-impl lash_test_internals::store::RuntimePersistenceDecorator for GatedRuntimePersistence {
+impl lash::persistence::RuntimePersistenceDecorator for GatedRuntimePersistence {
     fn inner(&self) -> &(dyn lash::persistence::RuntimePersistence + '_) {
         self.inner.as_ref()
     }

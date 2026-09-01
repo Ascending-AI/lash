@@ -28,8 +28,7 @@ async fn approval_test_core(
         .with_lashlang_abilities(workbench_lashlang_abilities()),
         artifact_store,
     );
-    let provider_id = provider.kind().to_string();
-    let mut runtime_host_config = lash::durability::RuntimeHostConfig::new(
+    let runtime_host_config = lash::durability::RuntimeHostConfig::new(
         effect_host,
         Arc::new(lash::persistence::FileAttachmentStore::new(
             data_dir.join("attachments"),
@@ -38,13 +37,10 @@ async fn approval_test_core(
         lash::CommitBudget::bounded(1024 * 1024, 512),
         lash::QueuedWorkBatchingConfig::new(1),
     );
-    runtime_host_config.providers.provider_resolver = Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(provider),
-    );
     LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .provider(provider)
         .session_spec(
             lash::SessionSpec::new()
-                .provider_id(provider_id)
                 .turn_budget(lash::TurnBudget::Unbounded),
         )
         .model(test_model())

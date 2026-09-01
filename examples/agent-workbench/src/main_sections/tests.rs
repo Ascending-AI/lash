@@ -1332,8 +1332,7 @@ finish initial
                 .with_lashlang_abilities(workbench_lashlang_abilities()),
             artifact_store_for_core,
         );
-        let provider_id = provider.kind().to_string();
-        let mut runtime_host_config = lash::durability::RuntimeHostConfig::new(
+        let runtime_host_config = lash::durability::RuntimeHostConfig::new(
             Arc::new(lash::durability::NativeEffectHost::default()),
             Arc::new(lash::persistence::FileAttachmentStore::new(
                 data_dir.join("attachments"),
@@ -1342,14 +1341,11 @@ finish initial
             lash::CommitBudget::bounded(1024 * 1024, 512),
             lash::QueuedWorkBatchingConfig::new(1),
         );
-        runtime_host_config.providers.provider_resolver = Arc::new(
-            lash_core::facade_support::SingleProviderResolver::new(provider),
-        );
         let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .with_native_queued_work()
+            .provider(provider)
             .session_spec(
                 lash::SessionSpec::new()
-                    .provider_id(provider_id)
                     .turn_budget(lash::TurnBudget::Unbounded),
             )
             .model(model)
@@ -2340,22 +2336,18 @@ finish initial
                 .with_lashlang_abilities(workbench_lashlang_abilities()),
             artifact_store,
         );
-        let provider_id = provider.kind().to_string();
-        let mut runtime_host_config = lash::durability::RuntimeHostConfig::new(
+        let runtime_host_config = lash::durability::RuntimeHostConfig::new(
             Arc::new(lash::durability::NativeEffectHost::default()),
             attachment_store,
             process_env_store,
             lash::CommitBudget::bounded(1024 * 1024, 512),
             lash::QueuedWorkBatchingConfig::new(1),
         );
-        runtime_host_config.providers.provider_resolver = Arc::new(
-            lash_core::facade_support::SingleProviderResolver::new(provider),
-        );
         LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .with_native_queued_work()
+            .provider(provider)
             .session_spec(
                 lash::SessionSpec::new()
-                    .provider_id(provider_id)
                     .turn_budget(lash::TurnBudget::Unbounded),
             )
             .model(model)

@@ -37,21 +37,17 @@ fn deferred_tools_test_core(
         artifact_store,
     )
     .with_deferred_tool_resolver(deferred.resolver());
-    let provider_id = provider.kind().to_string();
-    let mut runtime_host_config = lash::durability::RuntimeHostConfig::new(
+    let runtime_host_config = lash::durability::RuntimeHostConfig::new(
         Arc::new(lash::durability::NativeEffectHost::default()),
         test_attachment_store(),
         process_env_store,
         lash::CommitBudget::bounded(1024 * 1024, 512),
         lash::QueuedWorkBatchingConfig::new(1),
     );
-    runtime_host_config.providers.provider_resolver = Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(provider),
-    );
     LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .provider(provider)
         .session_spec(
             lash::SessionSpec::new()
-                .provider_id(provider_id)
                 .turn_budget(lash::TurnBudget::Unbounded),
         )
         .model(test_model())

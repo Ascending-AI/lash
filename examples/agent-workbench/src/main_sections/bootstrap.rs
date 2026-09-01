@@ -255,10 +255,6 @@ async fn async_main() -> AnyhowResult<()> {
             lash::QueuedWorkBatchingConfig::new(1024),
         ),
     );
-    let provider_id = provider.kind().to_string();
-    runtime_host_config.providers.provider_resolver = Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(provider),
-    );
     runtime_host_config.tracing.trace_sink = Some(Arc::clone(&trace_sink));
     runtime_host_config.tracing.trace_level = TraceLevel::Extended;
 
@@ -281,9 +277,9 @@ async fn async_main() -> AnyhowResult<()> {
     // Both are host policy, and a host that wants a turn to run unbounded now
     // has to say so.
     let builder = LashCore::rlm_builder(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS), factory)
+        .provider(provider)
         .session_spec(
             lash::SessionSpec::new()
-                .provider_id(provider_id)
                 .turn_budget(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS)),
         )
         .no_progress_budget(lash::NoProgressBudget::bounded(

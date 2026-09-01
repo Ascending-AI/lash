@@ -59,7 +59,6 @@ dependencies = [
  "croner",
  "dotenvy",
  "futures-util",
- "lash-internal-core",
  "lash-internal-http-transport",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",

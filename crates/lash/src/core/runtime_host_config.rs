@@ -6,7 +6,7 @@ impl LashCoreBuilder {
     pub(super) fn resolve_runtime_host_config(&mut self) -> Result<RuntimeHostConfig> {
         if let Some(base) = self.runtime_host_config.take() {
             self.reject_runtime_host_config_conflicts()?;
-            return Ok(base);
+            return Ok(self.apply_core_overrides(base));
         }
         let effect_host = self
             .effect_host
@@ -57,7 +57,6 @@ impl LashCoreBuilder {
             (self.termination.is_some(), "termination"),
             (self.lease_timings.is_some(), "lease_timings"),
             (self.clock.is_some(), "clock"),
-            (self.provider.is_some(), "provider_resolver"),
             (
                 self.process_tool_visibility_filter.is_some(),
                 "process_tool_visibility_filter",

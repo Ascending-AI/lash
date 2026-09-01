@@ -305,9 +305,9 @@ pub mod persistence {
         AppendRequestIdentity, CheckpointComponentDescriptor, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId,
         OrphanedTurnInputScope, PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt,
-        RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint,
-        SessionHead, SessionHeadMeta, SessionHeadPayload, commit_runtime_state_verified,
-        load_persisted_session_state,
+        RuntimePersistenceDecorator, RuntimeTurnCommitStamp, RuntimeUsageDelta,
+        RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionHead, SessionHeadMeta,
+        SessionHeadPayload, commit_runtime_state_verified, load_persisted_session_state,
     };
     pub use lash_core::{
         AttachmentCondemnation, AttachmentDeleteArming, AttachmentReclamationPolicy,
