@@ -195,7 +195,9 @@ mod dialect_tests {
     }
 
     /// The session's recorded config decides, so a session that recorded the
-    /// other dialect is described in the one it is running.
+    /// other dialect is described in the one it is running. (The end-to-end
+    /// witness that a per-turn key cannot re-word this prompt lives in
+    /// `state::dialect_pin_tests`.)
     #[test]
     fn the_dialect_comes_from_the_sessions_recorded_config() {
         let recorded = lash::runtime::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
@@ -204,25 +206,26 @@ mod dialect_tests {
         })
         .expect("typed options");
         assert_eq!(
-            crate::state::rlm_session_dialect(&recorded).expect("recorded dialect decodes"),
+            lash::rlm::rlm_session_dialect(&recorded).expect("recorded dialect decodes"),
             lash::rlm::RlmDialect::Typescript
         );
         assert_eq!(
-            crate::state::rlm_session_dialect(&lash::runtime::ProtocolTurnOptions::default())
+            lash::rlm::rlm_session_dialect(&lash::runtime::ProtocolTurnOptions::default())
                 .expect("an empty bag is a session running the default"),
             lash::rlm::RlmDialect::Lashlang
         );
     }
 
-    /// FIG-1979: the host read is strict. A recorded bag naming a language the
-    /// registry does not know is an error the operator sees, never the default
-    /// dialect quietly wording the board prompt in the wrong vocabulary.
+    /// FIG-1979: the read under the host's resolution is strict. A recorded bag
+    /// naming a language the registry does not know is an error the operator
+    /// sees, never the default dialect quietly wording the board prompt in the
+    /// wrong vocabulary.
     #[test]
     fn a_malformed_recorded_dialect_is_an_error_not_the_default() {
         let tampered = lash::runtime::ProtocolTurnOptions::from_payload(
             serde_json::json!({ "dialect": "python" }),
         );
-        let error = crate::state::rlm_session_dialect(&tampered)
+        let error = lash::rlm::rlm_session_dialect(&tampered)
             .expect_err("an unknown language id must refuse");
         assert!(
             error.to_string().contains("invalid RLM session config"),
@@ -234,8 +237,7 @@ mod dialect_tests {
         let nulled = lash::runtime::ProtocolTurnOptions::from_payload(
             serde_json::json!({ "dialect": serde_json::Value::Null }),
         );
-        crate::state::rlm_session_dialect(&nulled)
-            .expect_err("an explicit null dialect must refuse");
+        lash::rlm::rlm_session_dialect(&nulled).expect_err("an explicit null dialect must refuse");
     }
 
     /// The turn bag cannot carry a dialect at all: the per-turn options type

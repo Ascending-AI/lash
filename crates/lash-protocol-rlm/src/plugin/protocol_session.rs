@@ -158,9 +158,18 @@ pub fn rlm_session_config(
 ///
 /// This is the one read a host may make when it needs the running language —
 /// for prompt copy, a rendered label, an evidence bundle. The dialect is
-/// session scope (ADR 0066): it is resolved once at materialization and a turn
-/// cannot restate it, so reading it off a set of turn options reads the
-/// session's answer whether or not a turn merged its own options over the bag.
+/// session scope (ADR 0066): it is resolved once at materialization and the
+/// executor never consults a per-turn value.
+///
+/// **Pass the durable session bag, not a turn's effective options.** The typed
+/// per-turn bag has no dialect field, but the merge underneath it is an untyped
+/// shallow key-extend of the host's per-turn override over the session bag, so
+/// a raw `{"dialect": ...}` key on a turn override *does* reach a
+/// [`PromptHookContext`](lash_core::plugin::PromptHookContext)'s options and
+/// would win here. The durable carriers are
+/// [`PluginSessionContext::protocol_turn_options`](lash_core::plugin::PluginSessionContext)
+/// (read once at plugin build) and
+/// [`SessionReadView::protocol_turn_options`](lash_core::SessionReadView).
 ///
 /// The decode is strict (FIG-1979). A malformed or unknown language id is an
 /// error, never the default: silently substituting Lashlang is exactly the
@@ -333,6 +342,30 @@ fn guarded_session_config(
         .unwrap_or_default();
     apply_rlm_session_config_if_unset(&recorded, &requested)
         .map_err(|conflict| SessionError::Protocol(conflict.to_string()))
+}
+
+/// The dialect the session under construction will run, for a host plugin
+/// factory that has to word its own prompt copy in one language.
+///
+/// This is the same resolution the RLM plugin build itself performs, so a host
+/// contribution and the execution section can never name different languages.
+/// Both halves are needed: at a session's *first* open the durable bag is still
+/// empty and the statement lives in the create options, while on a reopen the
+/// recorded pin is the answer and the create options are only compared to it.
+///
+/// Resolve once, in [`PluginFactory::build`](lash_core::plugin::PluginFactory),
+/// and capture the value. A prompt hook's own `protocol_turn_options` are the
+/// session bag with the host's per-turn override shallow-merged over it, so a
+/// raw `{"dialect": ...}` key on a turn override reaches it and would win
+/// there — wording a turn in a dialect its cells never execute (FIG-1979).
+///
+/// The decode is strict, like every other read in this module.
+pub fn rlm_plugin_session_dialect(
+    ctx: &lash_core::plugin::PluginSessionContext,
+) -> Result<lash_rlm_types::RlmDialect, RlmSessionConfigDecodeError> {
+    guarded_session_config(&ctx.protocol_turn_options, &ctx.plugin_options)
+        .map(|config| config.dialect.unwrap_or_default())
+        .map_err(|err| RlmSessionConfigDecodeError(err.to_string()))
 }
 
 /// The one language this session is allowed to use, for the plugin build that

@@ -16,19 +16,22 @@
 
 /// Which dialect's tutorials belong in this turn's prompt.
 ///
-/// The dialect is session scope (ADR 0066, FIG-1979): it is resolved once at
-/// materialization and a turn cannot restate it, so this reads the session's
-/// own recorded answer — the same value the executor is handed — off the
-/// options the hook is given.
+/// The dialect is session scope (ADR 0066, FIG-1979). This resolves it at
+/// plugin build by the same rule the RLM plugin build uses — the session's
+/// durable bag plus its create options — so the tutorials can never name a
+/// different language from the execution section. It is deliberately not read
+/// from a prompt hook's effective options: those are the session bag with the
+/// host's per-turn override shallow-merged over it, so a raw `{"dialect": ...}`
+/// key on a turn would win there.
 ///
 /// The decode is strict. A bag that does not decode is a refusal the operator
 /// sees, never the default: an undecodable bag read as Lashlang would inject
 /// three complete Lashlang programs into a TypeScript session's prompt, which
 /// is the exact failure this function exists to prevent.
 pub(crate) fn tutorial_dialect(
-    options: &lash::runtime::ProtocolTurnOptions,
+    ctx: &lash::plugins::PluginSessionContext,
 ) -> Result<lash::rlm::RlmDialect, lash::plugins::PluginError> {
-    lash::rlm::rlm_session_dialect(options)
+    lash::rlm::rlm_plugin_session_dialect(ctx)
         .map_err(|err| lash::plugins::PluginError::Session(err.to_string()))
 }
 

@@ -34,8 +34,8 @@ pub use plugin::{
     RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmLanguageFeatures, RlmProtocolPluginConfig,
     RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmSessionConfigDecodeError,
     UnsetBound, WallClockBound, apply_rlm_session_config_if_unset,
-    apply_rlm_session_config_post_open, rlm_lashlang_surface, rlm_protocol_config,
-    rlm_session_config, rlm_session_config_options, rlm_session_dialect,
+    apply_rlm_session_config_post_open, rlm_lashlang_surface, rlm_plugin_session_dialect,
+    rlm_protocol_config, rlm_session_config, rlm_session_config_options, rlm_session_dialect,
 };
 pub use projection::{
     ProjectionRef, ProjectionRegistry, ProjectionResolveError, ProjectionResolver,

@@ -46,11 +46,12 @@ impl RlmTurnBuilderExt for TurnBuilder {
 ///
 /// The write half of the pair is
 /// [`RlmSessionExt::set_rlm_config_if_unset`].
-#[cfg(feature = "rlm")]
+///
 /// The read is strict (FIG-1979): a bag that does not decode is an error, not
 /// an empty config. A swallowed decode failure reads as "this session recorded
 /// nothing", which is the one answer a host must never infer from a corrupted
 /// bag — it resolves every fact to a default the session is not running.
+#[cfg(feature = "rlm")]
 pub trait RlmSessionReadViewExt {
     /// The RLM config this session recorded, as recorded.
     fn rlm_config(
@@ -193,7 +194,7 @@ pub use lash_protocol_rlm::{
     ExecutionBounds, InstructionBound, MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID,
     RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
     RlmSessionConfigDecodeError, TypeExpr, TypeField, UnsetBound, WallClockBound, format_type_expr,
-    rlm_session_dialect,
+    rlm_plugin_session_dialect, rlm_session_dialect,
 };
 /// Projection vocabulary: register lazy host projections on a
 /// [`ProjectionRegistry`], bind projected values session-wide via

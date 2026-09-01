@@ -7319,6 +7319,7 @@ lash::rlm::WallClockBound::millis
 lash::rlm::WallClockBound::secs
 lash::rlm::WallClockBound::unbounded
 lash::rlm::format_type_expr
+lash::rlm::rlm_plugin_session_dialect
 lash::rlm::rlm_session_dialect
 lash::rlm::rlm_session_projection_extension
 lash::runtime::AdvancedLashCoreBuilder

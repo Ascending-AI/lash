@@ -45,15 +45,24 @@ impl PluginFactory for DemoPluginFactory {
         DemoPlugin::ID
     }
 
-    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+        // Resolved once here, by the same rule the RLM plugin build uses: the
+        // session's durable bag plus its create options. A prompt hook's own
+        // options are the session bag with the host's per-turn override
+        // shallow-merged over it, so a raw per-turn `{"dialect": ...}` key
+        // would win there — wording the board in a dialect the turn's cells
+        // never execute (FIG-1979).
+        let dialect = crate::state::rlm_session_dialect(ctx)?;
         Ok(Arc::new(DemoSessionPlugin {
             db: Arc::clone(&self.db),
+            dialect,
         }))
     }
 }
 
 struct DemoSessionPlugin {
     db: Arc<Mutex<AppDb>>,
+    dialect: lash::rlm::RlmDialect,
 }
 
 impl SessionPlugin for DemoSessionPlugin {
@@ -63,10 +72,10 @@ impl SessionPlugin for DemoSessionPlugin {
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         let db = Arc::clone(&self.db);
+        let dialect = self.dialect;
         reg.prompt().contribute(Arc::new(move |ctx| {
             let db = Arc::clone(&db);
             Box::pin(async move {
-                let dialect = crate::state::rlm_session_dialect(&ctx.protocol_turn_options)?;
                 let board = load_chat_board_for_plugin(&db, &ctx.session_id)?;
                 let context = board_prompt(&board, dialect);
                 Ok(vec![PromptContribution::environment(

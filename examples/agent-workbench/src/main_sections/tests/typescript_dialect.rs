@@ -266,13 +266,13 @@ fn the_tutorials_follow_the_sessions_recorded_dialect() {
         },
     )
     .expect("typed options");
-    let resolved = tutorial_dialect(&typescript).expect("recorded dialect decodes");
+    let resolved = lash::rlm::rlm_session_dialect(&typescript).expect("recorded dialect decodes");
     assert_eq!(resolved, lash::rlm::RlmDialect::Typescript);
     assert!(workbench_prompt(resolved).contains("<typescript>"));
 
     // Absent options are how every pre-dialect session reads.
     assert_eq!(
-        tutorial_dialect(&lash::runtime::ProtocolTurnOptions::default())
+        lash::rlm::rlm_session_dialect(&lash::runtime::ProtocolTurnOptions::default())
             .expect("an empty bag is a session running the default"),
         lash::rlm::RlmDialect::Lashlang
     );
@@ -285,7 +285,7 @@ fn the_tutorials_follow_the_sessions_recorded_dialect() {
 fn a_malformed_recorded_dialect_refuses_the_tutorials() {
     let tampered =
         lash::runtime::ProtocolTurnOptions::from_payload(serde_json::json!({ "dialect": "python" }));
-    let error = tutorial_dialect(&tampered).expect_err("an unknown language id must refuse");
+    let error = lash::rlm::rlm_session_dialect(&tampered).expect_err("an unknown language id must refuse");
     assert!(
         error.to_string().contains("invalid RLM session config"),
         "the refusal names the config it could not read: {error}"
