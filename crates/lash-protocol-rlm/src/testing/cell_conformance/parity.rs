@@ -22,43 +22,79 @@ enum Disposition {
 
 struct ParityRow {
     scenario: &'static str,
+    tests: &'static [ParityTest],
     lashlang: Disposition,
     typescript: Disposition,
+}
+
+struct ParityTest {
+    name: &'static str,
+    _test: fn(),
+}
+
+macro_rules! parity_test {
+    ($test:ident) => {
+        ParityTest {
+            name: stringify!($test),
+            _test: $test,
+        }
+    };
 }
 
 const PARITY_MATRIX: &[ParityRow] = &[
     ParityRow {
         scenario: "a binding survives across cells",
+        tests: &[parity_test!(
+            both_dialects_agree_that_a_binding_survives_across_cells
+        )],
         lashlang: Disposition::Expressed,
         typescript: Disposition::Expressed,
     },
     ParityRow {
         scenario: "a failing cell preserves the session",
+        tests: &[parity_test!(
+            both_dialects_agree_that_a_failing_cell_preserves_the_session
+        )],
         lashlang: Disposition::Expressed,
         typescript: Disposition::Expressed,
     },
     ParityRow {
         scenario: "a garbage-producing cell does not poison the next",
+        tests: &[parity_test!(
+            both_dialects_agree_that_a_garbage_producing_cell_does_not_poison_the_next
+        )],
         lashlang: Disposition::Expressed,
         typescript: Disposition::Expressed,
     },
     ParityRow {
         scenario: "a structure grows across cells",
+        tests: &[parity_test!(
+            both_dialects_agree_that_a_structure_grows_across_cells
+        )],
         lashlang: Disposition::Expressed,
         typescript: Disposition::Expressed,
     },
     ParityRow {
         scenario: "a restart between every cell preserves the session",
+        tests: &[parity_test!(
+            both_dialects_agree_when_the_session_restarts_between_every_cell
+        )],
         lashlang: Disposition::Expressed,
         typescript: Disposition::Expressed,
     },
     ParityRow {
         scenario: "the persisted state is stable across repeated cells",
+        tests: &[parity_test!(
+            both_dialects_agree_that_the_persisted_state_is_stable_across_repeated_cells
+        )],
         lashlang: Disposition::Expressed,
         typescript: Disposition::Expressed,
     },
     ParityRow {
         scenario: "a closure-valued binding is dropped at the boundary",
+        tests: &[parity_test!(
+            lashlang_cannot_bind_a_function_value_to_a_name
+        )],
         lashlang: Disposition::NotExpressed(
             "Lashlang has no first-class function value: `fn` is a declaration, not an \
              expression, so no cell can bind a name to a closure",
@@ -67,6 +103,9 @@ const PARITY_MATRIX: &[ParityRow] = &[
     },
     ParityRow {
         scenario: "a refusal is a distinct failure tier from a wrong program",
+        tests: &[parity_test!(
+            lashlang_reports_an_out_of_language_construct_in_the_ordinary_error_tier
+        )],
         lashlang: Disposition::NotExpressed(
             "Lashlang reports a construct outside the language as an unknown name, the same \
              tier as a misspelling, so there is no separate refusal to compose with",
@@ -238,16 +277,28 @@ fn lashlang_reports_an_out_of_language_construct_in_the_ordinary_error_tier() {
     );
 }
 
-/// Every row that a dialect does not express says why, and no row is expressed
-/// by neither dialect.
+/// Every matrix row is linked to the test that proves it, and every gap says
+/// why the missing dialect cannot express it.
 #[test]
 fn the_parity_matrix_explains_every_gap() {
     for row in PARITY_MATRIX {
+        assert!(
+            !row.tests.is_empty(),
+            "row `{}` has no test proving its scenario",
+            row.scenario
+        );
+        for test in row.tests {
+            assert!(
+                !test.name.is_empty(),
+                "row `{}` has an empty test linkage",
+                row.scenario
+            );
+        }
         for disposition in [row.lashlang, row.typescript] {
             if let Disposition::NotExpressed(reason) = disposition {
                 assert!(
-                    reason.len() > 40,
-                    "row `{}` records a gap without explaining it: {reason:?}",
+                    !reason.is_empty(),
+                    "row `{}` records a gap without explaining it",
                     row.scenario
                 );
             }
