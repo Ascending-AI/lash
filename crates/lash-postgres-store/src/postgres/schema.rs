@@ -338,8 +338,8 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     // Component 71 merged the exec dispatch ledgers but still stored usage
     // deltas as JSON blobs. This refusal-only row retains that immediate
-    // predecessor after component 72 advances the current hard-cutover
-    // boundary. It is inapplicable at open because no row targets component 72.
+    // predecessor after component 73 advances the current hard-cutover
+    // boundary. It is inapplicable at open because no row targets component 73.
     SchemaMigration {
         from: 70,
         to: 72,
