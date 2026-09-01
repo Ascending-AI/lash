@@ -6286,6 +6286,13 @@ impl lash_core::TurnInputStore for CommitRetryStore {
         self.inner.list_pending_turn_inputs(session_id).await
     }
 
+    async fn list_turn_input_applications(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<lash_core::TurnInputApplication>, lash_core::StoreError> {
+        self.inner.list_turn_input_applications(session_id).await
+    }
+
     async fn cancel_pending_turn_inputs(
         &self,
         session_id: &str,

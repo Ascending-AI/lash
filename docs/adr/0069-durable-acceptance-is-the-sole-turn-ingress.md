@@ -267,9 +267,20 @@ instead of writing a second one. The redrive therefore has to re-derive the same
 turn, which means the same rows — a first execution that held the lane may have
 absorbed every earlier claimed row into one turn, and the replay reconstructs
 that set from the durable applications the first execution wrote rather than
-naming its own row alone. Where the set cannot be reconstructed, the replay fails
-loudly on the commit-identity conflict rather than quietly committing a different
-turn under the same identity.
+naming its own row alone. The application record's `checkpoint` is part of that
+reconstruction: the direct acceptance rebuilds only the rows applied with it at
+the initial boundary, while replayed checkpoint effects restore rows originally
+applied at `AfterWork` or `BeforeCompletion`. Folding a checkpoint input into the
+initial set changes the message shape and therefore the commit identity even when
+the words and row ids are unchanged.
+
+Where durable application history is missing, unreadable, or cannot yield the
+complete boundary-specific row set, Lash refuses the redrive before executing the
+turn with the terminal typed error `turn_input_redrive_set_unavailable`. Its
+diagnostic names the settled acceptance and the operator recovery step: restore
+turn-input application history, then redrive the same turn. It does not fall back
+to the settled row alone and discover the loss later as a bare commit-identity
+mismatch.
 
 A loser that cedes (section 5(d)) reaches the same place from the other side: its
 drive attempt is retired, and the re-run that follows lands in this paragraph.

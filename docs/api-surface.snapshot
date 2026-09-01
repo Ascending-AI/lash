@@ -8044,6 +8044,7 @@ lash::runtime::RuntimeErrorCode::TurnControlPeekOutcome
 lash::runtime::RuntimeErrorCode::TurnControlUnknownOrRevoked
 lash::runtime::RuntimeErrorCode::TurnControlWaitCancelled
 lash::runtime::RuntimeErrorCode::TurnControlWaitTimeout
+lash::runtime::RuntimeErrorCode::TurnInputRedriveSetUnavailable
 lash::runtime::RuntimeErrorCode::TurnInputSettlementSuperseded
 lash::runtime::RuntimeErrorCode::TurnStreamJoin
 lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout

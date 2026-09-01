@@ -3,6 +3,7 @@ use crate::ToolProvider as _;
 use crate::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
 use lash_sansio::core_support::*;
 use lash_sansio::sync::MutexExt;
+use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 
 type PluginErrorDiscriminant = std::mem::Discriminant<crate::PluginError>;
@@ -2119,6 +2120,153 @@ async fn standard_runtime_with_transport_and_queue_store_clock(
     (runtime, store)
 }
 
+#[derive(Clone, Default)]
+struct JournalReplayEffectController {
+    native: crate::NativeRuntimeEffectController,
+    outcomes: Arc<Mutex<HashMap<String, crate::RuntimeEffectOutcome>>>,
+}
+
+#[async_trait::async_trait]
+impl crate::AwaitEventResolver for JournalReplayEffectController {
+    async fn prepare_completion_key(
+        &self,
+        scope: &crate::ExecutionScope,
+        wait: crate::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<crate::CompletionKeyPreparation, crate::RuntimeError> {
+        self.native
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &crate::ExecutionScope,
+        wait: crate::AwaitEventWaitIdentity,
+    ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
+        self.native.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+        resolution: crate::Resolution,
+    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
+        self.native.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+    ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
+        self.native.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+        cancel: CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<crate::Resolution, crate::RuntimeError> {
+        self.native.await_await_event(key, cancel, deadline).await
+    }
+
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        self.native
+            .revoke_await_events_for_session(session_id)
+            .await
+    }
+
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        self.native
+            .cancel_await_events_for_session(session_id)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::RuntimeEffectController for JournalReplayEffectController {
+    async fn execute_effect(
+        &self,
+        envelope: crate::RuntimeEffectEnvelope,
+        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let effect_id = envelope
+            .invocation
+            .effect_id()
+            .expect("journal replay effect has an id")
+            .to_string();
+        if let Some(outcome) = self.outcomes.lock_recover().get(&effect_id) {
+            return Ok(outcome.clone());
+        }
+        let outcome = self.native.execute_effect(envelope, local_executor).await?;
+        self.outcomes
+            .lock_recover()
+            .insert(effect_id, outcome.clone());
+        Ok(outcome)
+    }
+}
+
+fn journal_replay_host(
+    controller: Arc<dyn crate::RuntimeEffectController>,
+) -> crate::EmbeddedRuntimeHost {
+    let mut host = test_host_config();
+    host.core.control.effect_host = Arc::new(crate::NativeEffectHost::new(controller));
+    host
+}
+
+struct JournalRedriveStore {
+    inner: Arc<RecordingStore>,
+    application_history_available: bool,
+    foreign_checkpoint_application: Option<(String, crate::TurnId)>,
+}
+
+#[async_trait::async_trait]
+impl crate::store::RuntimePersistenceDecorator for JournalRedriveStore {
+    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn load_session(
+        &self,
+    ) -> Result<Option<crate::store::PersistedSessionRead>, crate::StoreError> {
+        // A workflow replay resumes from the invocation's pre-commit resident
+        // state while the store already contains the first execution's commit.
+        Ok(None)
+    }
+
+    async fn list_turn_input_applications(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<crate::TurnInputApplication>, crate::StoreError> {
+        if self.application_history_available {
+            let mut applications = crate::store::TurnInputStore::list_turn_input_applications(
+                self.inner.as_ref(),
+                session_id,
+            )
+            .await?;
+            if let Some((input_id, turn_id)) = &self.foreign_checkpoint_application {
+                let application = applications
+                    .iter_mut()
+                    .find(|application| application.input_id == *input_id)
+                    .expect("foreign checkpoint application input is retained");
+                application.turn_id = turn_id.clone();
+                application.checkpoint = Some(crate::CheckpointKind::BeforeCompletion);
+            }
+            return Ok(applications);
+        }
+        Err(crate::StoreError::Backend(
+            "simulated unavailable turn-input application history".to_string(),
+        ))
+    }
+}
+
 async fn append_process_wake_to_queue(
     registry: &dyn crate::ProcessRegistry,
     store: &RecordingStore,
@@ -3547,6 +3695,228 @@ async fn queued_checkpoint_input_accepts_and_persists_one_normal_user_message() 
     assert_eq!(
         opening.id,
         crate::runtime::ingress_message_id(opening_input_id)
+    );
+}
+
+async fn commit_checkpoint_injected_turn_for_redrive(
+    store: Arc<RecordingStore>,
+    controller: Arc<dyn crate::RuntimeEffectController>,
+    turn_id: &str,
+) -> (crate::TurnInput, crate::TurnInputAcceptanceReceipt) {
+    let transport = mock_provider(vec![
+        MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "first answer".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        },
+        MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "answer after injection".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        },
+    ]);
+    let runtime_store: Arc<dyn crate::RuntimePersistence> = store.clone();
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        transport,
+        journal_replay_host(Arc::clone(&controller)),
+        runtime_store,
+    )
+    .await;
+    enqueue_idle_turn_input(store.as_ref(), "root", "queued before opening").await;
+    enqueue_turn_input_for_checkpoint(
+        store.as_ref(),
+        "root",
+        turn_id,
+        Some(format!("host:{turn_id}:injection")),
+        TurnInput::text("mid-turn injection"),
+    )
+    .await;
+    let input = TurnInput::text("opening input");
+    let scope = crate::ScopedEffectController::shared(
+        Arc::clone(&controller),
+        crate::ExecutionScope::turn("root", turn_id),
+    )
+    .expect("scope the first checkpoint-injected turn");
+    let committed = runtime
+        .stream_turn(
+            input.clone(),
+            TurnOptions::new(CancellationToken::new(), scope),
+        )
+        .await
+        .expect("commit the checkpoint-injected turn");
+    let acceptance = committed
+        .turn_input_acceptance
+        .expect("the committed direct turn exposes its acceptance");
+    (input, acceptance)
+}
+
+async fn redrive_checkpoint_injected_turn(
+    store: Arc<dyn crate::RuntimePersistence>,
+    controller: Arc<dyn crate::RuntimeEffectController>,
+    turn_id: &str,
+    input: TurnInput,
+) -> Result<crate::AssembledTurn, crate::RuntimeError> {
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        journal_replay_host(Arc::clone(&controller)),
+        store,
+    )
+    .await;
+    let scope = crate::ScopedEffectController::shared(
+        controller,
+        crate::ExecutionScope::turn("root", turn_id),
+    )
+    .expect("scope the checkpoint-injected redrive");
+    runtime
+        .stream_turn(input, TurnOptions::new(CancellationToken::new(), scope))
+        .await
+}
+
+#[tokio::test]
+async fn checkpoint_injected_turn_redrive_replays_the_original_commit_identity() {
+    let turn_id = "checkpoint-injected-redrive";
+    let store = Arc::new(RecordingStore::default());
+    let controller: Arc<dyn crate::RuntimeEffectController> =
+        Arc::new(JournalReplayEffectController::default());
+    let (input, first_acceptance) = commit_checkpoint_injected_turn_for_redrive(
+        Arc::clone(&store),
+        Arc::clone(&controller),
+        turn_id,
+    )
+    .await;
+    let first_applications =
+        crate::store::TurnInputStore::list_turn_input_applications(store.as_ref(), "root")
+            .await
+            .expect("read first turn applications");
+    assert_eq!(first_applications.len(), 3);
+    assert_eq!(
+        first_applications
+            .iter()
+            .filter(|application| application.checkpoint.is_some())
+            .count(),
+        1,
+        "the first execution must absorb exactly one checkpoint injection"
+    );
+
+    let replay_store: Arc<dyn crate::RuntimePersistence> = Arc::new(JournalRedriveStore {
+        inner: Arc::clone(&store),
+        application_history_available: true,
+        foreign_checkpoint_application: None,
+    });
+    let replayed = Box::pin(redrive_checkpoint_injected_turn(
+        replay_store,
+        Arc::clone(&controller),
+        turn_id,
+        input,
+    ))
+    .await
+    .expect("a checkpoint-injected turn redrive must replay the original commit receipt");
+
+    assert_eq!(
+        replayed.turn_input_acceptance.as_ref(),
+        Some(&first_acceptance),
+        "redrive must retain the journaled acceptance identity"
+    );
+    assert_eq!(
+        crate::store::TurnInputStore::list_turn_input_applications(store.as_ref(), "root")
+            .await
+            .expect("read applications after redrive"),
+        first_applications,
+        "redrive must preserve the original initial/checkpoint application split"
+    );
+}
+
+#[tokio::test]
+async fn checkpoint_injected_turn_redrive_refuses_when_application_history_is_unavailable() {
+    let turn_id = "checkpoint-injected-redrive-refusal";
+    let store = Arc::new(RecordingStore::default());
+    let controller: Arc<dyn crate::RuntimeEffectController> =
+        Arc::new(JournalReplayEffectController::default());
+    let (input, acceptance) = commit_checkpoint_injected_turn_for_redrive(
+        Arc::clone(&store),
+        Arc::clone(&controller),
+        turn_id,
+    )
+    .await;
+    let unavailable: Arc<dyn crate::RuntimePersistence> = Arc::new(JournalRedriveStore {
+        inner: Arc::clone(&store),
+        application_history_available: false,
+        foreign_checkpoint_application: None,
+    });
+
+    let error = Box::pin(redrive_checkpoint_injected_turn(
+        unavailable,
+        controller,
+        turn_id,
+        input,
+    ))
+    .await
+    .expect_err("redrive must stop before commit when its application set cannot be rebuilt");
+
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::TurnInputRedriveSetUnavailable,
+        "the refusal must be typed instead of surfacing a later commit-identity mismatch"
+    );
+    assert!(
+        error.message.contains(&acceptance.input_id),
+        "the refusal must name the journaled acceptance that needs recovery: {error:?}"
+    );
+    assert!(
+        error
+            .message
+            .contains("restore turn-input application history, then redrive the same turn"),
+        "the refusal must name the operator recovery step: {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn journaled_acceptance_applied_by_a_foreign_turn_refuses_before_commit() {
+    let turn_id = "checkpoint-injected-redrive-foreign-application";
+    let store = Arc::new(RecordingStore::default());
+    let controller: Arc<dyn crate::RuntimeEffectController> =
+        Arc::new(JournalReplayEffectController::default());
+    let (input, acceptance) = commit_checkpoint_injected_turn_for_redrive(
+        Arc::clone(&store),
+        Arc::clone(&controller),
+        turn_id,
+    )
+    .await;
+    let foreign: Arc<dyn crate::RuntimePersistence> = Arc::new(JournalRedriveStore {
+        inner: Arc::clone(&store),
+        application_history_available: true,
+        foreign_checkpoint_application: Some((
+            acceptance.input_id,
+            crate::TurnId::from("foreign-turn"),
+        )),
+    });
+
+    let error = Box::pin(redrive_checkpoint_injected_turn(
+        foreign, controller, turn_id, input,
+    ))
+    .await
+    .expect_err("a foreign checkpoint application must stop before commit");
+
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::TurnInputRedriveSetUnavailable,
+        "a journaled acceptance applied at another turn's checkpoint must be refused before commit, not surface StoreCommitFailed"
     );
 }
 

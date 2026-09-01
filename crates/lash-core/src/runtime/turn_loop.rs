@@ -1227,63 +1227,96 @@ impl LashRuntime {
     /// no-op cancel probe the drive site already uses reads them back without
     /// withdrawing anything.
     ///
-    /// Recovery is best effort by design: a store that cannot report
-    /// applications, or a set this call cannot read back whole, falls back to
-    /// the settled row alone rather than inventing a turn. That is the pre-
-    /// FIG-1671 shape and it is correct whenever the first execution drove one
-    /// row, which is every single-row session.
+    /// Application evidence also records *where* each row entered the turn. A
+    /// direct acceptance redrive reconstructs only the rows applied at the
+    /// same checkpoint as that acceptance (normally the initial `None` group);
+    /// checkpoint effects replay their own journaled claim sets later. Folding
+    /// a checkpoint-applied row into this initial set changes both the message
+    /// shape and the semantic commit identity.
+    ///
+    /// Reconstruction is fail-closed. Falling back to the settled row alone is
+    /// only sound when it was the whole initial group, which cannot be proven
+    /// without the durable applications. Refuse before executing the turn and
+    /// tell the operator which history must be restored instead of allowing a
+    /// bare commit-identity mismatch after provider work.
     async fn settled_turn_input_redrive_set(
         &self,
         store: &dyn crate::store::RuntimePersistence,
         settled: &crate::PendingTurnInput,
-    ) -> Vec<crate::PendingTurnInput> {
-        let alone = || vec![settled.clone()];
-        let Ok(applications) = store
+    ) -> Result<crate::UnclaimedTurnInputs, RuntimeError> {
+        let unavailable = |detail: String| {
+            RuntimeError::new(
+                RuntimeErrorCode::TurnInputRedriveSetUnavailable,
+                format!(
+                    "cannot rebuild redrive set for settled turn input `{}` in session `{}`: \
+                     {detail}; operator recovery: restore turn-input application history, then \
+                     redrive the same turn",
+                    settled.input_id, self.state.session_id
+                ),
+            )
+        };
+        let applications = store
             .list_turn_input_applications(&self.state.session_id)
             .await
-        else {
-            return alone();
-        };
-        let Some(turn_id) = applications
+            .map_err(|err| unavailable(format!("application history read failed: {err}")))?;
+        let Some(settled_application) = applications
             .iter()
             .find(|application| application.input_id == settled.input_id)
-            .map(|application| application.turn_id.clone())
+            .cloned()
         else {
-            return alone();
+            return Err(unavailable(
+                "the settled input has no durable application record".to_string(),
+            ));
         };
-        let settled_ids = applications
+        let redrive_applications = applications
             .iter()
-            .filter(|application| application.turn_id == turn_id)
-            .map(|application| application.input_id.clone())
+            .filter(|application| {
+                application.turn_id == settled_application.turn_id
+                    && application.checkpoint == settled_application.checkpoint
+            })
+            .cloned()
             .collect::<Vec<_>>();
-        if settled_ids.len() <= 1 {
-            return alone();
-        }
-        let mut inputs = Vec::with_capacity(settled_ids.len());
-        for input_id in &settled_ids {
-            if input_id == &settled.input_id {
+        let mut inputs = Vec::with_capacity(redrive_applications.len());
+        for application in &redrive_applications {
+            if application.input_id == settled.input_id {
                 inputs.push(settled.clone());
                 continue;
             }
             match store
-                .cancel_pending_turn_input(&self.state.session_id, input_id)
+                .cancel_pending_turn_input(&self.state.session_id, &application.input_id)
                 .await
             {
                 Ok(crate::PendingTurnInputCancelOutcome::AlreadyCompleted(sibling)) => {
                     inputs.push(sibling);
                 }
-                _ => return alone(),
+                Ok(outcome) => {
+                    return Err(unavailable(format!(
+                        "application sibling `{}` was not completed ({outcome:?})",
+                        application.input_id
+                    )));
+                }
+                Err(err) => {
+                    return Err(unavailable(format!(
+                        "application sibling `{}` could not be read: {err}",
+                        application.input_id
+                    )));
+                }
             }
         }
         tracing::debug!(
             session_id = %self.state.session_id,
-            turn_id = %turn_id,
+            turn_id = %settled_application.turn_id,
             settled_input_id = %settled.input_id,
+            checkpoint = ?settled_application.checkpoint,
             sibling_count = inputs.len() - 1,
             event = "turn_input.redrive_set_recovered",
-            "replayed acceptance redrives the full row set its first execution settled"
+            "replayed acceptance redrives the row set applied at its original checkpoint"
         );
-        inputs
+        Ok(crate::UnclaimedTurnInputs {
+            session_id: self.state.session_id.clone(),
+            inputs,
+            applications: redrive_applications,
+        })
     }
 
     /// Drain-time backstop for inputs no turn can deliver (FIG-1573).
@@ -2969,16 +3002,10 @@ impl LashRuntime {
                         // replaying the receipt. So rebuild the settled row
                         // set from the durable applications the first
                         // execution wrote.
-                        let inputs = self
+                        let unclaimed = self
                             .settled_turn_input_redrive_set(store.as_ref(), settled)
-                            .await;
-                        super::turn_input_ingress::TurnInputDrive::Unclaimed(
-                            crate::UnclaimedTurnInputs {
-                                session_id: self.state.session_id.clone(),
-                                inputs,
-                                applications: Vec::new(),
-                            },
-                        )
+                            .await?;
+                        super::turn_input_ingress::TurnInputDrive::Unclaimed(unclaimed)
                     } else if matches!(outcome, crate::PendingTurnInputCancelOutcome::NotFound) {
                         // The journaled acceptance names an identity, not a
                         // write (ADR 0069 §6): a replayed acceptance hands
@@ -3338,7 +3365,8 @@ impl LashRuntime {
         }
         let mut initial_turn_input_applications = Vec::new();
         for claim in &mut turn_input_claims {
-            claim.record_initial_turn_application(&crate::TurnId::from(&trace_turn_id), &user_id);
+            claim
+                .record_initial_turn_application(&crate::TurnId::from(&trace_turn_id), &user_id)?;
             initial_turn_input_applications.extend(claim.applications().to_vec());
         }
         if !initial_turn_input_applications.is_empty() {
