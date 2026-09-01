@@ -108,7 +108,7 @@ pub(crate) async fn send_message_restate(
                 let item = StreamItem::Message {
                     message: user_message,
                 };
-                db.insert_turn_event(&turn_id, &item, item.is_done())
+                db.insert_turn_event(&turn_id, &item)
             }
         })
         .await?;
@@ -189,21 +189,32 @@ async fn stream_turn_outbox(
                 .await
             {
                 Ok(events) => {
-                    let mut done = false;
                     for event in events {
                         last_id = event.id;
-                        if event.is_done {
-                            done = true;
-                        }
+                        let item = match serde_json::from_str::<StreamItem>(&event.item_json) {
+                            Ok(item) => item,
+                            Err(err) => {
+                                replay.abort();
+                                let mut line = json!({
+                                    "type": "error",
+                                    "message": format!("invalid turn event: {err}"),
+                                })
+                                .to_string();
+                                line.push('\n');
+                                let _ = tx.send(Ok(Bytes::from(line))).await;
+                                return;
+                            }
+                        };
+                        let is_done = item.is_done();
                         let mut line = event.item_json;
                         line.push('\n');
                         if tx.send(Ok(Bytes::from(line))).await.is_err() {
                             return;
                         }
-                    }
-                    if done {
-                        wait_for_live_replay_flush(&mut replay).await;
-                        return;
+                        if is_done {
+                            wait_for_live_replay_flush(&mut replay).await;
+                            return;
+                        }
                     }
                 }
                 Err(err) => {
@@ -298,7 +309,7 @@ async fn run_restate_chat_turn_and_persist(
                     let turn_id = request.turn_id.clone();
                     move |db| {
                         let item = StreamItem::Message { message };
-                        db.insert_turn_event(&turn_id, &item, item.is_done())
+                        db.insert_turn_event(&turn_id, &item)
                     }
                 })
                 .await?;
@@ -310,7 +321,7 @@ async fn run_restate_chat_turn_and_persist(
                     let message = err.to_string();
                     move |db| {
                         let item = StreamItem::Error { message };
-                        db.insert_turn_event(&turn_id, &item, item.is_done())
+                        db.insert_turn_event(&turn_id, &item)
                     }
                 })
                 .await?;
@@ -321,7 +332,7 @@ async fn run_restate_chat_turn_and_persist(
             let turn_id = request.turn_id;
             move |db| {
                 let item = StreamItem::Done;
-                db.insert_turn_event(&turn_id, &item, item.is_done())
+                db.insert_turn_event(&turn_id, &item)
             }
         })
         .await?;
@@ -358,6 +369,46 @@ mod restate_tests {
     };
 
     const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
+
+    #[test]
+    fn resume_stops_at_deserialized_done_item() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut db = AppDb::open(&temp.path().join("app.db")).expect("open db");
+        let chat = db
+            .create_chat("resume", "mock-model", None)
+            .expect("create chat");
+        let message = db
+            .insert_message(&chat.id, "assistant", "before done")
+            .expect("create message");
+        db.insert_turn_event("turn-1", &StreamItem::Message { message })
+            .expect("insert message event");
+        db.insert_turn_event("turn-1", &StreamItem::Done)
+            .expect("insert done event");
+        db.insert_turn_event(
+            "turn-1",
+            &StreamItem::Error {
+                message: "after done".to_string(),
+            },
+        )
+        .expect("insert trailing event");
+
+        let events = db
+            .list_turn_events_after("turn-1", 0)
+            .expect("list turn events");
+        let mut resumed = Vec::new();
+        for event in events {
+            let item: StreamItem =
+                serde_json::from_str(&event.item_json).expect("deserialize stored turn event");
+            let is_done = item.is_done();
+            resumed.push(item);
+            if is_done {
+                break;
+            }
+        }
+
+        assert_eq!(resumed.len(), 2);
+        assert!(matches!(resumed.last(), Some(StreamItem::Done)));
+    }
 
     #[test]
     #[ignore = "requires a running Restate server; set RESTATE_INGRESS_URL and run with --ignored"]
@@ -915,7 +966,11 @@ finish "done via Restate E2E"
                 })
                 .await
                 .expect("list turn events");
-            if events.iter().any(|event| event.is_done) {
+            if events.iter().any(|event| {
+                serde_json::from_str::<StreamItem>(&event.item_json)
+                    .expect("stored turn event must deserialize")
+                    .is_done()
+            }) {
                 return;
             }
             if std::time::Instant::now() >= deadline {
@@ -923,7 +978,7 @@ finish "done via Restate E2E"
                     .iter()
                     .rev()
                     .take(8)
-                    .map(|event| (event.id, event.is_done, event.item_json.as_str()))
+                    .map(|event| (event.id, event.item_json.as_str()))
                     .collect::<Vec<_>>();
                 tail.reverse();
                 panic!(

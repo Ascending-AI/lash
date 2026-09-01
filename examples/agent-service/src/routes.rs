@@ -84,7 +84,7 @@ pub(crate) struct AppSettings {
     model_variants: Vec<&'static str>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum StreamItem {
     Observation {
@@ -107,6 +107,7 @@ pub(crate) enum StreamItem {
 }
 
 impl StreamItem {
+    #[cfg(feature = "restate")]
     pub(crate) fn is_done(&self) -> bool {
         matches!(self, Self::Done)
     }
@@ -514,10 +515,7 @@ impl ChannelTurnEvents {
             let item = StreamItem::Error { message };
             let _ = self
                 .state
-                .with_db(move |db| {
-                    let is_done = item.is_done();
-                    db.insert_turn_event(&turn_id, &item, is_done)
-                })
+                .with_db(move |db| db.insert_turn_event(&turn_id, &item))
                 .await;
         }
     }

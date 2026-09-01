@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use lash::TurnEvent;
 use lash_remote_protocol::RemoteTurnEvent;
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::board::{BoardState, apply_agent_move, default_board};
@@ -21,7 +21,7 @@ pub(crate) struct ChatSummary {
     pub(crate) model_label: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct ChatMessage {
     pub(crate) id: i64,
     pub(crate) chat_id: String,
@@ -51,7 +51,6 @@ pub(crate) struct ChatModelSelection {
 pub(crate) struct TurnOutboxEvent {
     pub(crate) id: i64,
     pub(crate) item_json: String,
-    pub(crate) is_done: bool,
 }
 
 pub(crate) struct AppDb {
@@ -93,19 +92,10 @@ impl AppDb {
                 board_json TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS code_block_tool_calls (
-                code_block_message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-                tool_call_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
-                call_id TEXT NOT NULL,
-                PRIMARY KEY (code_block_message_id, call_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_code_block_tool_calls_tool_message
-                ON code_block_tool_calls(tool_call_message_id);
             CREATE TABLE IF NOT EXISTS turn_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 turn_id TEXT NOT NULL,
                 item_json TEXT NOT NULL,
-                is_done INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_turn_events_turn_id_id
@@ -156,14 +146,13 @@ impl AppDb {
         &mut self,
         turn_id: &str,
         item: &T,
-        is_done: bool,
     ) -> AppResult<()> {
         let item_json =
             serde_json::to_string(item).map_err(|err| AppError::internal(err.to_string()))?;
         self.conn.execute(
-            "INSERT INTO turn_events (turn_id, item_json, is_done, created_at)
-             VALUES (?1, ?2, ?3, datetime('now'))",
-            params![turn_id, item_json, is_done as i64],
+            "INSERT INTO turn_events (turn_id, item_json, created_at)
+             VALUES (?1, ?2, datetime('now'))",
+            params![turn_id, item_json],
         )?;
         Ok(())
     }
@@ -175,7 +164,7 @@ impl AppDb {
         last_id: i64,
     ) -> AppResult<Vec<TurnOutboxEvent>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, item_json, is_done
+            "SELECT id, item_json
              FROM turn_events
              WHERE turn_id = ?1 AND id > ?2
              ORDER BY id ASC",
@@ -184,7 +173,6 @@ impl AppDb {
             Ok(TurnOutboxEvent {
                 id: row.get(0)?,
                 item_json: row.get(1)?,
-                is_done: row.get::<_, i64>(2)? != 0,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -599,20 +587,17 @@ impl AppDb {
         event: TurnEvent,
         code: Option<String>,
     ) -> AppResult<ChatMessage> {
-        let (payload, tool_call_ids) = match event {
+        let payload = match event {
             TurnEvent::CodeBlockStarted {
                 language,
                 code,
                 graph_key,
-            } => (
-                json!({
-                    "phase": "started",
-                    "language": language,
-                    "code": code,
-                    "graph_key": graph_key,
-                }),
-                Vec::new(),
-            ),
+            } => json!({
+                "phase": "started",
+                "language": language,
+                "code": code,
+                "graph_key": graph_key,
+            }),
             TurnEvent::CodeBlockCompleted {
                 language,
                 output,
@@ -621,20 +606,17 @@ impl AppDb {
                 duration_ms,
                 tool_call_ids,
                 graph_key,
-            } => (
-                json!({
-                    "phase": "completed",
-                    "language": language,
-                    "output": output,
-                    "error": error,
-                    "success": success,
-                    "duration_ms": duration_ms,
-                    "tool_call_ids": tool_call_ids,
-                    "code": code,
-                    "graph_key": graph_key,
-                }),
-                tool_call_ids,
-            ),
+            } => json!({
+                "phase": "completed",
+                "language": language,
+                "output": output,
+                "error": error,
+                "success": success,
+                "duration_ms": duration_ms,
+                "tool_call_ids": tool_call_ids,
+                "code": code,
+                "graph_key": graph_key,
+            }),
             _ => return Err(AppError::internal("expected code-block event")),
         };
         let created_at = now();
@@ -649,7 +631,6 @@ impl AppDb {
             params![now(), chat_id],
         )?;
         let id = self.conn.last_insert_rowid();
-        self.replace_code_block_tool_links(chat_id, id, &tool_call_ids)?;
         Ok(ChatMessage {
             id,
             chat_id: chat_id.to_string(),
@@ -667,7 +648,7 @@ impl AppDb {
         event: TurnEvent,
         code: Option<String>,
     ) -> AppResult<ChatMessage> {
-        let (payload, tool_call_ids) = match event {
+        let payload = match event {
             TurnEvent::CodeBlockCompleted {
                 language,
                 output,
@@ -676,20 +657,17 @@ impl AppDb {
                 duration_ms,
                 tool_call_ids,
                 graph_key,
-            } => (
-                json!({
-                    "phase": "completed",
-                    "language": language,
-                    "output": output,
-                    "error": error,
-                    "success": success,
-                    "duration_ms": duration_ms,
-                    "tool_call_ids": tool_call_ids,
-                    "code": code,
-                    "graph_key": graph_key,
-                }),
-                tool_call_ids,
-            ),
+            } => json!({
+                "phase": "completed",
+                "language": language,
+                "output": output,
+                "error": error,
+                "success": success,
+                "duration_ms": duration_ms,
+                "tool_call_ids": tool_call_ids,
+                "code": code,
+                "graph_key": graph_key,
+            }),
             _ => return Err(AppError::internal("expected code-block event")),
         };
         let language = payload["language"].as_str().unwrap_or("code").to_string();
@@ -698,16 +676,6 @@ impl AppDb {
              WHERE id = ?3 AND kind = 'code_block'",
             params![language, payload.to_string(), id],
         )?;
-        let chat_id = self
-            .conn
-            .query_row(
-                "SELECT chat_id FROM messages WHERE id = ?1 AND kind = 'code_block'",
-                params![id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?
-            .ok_or_else(|| AppError::internal("code block message not found"))?;
-        self.replace_code_block_tool_links(&chat_id, id, &tool_call_ids)?;
         self.message_by_id(id)
     }
 
@@ -717,11 +685,9 @@ impl AppDb {
              FROM messages WHERE chat_id = ?1 ORDER BY id ASC",
         )?;
         let rows = stmt.query_map(params![chat_id], chat_message_from_row)?;
-        let mut messages = rows
+        let messages = rows
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(AppError::from)?;
-        drop(stmt);
-        self.hydrate_code_block_tool_links(&mut messages)?;
         Ok(messages)
     }
 
@@ -734,83 +700,6 @@ impl AppDb {
                 chat_message_from_row,
             )
             .map_err(AppError::from)
-    }
-
-    fn replace_code_block_tool_links(
-        &mut self,
-        chat_id: &str,
-        code_block_message_id: i64,
-        tool_call_ids: &[String],
-    ) -> AppResult<()> {
-        self.conn.execute(
-            "DELETE FROM code_block_tool_calls WHERE code_block_message_id = ?1",
-            params![code_block_message_id],
-        )?;
-        for call_id in tool_call_ids {
-            let tool_message_id = self
-                .find_tool_call_message_id(chat_id, call_id)
-                .map_err(AppError::from)?;
-            self.conn.execute(
-                "INSERT OR REPLACE INTO code_block_tool_calls
-                 (code_block_message_id, tool_call_message_id, call_id)
-                 VALUES (?1, ?2, ?3)",
-                params![code_block_message_id, tool_message_id, call_id],
-            )?;
-        }
-        Ok(())
-    }
-
-    fn find_tool_call_message_id(
-        &mut self,
-        chat_id: &str,
-        call_id: &str,
-    ) -> rusqlite::Result<Option<i64>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, payload FROM messages
-             WHERE chat_id = ?1 AND kind = 'tool_call'
-             ORDER BY id ASC",
-        )?;
-        let rows = stmt.query_map(params![chat_id], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
-        })?;
-        for row in rows {
-            let (id, payload) = row?;
-            let Some(payload) = payload else {
-                continue;
-            };
-            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&payload) else {
-                continue;
-            };
-            if payload.get("call_id").and_then(|value| value.as_str()) == Some(call_id) {
-                return Ok(Some(id));
-            }
-        }
-        Ok(None)
-    }
-
-    fn hydrate_code_block_tool_links(&mut self, messages: &mut [ChatMessage]) -> AppResult<()> {
-        for message in messages.iter_mut() {
-            if message.kind != "code_block" {
-                continue;
-            }
-            let Some(payload) = message.payload.as_mut() else {
-                continue;
-            };
-            let mut stmt = self.conn.prepare(
-                "SELECT call_id FROM code_block_tool_calls
-                 WHERE code_block_message_id = ?1
-                 ORDER BY rowid ASC",
-            )?;
-            let call_ids = stmt
-                .query_map(params![message.id], |row| row.get::<_, String>(0))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            if !call_ids.is_empty()
-                && let Some(object) = payload.as_object_mut()
-            {
-                object.insert("tool_call_ids".to_string(), json!(call_ids));
-            }
-        }
-        Ok(())
     }
 
     fn branch_point(&mut self, source_chat_id: &str, node_id: &str) -> AppResult<ChatBranchPoint> {
@@ -1176,6 +1065,68 @@ mod tests {
                 .message_count,
             1,
             "a sibling chat must not overwrite the source projection"
+        );
+    }
+
+    #[test]
+    fn forked_code_block_keeps_payload_tool_links() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut db = AppDb::open(&temp.path().join("app.db")).expect("open db");
+        let source = db
+            .create_chat("source", "mock-model", None)
+            .expect("create source");
+        db.insert_tool_call(
+            &source.id,
+            TurnEvent::ToolCallCompleted {
+                call_id: Some("move-1".to_string()),
+                name: "play_move".to_string(),
+                args: json!({ "cell": 4 }),
+                output: lash::tools::ToolCallOutput::success(json!({ "accepted": true })),
+                duration_ms: 1,
+                graph_key: None,
+                parent_call_id: None,
+            },
+        )
+        .expect("persist tool call");
+        db.insert_code_block(
+            &source.id,
+            TurnEvent::CodeBlockCompleted {
+                language: "rust".to_string(),
+                output: "ok".to_string(),
+                error: None,
+                success: true,
+                duration_ms: 1,
+                tool_call_ids: vec!["move-1".to_string()],
+                graph_key: None,
+            },
+            Some("fn main() {}".to_string()),
+        )
+        .expect("persist code block");
+        db.upsert_chat_board(&source.id, &default_board())
+            .expect("seed board");
+        db.save_branch_point(&source.id, "node-pinned")
+            .expect("save point");
+        db.prepare_chat_fork(&source.id, "node-pinned", "branch")
+            .expect("fork product projection");
+        db.finish_chat_fork("branch").expect("publish branch");
+
+        let source_code_block = db
+            .list_messages(&source.id)
+            .expect("list source messages")
+            .into_iter()
+            .find(|message| message.kind == "code_block")
+            .expect("source code block");
+        let branch_code_block = db
+            .list_messages("branch")
+            .expect("list branch messages")
+            .into_iter()
+            .find(|message| message.kind == "code_block")
+            .expect("branch code block");
+
+        assert_eq!(branch_code_block.payload, source_code_block.payload);
+        assert_eq!(
+            branch_code_block.payload.expect("code block payload")["tool_call_ids"],
+            json!(["move-1"])
         );
     }
 
