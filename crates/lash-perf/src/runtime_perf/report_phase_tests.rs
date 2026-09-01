@@ -84,12 +84,12 @@ async fn affected_postgres_scenarios_leave_base_database_clean() {
         .expect("list base sessions before perf runs")
         .len();
 
-    run_once_durable_checkpoint_curve(
+    Box::pin(run_once_durable_checkpoint_curve(
         RuntimePerfScenario::DurableCheckpointCurvePostgres,
         1,
         &checkpoint_curve_config(),
         Some(base_database.url()),
-    )
+    ))
     .await
     .expect("durable checkpoint curve PostgreSQL run");
     run_once_store_hardening_hot_paths(1, base_database.url())
