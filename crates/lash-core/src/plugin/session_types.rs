@@ -775,7 +775,7 @@ impl SessionCreateRequest {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionToolAccess {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolDefinition>,
@@ -784,13 +784,17 @@ pub struct SessionToolAccess {
 }
 
 impl SessionToolAccess {
+    pub(crate) fn is_default(&self) -> bool {
+        self.tools.is_empty() && self.hidden_tools.is_empty()
+    }
+
     /// Lets protocol implementors apply the session's persisted tool-hiding policy by exact name.
     pub fn hides(&self, name: &str) -> bool {
         self.hidden_tools.contains(name)
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubagentSessionContext {
     pub parent_session_id: String,
     pub capability: String,

@@ -14,6 +14,8 @@ fn persisted_state_hydrates_provider_id_without_live_provider_rebinding() {
                 turn_budget: crate::TurnBudget::Unbounded,
                 prompt: Some(crate::PromptLayer::new()),
                 generation: crate::GenerationOptions::default(),
+                tool_access: crate::SessionToolAccess::default(),
+                subagent: None,
             },
             checkpoint_ref: None,
             token_ledger: Vec::new(),

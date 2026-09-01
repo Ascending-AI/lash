@@ -3,7 +3,7 @@
 --
 
 
--- Dumped from database version 14.24
+-- Dumped from database version 16.15
 -- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
@@ -809,9 +809,9 @@ INSERT INTO lash_durable_read_fixture.lash_deleted_sessions VALUES ('durable-rea
 -- Data for Name: lash_graph_nodes; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940', NULL, 0, 'frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940', '{"schema_version":6,"timestamp":"2023-11-14T22:13:20+00:00","kind":"frame_open","frame_key":"frame-key/v2/c9b08bd8c779c300744ed4d57455bc2d2166e56c7b2b2783b2fa9db331ef66e6","reason":"initial","assignment":{"policy":{"model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"provider_id":"","session_id":null,"autonomous":false,"turn_budget":"unbounded"},"plugin_options":{}},"protocol_turn_options":{"schema_version":1,"payload":{}}}', false);
-INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08', 'frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940', 1, 'frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940', '{"schema_version":6,"timestamp":"2023-11-14T22:13:20+00:00","kind":"event","event":{"Conversation":{"id":"m_append_9304aea3269b249d9b8e240f046976a16b2a95e618eb374edf1eded586a60e3c","role":"User","parts":[{"id":"m_append_9304aea3269b249d9b8e240f046976a16b2a95e618eb374edf1eded586a60e3c.p0","kind":"Text","content":"durable read user message","prune_state":"Intact"}],"origin":{"kind":"plugin","plugin_id":"plugin"}}}}', false);
-INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a', 'n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08', 2, 'frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940', '{"schema_version":6,"timestamp":"2023-11-14T22:13:20+00:00","kind":"plugin","plugin_type":"durable-read-plugin","body":{"fixture":true,"order":2}}', false);
+INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940', NULL, 0, 'frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940', '{"schema_version":7,"timestamp":"2023-11-14T22:13:20+00:00","kind":"frame_open","frame_key":"frame-key/v2/c9b08bd8c779c300744ed4d57455bc2d2166e56c7b2b2783b2fa9db331ef66e6","reason":"initial","assignment":{"policy":{"model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"provider_id":"","session_id":null,"autonomous":false,"turn_budget":"unbounded"},"plugin_options":{}},"protocol_turn_options":{"schema_version":1,"payload":{}}}', false);
+INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08', 'frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940', 1, 'frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940', '{"schema_version":7,"timestamp":"2023-11-14T22:13:20+00:00","kind":"event","event":{"Conversation":{"id":"m_append_9304aea3269b249d9b8e240f046976a16b2a95e618eb374edf1eded586a60e3c","role":"User","parts":[{"id":"m_append_9304aea3269b249d9b8e240f046976a16b2a95e618eb374edf1eded586a60e3c.p0","kind":"Text","content":"durable read user message","prune_state":"Intact"}],"origin":{"kind":"plugin","plugin_id":"plugin"}}}}', false);
+INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a', 'n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08', 2, 'frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940', '{"schema_version":7,"timestamp":"2023-11-14T22:13:20+00:00","kind":"plugin","plugin_type":"durable-read-plugin","body":{"fixture":true,"order":2}}', false);
 
 
 --

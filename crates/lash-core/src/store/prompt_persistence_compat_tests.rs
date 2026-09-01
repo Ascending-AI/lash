@@ -15,6 +15,8 @@ fn legacy_config_keeps_prompt_absence_distinct() {
         turn_budget: crate::TurnBudget::Unbounded,
         prompt: Some(committed_prompt_layer()),
         generation: crate::GenerationOptions::default(),
+        tool_access: crate::SessionToolAccess::default(),
+        subagent: None,
     };
     let mut old_writer_value = serde_json::to_value(config).expect("serialize current config");
     let old_writer_object = old_writer_value
@@ -56,6 +58,27 @@ fn legacy_config_keeps_prompt_absence_distinct() {
 }
 
 #[test]
+fn legacy_config_without_authority_decodes_as_unrestricted_root() {
+    let legacy = serde_json::json!({
+        "provider_id": "provider",
+        "model": {
+            "id": "model",
+            "variant": "provider_default",
+            "limits": { "context_window_tokens": 4096 }
+        },
+        "turn_budget": "unbounded",
+        "prompt": {},
+        "generation": {}
+    });
+
+    let restored: crate::PersistedSessionConfig =
+        serde_json::from_value(legacy).expect("legacy authority-free config must decode");
+
+    assert_eq!(restored.tool_access, crate::SessionToolAccess::default());
+    assert_eq!(restored.subagent, None);
+}
+
+#[test]
 fn explicit_empty_prompt_is_serialized_as_present() {
     let value = serde_json::to_value(crate::PersistedSessionConfig {
         provider_id: "stored-provider".to_string(),
@@ -63,6 +86,8 @@ fn explicit_empty_prompt_is_serialized_as_present() {
         turn_budget: crate::TurnBudget::Unbounded,
         prompt: Some(crate::PromptLayer::new()),
         generation: crate::GenerationOptions::default(),
+        tool_access: crate::SessionToolAccess::default(),
+        subagent: None,
     })
     .expect("serialize explicit empty prompt");
 
@@ -85,6 +110,8 @@ fn committed_prompt_cold_loads_into_the_runtime_policy() {
             turn_budget: crate::TurnBudget::Unbounded,
             prompt: Some(expected_prompt.clone()),
             generation: crate::GenerationOptions::default(),
+            tool_access: crate::SessionToolAccess::default(),
+            subagent: None,
         },
         current_frame_node_id: None,
     })
@@ -128,6 +155,8 @@ fn committed_generation_cold_loads_into_the_runtime_policy() {
             turn_budget: crate::TurnBudget::Unbounded,
             prompt: Some(crate::PromptLayer::new()),
             generation: expected_generation.clone(),
+            tool_access: crate::SessionToolAccess::default(),
+            subagent: None,
         },
         current_frame_node_id: None,
     })

@@ -98,7 +98,7 @@ fn is_default_tool_activation(activation: &ToolActivation) -> bool {
     *activation == ToolActivation::default()
 }
 
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolOutputContract {
     #[default]
@@ -250,7 +250,7 @@ impl std::fmt::Display for ToolId {
 /// there is no per-manifest tier. The optional compact contract is the
 /// catalog-facing projection of the resolved contract; full schemas stay in
 /// [`ToolContract`].
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ToolManifest {
     pub id: ToolId,
     pub name: String,
@@ -275,7 +275,7 @@ pub struct ToolManifest {
 }
 
 /// Heavy tool contract resolved only when a prompt or call needs schemas/docs.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ToolContract {
     #[serde(skip)]
     identity: Option<ToolContractIdentity>,
@@ -441,7 +441,7 @@ impl ToolContract {
 /// Composes the runtime [`ToolManifest`] and [`ToolContract`] projections. Both
 /// are `#[serde(flatten)]`ed so the serialized JSON shape stays flat (and wire/
 /// persistence compatible); the two structs have disjoint field names.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ToolDefinition {
     #[serde(flatten)]
     pub manifest: ToolManifest,
@@ -460,7 +460,7 @@ pub struct ModelTool {
 const COMPACT_TOOL_EXAMPLE_LIMIT: usize = 2;
 const COMPACT_TOOL_EXAMPLE_CHAR_LIMIT: usize = 240;
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CompactToolContract {
     pub name: String,
     pub signature: String,

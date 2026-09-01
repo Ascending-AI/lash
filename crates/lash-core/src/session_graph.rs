@@ -228,6 +228,9 @@ pub struct SessionNodeRecord {
 ///
 /// Version 6 stores checked `FrameKey` values in durable frame-open payloads.
 ///
+/// Version 7 persists tool-access and subagent authority in the durable
+/// session configuration.
+///
 /// Version 3 removes the duplicated `LlmResponse.full_text` member. The
 /// pre-v3 decode path below projects that legacy value into response parts
 /// before typed decoding when the parts carry no visible assistant prose.
@@ -235,7 +238,7 @@ pub struct SessionNodeRecord {
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as a forward-only fence rather than a
 /// counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 6;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 7;
 
 /// Generation of a body written before the stamp existed.
 ///
@@ -374,6 +377,14 @@ pub struct PersistedSessionConfig {
     /// the options it last committed.
     #[serde(default)]
     pub generation: crate::GenerationOptions,
+    /// Authority inputs needed to reconstruct the same tool policy on a
+    /// stateless worker. Catalog membership remains separate host curation.
+    #[serde(default, skip_serializing_if = "crate::SessionToolAccess::is_default")]
+    pub tool_access: crate::SessionToolAccess,
+    /// Subagent authority is part of durable session construction rather than
+    /// ambient worker state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<crate::SubagentSessionContext>,
 }
 
 impl PersistedSessionConfig {
@@ -390,6 +401,8 @@ impl PersistedSessionConfig {
             turn_budget,
             prompt: None,
             generation: crate::GenerationOptions::default(),
+            tool_access: crate::SessionToolAccess::default(),
+            subagent: None,
         }
     }
 }
@@ -402,6 +415,8 @@ impl From<&crate::SessionPolicy> for PersistedSessionConfig {
             turn_budget: policy.turn_budget,
             prompt: Some(policy.prompt.clone()),
             generation: policy.generation.clone(),
+            tool_access: crate::SessionToolAccess::default(),
+            subagent: None,
         }
     }
 }

@@ -922,7 +922,7 @@ mod tests {
 
     #[tokio::test]
     async fn queued_work_claim_stress_advances_its_commit_cursor() {
-        run_once_queued_work_claim_stress(1)
+        Box::pin(run_once_queued_work_claim_stress(1))
             .await
             .expect("queued-work stress scenario");
     }

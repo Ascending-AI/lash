@@ -400,6 +400,39 @@ fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips()
 }
 
 #[test]
+fn boxed_runtime_authority_keeps_flat_json_and_legacy_defaults() {
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    state
+        .authority
+        .tool_access
+        .hidden_tools
+        .insert("hidden".to_string());
+    state.authority.subagent = Some(crate::SubagentSessionContext {
+        parent_session_id: "parent".to_string(),
+        capability: "research".to_string(),
+        depth: 1,
+        max_depth: 3,
+    });
+
+    let mut value = serde_json::to_value(&state).expect("serialize runtime state");
+    assert!(value.get("authority").is_none());
+    assert_eq!(
+        value["tool_access"]["hidden_tools"],
+        serde_json::json!(["hidden"])
+    );
+    assert_eq!(value["subagent"]["parent_session_id"], "parent");
+
+    let object = value.as_object_mut().expect("runtime state object");
+    object.remove("tool_access");
+    object.remove("subagent");
+    let legacy: RuntimeSessionState =
+        serde_json::from_value(value).expect("legacy authority-free runtime state");
+    assert!(legacy.authority.tool_access.is_default());
+    assert!(legacy.authority.subagent.is_none());
+}
+
+#[test]
 fn reconciled_generation_forces_next_plugin_snapshot_export() {
     let names = Arc::new(Mutex::new(vec!["dynamic_one".to_string()]));
     let tools: Arc<dyn crate::ToolProvider> = Arc::new(DynamicSnapshotTools {

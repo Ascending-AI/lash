@@ -200,6 +200,7 @@ impl CurrentSessionCapability {
             token_usage: runtime.state.token_usage.clone(),
             last_prompt_usage: runtime.state.last_prompt_usage.clone(),
             protocol_turn_options: runtime.state.effective_protocol_turn_options().clone(),
+            authority: runtime.state.authority.clone(),
             checkpoint_components: runtime.state.checkpoint_components.clone(),
             plugin_snapshot_revision: runtime.state.plugin_snapshot_revision,
             token_ledger: runtime.state.token_ledger.clone(),

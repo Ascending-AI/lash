@@ -255,6 +255,83 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
 }
 
 #[tokio::test]
+async fn park_resume_restores_tool_and_subagent_authority() {
+    let visible = DynamicToolSpec::new(
+        "tool:authority_visible",
+        "authority_visible",
+        "present before and after the worker bounce",
+    );
+    let hidden = DynamicToolSpec::new(
+        "tool:authority_hidden",
+        "authority_hidden",
+        "appears only after the worker bounce",
+    );
+    let surface = Arc::new(DynamicToolSurface::new(vec![visible.clone()]));
+    let provider: Arc<dyn crate::ToolProvider> = surface.clone();
+    let plugin_host = dynamic_plugin_host(provider);
+    let authority = SessionAuthorityContext {
+        tool_access: crate::SessionToolAccess {
+            tools: Vec::new(),
+            hidden_tools: [hidden.name.to_string()].into_iter().collect(),
+        },
+        subagent: Some(crate::SubagentSessionContext {
+            parent_session_id: "authority-parent".to_string(),
+            capability: "authority-capability".to_string(),
+            depth: 2,
+            max_depth: 4,
+        }),
+        ..SessionAuthorityContext::default()
+    };
+    let plugins = plugin_host
+        .build_session_with_parent(
+            "authority-child",
+            Some("authority-parent".to_string()),
+            crate::plugin::SessionCreationConfig {
+                authority,
+                ..Default::default()
+            },
+        )
+        .expect("initial authority plugin session");
+    let store = Arc::new(RecordingStore::default());
+    let owner = crate::LeaseOwnerIdentity::opaque("authority-worker", "authority-boot");
+    let mut runtime = LashRuntime::from_persistent_embedded_state(
+        standard_test_policy(),
+        test_host_config(),
+        crate::PersistentRuntimeServices::new(plugins, store),
+        root_state("authority-child"),
+        owner.clone(),
+    )
+    .await
+    .expect("initial authority runtime");
+    runtime.stamp_live_plugin_state();
+    let parked = runtime.park().await.expect("persist authority runtime");
+
+    surface.replace(vec![visible, hidden.clone()]);
+    let env = runtime_environment(plugin_host);
+    let resumed = LashRuntime::resume(parked, &env, owner)
+        .await
+        .expect("resume authority runtime");
+
+    let names = catalog_names(&resumed);
+    assert!(names.contains(&"authority_visible".to_string()));
+    assert!(
+        !names.contains(&hidden.name.to_string()),
+        "a newly live tool must still be hidden by persisted authority after a worker bounce: {names:?}"
+    );
+    let resumed_subagent = resumed
+        .session
+        .as_ref()
+        .expect("resumed session")
+        .plugins()
+        .subagent_context()
+        .expect("persisted subagent context");
+    assert_eq!(resumed_subagent.parent_session_id, "authority-parent");
+    assert_eq!(resumed_subagent.capability, "authority-capability");
+    assert_eq!(resumed_subagent.depth, 2);
+    assert_eq!(resumed_subagent.max_depth, 4);
+}
+
+#[tokio::test]
 async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes() {
     let session_id = "filter-session";
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
