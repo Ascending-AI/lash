@@ -7,10 +7,6 @@
     "verdict": "deliberately-excluded",
     "reason": "StoredSessionNodeBody states SESSION_NODE_BODY_SCHEMA_VERSION and is fenced against newer generations on decode; its shape is guarded by that surface in scripts/versioned-surfaces.toml, which spans the session-history model the schemars payload projection cannot reach."
   },
-  "lash_usage_deltas.entry_json": {
-    "verdict": "deliberately-excluded",
-    "reason": "TokenLedgerEntry identity is pinned by payload_encoding_version and payload_hash columns with a permanent tag registry."
-  },
   "lash_runtime_turn_commits.result_json": {
     "verdict": "deliberately-excluded",
     "reason": "RuntimeCommitReceipt is a receipt coupled to turn_commit_hash and identity_encoding_version; enrolling the full receipt DTO is a separate cutover."

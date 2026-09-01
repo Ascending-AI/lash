@@ -292,24 +292,7 @@ const TABLE_REGISTRY: &[TablePair] = &[
             ],
         },
     },
-    TablePair {
-        sqlite_table: Some("usage_deltas"),
-        postgres_table: Some("lash_usage_deltas"),
-        parity: Parity::Divergent {
-            reason: "TokenLedgerEntry identity is pinned by payload_encoding_version and \
-                     payload_hash columns with a permanent tag registry",
-            sqlite_only_columns: &[
-                "cache_read_input_tokens",
-                "cache_write_input_tokens",
-                "input_tokens",
-                "model",
-                "output_tokens",
-                "reasoning_output_tokens",
-                "source",
-            ],
-            postgres_only_columns: &["entry_json"],
-        },
-    },
+    pair("usage_deltas", "lash_usage_deltas"),
     pair("wake_allocation_floors", "lash_wake_allocation_floors"),
     pair("wake_redelivery_fences", "lash_wake_redelivery_fences"),
 ];

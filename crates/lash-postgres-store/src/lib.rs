@@ -275,7 +275,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 71 merges the two journaled exec dispatch ledgers. Component-70
 // databases may contain the removed two-list payload and are rejected at open;
 // there is deliberately no migration arm.
-const SCHEMA_VERSION: i32 = 71;
+// Version 72 replaces the usage-delta JSON blob with typed usage columns.
+// Component-71 databases contain the removed blob rows and are rejected at
+// open; there is deliberately no migration arm.
+const SCHEMA_VERSION: i32 = 72;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

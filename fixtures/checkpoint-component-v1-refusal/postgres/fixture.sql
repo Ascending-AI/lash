@@ -3,7 +3,7 @@
 --
 
 
--- Dumped from database version 16.15
+-- Dumped from database version 14.24
 -- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
@@ -667,7 +667,13 @@ CREATE TABLE lash_durable_read_fixture.lash_usage_deltas (
     entry_ordinal bigint NOT NULL,
     payload_encoding_version integer NOT NULL,
     payload_hash text NOT NULL,
-    entry_json text NOT NULL
+    source text NOT NULL,
+    model text NOT NULL,
+    input_tokens bigint NOT NULL,
+    output_tokens bigint NOT NULL,
+    cache_read_input_tokens bigint NOT NULL,
+    cache_write_input_tokens bigint NOT NULL,
+    reasoning_output_tokens bigint NOT NULL
 );
 
 
@@ -936,7 +942,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 71);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 72);
 
 
 --
@@ -1016,7 +1022,6 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_subscriptions VALUES ('trigge
 -- Data for Name: lash_usage_deltas; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_usage_deltas VALUES (1, 'durable-read-fixture', '{"key":"commit","scope":{"operation_id":"durable-read-legacy-commit","type":"runtime_operation"}}', 0, 2, 'ebdcf60d363dd343af59872a3ae811b0a6c007ed748633c7a74a6376d8437711', '{"source":"durable-read-turn","model":"durable-read-model","usage":{"input_tokens":21,"output_tokens":12,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2}}');
 
 
 --
@@ -1051,7 +1056,7 @@ SELECT pg_catalog.setval('lash_durable_read_fixture.lash_queued_work_batches_enq
 -- Name: lash_usage_deltas_seq_seq; Type: SEQUENCE SET; Schema: lash_durable_read_fixture; Owner: -
 --
 
-SELECT pg_catalog.setval('lash_durable_read_fixture.lash_usage_deltas_seq_seq', 1, true);
+SELECT pg_catalog.setval('lash_durable_read_fixture.lash_usage_deltas_seq_seq', 1, false);
 
 
 --

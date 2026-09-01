@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 71);
+    assert_eq!(PostgresStorage::schema_version(), 72);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -149,9 +149,12 @@ async fn regenerate_postgres_durable_fixture() {
     drop_fixture_schema(&database_url).await;
 }
 
-/// At current head these catalog ALTERs are effectively a no-op: the remaining
-/// component-68 difference is dropped owner-liveness columns already reflected
-/// in the committed fixture.
+/// Author-time catalog refresh for the deliberately stale checkpoint fixture.
+///
+/// Hard-cutover tables are recreated from this build's authoritative DDL and
+/// their pre-cutover rows are discarded. This tooling is not reachable from a
+/// store open; the component-v1 checkpoint payload is the only old durable
+/// artifact this fixture preserves.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "refreshes only the refusal fixture catalog; preserves its component-v1 checkpoint"]
 async fn regenerate_postgres_prior_component_fixture_catalog() {
@@ -170,6 +173,14 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .connect(&fixture_database_url)
         .await
         .expect("connect to refresh refusal fixture catalog");
+    sqlx::query("DROP TABLE lash_usage_deltas")
+        .execute(&pool)
+        .await
+        .expect("discard pre-cutover usage-delta blob rows");
+    sqlx::raw_sql(schema_table_ddl("lash_usage_deltas"))
+        .execute(&pool)
+        .await
+        .expect("recreate the usage-delta table from the authoritative DDL");
     sqlx::raw_sql(
         "ALTER TABLE lash_pending_turn_inputs
              DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_state,
@@ -183,7 +194,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
                      OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
                          AND state IN ('deferred_next_turn', 'cancelled', 'completed')));
          UPDATE lash_schema_versions
-            SET version = 71
+            SET version = 72
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)
@@ -201,6 +212,19 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     )
     .expect("write refreshed Postgres refusal fixture catalog");
     drop_fixture_schema(&database_url).await;
+}
+
+fn schema_table_ddl(table: &str) -> &'static str {
+    let ddl = PostgresStorage::schema_ddl();
+    let marker = format!("CREATE TABLE IF NOT EXISTS {table} (");
+    let start = ddl
+        .find(&marker)
+        .unwrap_or_else(|| panic!("schema DDL must declare {table}"));
+    let statement = &ddl[start..];
+    let end = statement
+        .find(';')
+        .unwrap_or_else(|| panic!("{table} DDL must end with a semicolon"));
+    &statement[..=end]
 }
 
 async fn upgrade_prior_fixture_frame_identity(pool: &sqlx::PgPool) {
