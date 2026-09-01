@@ -1,53 +1,102 @@
 use super::*;
 
-fn compare_queue_claim_authority(
-    left: &crate::QueuedWorkClaim,
-    right: &crate::QueuedWorkClaim,
+trait ClaimRows {
+    type Row;
+
+    fn rows(&self) -> &[Self::Row];
+    fn row_key(row: &Self::Row) -> &str;
+    fn retain_rows(&mut self, overlapping: &std::collections::HashSet<String>);
+}
+
+impl ClaimRows for crate::QueuedWorkClaimData {
+    type Row = crate::QueuedWorkBatch;
+
+    fn rows(&self) -> &[Self::Row] {
+        &self.batches
+    }
+
+    fn row_key(row: &Self::Row) -> &str {
+        &row.batch_id
+    }
+
+    fn retain_rows(&mut self, overlapping: &std::collections::HashSet<String>) {
+        self.batches
+            .retain(|batch| !overlapping.contains(Self::row_key(batch)));
+    }
+}
+
+impl ClaimRows for crate::TurnInputClaimData {
+    type Row = crate::PendingTurnInput;
+
+    fn rows(&self) -> &[Self::Row] {
+        &self.inputs
+    }
+
+    fn row_key(row: &Self::Row) -> &str {
+        &row.input_id
+    }
+
+    fn retain_rows(&mut self, overlapping: &std::collections::HashSet<String>) {
+        self.inputs
+            .retain(|input| !overlapping.contains(Self::row_key(input)));
+        self.applications
+            .retain(|application| !overlapping.contains(&application.input_id));
+    }
+}
+
+fn compare_claim_authority<C>(
+    left: &crate::WorkClaim<C>,
+    right: &crate::WorkClaim<C>,
 ) -> std::cmp::Ordering {
     (left.session_lease_generation, left.fencing_token)
         .cmp(&(right.session_lease_generation, right.fencing_token))
 }
 
-fn merge_pending_queue_claim_authority(
-    pending_claims: &mut Vec<crate::QueuedWorkClaim>,
-    mut incoming: crate::QueuedWorkClaim,
+fn merge_pending_claim_authority<C: ClaimRows>(
+    pending_claims: &mut [&mut crate::WorkClaim<C>],
+    incoming: &mut crate::WorkClaim<C>,
+    row_kind: &str,
+    mut on_lower_authority: impl FnMut(
+        &mut crate::WorkClaim<C>,
+        &mut crate::WorkClaim<C>,
+        &std::collections::HashSet<String>,
+    ),
 ) -> Result<(), RuntimeError> {
     for pending in pending_claims.iter_mut() {
         let overlapping = pending
-            .batches
+            .data
+            .rows()
             .iter()
-            .filter(|pending_batch| {
+            .filter(|pending_row| {
                 incoming
-                    .batches
+                    .data
+                    .rows()
                     .iter()
-                    .any(|batch| batch.batch_id == pending_batch.batch_id)
+                    .any(|incoming_row| C::row_key(incoming_row) == C::row_key(pending_row))
             })
-            .map(|batch| batch.batch_id.clone())
-            .collect::<Vec<_>>();
+            .map(|row| C::row_key(row).to_string())
+            .collect::<std::collections::HashSet<_>>();
         if overlapping.is_empty() {
             continue;
         }
 
-        match compare_queue_claim_authority(pending, &incoming) {
-            std::cmp::Ordering::Less => pending
-                .batches
-                .retain(|batch| !overlapping.contains(&batch.batch_id)),
-            std::cmp::Ordering::Greater => incoming
-                .batches
-                .retain(|batch| !overlapping.contains(&batch.batch_id)),
+        match compare_claim_authority(*pending, incoming) {
+            std::cmp::Ordering::Less => {
+                on_lower_authority(pending, incoming, &overlapping);
+                pending.data.retain_rows(&overlapping);
+            }
+            std::cmp::Ordering::Greater => incoming.data.retain_rows(&overlapping),
             std::cmp::Ordering::Equal
                 if pending.claim_id == incoming.claim_id
                     && pending.lease_token == incoming.lease_token =>
             {
-                incoming
-                    .batches
-                    .retain(|batch| !overlapping.contains(&batch.batch_id));
+                incoming.data.retain_rows(&overlapping);
             }
             std::cmp::Ordering::Equal => {
                 return Err(RuntimeError::new(
                     RuntimeErrorCode::StoreCommitFailed,
                     format!(
-                        "queued-work rows {overlapping:?} have conflicting claim authorities `{}` and `{}` at session generation {} and fencing token {}",
+                        "{row_kind} rows {overlapping:?} have conflicting claim authorities `{}` and `{}` at session generation {} and fencing token {}",
                         pending.claim_id,
                         incoming.claim_id,
                         incoming.session_lease_generation,
@@ -57,6 +106,21 @@ fn merge_pending_queue_claim_authority(
             }
         }
     }
+    Ok(())
+}
+
+fn merge_pending_queue_claim_authority(
+    pending_claims: &mut Vec<crate::QueuedWorkClaim>,
+    mut incoming: crate::QueuedWorkClaim,
+) -> Result<(), RuntimeError> {
+    let mut pending_refs = pending_claims.iter_mut().collect::<Vec<_>>();
+    merge_pending_claim_authority(
+        &mut pending_refs,
+        &mut incoming,
+        "queued-work",
+        |_, _, _| {},
+    )?;
+    drop(pending_refs);
     pending_claims.retain(|claim| !claim.batches.is_empty());
     if !incoming.batches.is_empty() {
         pending_claims.push(incoming);
@@ -90,80 +154,27 @@ fn merge_pending_turn_input_claim_authority(
             crate::runtime::turn_input_ingress::TurnInputDrive::Unclaimed(_) => None,
         })
         .collect::<Vec<_>>();
-    for pending in pending_claims.iter_mut() {
-        let overlapping = pending
-            .inputs
-            .iter()
-            .filter(|pending_input| {
-                incoming
-                    .inputs
-                    .iter()
-                    .any(|input| input.input_id == pending_input.input_id)
-            })
-            .map(|input| input.input_id.clone())
-            .collect::<std::collections::HashSet<_>>();
-        if overlapping.is_empty() {
-            continue;
-        }
-
-        match (pending.session_lease_generation, pending.fencing_token)
-            .cmp(&(incoming.session_lease_generation, incoming.fencing_token))
-        {
-            std::cmp::Ordering::Less => {
-                already_delivered.extend(overlapping.iter().cloned());
-                for application in pending
-                    .applications
-                    .iter()
-                    .filter(|application| overlapping.contains(&application.input_id))
-                {
-                    if !incoming
-                        .applications
-                        .iter()
-                        .any(|existing| existing.input_id == application.input_id)
-                    {
-                        incoming.applications.push(application.clone());
-                    }
-                }
-                pending
-                    .inputs
-                    .retain(|input| !overlapping.contains(&input.input_id));
-                pending
-                    .applications
-                    .retain(|application| !overlapping.contains(&application.input_id));
-            }
-            std::cmp::Ordering::Greater => {
-                incoming
-                    .inputs
-                    .retain(|input| !overlapping.contains(&input.input_id));
-                incoming
-                    .applications
-                    .retain(|application| !overlapping.contains(&application.input_id));
-            }
-            std::cmp::Ordering::Equal
-                if pending.claim_id == incoming.claim_id
-                    && pending.lease_token == incoming.lease_token =>
+    merge_pending_claim_authority(
+        &mut pending_claims,
+        incoming,
+        "turn-input",
+        |pending, incoming, overlapping| {
+            already_delivered.extend(overlapping.iter().cloned());
+            for application in pending
+                .applications
+                .iter()
+                .filter(|application| overlapping.contains(&application.input_id))
             {
-                incoming
-                    .inputs
-                    .retain(|input| !overlapping.contains(&input.input_id));
-                incoming
+                if !incoming
                     .applications
-                    .retain(|application| !overlapping.contains(&application.input_id));
+                    .iter()
+                    .any(|existing| existing.input_id == application.input_id)
+                {
+                    incoming.applications.push(application.clone());
+                }
             }
-            std::cmp::Ordering::Equal => {
-                return Err(RuntimeError::new(
-                    RuntimeErrorCode::StoreCommitFailed,
-                    format!(
-                        "turn-input rows {overlapping:?} have conflicting claim authorities `{}` and `{}` at session generation {} and fencing token {}",
-                        pending.claim_id,
-                        incoming.claim_id,
-                        incoming.session_lease_generation,
-                        incoming.fencing_token,
-                    ),
-                ));
-            }
-        }
-    }
+        },
+    )?;
     drop(pending_claims);
     pending_drives.retain(|drive| !drive.inputs().is_empty());
     Ok(already_delivered)
@@ -825,6 +836,59 @@ mod claim_authority_tests {
                 .claim_id,
             "first"
         );
+    }
+
+    #[test]
+    fn lower_turn_input_authority_records_delivery_and_adopts_applications() {
+        let mut predecessor = turn_input_claim("predecessor", 1, 1, &["input-a"]);
+        predecessor.applications.push(crate::TurnInputApplication {
+            input_id: "input-a".to_string(),
+            source_key: None,
+            turn_id: crate::TurnId::from("fig905-turn"),
+            committed_message_id: "message-a".to_string(),
+            checkpoint: Some(crate::CheckpointKind::AfterWork),
+        });
+        let mut pending = vec![super::super::turn_input_ingress::TurnInputDrive::Claimed(
+            predecessor,
+        )];
+        let mut incoming = turn_input_claim("successor", 2, 2, &["input-a"]);
+
+        let already_delivered =
+            merge_pending_turn_input_claim_authority(&mut pending, &mut incoming)
+                .expect("merge a lower-authority turn-input claim");
+
+        assert_eq!(
+            already_delivered,
+            std::collections::HashSet::from(["input-a".to_string()])
+        );
+        assert!(pending.is_empty());
+        assert_eq!(incoming.inputs.len(), 1);
+        assert_eq!(incoming.applications.len(), 1);
+        assert_eq!(incoming.applications[0].committed_message_id, "message-a");
+    }
+
+    #[test]
+    fn higher_turn_input_authority_discards_the_incoming_rows_and_applications() {
+        let mut pending = vec![super::super::turn_input_ingress::TurnInputDrive::Claimed(
+            turn_input_claim("successor", 2, 2, &["input-a"]),
+        )];
+        let mut incoming = turn_input_claim("predecessor", 1, 1, &["input-a"]);
+        incoming.applications.push(crate::TurnInputApplication {
+            input_id: "input-a".to_string(),
+            source_key: None,
+            turn_id: crate::TurnId::from("fig905-turn"),
+            committed_message_id: "message-a".to_string(),
+            checkpoint: Some(crate::CheckpointKind::AfterWork),
+        });
+
+        let already_delivered =
+            merge_pending_turn_input_claim_authority(&mut pending, &mut incoming)
+                .expect("merge a higher-authority turn-input claim");
+
+        assert!(already_delivered.is_empty());
+        assert_eq!(pending.len(), 1);
+        assert!(incoming.inputs.is_empty());
+        assert!(incoming.applications.is_empty());
     }
 
     #[test]
