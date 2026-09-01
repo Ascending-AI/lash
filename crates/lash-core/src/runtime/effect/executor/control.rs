@@ -499,18 +499,10 @@ impl<'run> ScopedEffectController<'run> {
     /// The trio it yields is always observing: a scope alone cannot say whether
     /// the enclosing execution opted out.
     ///
-    /// That is exact for the turn-driver site, which only ever runs turn work.
-    /// It is a known crack at the two dispatch-side sites --
-    /// `tool_dispatch::attempt_coordinator::sleep_before_retry` and the
-    /// runner-side deferred-tool await in
-    /// `runtime::session_manager::process_runners::tool` -- which reach this
-    /// producer through a `ToolDispatchContext` that carries no observation
-    /// flag. A retryable tool failure inside a process body therefore still
-    /// journals its retry sleep with the turn-cancel gate attached, exactly as
-    /// it did before FIG-1759. Threading the observation decision down to
-    /// those two is FIG-1821; until then this is behaviour, not oversight, and
-    /// a caller must not read the always-observing result as proof that its
-    /// execution observes.
+    /// That is exact for the turn-driver and test-dispatch sites that call this
+    /// producer: both only run work that observes turn cancellation. Process
+    /// bodies instead build one unobserved trio at their execution boundary and
+    /// carry it through retry sleeps and deferred-tool awaits whole.
     pub(crate) fn turn_cancel_wait(&self, cancellation: CancellationToken) -> TurnCancelWait {
         TurnCancelWait::observing(cancellation, self.scope.clone())
     }

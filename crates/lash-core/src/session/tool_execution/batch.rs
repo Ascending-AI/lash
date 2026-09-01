@@ -237,6 +237,8 @@ impl RuntimeExecutionContext<'_> {
                 .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
                 .unwrap_or_default();
         let execution_grant = authorization.into_execution_grant();
+        let turn_cancel_wait =
+            Box::new(self.turn_cancel_wait(self.cancellation_token.clone().unwrap_or_default()));
         let coordinated = coordinate_tool_invocation(
             self.dispatch.as_ref(),
             child.call.clone(),
@@ -246,7 +248,7 @@ impl RuntimeExecutionContext<'_> {
                 parent: parent_invocation.clone(),
                 replay_suffix: child.replay_suffix.clone(),
             },
-            self.cancellation_token.clone(),
+            turn_cancel_wait.as_ref(),
             intent_drain_slot,
             intent_trace_hook,
             |completion_key| {

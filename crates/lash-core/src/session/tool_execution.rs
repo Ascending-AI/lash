@@ -957,6 +957,9 @@ impl RuntimeExecutionContext<'_> {
                         child_execution_trace_hook
                             .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
                             .unwrap_or_default();
+                    let turn_cancel_wait = Box::new(
+                        self.turn_cancel_wait(self.cancellation_token.clone().unwrap_or_default()),
+                    );
                     let coordinated = coordinate_tool_invocation(
                         &dispatch,
                         *prepared,
@@ -965,7 +968,7 @@ impl RuntimeExecutionContext<'_> {
                         ToolAttemptEffectIdentity::Scalar {
                             parent: parent_invocation.clone(),
                         },
-                        self.cancellation_token.clone(),
+                        turn_cancel_wait.as_ref(),
                         None,
                         intent_trace_hook,
                         |completion_key| {

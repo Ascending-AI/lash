@@ -17,6 +17,7 @@ use tokio::time::{Duration, timeout};
 mod directives;
 mod intent_drain;
 mod internal_activation;
+mod retry_turn_cancel_gate;
 mod settlement_order;
 
 type AttemptObservation = (u32, u32, Option<String>);

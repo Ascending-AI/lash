@@ -293,7 +293,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
     execution_grant: Option<Box<crate::ToolExecutionGrant>>,
     retry_policy: ToolRetryPolicy,
     identity: ToolAttemptEffectIdentity,
-    cancellation: Option<tokio_util::sync::CancellationToken>,
+    turn_cancel_wait: &crate::runtime::TurnCancelWait,
     // Owned for the whole coordination: the guard discharges its drain slot on
     // drop, so every return below — terminal, pending or failed — releases the
     // next slot without a hand-written call.
@@ -464,7 +464,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                     && let Err(err) = sleep_before_retry(
                         context,
                         identity.retry_sleep_invocation(context, &call, attempt),
-                        cancellation.clone(),
+                        turn_cancel_wait,
                         retry_after,
                     )
                     .await
@@ -646,7 +646,7 @@ fn runtime_failure_outcome(
 async fn sleep_before_retry(
     context: &ToolDispatchContext<'_>,
     invocation: RuntimeInvocation,
-    cancellation: Option<tokio_util::sync::CancellationToken>,
+    turn_cancel_wait: &crate::runtime::TurnCancelWait,
     retry_after_ms: u64,
 ) -> Result<(), crate::RuntimeEffectControllerError> {
     let outcome = context
@@ -660,10 +660,7 @@ async fn sleep_before_retry(
                 },
             ),
             RuntimeEffectLocalExecutor::sleep_under(
-                &context
-                    .effect_controller
-                    .scoped()
-                    .turn_cancel_wait(cancellation.unwrap_or_default()),
+                turn_cancel_wait,
                 std::sync::Arc::clone(&context.clock),
             ),
         )
