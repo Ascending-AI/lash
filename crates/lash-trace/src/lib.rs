@@ -35,8 +35,8 @@ mod lashlang_graph;
 #[cfg(feature = "otel")]
 pub mod otel;
 
-pub use lash_sansio::TextProjectionMetadata;
 pub use lash_sansio::llm::types::GenerationReceipt;
+pub use lash_sansio::{CellFailure, CellFailureKind, TextProjectionMetadata};
 pub use lashlang_graph::{
     TraceLashlangEdgeSelection, TraceLashlangGraph, TraceLashlangGraphChildLink,
     TraceLashlangGraphEdge, TraceLashlangGraphNode, TraceLashlangGraphStore,
@@ -83,8 +83,10 @@ pub use lashlang_graph::{
 /// provider-reported usage to each LLM attempt projection. Version 13 adds the
 /// typed `attachment_degraded` continuation event. Version 14 adds the
 /// requested model identifier to completed LLM responses because the
-/// independently developed v13 changes would otherwise collide.
-pub const TRACE_SCHEMA_VERSION: u32 = 14;
+/// independently developed v13 changes would otherwise collide. Version 15
+/// replaces the exec completion's string error with a structured cell failure
+/// carrying its policy, program, or host kind.
+pub const TRACE_SCHEMA_VERSION: u32 = 15;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -390,7 +392,7 @@ pub enum TraceEvent {
         output_chars: usize,
         observation_count: usize,
         observation_projections: Vec<TextProjectionMetadata>,
-        error: Option<String>,
+        error: Option<CellFailure>,
         terminal_finish: Option<Value>,
         tool_calls: Vec<TraceExecToolCall>,
     },

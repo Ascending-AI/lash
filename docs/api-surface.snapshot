@@ -3070,6 +3070,14 @@ lash::plugins::BeforeToolCallPluginDirective::ShortCircuitTool
 lash::plugins::BeforeToolCallPluginDirective::ShortCircuitTool::0
 lash::plugins::BeforeToolCallPluginDirective::short_circuit
 lash::plugins::BeforeTurnHook
+lash::plugins::CellFailure
+lash::plugins::CellFailure::kind
+lash::plugins::CellFailure::message
+lash::plugins::CellFailure::new
+lash::plugins::CellFailureKind
+lash::plugins::CellFailureKind::Host
+lash::plugins::CellFailureKind::Policy
+lash::plugins::CellFailureKind::Program
 lash::plugins::ChatContextProjector
 lash::plugins::CheckpointApplication
 lash::plugins::CheckpointApplication::abort

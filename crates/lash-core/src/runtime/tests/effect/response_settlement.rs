@@ -67,7 +67,10 @@ impl crate::plugin::CodeExecutorPlugin for SettlementExecutor {
                 observations: Vec::new(),
                 calls: Vec::new(),
                 printed_images: Vec::new(),
-                error: Some("code execution stopped".to_string()),
+                error: Some(crate::CellFailure::new(
+                    crate::CellFailureKind::Host,
+                    "code execution stopped",
+                )),
                 duration_ms: 1,
                 degraded_bindings: Vec::new(),
                 terminal_finish: None,

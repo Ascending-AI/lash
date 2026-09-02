@@ -185,7 +185,13 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
                 },
             ],
             calls_omitted: 0,
-            error: Some("read failed at secret.txt; cache failed at .cache/lash/state".to_string()),
+            error: Some(crate::feedback::render(
+                &lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Program,
+                    "read failed at secret.txt; cache failed at .cache/lash/state",
+                ),
+                "block",
+            )),
             final_output: None,
         }),
     ));
@@ -198,7 +204,6 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
     - module.ok → ok
     - module.fail → err
 
-    [ERROR]
     read failed at secret.txt; cache failed at .cache/lash/state
 
     Next: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected block.
@@ -384,10 +389,20 @@ fn a_refusal_and_a_runtime_failure_read_differently() {
     let refused = rendered_text(&render(&[failed_step_event(
         "lashlang_step_0",
         "class A {}",
-        &crate::feedback::RlmFeedbackKind::Policy.label("TS_CLASS_UNSUPPORTED: classes"),
+        &crate::feedback::render(
+            &lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Policy,
+                "TS_CLASS_UNSUPPORTED: classes",
+            ),
+            "block",
+        ),
     )]));
     assert!(
-        refused.contains("[POLICY]\nTS_CLASS_UNSUPPORTED: classes"),
+        refused.contains("TS_CLASS_UNSUPPORTED: classes"),
+        "{refused}"
+    );
+    assert!(
+        !refused.lines().any(|line| line.starts_with('[')),
         "{refused}"
     );
     assert!(
@@ -402,28 +417,15 @@ fn a_refusal_and_a_runtime_failure_read_differently() {
     let threw = rendered_text(&render(&[failed_step_event(
         "lashlang_step_0",
         "print rows[9]",
-        &crate::feedback::RlmFeedbackKind::Error.label("index out of range"),
+        &crate::feedback::render(
+            &lash_core::CellFailure::new(lash_core::CellFailureKind::Program, "index out of range"),
+            "block",
+        ),
     )]));
-    assert!(threw.contains("[ERROR]\nindex out of range"), "{threw}");
+    assert!(threw.contains("index out of range"), "{threw}");
+    assert!(!threw.lines().any(|line| line.starts_with('[')), "{threw}");
     assert!(threw.contains("the defect is in the program"), "{threw}");
     assert!(!threw.contains("refused"), "{threw}");
-}
-
-#[test]
-fn a_stop_carrier_never_renders_as_model_feedback() {
-    let transcript = rendered_text(&render(&[failed_step_event(
-        "lashlang_step_0",
-        "value = 1",
-        &crate::feedback::RlmFeedbackKind::Stop
-            .label("lashlang execution was cancelled by the host"),
-    )]));
-
-    assert!(!transcript.contains("[STOP]"), "{transcript}");
-    assert!(
-        !transcript.contains("cancelled by the host"),
-        "{transcript}"
-    );
-    assert!(!transcript.contains("Next:"), "{transcript}");
 }
 
 /// A host-authored System message is not the RLM protocol's to delete.

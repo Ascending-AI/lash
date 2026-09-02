@@ -169,13 +169,13 @@ IDENTIFIER_RENAME_BASELINES = {
 # must not merge independently and publish the reserved version without the
 # pinned upper-branch shape.
 STACKED_VERSION_BASELINES = {
-    # FIG-2030 is the second change in the coordinated protocol-52 window.
-    # FIG-2029 performed the window's single 51 -> 52 bump; this branch adds
-    # the freshness sequence and typed lease-owner wire shapes reserved under
-    # 52. A release freeze prevents publishing the merged base until the
-    # window's remaining coordinated changes land.
+    # FIG-1972 is the third and final change in the coordinated protocol-52
+    # window. FIG-2029 performed the window's single 51 -> 52 bump; FIG-2030
+    # added freshness and typed lease-owner wire shapes; this final branch adds
+    # typed RLM cell failures and minting replay identity. The release freeze
+    # prevents publishing a partial version-52 shape before all three land.
     "crates/lash-remote-protocol/src/lib.rs:REMOTE_PROTOCOL_VERSION": (
-        "sha256:8872f139bd260c428c69a7e371f8d71aef45cc98ccbdc6c0af9352045b2b4a05"
+        "sha256:aa288b695f784a8c6e38d0536ab34357d4fa59ce5e86a62d43fd6d50f6f1dec1"
     ),
 }
 

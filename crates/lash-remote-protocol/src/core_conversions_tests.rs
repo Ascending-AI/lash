@@ -6,6 +6,64 @@ use super::*;
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
 #[test]
+fn runtime_replay_round_trip_retains_minting_emission_key() {
+    let replay = lash_core::runtime::RuntimeReplay {
+        key: "tool-intent:derived".to_string(),
+        attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
+            lash_core::ToolIntentIdentity {
+                session_id: "session".to_string(),
+                execution_scope_id: "turn".to_string(),
+                tool_call_id: "call".to_string(),
+                intent_index: 0,
+                replay_key: "intent:derived".to_string(),
+                minting_emission_replay_key: Some("emission:minting".to_string()),
+            },
+        )),
+    };
+
+    let round_trip =
+        lash_core::runtime::RuntimeReplay::from(RemoteRuntimeReplay::from(replay.clone()));
+    assert_eq!(round_trip, replay);
+}
+
+#[test]
+fn code_block_failure_conversion_preserves_kind_and_message() {
+    let remote = RemoteTurnActivity::from_core(
+        3,
+        lash_core::TurnActivity::independent(lash_core::TurnEvent::CodeBlockCompleted {
+            language: "lashlang".to_string(),
+            output: String::new(),
+            error: Some(lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Host,
+                "artifact store unavailable",
+            )),
+            success: false,
+            duration_ms: 7,
+            tool_call_ids: Vec::new(),
+            graph_key: None,
+        }),
+    )
+    .expect("code-block activity converts");
+    let json = serde_json::to_value(&remote).expect("serialize remote activity");
+    assert_eq!(
+        json["error"],
+        serde_json::json!({
+            "kind": "host",
+            "message": "artifact store unavailable",
+        })
+    );
+
+    let RemoteTurnEvent::CodeBlockCompleted {
+        error: Some(error), ..
+    } = remote.event
+    else {
+        panic!("expected typed code-block failure");
+    };
+    assert_eq!(error.kind, RemoteCellFailureKind::Host);
+    assert_eq!(error.message, "artifact store unavailable");
+}
+
+#[test]
 fn turn_cancel_core_conversions_round_trip_every_envelope() {
     let core_request = lash_core::facade_support::TurnCancelRequest::new(
         lash_core::facade_support::TurnAddress::new("session", "turn"),
@@ -990,6 +1048,7 @@ fn remote_turn_result_maps_core_semantics() {
             tool_call_id: "exec-call".to_string(),
             intent_index: 0,
             replay_key: "intent-replay-key".to_string(),
+            minting_emission_replay_key: None,
         },
         kind: RemoteToolIntentKind::EmitProcessEvent,
         result: serde_json::json!({"sequence": 3}),

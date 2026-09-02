@@ -452,7 +452,12 @@ impl RuntimeBoundaryHarness {
             }],
             calls: Vec::new(),
             printed_images: Vec::new(),
-            error: (exit_code != 0).then(|| format!("exit code {exit_code}")),
+            error: (exit_code != 0).then(|| {
+                lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Program,
+                    format!("exit code {exit_code}"),
+                )
+            }),
             duration_ms: 0,
             degraded_bindings: Vec::new(),
             terminal_finish: Some(json!({

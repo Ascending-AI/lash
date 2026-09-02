@@ -200,6 +200,7 @@ impl From<lash_core::ToolIntentIdentity> for RemoteToolIntentIdentity {
             tool_call_id: value.tool_call_id,
             intent_index: value.intent_index,
             replay_key: value.replay_key,
+            minting_emission_replay_key: value.minting_emission_replay_key,
         }
     }
 }

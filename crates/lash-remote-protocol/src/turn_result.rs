@@ -310,6 +310,8 @@ pub struct RemoteToolIntentIdentity {
     pub tool_call_id: String,
     pub intent_index: u32,
     pub replay_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minting_emission_replay_key: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

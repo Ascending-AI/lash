@@ -121,6 +121,25 @@ impl From<lash_core::CheckpointKind> for RemoteTurnInputCheckpoint {
     }
 }
 
+impl From<lash_core::CellFailureKind> for RemoteCellFailureKind {
+    fn from(value: lash_core::CellFailureKind) -> Self {
+        match value {
+            lash_core::CellFailureKind::Policy => Self::Policy,
+            lash_core::CellFailureKind::Program => Self::Program,
+            lash_core::CellFailureKind::Host => Self::Host,
+        }
+    }
+}
+
+impl From<lash_core::CellFailure> for RemoteCellFailure {
+    fn from(value: lash_core::CellFailure) -> Self {
+        Self {
+            kind: value.kind.into(),
+            message: value.message,
+        }
+    }
+}
+
 impl From<&lash_core::TurnInputApplication> for RemoteTurnInputApplication {
     fn from(value: &lash_core::TurnInputApplication) -> Self {
         Self {
@@ -288,7 +307,7 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
             } => Ok(Self::CodeBlockCompleted {
                 language,
                 output,
-                error,
+                error: error.map(Into::into),
                 success,
                 duration_ms,
                 tool_call_ids,

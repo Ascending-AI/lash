@@ -116,8 +116,11 @@ pub use usage_activity::*;
 // Bumped to 51: trigger occurrences carry typed fired or dropped
 // outcomes. Exact-version negotiation prevents older peers from erasing the
 // audit fate of a non-fired occurrence.
-// Bumped to 52: durable process references carry their registration
-// incarnation, refusing version-51 peers that could rebind to a reused ID.
+// Bumped to 52: the coordinated release window adds durable process-reference
+// incarnations, process-observation freshness and typed lease owners, then the
+// final member types RLM cell failures and preserves minting replay identity.
+// The release freeze prevents publishing any partial version-52 shape; once
+// the final shape ships, exact-version negotiation refuses version-51 peers.
 pub const REMOTE_PROTOCOL_VERSION: u32 = 52;
 
 /// One versioned remote-protocol message.

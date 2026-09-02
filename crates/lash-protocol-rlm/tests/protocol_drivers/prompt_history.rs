@@ -259,7 +259,10 @@ fn rlm_prompt_history_exec_error_keeps_reasoning_prose_and_code_exact() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "missing_name",
                 output: Vec::new(),
-                error: Some("unknown variable `missing_name`".to_string()),
+                error: Some(program_failure_feedback(
+                    "unknown variable `missing_name`",
+                    "block",
+                )),
                 final_output: None,
             }),
             ..RlmProtocolExpectations::default()

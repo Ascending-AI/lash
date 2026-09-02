@@ -97,10 +97,29 @@ impl RemoteTurnActivity {
                 }
             }
             RemoteTurnEvent::ModelCallRecorded { record } => validate_llm_call_record(record)?,
+            RemoteTurnEvent::CodeBlockCompleted {
+                error: Some(error), ..
+            } => {
+                require_non_empty("RemoteCellFailure", "message", &error.message)?;
+            }
             _ => {}
         }
         Ok(())
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteCellFailureKind {
+    Policy,
+    Program,
+    Host,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteCellFailure {
+    pub kind: RemoteCellFailureKind,
+    pub message: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -135,7 +154,7 @@ pub enum RemoteTurnEvent {
         language: String,
         output: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
+        error: Option<RemoteCellFailure>,
         success: bool,
         duration_ms: u64,
         tool_call_ids: Vec<String>,

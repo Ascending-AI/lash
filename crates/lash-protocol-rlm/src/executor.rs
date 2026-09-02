@@ -213,7 +213,8 @@ impl RlmCheckpointPerfFixture {
         .await;
         if let Some(error) = response.error {
             return Err(SessionError::Protocol(format!(
-                "RLM checkpoint perf assignment failed: {error}"
+                "RLM checkpoint perf assignment failed: {}",
+                error.message,
             )));
         }
         Ok(())
@@ -271,6 +272,7 @@ async fn execute_code_inner(
             return exec_setup_failure_or_stop(
                 state,
                 &ctx,
+                lash_core::CellFailureKind::Host,
                 format!("invalid Lashlang host tool surface: {err}"),
                 start,
                 Vec::new(),
@@ -325,7 +327,7 @@ async fn execute_code_inner(
     // The kind is decided here, while the failure is still a typed diagnostic.
     // "Compilation failed" is not enough to classify it: a misspelled name and a
     // forbidden construct both fail here and need opposite advice.
-    let compile_result: Result<_, (crate::feedback::RlmFeedbackKind, String)> = {
+    let compile_result: Result<_, (lash_core::CellFailureKind, String)> = {
         let _phase = ctx.named_phase("rlm_lashlang.compile_link");
         match source_dialect {
             SourceDialect::Lashlang => state
@@ -392,8 +394,7 @@ async fn execute_code_inner(
     let cached_program = match compile_result {
         Ok(program) => program,
         Err((kind, error)) => {
-            let error = kind.label(error);
-            return exec_setup_failure_or_stop(state, &ctx, error, start, Vec::new());
+            return exec_setup_failure_or_stop(state, &ctx, kind, error, start, Vec::new());
         }
     };
     let linked_module = cached_program.linked_module();
@@ -412,6 +413,7 @@ async fn execute_code_inner(
             return exec_setup_failure_or_stop(
                 state,
                 &ctx,
+                lash_core::CellFailureKind::Host,
                 format!("failed to store lashlang module artifact: {err}"),
                 start,
                 Vec::new(),
@@ -427,6 +429,7 @@ async fn execute_code_inner(
             return exec_setup_failure_or_stop(
                 state,
                 &ctx,
+                lash_core::CellFailureKind::Host,
                 format!("failed to resolve trigger owner namespace: {err}"),
                 start,
                 Vec::new(),
@@ -442,6 +445,7 @@ async fn execute_code_inner(
             return exec_setup_failure_or_stop(
                 state,
                 &ctx,
+                lash_core::CellFailureKind::Host,
                 format!("failed to replace current trigger key manifest: {err}"),
                 start,
                 Vec::new(),
@@ -470,7 +474,14 @@ async fn execute_code_inner(
     let degraded_bindings = match rehydrated {
         Ok(rehydrated) => rehydrated.degraded_bindings,
         Err(err) => {
-            return exec_setup_failure_or_stop(state, &ctx, err, start, Vec::new());
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                lash_core::CellFailureKind::Host,
+                err,
+                start,
+                Vec::new(),
+            );
         }
     };
 
@@ -479,7 +490,14 @@ async fn execute_code_inner(
         match projected_bindings(&ctx, session_projected_bindings, projection_resolver).await {
             Ok(projected) => projected,
             Err(err) => {
-                return exec_setup_failure_or_stop(state, &ctx, err, start, degraded_bindings);
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailureKind::Host,
+                    err,
+                    start,
+                    degraded_bindings,
+                );
             }
         }
     };
@@ -546,9 +564,10 @@ async fn execute_code_inner(
             state.cancel_code_execution();
             return exec_response_from(
                 host.into_collected(),
-                Some(crate::feedback::RlmFeedbackKind::Stop.label(format!(
-                    "foreground execution stopped while returning failure: {value}"
-                ))),
+                Some(lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Host,
+                    format!("foreground execution stopped while returning failure: {value}"),
+                )),
                 None,
                 start,
                 degraded_bindings.clone(),
@@ -557,10 +576,10 @@ async fn execute_code_inner(
         Ok(ExecutionOutcome::Failed(value)) => {
             return exec_response_from(
                 host.into_collected(),
-                Some(
-                    crate::feedback::RlmFeedbackKind::Error
-                        .label(format!("process failed in foreground execution: {value}")),
-                ),
+                Some(lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Program,
+                    format!("process failed in foreground execution: {value}"),
+                )),
                 None,
                 start,
                 degraded_bindings.clone(),
@@ -575,16 +594,17 @@ async fn execute_code_inner(
             );
             let kind = lashlang_runtime_feedback_kind(&error, host.cancellation_observed());
             let failure = runtime_failure.unwrap_or(lashlang::RuntimeFailure { error, span: None });
-            if kind == crate::feedback::RlmFeedbackKind::Stop {
+            if host.cancellation_observed()
+                || matches!(&failure.error, lashlang::RuntimeError::HostCancelled)
+            {
                 state.cancel_code_execution();
             }
             return exec_response_from(
                 host.into_collected(),
-                Some(kind.label(lashlang::format_runtime_diagnostic(
-                    code,
-                    &failure.error,
-                    failure.span,
-                ))),
+                Some(lash_core::CellFailure::new(
+                    kind,
+                    lashlang::format_runtime_diagnostic(code, &failure.error, failure.span),
+                )),
                 None,
                 start,
                 degraded_bindings.clone(),
@@ -612,22 +632,21 @@ fn process_handle_names(globals: &lashlang::Record) -> BTreeSet<String> {
         .collect()
 }
 
-/// Classifies a typed Lashlang runtime outcome before it enters the persisted
-/// string carrier used by the RLM trajectory.
+/// Classifies a typed Lashlang runtime outcome before it enters the response.
 fn lashlang_runtime_feedback_kind(
     error: &lashlang::RuntimeError,
     host_cancelled: bool,
-) -> crate::feedback::RlmFeedbackKind {
+) -> lash_core::CellFailureKind {
     match error {
-        _ if host_cancelled => crate::feedback::RlmFeedbackKind::Stop,
-        lashlang::RuntimeError::HostCancelled => crate::feedback::RlmFeedbackKind::Stop,
-        error if error.is_execution_bound_exhausted() => crate::feedback::RlmFeedbackKind::Policy,
-        _ => crate::feedback::RlmFeedbackKind::Error,
+        _ if host_cancelled => lash_core::CellFailureKind::Host,
+        lashlang::RuntimeError::HostCancelled => lash_core::CellFailureKind::Host,
+        error if error.is_execution_bound_exhausted() => lash_core::CellFailureKind::Policy,
+        _ => lash_core::CellFailureKind::Program,
     }
 }
 
 fn exec_setup_failure_with_degraded(
-    error: impl Into<String>,
+    error: lash_core::CellFailure,
     start: std::time::Instant,
     degraded_bindings: Vec<lash_core::DegradedBinding>,
 ) -> ExecResponse {
@@ -635,7 +654,7 @@ fn exec_setup_failure_with_degraded(
         observations: Vec::new(),
         calls: Vec::new(),
         printed_images: Vec::new(),
-        error: Some(error.into()),
+        error: Some(error),
         duration_ms: start.elapsed().as_millis() as u64,
         degraded_bindings,
         terminal_finish: None,
@@ -645,6 +664,7 @@ fn exec_setup_failure_with_degraded(
 fn exec_setup_failure_or_stop(
     state: &mut RlmExecutionState,
     ctx: &RuntimeExecutionContext<'_>,
+    kind: lash_core::CellFailureKind,
     error: impl Into<String>,
     start: std::time::Instant,
     degraded_bindings: Vec<lash_core::DegradedBinding>,
@@ -652,18 +672,24 @@ fn exec_setup_failure_or_stop(
     if ctx.is_cancelled() {
         state.cancel_code_execution();
         return exec_setup_failure_with_degraded(
-            crate::feedback::RlmFeedbackKind::Stop
-                .label("foreground execution stopped during setup"),
+            lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Host,
+                "foreground execution stopped during setup",
+            ),
             start,
             degraded_bindings,
         );
     }
-    exec_setup_failure_with_degraded(error, start, degraded_bindings)
+    exec_setup_failure_with_degraded(
+        lash_core::CellFailure::new(kind, error),
+        start,
+        degraded_bindings,
+    )
 }
 
 fn exec_response_from(
     collected: CollectedExecutionOutput,
-    error: Option<String>,
+    error: Option<lash_core::CellFailure>,
     terminal_finish: Option<serde_json::Value>,
     start: std::time::Instant,
     degraded_bindings: Vec<lash_core::DegradedBinding>,
@@ -685,13 +711,11 @@ fn exec_response_from(
 /// Asked of the diagnostic, not of its code. Three codes carry both families —
 /// `TS_METHOD_UNSUPPORTED` covers `Promise.then` and `[].map()` alike — so only
 /// the site that emitted it knows, and it records the answer at construction.
-fn typescript_feedback_kind(
-    error: &lash_typescript::Diagnostic,
-) -> crate::feedback::RlmFeedbackKind {
+fn typescript_feedback_kind(error: &lash_typescript::Diagnostic) -> lash_core::CellFailureKind {
     if error.is_dialect_refusal() {
-        crate::feedback::RlmFeedbackKind::Policy
+        lash_core::CellFailureKind::Policy
     } else {
-        crate::feedback::RlmFeedbackKind::Error
+        lash_core::CellFailureKind::Program
     }
 }
 
@@ -719,14 +743,14 @@ fn refine_typescript_method_diagnostic(
 /// missing `finish` value. The refusals are the retired forms and the rules
 /// about where a construct may appear — no rewrite of the same approach is
 /// accepted, so the model must be told to write a different one.
-fn lashlang_parse_feedback_kind(error: &lashlang::ParseError) -> crate::feedback::RlmFeedbackKind {
+fn lashlang_parse_feedback_kind(error: &lashlang::ParseError) -> lash_core::CellFailureKind {
     match error {
         lashlang::ParseError::SubmitRemoved { .. }
         | lashlang::ParseError::DeclarativeTriggerRemoved { .. }
         | lashlang::ParseError::SessionProcessAdminOutsideBlock { .. }
         | lashlang::ParseError::ForegroundControlInsideProcess { .. }
-        | lashlang::ParseError::NestingTooDeep { .. } => crate::feedback::RlmFeedbackKind::Policy,
-        _ => crate::feedback::RlmFeedbackKind::Error,
+        | lashlang::ParseError::NestingTooDeep { .. } => lash_core::CellFailureKind::Policy,
+        _ => lash_core::CellFailureKind::Program,
     }
 }
 
@@ -736,16 +760,16 @@ fn lashlang_parse_feedback_kind(error: &lashlang::ParseError) -> crate::feedback
 /// the program. A bare tool call, a disabled feature, an opaque descriptor read,
 /// and the placement rules are the host declining, and no amount of debugging
 /// changes them.
-fn lashlang_link_feedback_kind(error: &lashlang::LinkError) -> crate::feedback::RlmFeedbackKind {
+fn lashlang_link_feedback_kind(error: &lashlang::LinkError) -> lash_core::CellFailureKind {
     match error {
         lashlang::LinkError::BareToolCall { .. }
         | lashlang::LinkError::FeatureDisabled { .. }
         | lashlang::LinkError::OpaqueHostDescriptorAccess { .. }
         | lashlang::LinkError::ProcessLifecycleOutsideProcess { .. }
         | lashlang::LinkError::TriggerEventOutsideInputs { .. } => {
-            crate::feedback::RlmFeedbackKind::Policy
+            lash_core::CellFailureKind::Policy
         }
-        _ => crate::feedback::RlmFeedbackKind::Error,
+        _ => lash_core::CellFailureKind::Program,
     }
 }
 
@@ -957,7 +981,7 @@ mod tests {
     fn host_cancellation_is_a_terminal_stop_not_a_program_error() {
         assert_eq!(
             lashlang_runtime_feedback_kind(&lashlang::RuntimeError::HostCancelled, false),
-            crate::feedback::RlmFeedbackKind::Stop
+            lash_core::CellFailureKind::Host
         );
         assert_eq!(
             lashlang_runtime_feedback_kind(
@@ -966,7 +990,7 @@ mod tests {
                 },
                 true,
             ),
-            crate::feedback::RlmFeedbackKind::Stop,
+            lash_core::CellFailureKind::Host,
             "host cancellation wins when an active wait unwinds through a host error"
         );
     }
@@ -1222,9 +1246,9 @@ mod tests {
 
                 let error = response.error.expect("host cancellation is classified");
                 assert_eq!(
-                    crate::feedback::RlmFeedbackKind::split(&error).0,
-                    crate::feedback::RlmFeedbackKind::Stop,
-                    "{language}: the live executor must carry Stop to the driver"
+                    error.kind,
+                    lash_core::CellFailureKind::Host,
+                    "{language}: cancellation must never be classified as a program failure"
                 );
                 assert!(
                     state.rlm.globals().get(cancelled_binding).is_none(),
@@ -1288,8 +1312,8 @@ mod tests {
 
                 let error = response.error.expect("cancelled setup is classified");
                 assert_eq!(
-                    crate::feedback::RlmFeedbackKind::split(&error).0,
-                    crate::feedback::RlmFeedbackKind::Stop,
+                    error.kind,
+                    lash_core::CellFailureKind::Host,
                     "{language}: observed cancellation must win over a compile failure"
                 );
             }
@@ -1455,8 +1479,8 @@ mod tests {
 
     /// A typo is not a policy refusal.
     ///
-    /// Classifying every compile failure as `[POLICY]` produced the one thing
-    /// the split exists to prevent: `unknown name \`task\`` arrived under "the
+    /// Classifying every compile failure as Policy produced the one thing
+    /// the typed distinction exists to prevent: `unknown name \`task\`` arrived under "the
     /// runtime refused this cell; sending it again unchanged will be refused
     /// again. Rewrite it in the form named above" — with no form named above,
     /// because a misspelled identifier has no accepted alternative form. The
@@ -1467,7 +1491,7 @@ mod tests {
             .expect_err("an unbound name is rejected");
         assert_eq!(
             typescript_feedback_kind(&typo),
-            crate::feedback::RlmFeedbackKind::Error,
+            lash_core::CellFailureKind::Program,
             "a misspelled name is the program being wrong: {typo}"
         );
 
@@ -1475,7 +1499,7 @@ mod tests {
             .expect_err("classes are refused");
         assert_eq!(
             typescript_feedback_kind(&forbidden),
-            crate::feedback::RlmFeedbackKind::Policy,
+            lash_core::CellFailureKind::Policy,
             "a construct outside the dialect is a refusal: {forbidden}"
         );
 
@@ -1505,12 +1529,12 @@ mod tests {
         );
         assert_eq!(
             typescript_feedback_kind(&nondeterministic),
-            crate::feedback::RlmFeedbackKind::Policy,
+            lash_core::CellFailureKind::Policy,
             "the runtime will never run this: {nondeterministic}"
         );
         assert_eq!(
             typescript_feedback_kind(&miscounted),
-            crate::feedback::RlmFeedbackKind::Error,
+            lash_core::CellFailureKind::Program,
             "the method exists and the call is wrong: {miscounted}"
         );
     }
@@ -1986,8 +2010,8 @@ mod tests {
             assert!(
                 result
                     .error
-                    .as_deref()
-                    .is_some_and(|error| error.contains("instruction budget"))
+                    .as_ref()
+                    .is_some_and(|error| error.message.contains("instruction budget"))
             );
         });
     }
@@ -2506,8 +2530,9 @@ mod tests {
             );
             let error = response.error.as_ref().unwrap();
             assert!(
-                error.contains("to_int") || error.contains("invalid_int"),
-                "expected runtime error diagnostic, got: {error}"
+                error.message.contains("to_int") || error.message.contains("invalid_int"),
+                "expected runtime error diagnostic, got: {}",
+                error.message,
             );
             assert_eq!(response.observations.len(), 1);
             assert!(
@@ -4131,11 +4156,12 @@ mod tests {
             )
             .await;
 
-            let error = response
-                .error
-                .as_deref()
-                .expect("event mismatch should fail");
-            assert!(error.contains("trigger source emits"), "{error}");
+            let error = response.error.as_ref().expect("event mismatch should fail");
+            assert!(
+                error.message.contains("trigger source emits"),
+                "{}",
+                error.message,
+            );
             assert!(response.observations.is_empty());
             assert!(response.terminal_finish.is_none());
         });
@@ -4217,20 +4243,25 @@ mod tests {
             .await;
             let error = response
                 .error
-                .as_deref()
+                .as_ref()
                 .expect("bare tool call should fail at link time");
 
-            let (kind, evidence) = crate::feedback::RlmFeedbackKind::split(error);
             assert_eq!(
-                kind,
-                crate::feedback::RlmFeedbackKind::Policy,
-                "a link refusal is a policy failure, not a runtime one: {error}"
+                error.kind,
+                lash_core::CellFailureKind::Policy,
+                "a link refusal is a policy failure, not a runtime one: {}",
+                error.message,
             );
             assert!(
-                evidence.starts_with(RLM_BARE_TOOL_CALL_DIAGNOSTIC),
-                "{error}"
+                error.message.starts_with(RLM_BARE_TOOL_CALL_DIAGNOSTIC),
+                "{}",
+                error.message,
             );
-            assert!(error.contains("hint: use `files.read`"), "{error}");
+            assert!(
+                error.message.contains("hint: use `files.read`"),
+                "{}",
+                error.message,
+            );
             assert!(response.calls.is_empty());
             assert!(response.terminal_finish.is_none());
         });
@@ -4251,10 +4282,15 @@ mod tests {
 
             let error = response.error.expect("link should reject typo");
             assert!(
-                error.contains("unknown name `misspelled_result`"),
-                "{error}"
+                error.message.contains("unknown name `misspelled_result`"),
+                "{}",
+                error.message,
             );
-            assert!(error.contains("--> line 40, column 8"), "{error}");
+            assert!(
+                error.message.contains("--> line 40, column 8"),
+                "{}",
+                error.message,
+            );
             assert!(
                 response.observations.is_empty(),
                 "no print effect may execute before a link failure"
@@ -4339,16 +4375,17 @@ mod tests {
                 .await;
                 let error = response
                     .error
-                    .as_deref()
+                    .as_ref()
                     .unwrap_or_else(|| panic!("{} should fail at link time", case.name));
 
                 assert!(
-                    error.contains(&format!(
+                    error.message.contains(&format!(
                         "lashlang feature `{}` is disabled by this host",
                         case.feature
                     )),
-                    "{} error was {error}",
-                    case.name
+                    "{} error was {}",
+                    case.name,
+                    error.message,
                 );
                 assert!(
                     response.calls.is_empty(),

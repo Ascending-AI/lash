@@ -353,11 +353,19 @@ pub(crate) fn exec_response(
             .collect(),
         calls: Vec::new(),
         printed_images: Vec::new(),
-        error: error.map(str::to_string),
+        error: error.map(|message| {
+            lash_sansio::CellFailure::new(lash_sansio::CellFailureKind::Program, message)
+        }),
         duration_ms: 1,
         degraded_bindings: Vec::new(),
         terminal_finish: final_output,
     }
+}
+
+pub(crate) fn program_failure_feedback(message: &str, cell_noun: &str) -> String {
+    format!(
+        "{message}\n\nNext: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected {cell_noun}."
+    )
 }
 
 pub(crate) fn effects_include_runtime_error(effects: &[Effect], message_fragment: &str) -> bool {
