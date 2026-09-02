@@ -122,7 +122,14 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &str) -> Option<Entr
             )
             .attr(Attr::int("calls", tool_call_ids.len() as u64));
             if let Some(error) = error {
-                entry = entry.attr(Attr::text("error", error));
+                let kind = match error.kind {
+                    lash_core::CellFailureKind::Policy => "policy",
+                    lash_core::CellFailureKind::Program => "program",
+                    lash_core::CellFailureKind::Host => "host",
+                };
+                entry = entry
+                    .attr(Attr::text("failure", kind))
+                    .attr(Attr::text("error", &error.message));
             }
             entry
         }

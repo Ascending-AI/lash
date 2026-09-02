@@ -561,25 +561,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
 
         match result {
             Ok(response) => {
-                let exec_error = response.error.map(|raw_error| {
-                    let kind = crate::feedback::RlmFeedbackKind::split(&raw_error).0;
-                    (kind, raw_error)
+                let exec_error = response.error.map(|failure| {
+                    crate::feedback::render(&failure, self.dialect.prompt_vocabulary().cell_noun)
                 });
-                if matches!(
-                    exec_error,
-                    Some((crate::feedback::RlmFeedbackKind::Stop, _))
-                ) {
-                    return vec![
-                        DriverAction::AppendEvents(vec![diagnostic_event(
-                            "stop_without_cancellation_evidence",
-                            serde_json::json!({
-                                "code": "rlm_stop_without_cancellation_evidence",
-                                "constraint": "a Stop response must carry observed host cancellation evidence",
-                            }),
-                        )]),
-                        DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError)),
-                    ];
-                }
                 if !response.degraded_bindings.is_empty() {
                     actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                         "projection_rehydration",
@@ -612,13 +596,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         state.output.push(observation.text);
                     }
                 }
-                if let Some((
-                    crate::feedback::RlmFeedbackKind::Policy
-                    | crate::feedback::RlmFeedbackKind::Error,
-                    raw_error,
-                )) = exec_error
-                {
-                    state.exec_error = Some(raw_error);
+                if let Some(rendered_error) = exec_error {
+                    state.exec_error = Some(rendered_error);
                 }
                 if let Some(finish_value) = response.terminal_finish {
                     state.terminal_finish = Some(finish_value);
@@ -639,7 +618,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 }
             }
             Err(error) => {
-                state.exec_error = Some(error);
+                state.exec_error = Some(crate::feedback::render(
+                    &lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error),
+                    self.dialect.prompt_vocabulary().cell_noun,
+                ));
             }
         }
 

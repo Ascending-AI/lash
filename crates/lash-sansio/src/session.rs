@@ -67,6 +67,34 @@ pub struct DegradedBinding {
     pub reason: String,
 }
 
+/// Why an executed code cell failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CellFailureKind {
+    /// The runtime refused the program because it violates a dialect or policy bound.
+    Policy,
+    /// The authored program failed to compile or execute correctly.
+    Program,
+    /// Host infrastructure failed while preparing or executing the program.
+    Host,
+}
+
+/// Structured failure returned by a code executor.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CellFailure {
+    pub kind: CellFailureKind,
+    pub message: String,
+}
+
+impl CellFailure {
+    pub fn new(kind: CellFailureKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct Observation {
     pub text: String,
@@ -78,7 +106,7 @@ pub struct ExecResponse {
     pub observations: Vec<Observation>,
     pub calls: Vec<ExecutedCall>,
     pub printed_images: Vec<AttachmentRef>,
-    pub error: Option<String>,
+    pub error: Option<CellFailure>,
     pub duration_ms: u64,
     /// Bindings that could not be restored to a live host reference during
     /// executor setup. The executor leaves each binding loudly unavailable;

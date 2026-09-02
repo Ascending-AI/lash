@@ -64,14 +64,15 @@ const INHERITED_DIAGNOSTICS: &[&str] = &[
 
 /// Asserts an outcome is not one cell blaming another.
 fn assert_not_inherited(outcome: &CellOutcome, context: &str) {
-    let Some(error) = outcome.error.as_deref() else {
+    let Some(error) = outcome.error.as_ref() else {
         return;
     };
     for fragment in INHERITED_DIAGNOSTICS {
         assert!(
-            !error.contains(fragment),
+            !error.message.contains(fragment),
             "{context}: a cell failed with a diagnostic about an earlier cell's program \
-             (`{fragment}`): {error}"
+             (`{fragment}`): {}",
+            error.message,
         );
     }
 }
@@ -108,7 +109,11 @@ fn drive(dialect: Dialect, mode: HarnessMode, cells: &[Cell]) -> (Session, Sessi
                 );
             }
             Expectation::FailsTyped => {
-                let failure = outcome.error.as_deref().unwrap_or("");
+                let failure = outcome
+                    .error
+                    .as_ref()
+                    .map(|failure| failure.message.as_str())
+                    .unwrap_or("");
                 assert!(
                     !failure.is_empty(),
                     "{context} was required to fail typed, and reported {outcome:?}"

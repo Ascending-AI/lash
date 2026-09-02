@@ -53,7 +53,8 @@ pub(crate) async fn run_task(
                         ..
                     } => Some(
                         error
-                            .as_deref()
+                            .as_ref()
+                            .map(|failure| failure.message.as_str())
                             .filter(|message| !message.trim().is_empty())
                             .unwrap_or(output)
                             .trim()

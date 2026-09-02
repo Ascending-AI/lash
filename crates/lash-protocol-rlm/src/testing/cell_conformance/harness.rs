@@ -60,7 +60,7 @@ pub(crate) struct CellOutcome {
     /// The cell's typed failure, if it failed. Every failing cell must produce
     /// one: a cell that neither runs nor fails typed is the shape the
     /// no-poisoning law forbids.
-    pub(crate) error: Option<String>,
+    pub(crate) error: Option<lash_core::CellFailure>,
     /// The terminal value the cell finished the session with, if it did.
     pub(crate) finish: Option<serde_json::Value>,
 }
@@ -73,7 +73,8 @@ impl CellOutcome {
     /// The failure text, for a cell the scenario expects to fail.
     pub(crate) fn failure(&self) -> &str {
         self.error
-            .as_deref()
+            .as_ref()
+            .map(|failure| failure.message.as_str())
             .expect("a cell expected to fail reported no error")
     }
 }

@@ -228,7 +228,10 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             TurnEvent::CodeBlockCompleted {
                 language: "python".to_string(),
                 output: "1".to_string(),
-                error: Some("boom".to_string()),
+                error: Some(lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Program,
+                    "boom",
+                )),
                 success: false,
                 duration_ms: 5,
                 tool_call_ids: vec!["call-1".to_string()],
@@ -238,7 +241,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 "type": "code_block_completed",
                 "language": "python",
                 "output": "1",
-                "error": "boom",
+                "error": { "kind": "program", "message": "boom" },
                 "success": false,
                 "duration_ms": 5,
                 "tool_call_ids": ["call-1"],

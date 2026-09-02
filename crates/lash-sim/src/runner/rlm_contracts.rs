@@ -816,7 +816,9 @@ fn rlm_exec_response(
             .collect(),
         calls: Vec::new(),
         printed_images: Vec::new(),
-        error: error.map(str::to_string),
+        error: error.map(|message| {
+            lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
+        }),
         duration_ms: 1,
         degraded_bindings: Vec::new(),
         terminal_finish,
@@ -852,7 +854,9 @@ fn rlm_exec_response_with_tool_calls(
             .collect(),
         calls,
         printed_images: Vec::new(),
-        error: error.map(str::to_string),
+        error: error.map(|message| {
+            lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
+        }),
         duration_ms,
         degraded_bindings: Vec::new(),
         terminal_finish,

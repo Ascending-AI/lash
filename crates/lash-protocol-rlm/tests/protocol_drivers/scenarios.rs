@@ -359,7 +359,10 @@ fn rlm_protocol_scenario_finish_required_exec_error_at_max_turns_stops_without_r
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "missing_name",
                 output: Vec::new(),
-                error: Some("unknown variable `missing_name`".to_string()),
+                error: Some(program_failure_feedback(
+                    "unknown variable `missing_name`",
+                    "block",
+                )),
                 final_output: None,
             }),
             ..RlmProtocolExpectations::default()

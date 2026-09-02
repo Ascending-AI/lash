@@ -405,7 +405,10 @@ impl RuntimeTurnDriver<'_> {
                     TurnEvent::CodeBlockCompleted {
                         language: language.clone(),
                         output: String::new(),
-                        error: Some(message),
+                        error: Some(crate::CellFailure::new(
+                            crate::CellFailureKind::Host,
+                            message,
+                        )),
                         success: false,
                         duration_ms: 0,
                         tool_call_ids: Vec::new(),
@@ -450,7 +453,10 @@ impl RuntimeTurnDriver<'_> {
                     TurnEvent::CodeBlockCompleted {
                         language: language.clone(),
                         output: String::new(),
-                        error: Some(message),
+                        error: Some(crate::CellFailure::new(
+                            crate::CellFailureKind::Host,
+                            message,
+                        )),
                         success: false,
                         duration_ms: self
                             .host
@@ -529,7 +535,10 @@ impl RuntimeTurnDriver<'_> {
                     TurnEvent::CodeBlockCompleted {
                         language: language.clone(),
                         output: String::new(),
-                        error: Some(error.clone()),
+                        error: Some(crate::CellFailure::new(
+                            crate::CellFailureKind::Host,
+                            error.clone(),
+                        )),
                         success: false,
                         duration_ms: self
                             .host

@@ -747,8 +747,8 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_in_both_dialects
     for dialect in ["lashlang", "typescript"] {
         for restore_pending_exec in [false, true] {
             for response_error in [
-                Some("[STOP] lashlang execution was cancelled by the host"),
-                Some("[ERROR] compilation lost a race with cancellation"),
+                Some("lashlang execution was cancelled by the host"),
+                Some("compilation lost a race with cancellation"),
                 None,
             ] {
                 let case = format!(
@@ -834,9 +834,9 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_in_both_dialects
                         matches!(
                             block,
                             LlmContentBlock::Text { text, .. }
-                                if text.contains("[ERROR]")
-                                    || text.contains("[POLICY]")
-                                    || text.contains("[STOP]")
+                                if text.contains("the defect is in the program")
+                                    || text.contains("the runtime refused")
+                                    || text.contains("the host failed")
                                     || text.contains("Next:")
                         )
                     })
@@ -870,7 +870,7 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_in_both_dialects
 }
 
 #[test]
-fn stop_without_host_evidence_never_fabricates_a_cancelled_terminal() {
+fn host_failure_without_cancellation_evidence_retries_without_fabricating_cancelled_terminal() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("run until stopped")],
@@ -894,47 +894,45 @@ fn stop_without_host_evidence_never_fabricates_a_cancelled_terminal() {
             _ => None,
         })
         .expect("cell execution");
+    let mut response = exec_response(&[], None, None);
+    response.error = Some(lash_sansio::CellFailure::new(
+        lash_sansio::CellFailureKind::Host,
+        "execution token failed without host cancellation evidence",
+    ));
     machine.handle_response(Response::ExecResult {
         id: exec_id,
-        result: Ok(exec_response(
-            &[],
-            Some("[STOP] execution token was cancelled without host evidence"),
-            None,
-        )),
+        result: Ok(response),
     });
 
-    let effects = drain_effects(&mut machine);
+    let mut effects = drain_effects(&mut machine);
+    let (checkpoint_id, _) = find_checkpoint(&effects).expect("retry checkpoint");
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: lash_sansio::CheckpointDelivery::default(),
+    });
+    effects.extend(drain_effects(&mut machine));
     assert!(
-        !effects
+        effects
             .iter()
             .any(|effect| matches!(effect, Effect::LlmCall { .. })),
-        "a raw cancellation token never becomes model repair feedback"
+        "a host failure without cancellation evidence is retryable"
     );
-    assert_eq!(
-        find_turn_outcome(&effects),
-        Some(lash_sansio::TurnOutcome::Stopped(
-            lash_sansio::TurnStop::RuntimeError,
-        )),
-        "without observed host evidence, Stop must not fabricate Cancelled"
+    assert!(
+        find_turn_outcome(&effects).is_none(),
+        "a typed host failure must not fabricate a terminal cancellation"
     );
-    let diagnostic = machine.events().iter().find_map(|record| {
-        let lash_core::SessionHistoryRecord::Protocol(event) = record else {
-            return None;
-        };
-        match lash_protocol_rlm::decode_rlm_protocol_event(event) {
-            Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                if diagnostic.phase == "stop_without_cancellation_evidence" =>
-            {
-                Some(diagnostic)
-            }
-            _ => None,
-        }
-    });
-    assert_eq!(
-        diagnostic
-            .expect("durable missing-evidence diagnostic")
-            .payload["code"],
-        "rlm_stop_without_cancellation_evidence"
+    assert!(
+        machine.events().iter().all(|record| {
+            let lash_core::SessionHistoryRecord::Protocol(event) = record else {
+                return true;
+            };
+            !matches!(
+                lash_protocol_rlm::decode_rlm_protocol_event(event),
+                Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic))
+                    if diagnostic.phase == "stop_without_cancellation_evidence"
+            )
+        }),
+        "the retired stop-prefix diagnostic is unreachable through typed failures"
     );
 }
 

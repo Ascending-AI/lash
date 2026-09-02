@@ -435,7 +435,9 @@ pub mod plugins {
         SessionGraphService, SessionStateService, SessionToolAccess, SubagentSessionContext,
     };
     /// Code-executor request, response, and runtime capability context.
-    pub use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext};
+    pub use lash_core::{
+        CellFailure, CellFailureKind, ExecRequest, ExecResponse, RuntimeExecutionContext,
+    };
     pub use lash_core::{
         PluginError, PluginMessage, PluginRuntimeEvent, ToolCatalog, facade_support::PluginFactory,
         facade_support::PluginHost, facade_support::PluginRegistrar, facade_support::PluginSession,

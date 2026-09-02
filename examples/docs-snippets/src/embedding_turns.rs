@@ -72,7 +72,7 @@ async fn update_or_insert_code_row(
     _row: Option<UiRowId>,
     _language: String,
     _output: String,
-    _error: Option<String>,
+    _error: Option<lash::plugins::CellFailure>,
     _success: bool,
 ) {
 }

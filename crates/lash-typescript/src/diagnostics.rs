@@ -883,7 +883,7 @@ mod tests {
         );
     }
 
-    /// `[POLICY]` feedback tells the model to rewrite the cell "in the form
+    /// Policy feedback tells the model to rewrite the cell "in the form
     /// named above". A refusal with no named form makes that instruction a lie,
     /// and a lie in the repair loop costs a whole turn.
     #[test]

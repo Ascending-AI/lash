@@ -269,17 +269,27 @@ fn lashlang_cannot_bind_a_function_value_to_a_name() {
 #[test]
 fn lashlang_reports_an_out_of_language_construct_in_the_ordinary_error_tier() {
     let mut lashlang = Session::open(Dialect::Lashlang, HarnessMode::Resident);
-    let lashlang_failure = lashlang.run_failing("class NotADialectConstruct {}");
-    assert!(
-        lashlang_failure.starts_with("[ERROR]"),
-        "Lashlang has no refusal tier: {lashlang_failure}"
+    let lashlang_failure = lashlang
+        .run("class NotADialectConstruct {}")
+        .error
+        .expect("Lashlang construct should fail");
+    assert_eq!(
+        lashlang_failure.kind,
+        lash_core::CellFailureKind::Program,
+        "Lashlang has no refusal tier: {}",
+        lashlang_failure.message,
     );
 
     let mut typescript = Session::open(Dialect::Typescript, HarnessMode::Resident);
-    let typescript_failure = typescript.run_failing(&Cell::Refusal.render(Dialect::Typescript));
-    assert!(
-        typescript_failure.starts_with("[POLICY]"),
-        "TypeScript separates a refusal from a wrong program: {typescript_failure}"
+    let typescript_failure = typescript
+        .run(&Cell::Refusal.render(Dialect::Typescript))
+        .error
+        .expect("TypeScript construct should fail");
+    assert_eq!(
+        typescript_failure.kind,
+        lash_core::CellFailureKind::Policy,
+        "TypeScript separates a refusal from a wrong program: {}",
+        typescript_failure.message,
     );
 }
 
