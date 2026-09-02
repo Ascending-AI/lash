@@ -450,9 +450,11 @@ mod tests {
         let observed =
             serde_json::to_value(RuntimeJson(&value)).expect("serialize observed runtime value");
         let direct = serde_json::to_value(DirectJson(&value)).expect("serialize direct value");
+        let transport =
+            serde_json::to_value(TransportJson(&value)).expect("serialize transport value");
 
         assert_eq!(
-            runtime,
+            transport,
             serde_json::json!({
                 (doubled.clone()): "reserved",
                 (format!("{PROJECTED_JSON_TAG}{doubled}")): "prefixed",
@@ -465,6 +467,7 @@ mod tests {
                 (doubled.clone()): "prefixed",
             })
         );
+        assert_eq!(runtime, observed);
         assert_eq!(
             direct,
             serde_json::json!({

@@ -21,7 +21,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::record::{Symbol, intern_symbol, symbol_name};
 use super::{
-    HeapId, Name, Record, RuntimeError, RuntimeJson, TransportJson, append_tuple_literal_direct,
+    HeapId, Name, Record, RuntimeError, RuntimeJson, append_tuple_literal_direct,
     execute_contains_direct, from_json, is_truthy as value_truthy, materialize_projected_async,
     read_field_ref_direct, read_index_ref_direct, stringify_value_async, value_contains_projected,
     value_len, value_type_name, write_number,
@@ -239,7 +239,7 @@ impl Serialize for Value {
     where
         S: Serializer,
     {
-        TransportJson(self).serialize(serializer)
+        RuntimeJson(self).serialize(serializer)
     }
 }
 

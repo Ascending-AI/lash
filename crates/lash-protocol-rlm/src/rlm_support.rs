@@ -1065,6 +1065,43 @@ mod bound_variable_tests {
         }
     }
 
+    #[tokio::test]
+    async fn model_visible_reserved_prefix_key_matches_preview_and_schema() {
+        let reserved_key = "__projected__payload";
+        let value = FlowValue::Record(Arc::new(lashlang::Record::from_iter([
+            (
+                reserved_key.to_string(),
+                FlowValue::String("z".repeat(2_000).into()),
+            ),
+            ("body".to_string(), FlowValue::String("plain".into())),
+        ])));
+
+        let encoded = crate::projection::flow_to_json_value(&value).await;
+        let decoded = crate::projection::normalize_tool_args_for_projection(
+            encoded,
+            &lash_core::ToolArgumentProjectionPolicy::MaterializeProjectedValues,
+        )
+        .expect("transport codec should decode its escaped record key");
+        assert_eq!(
+            crate::projection::json_to_flow_value(decoded),
+            value,
+            "transport codec must preserve the reserved-prefix record key"
+        );
+
+        let mut cache = BoundVariableRenderCache::default();
+        let rendered = render_bound_variables(
+            &mut cache,
+            &[("payload".to_string(), value)],
+            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        );
+        assert!(
+            rendered.contains("keys=2 (__projected__payload, body)")
+                && rendered.contains(r#"≈ {"__projected__payload":"#)
+                && rendered.contains("  __projected__payload: str,"),
+            "reserved-prefix key must be verbatim in the row key set, inline preview, and Schema:\n{rendered}"
+        );
+    }
+
     #[test]
     fn rows_remain_sorted_by_name_when_values_change() {
         let mut cache = BoundVariableRenderCache::default();
