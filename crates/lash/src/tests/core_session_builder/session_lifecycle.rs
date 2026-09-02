@@ -1393,7 +1393,11 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
         panic!("expected typed protocol rejection at the host boundary, got {error}");
     };
 
-    assert!(message.contains("RLM snapshot version 5 is incompatible with version 16"));
+    let expected = format!(
+        "RLM snapshot version 5 is incompatible with version {}",
+        lash_protocol_rlm::RLM_SNAPSHOT_VERSION
+    );
+    assert!(message.contains(&expected));
     assert!(message.contains("drain in-flight sessions on the old build"));
     assert!(message.contains("recreate development/test stores"));
     Ok(())
