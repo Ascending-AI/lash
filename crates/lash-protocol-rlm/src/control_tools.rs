@@ -639,7 +639,12 @@ mod tests {
         let args = json!({
             "task": "finish from here",
             "seed": {
-                "proj": { "__projected__": "carry-over" },
+                "proj": {
+                    "__projected__": {
+                        "kind": "materialized",
+                        "value": "carry-over"
+                    }
+                },
                 "glob": 7
             }
         });
@@ -673,7 +678,10 @@ mod tests {
         assert!(!seed.globals.contains_key("proj"));
         assert_eq!(seed.projected.entries.len(), 1);
         assert_eq!(seed.projected.entries[0].0, "proj");
-        assert_eq!(seed.projected.entries[0].1, json!("carry-over"));
+        assert_eq!(
+            seed.projected.entries[0].1,
+            lash_rlm_types::RlmProjectedSeedEntry::Materialized(json!("carry-over"))
+        );
         assert!(manager.created.lock_recover().is_empty());
     }
 

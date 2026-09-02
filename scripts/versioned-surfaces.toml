@@ -614,7 +614,12 @@ paths = [
   "crates/lash-protocol-rlm/src/protocol/state.rs",
   "crates/lash-protocol-rlm/src/projection/bindings.rs",
 ]
-must_cover = ["RlmSnapshotRoot", "RlmDriverState", "ProjectionRef"]
+must_cover = ["RlmSnapshotRoot", "RlmDriverState"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-rlm-types/src/lib.rs"]
+symbols = ["ProjectionRef"]
 
 [[surface]]
 constant = "BYTECODE_FORMAT_VERSION"

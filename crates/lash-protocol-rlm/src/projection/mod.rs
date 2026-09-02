@@ -4,7 +4,7 @@ mod transport;
 
 pub use bindings::{
     ProjectionRef, ProjectionRegistry, ProjectionResolveError, ProjectionResolver,
-    RlmProjectedBindings, RlmProjectedSeedError, RlmToolResultProjector, RlmTurnInputExt,
+    RlmProjectedBindings, RlmToolResultProjector, RlmTurnInputExt,
     rlm_session_projection_extension,
 };
 pub use context::{

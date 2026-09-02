@@ -539,6 +539,13 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
 
 #[test]
 fn previous_snapshot_version_is_typed_rejection_with_or_without_file_leaves() {
+    const PROJECTED_SEED_PREDECESSOR_SNAPSHOT_VERSION: u32 = 15;
+    assert_eq!(
+        RLM_SNAPSHOT_VERSION,
+        PROJECTED_SEED_PREDECESSOR_SNAPSHOT_VERSION + 1,
+        "the FIG-1974 snapshot bump must stay adjacent to its predecessor"
+    );
+
     #[derive(Serialize)]
     struct PreviousEnvelope {
         version: u32,
@@ -570,7 +577,7 @@ fn previous_snapshot_version_is_typed_rejection_with_or_without_file_leaves() {
         }
         let hydration = lash_core::plugin::HydratedExecutionState {
             root: rmp_serde::to_vec_named(&PreviousEnvelope {
-                version: RLM_SNAPSHOT_VERSION - 1,
+                version: PROJECTED_SEED_PREDECESSOR_SNAPSHOT_VERSION,
                 engine: "lashlang",
                 globals: [(
                     "kept".to_string(),
@@ -597,7 +604,7 @@ fn previous_snapshot_version_is_typed_rejection_with_or_without_file_leaves() {
             RlmSnapshotError::VersionMismatch {
                 expected: RLM_SNAPSHOT_VERSION,
                 found
-            } if *found == RLM_SNAPSHOT_VERSION - 1
+            } if *found == PROJECTED_SEED_PREDECESSOR_SNAPSHOT_VERSION
         ));
         let message = error.to_string();
         assert!(message.contains("drain in-flight sessions on the old build"));
@@ -657,7 +664,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     ));
 }
 
-/// Fixed-byte authority for the version-15 root encoding (ADR 0056).
+/// Fixed-byte authority for the version-16 root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder
 /// cannot see the drift that matters: a dependency bump or serializer change
@@ -668,9 +675,9 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// persisted shape changed: decide on a version bump, then update the
 /// golden, never the reverse.
 #[test]
-fn version_15_root_encodes_to_golden_bytes() {
+fn version_16_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "84a776657273696f6e0fa6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c617282",
+        "84a776657273696f6e10a6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c617282",
         "a46b696e64a6696e6c696e65a4626f6479c43e82a776657273696f6e07a7676c6f62616c739182a46e616d65a576616c7565",
         "a576616c756582a46b696e64a6737472696e67a576616c7565a5736d616c6cb06c65616665645f636f6d706f7369746582a4",
         "6b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f653233376136",
@@ -748,7 +755,7 @@ fn version_15_root_encodes_to_golden_bytes() {
         .collect::<String>();
     assert_eq!(
         hex, GOLDEN,
-        "the version-15 root encoding changed; decide on a version bump before updating the golden"
+        "the version-16 root encoding changed; decide on a version bump before updating the golden"
     );
 
     let decoded: RlmSnapshotRoot =

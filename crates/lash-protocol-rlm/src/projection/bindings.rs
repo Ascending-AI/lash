@@ -7,35 +7,13 @@ use lash_core::{
     PromptContribution, ProtocolSessionExtension, ProtocolTurnExtension,
     ProtocolTurnExtensionHandle, TurnInput,
 };
+pub use lash_rlm_types::ProjectionRef;
 
 pub(crate) const RLM_TURN_INPUT_PLUGIN_ID: &str = "rlm";
 use lashlang::{
     ProjectedBindingError, ProjectedBindings, ProjectedHostDescriptor, ProjectedValue,
     Value as FlowValue,
 };
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ProjectionRef {
-    pub kind: String,
-    pub key: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub descriptor_type: Option<String>,
-}
-
-impl ProjectionRef {
-    pub fn new(kind: impl Into<String>, key: serde_json::Value) -> Self {
-        Self {
-            kind: kind.into(),
-            key,
-            descriptor_type: None,
-        }
-    }
-
-    pub fn with_descriptor_type(mut self, descriptor_type: impl Into<String>) -> Self {
-        self.descriptor_type = Some(descriptor_type.into());
-        self
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectionResolveError {
@@ -129,43 +107,6 @@ pub struct RlmProjectedBindings {
 
 pub type RlmToolResultProjector =
     Arc<dyn Fn(&str, &serde_json::Value) -> Option<FlowValue> + Send + Sync + 'static>;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RlmProjectedSeedError {
-    Binding(ProjectedBindingError),
-    InvalidProjectionRef { name: String, source: String },
-}
-
-impl RlmProjectedSeedError {
-    pub fn invalid_projection_ref(name: impl Into<String>, source: impl std::fmt::Display) -> Self {
-        Self::InvalidProjectionRef {
-            name: name.into(),
-            source: source.to_string(),
-        }
-    }
-}
-
-impl From<ProjectedBindingError> for RlmProjectedSeedError {
-    fn from(value: ProjectedBindingError) -> Self {
-        Self::Binding(value)
-    }
-}
-
-impl std::fmt::Display for RlmProjectedSeedError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Binding(err) => err.fmt(f),
-            Self::InvalidProjectionRef { name, source } => {
-                write!(
-                    f,
-                    "invalid projection ref for projected seed `{name}`: {source}"
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for RlmProjectedSeedError {}
 
 impl RlmProjectedBindings {
     pub fn new() -> Self {
@@ -272,15 +213,16 @@ impl RlmProjectedBindings {
     /// seed map.
     pub fn from_snapshot(
         snapshot: &lash_rlm_types::RlmProjectedSeedSnapshot,
-    ) -> Result<Self, RlmProjectedSeedError> {
+    ) -> Result<Self, ProjectedBindingError> {
         let mut out = Self::new();
-        for (name, value) in &snapshot.entries {
-            out = if let Some(reference) =
-                super::transport::projection_ref_from_seed_value(name, value)?
-            {
-                out.bind_lazy(name.clone(), reference)?
-            } else {
-                out.bind_json(name.clone(), value.clone())?
+        for (name, entry) in &snapshot.entries {
+            out = match entry {
+                lash_rlm_types::RlmProjectedSeedEntry::Materialized(value) => {
+                    out.bind_json(name.clone(), value.clone())?
+                }
+                lash_rlm_types::RlmProjectedSeedEntry::Ref(reference) => {
+                    out.bind_lazy(name.clone(), reference.clone())?
+                }
             };
         }
         Ok(out)
@@ -539,12 +481,7 @@ mod tests {
     fn projected_seed_snapshot_preserves_projection_refs() {
         let reference = ProjectionRef::new("memory", serde_json::json!("stable"));
         let mut snapshot = lash_rlm_types::RlmProjectedSeedSnapshot::new();
-        snapshot.push(
-            "doc",
-            serde_json::json!({
-                lash_rlm_types::PROJECTION_REF_JSON_TAG: reference,
-            }),
-        );
+        snapshot.push("doc", lash_rlm_types::RlmProjectedSeedEntry::Ref(reference));
 
         let bindings = RlmProjectedBindings::from_snapshot(&snapshot).expect("snapshot");
         assert_eq!(
@@ -554,22 +491,31 @@ mod tests {
     }
 
     #[test]
-    fn projected_seed_snapshot_reports_invalid_projection_refs() {
+    fn projected_seed_snapshot_preserves_materialized_projection_ref_shaped_data() {
         let mut snapshot = lash_rlm_types::RlmProjectedSeedSnapshot::new();
         snapshot.push(
-            "doc",
-            serde_json::json!({
-                lash_rlm_types::PROJECTION_REF_JSON_TAG: "not a projection ref",
-            }),
+            "data",
+            lash_rlm_types::RlmProjectedSeedEntry::Materialized(serde_json::json!({
+                "__projection_ref__": {
+                    "kind": "memory",
+                    "key": "spoof",
+                },
+            })),
         );
+        let snapshot = serde_json::from_value(
+            serde_json::to_value(snapshot).expect("serialize projected seed snapshot"),
+        )
+        .expect("deserialize projected seed snapshot");
 
-        let err = match RlmProjectedBindings::from_snapshot(&snapshot) {
-            Ok(_) => panic!("invalid projection ref should fail"),
-            Err(err) => err,
-        };
+        let bindings = RlmProjectedBindings::from_snapshot(&snapshot).expect("snapshot");
 
-        assert!(err.to_string().contains("invalid projection ref"));
-        assert!(err.to_string().contains("doc"));
+        assert!(
+            matches!(
+                bindings.bindings.get("data"),
+                Some(RlmProjectedBinding::Value(_))
+            ),
+            "materialized projection-ref-shaped data must not become a lazy reference"
+        );
     }
 
     /// `rlm_project` attaches the bindings on both seams, and exactly one of
