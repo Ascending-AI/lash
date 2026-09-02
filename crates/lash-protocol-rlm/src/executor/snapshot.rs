@@ -7,6 +7,9 @@ use thiserror::Error;
 /// wiring a store; the history below is why each boundary is a version rather
 /// than a decode failure.
 ///
+// v16 cuts the projection reference carrier over to the shared typed seed
+// entry family used by durable RLM seed events. Older snapshots fail closed
+// with the standard drain-or-recreate remedy.
 // v14 removes the obsolete guest scratch-file section. Older snapshots fail
 // closed with the standard drain-or-recreate remedy.
 // v13 carries Lashlang snapshot v7 and VM continuation v8: a heap error's brand
@@ -22,7 +25,7 @@ use thiserror::Error;
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
-pub const RLM_SNAPSHOT_VERSION: u32 = 15;
+pub const RLM_SNAPSHOT_VERSION: u32 = 16;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

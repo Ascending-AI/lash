@@ -5455,10 +5455,11 @@ mod tests {
                 .expect("expected projected wrapper object");
             assert_eq!(obj.len(), 1, "wrapper should have exactly one key");
             assert_eq!(
-                obj.get(PROJECTED_JSON_TAG)
-                    .and_then(|v| v.as_str())
-                    .expect("inner string"),
-                "hello"
+                obj.get(PROJECTED_JSON_TAG),
+                Some(&serde_json::json!({
+                    "kind": "materialized",
+                    "value": "hello"
+                }))
             );
         });
     }
@@ -5480,7 +5481,8 @@ mod tests {
                 value,
                 serde_json::json!({
                     PROJECTED_JSON_TAG: {
-                        lash_rlm_types::PROJECTION_REF_JSON_TAG: {
+                        "kind": "ref",
+                        "value": {
                             "kind": "memory",
                             "key": "doc",
                         }
@@ -5576,7 +5578,8 @@ mod tests {
                 &record,
                 &lash_core::ToolArgumentProjectionPolicy::MaterializeProjectedValues,
             )
-            .await;
+            .await
+            .expect("projection transport should be canonical");
 
             assert_eq!(value, serde_json::json!({ "query": "p" }));
         });
@@ -5619,7 +5622,8 @@ mod tests {
                 &record,
                 &lash_core::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
             )
-            .await;
+            .await
+            .expect("projection transport should be canonical");
 
             assert_eq!(
                 value,
@@ -5628,7 +5632,8 @@ mod tests {
                     "seed": {
                         "problem": {
                             "__projected__": {
-                                "__projection_ref__": {
+                                "kind": "ref",
+                                "value": {
                                     "kind": "memory",
                                     "key": "doc"
                                 }

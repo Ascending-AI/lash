@@ -673,14 +673,58 @@ where
     }
 }
 
+/// Durable identity for a host projection that can be resolved in another
+/// process-local RLM runtime.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ProjectionRef {
+    pub kind: String,
+    pub key: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descriptor_type: Option<String>,
+}
+
+impl Eq for ProjectionRef {}
+
+impl ProjectionRef {
+    pub fn new(kind: impl Into<String>, key: serde_json::Value) -> Self {
+        Self {
+            kind: kind.into(),
+            key,
+            descriptor_type: None,
+        }
+    }
+
+    pub fn with_descriptor_type(mut self, descriptor_type: impl Into<String>) -> Self {
+        self.descriptor_type = Some(descriptor_type.into());
+        self
+    }
+}
+
+/// One durable projected seed binding.
+///
+/// The explicit tag makes projection references disjoint from ordinary JSON:
+/// materialized data can spell any object keys without acquiring reference
+/// semantics during restore.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum RlmProjectedSeedEntry {
+    Materialized(serde_json::Value),
+    Ref(ProjectionRef),
+}
+
 /// Wire-format snapshot of a set of projected bindings. Pairs of
-/// `(name, json_value)` that get re-projected as host bindings on the child
-/// session at creation time. This is the serializable form of
+/// `(name, entry)` get re-projected as host bindings on the child session at
+/// creation time. This is the serializable form of
 /// `lash_protocol_rlm::RlmProjectedBindings`; lash-rlm-types stays free of any
 /// runtime dependency on lashlang itself.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RlmProjectedSeedSnapshot {
-    pub entries: Vec<(String, serde_json::Value)>,
+    pub entries: Vec<(String, RlmProjectedSeedEntry)>,
 }
 
 impl RlmProjectedSeedSnapshot {
@@ -688,8 +732,8 @@ impl RlmProjectedSeedSnapshot {
         Self::default()
     }
 
-    pub fn push(&mut self, name: impl Into<String>, value: serde_json::Value) {
-        self.entries.push((name.into(), value));
+    pub fn push(&mut self, name: impl Into<String>, entry: RlmProjectedSeedEntry) {
+        self.entries.push((name.into(), entry));
     }
 
     pub fn is_empty(&self) -> bool {
@@ -714,26 +758,45 @@ impl RlmSeedPluginBody {
 /// Reserved JSON key used as the canonical wire encoding for
 /// `lashlang::Value::Projected` across the lashlang→host bridge. When the
 /// model passes a projected source as a tool argument, lashlang serializes it
-/// as `{"__projected__": <inner>}`.
+/// as `{"__projected__": <tagged seed entry>}`.
 pub const PROJECTED_JSON_TAG: &str = "__projected__";
-pub const PROJECTION_REF_JSON_TAG: &str = "__projection_ref__";
 
-/// Returns the inner JSON value if `value` is the canonical projection wrapper
-/// (a single-key object whose key is [`PROJECTED_JSON_TAG`]), else `None`.
-pub fn projection_inner(value: &serde_json::Value) -> Option<&serde_json::Value> {
-    let obj = value.as_object()?;
-    if obj.len() != 1 {
-        return None;
-    }
-    obj.get(PROJECTED_JSON_TAG)
-}
+#[cfg(test)]
+mod projected_seed_tests {
+    use super::*;
 
-pub fn projection_ref_inner(value: &serde_json::Value) -> Option<&serde_json::Value> {
-    let obj = value.as_object()?;
-    if obj.len() != 1 {
-        return None;
+    #[test]
+    fn projected_seed_entry_serde_is_tagged_and_rejects_the_legacy_shape() {
+        let entry = RlmProjectedSeedEntry::Materialized(serde_json::json!({
+            "__projection_ref__": {
+                "kind": "memory",
+                "key": "data",
+            }
+        }));
+
+        assert_eq!(
+            serde_json::to_value(&entry).expect("serialize seed entry"),
+            serde_json::json!({
+                "kind": "materialized",
+                "value": {
+                    "__projection_ref__": {
+                        "kind": "memory",
+                        "key": "data",
+                    }
+                }
+            })
+        );
+        assert!(
+            serde_json::from_value::<RlmProjectedSeedEntry>(serde_json::json!({
+                "__projection_ref__": {
+                    "kind": "memory",
+                    "key": "data",
+                }
+            }))
+            .is_err(),
+            "the untagged legacy seed entry must not decode"
+        );
     }
-    obj.get(PROJECTION_REF_JSON_TAG)
 }
 
 #[derive(Clone, Debug)]

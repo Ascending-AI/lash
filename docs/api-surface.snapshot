@@ -2076,6 +2076,8 @@ lash::persistence::PersistedSessionConfig::model
 lash::persistence::PersistedSessionConfig::new
 lash::persistence::PersistedSessionConfig::prompt
 lash::persistence::PersistedSessionConfig::provider_id
+lash::persistence::PersistedSessionConfig::subagent
+lash::persistence::PersistedSessionConfig::tool_access
 lash::persistence::PersistedSessionConfig::turn_budget
 lash::persistence::PersistedSessionRead
 lash::persistence::PersistedSessionRead::checkpoint
@@ -2336,6 +2338,7 @@ lash::persistence::RuntimeSessionState::append_active_conversation_messages
 lash::persistence::RuntimeSessionState::append_active_read_delta
 lash::persistence::RuntimeSessionState::apply_persisted_commit_result
 lash::persistence::RuntimeSessionState::apply_snapshot
+lash::persistence::RuntimeSessionState::authority
 lash::persistence::RuntimeSessionState::checkpoint_components
 lash::persistence::RuntimeSessionState::checkpoint_ref
 lash::persistence::RuntimeSessionState::current_agent_frame

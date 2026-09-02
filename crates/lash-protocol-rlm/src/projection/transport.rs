@@ -1,14 +1,20 @@
 use std::sync::Arc;
 
 use lash_core::{SessionAppendNode, ToolArgumentProjectionPolicy};
-use lash_rlm_types::{PROJECTED_JSON_TAG, PROJECTION_REF_JSON_TAG};
+use lash_rlm_types::{PROJECTED_JSON_TAG, RlmProjectedSeedEntry};
 use lashlang::{
     BudgetedJsonProjector, ImageValue, ProjectedFuture, ProjectedValue, Record as FlowRecord,
     State as FlowState, Value as FlowValue, ValueProjectionContext, ValueProjector,
 };
 use serde_json::Value;
 
-use super::bindings::{ProjectionRef, ProjectionResolver, RlmProjectedSeedError};
+use super::bindings::{ProjectionRef, ProjectionResolver};
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ProjectionTransportError {
+    #[error("non-canonical `{PROJECTED_JSON_TAG}` wrapper: {reason}")]
+    NonCanonicalWrapper { reason: String },
+}
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct RlmSeed {
@@ -32,10 +38,18 @@ impl RlmSeed {
         };
         let mut out = Self::default();
         for (name, value) in raw.iter() {
-            if let Some(inner) = lash_rlm_types::projection_inner(value) {
-                out.projected.push(name.clone(), inner.clone());
+            let name = decode_seed_name(name, &out)?;
+            if let Some(entry) = projected_entry(value).map_err(|error| error.to_string())? {
+                let entry = match entry {
+                    RlmProjectedSeedEntry::Materialized(value) => {
+                        RlmProjectedSeedEntry::Materialized(decode_escaped_json(value)?)
+                    }
+                    RlmProjectedSeedEntry::Ref(reference) => RlmProjectedSeedEntry::Ref(reference),
+                };
+                out.projected.push(name, entry);
             } else {
-                out.globals.insert(name.clone(), value.clone());
+                out.globals
+                    .insert(name, decode_escaped_json(value.clone())?);
             }
         }
         Ok(out)
@@ -67,7 +81,7 @@ pub fn rlm_seed_initial_nodes(seed: RlmSeed) -> Vec<SessionAppendNode> {
 pub(crate) fn normalize_tool_args_for_projection(
     args: Value,
     policy: &ToolArgumentProjectionPolicy,
-) -> Value {
+) -> Result<Value, ProjectionTransportError> {
     match policy {
         ToolArgumentProjectionPolicy::MaterializeProjectedValues => {
             materialize_projected_json(args)
@@ -82,60 +96,194 @@ pub(crate) fn normalize_tool_args_for_projection(
 pub(crate) async fn flow_record_to_tool_args(
     record: &FlowRecord,
     policy: &ToolArgumentProjectionPolicy,
-) -> Value {
+) -> Result<Value, ProjectionTransportError> {
     normalize_tool_args_for_projection(flow_record_to_json_value(record).await, policy)
 }
 
-fn normalize_seed_preserving_tool_args(args: Value, field: &str) -> Value {
+fn normalize_seed_preserving_tool_args(
+    args: Value,
+    field: &str,
+) -> Result<Value, ProjectionTransportError> {
     let Value::Object(args) = args else {
         return materialize_projected_json(args);
     };
-    Value::Object(
-        args.into_iter()
-            .map(|(key, value)| {
-                let value = if key == field {
-                    normalize_projected_seed(value)
-                } else {
-                    materialize_projected_json(value)
-                };
-                (key, value)
-            })
-            .collect(),
-    )
+    let mut normalized = serde_json::Map::with_capacity(args.len());
+    for (key, value) in args {
+        let key = unescape_projected_key(key);
+        if normalized.contains_key(&key) {
+            return Err(ProjectionTransportError::NonCanonicalWrapper {
+                reason: format!("escaped key `{key}` collides with another object key"),
+            });
+        }
+        let value = if key == field {
+            normalize_projected_seed(value)?
+        } else {
+            materialize_projected_json(value)?
+        };
+        normalized.insert(key, value);
+    }
+    Ok(Value::Object(normalized))
 }
 
-fn normalize_projected_seed(seed: Value) -> Value {
+fn normalize_projected_seed(seed: Value) -> Result<Value, ProjectionTransportError> {
     let Value::Object(seed) = seed else {
         return materialize_projected_json(seed);
     };
-    Value::Object(
-        seed.into_iter()
-            .map(|(key, value)| {
-                let value = if lash_rlm_types::projection_inner(&value).is_some() {
-                    value
-                } else {
-                    materialize_projected_json(value)
-                };
-                (key, value)
-            })
-            .collect(),
-    )
+    let mut normalized = serde_json::Map::with_capacity(seed.len());
+    for (key, value) in seed {
+        let value = if let Some(entry) = projected_entry(&value)? {
+            let entry = match entry {
+                RlmProjectedSeedEntry::Materialized(value) => RlmProjectedSeedEntry::Materialized(
+                    materialize_projected_json_preserving_escapes(value)?,
+                ),
+                RlmProjectedSeedEntry::Ref(reference) => RlmProjectedSeedEntry::Ref(reference),
+            };
+            projected_wrapper(entry)
+        } else {
+            materialize_projected_json_preserving_escapes(value)?
+        };
+        normalized.insert(key, value);
+    }
+    Ok(Value::Object(normalized))
 }
 
-fn materialize_projected_json(value: Value) -> Value {
-    if let Some(inner) = lash_rlm_types::projection_inner(&value) {
-        return materialize_projected_json(inner.clone());
+fn materialize_projected_json(value: Value) -> Result<Value, ProjectionTransportError> {
+    materialize_projected_json_with_keys(value, TransportKeyMode::DecodeEscapes)
+}
+
+fn materialize_projected_json_preserving_escapes(
+    value: Value,
+) -> Result<Value, ProjectionTransportError> {
+    materialize_projected_json_with_keys(value, TransportKeyMode::PreserveEscapes)
+}
+
+#[derive(Clone, Copy)]
+enum TransportKeyMode {
+    DecodeEscapes,
+    PreserveEscapes,
+}
+
+fn materialize_projected_json_with_keys(
+    value: Value,
+    key_mode: TransportKeyMode,
+) -> Result<Value, ProjectionTransportError> {
+    if let Some(entry) = projected_entry(&value)? {
+        return match entry {
+            RlmProjectedSeedEntry::Materialized(value) => {
+                materialize_projected_json_with_keys(value, key_mode)
+            }
+            RlmProjectedSeedEntry::Ref(reference) => {
+                serde_json::to_value(reference).map_err(|error| {
+                    ProjectionTransportError::NonCanonicalWrapper {
+                        reason: format!("projection reference did not serialize: {error}"),
+                    }
+                })
+            }
+        };
     }
     match value {
-        Value::Array(items) => {
-            Value::Array(items.into_iter().map(materialize_projected_json).collect())
+        Value::Array(items) => items
+            .into_iter()
+            .map(|value| materialize_projected_json_with_keys(value, key_mode))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        Value::Object(map) => {
+            let mut decoded = serde_json::Map::with_capacity(map.len());
+            for (key, value) in map {
+                let key = match key_mode {
+                    TransportKeyMode::DecodeEscapes => unescape_projected_key(key),
+                    TransportKeyMode::PreserveEscapes => key,
+                };
+                if decoded.contains_key(&key) {
+                    return Err(ProjectionTransportError::NonCanonicalWrapper {
+                        reason: format!("escaped key `{key}` collides with another object key"),
+                    });
+                }
+                decoded.insert(key, materialize_projected_json_with_keys(value, key_mode)?);
+            }
+            Ok(Value::Object(decoded))
         }
-        Value::Object(map) => Value::Object(
-            map.into_iter()
-                .map(|(key, value)| (key, materialize_projected_json(value)))
-                .collect(),
-        ),
-        value => value,
+        value => Ok(value),
+    }
+}
+
+fn decode_escaped_json(value: Value) -> Result<Value, String> {
+    match value {
+        Value::Array(items) => items
+            .into_iter()
+            .map(decode_escaped_json)
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        Value::Object(map) => {
+            let mut decoded = serde_json::Map::with_capacity(map.len());
+            for (key, value) in map {
+                let key = unescape_projected_key(key);
+                if decoded.contains_key(&key) {
+                    return Err(format!(
+                        "non-canonical `{PROJECTED_JSON_TAG}` escape: decoded key `{key}` collides with another object key"
+                    ));
+                }
+                decoded.insert(key, decode_escaped_json(value)?);
+            }
+            Ok(Value::Object(decoded))
+        }
+        value => Ok(value),
+    }
+}
+
+fn decode_seed_name(name: &str, seed: &RlmSeed) -> Result<String, String> {
+    let name = unescape_projected_key(name.to_string());
+    if seed.globals.contains_key(&name)
+        || seed
+            .projected
+            .entries
+            .iter()
+            .any(|(existing, _)| existing == &name)
+    {
+        return Err(format!(
+            "non-canonical `{PROJECTED_JSON_TAG}` escape: decoded seed name `{name}` collides with another seed name"
+        ));
+    }
+    Ok(name)
+}
+
+fn projected_entry(
+    value: &Value,
+) -> Result<Option<RlmProjectedSeedEntry>, ProjectionTransportError> {
+    let Some(object) = value.as_object() else {
+        return Ok(None);
+    };
+    let Some(payload) = object.get(PROJECTED_JSON_TAG) else {
+        return Ok(None);
+    };
+    if object.len() != 1 {
+        return Err(ProjectionTransportError::NonCanonicalWrapper {
+            reason: "reserved key must be the only object key".to_string(),
+        });
+    }
+    serde_json::from_value(payload.clone())
+        .map(Some)
+        .map_err(|error| ProjectionTransportError::NonCanonicalWrapper {
+            reason: error.to_string(),
+        })
+}
+
+fn projected_wrapper(entry: RlmProjectedSeedEntry) -> Value {
+    serde_json::json!({ PROJECTED_JSON_TAG: entry })
+}
+
+fn escape_projected_key(key: &str) -> String {
+    if key.starts_with(PROJECTED_JSON_TAG) {
+        format!("{PROJECTED_JSON_TAG}{key}")
+    } else {
+        key.to_string()
+    }
+}
+
+fn unescape_projected_key(key: String) -> String {
+    match key.strip_prefix(PROJECTED_JSON_TAG) {
+        Some(rest) if rest.starts_with(PROJECTED_JSON_TAG) => rest.to_string(),
+        _ => key,
     }
 }
 
@@ -159,17 +307,16 @@ pub(crate) fn flow_to_json_value<'a>(value: &'a FlowValue) -> ProjectedFuture<'a
             }
             FlowValue::Record(record) => flow_record_to_json_value(record).await,
             FlowValue::Projected(value) => {
-                if let Some(reference) = value.projection_ref() {
-                    let mut ref_obj = serde_json::Map::with_capacity(1);
-                    ref_obj.insert(PROJECTION_REF_JSON_TAG.to_string(), reference.clone());
-                    let mut obj = serde_json::Map::with_capacity(1);
-                    obj.insert(PROJECTED_JSON_TAG.to_string(), Value::Object(ref_obj));
-                    return Value::Object(obj);
-                }
-                let inner = flow_to_json_value(&value.materialize_async().await).await;
-                let mut obj = serde_json::Map::with_capacity(1);
-                obj.insert(PROJECTED_JSON_TAG.to_string(), inner);
-                Value::Object(obj)
+                let entry = if let Some(reference) = value.projection_ref() {
+                    let reference = serde_json::from_value::<ProjectionRef>(reference.clone())
+                        .expect("projected values must carry a valid projection reference");
+                    RlmProjectedSeedEntry::Ref(reference)
+                } else {
+                    RlmProjectedSeedEntry::Materialized(
+                        flow_to_json_value(&value.materialize_async().await).await,
+                    )
+                };
+                projected_wrapper(entry)
             }
             FlowValue::Ref(_) => {
                 unreachable!("VM heap references must be materialized before JSON rendering")
@@ -184,7 +331,7 @@ pub(crate) async fn flow_record_to_json_value(record: &FlowRecord) -> Value {
         if matches!(value, FlowValue::Undefined) {
             continue;
         }
-        object.insert(key.to_string(), flow_to_json_value(value).await);
+        object.insert(escape_projected_key(key), flow_to_json_value(value).await);
     }
     Value::Object(object)
 }
@@ -364,18 +511,6 @@ pub(crate) async fn format_output_value(value: &FlowValue) -> String {
         .await
 }
 
-pub(crate) fn projection_ref_from_seed_value(
-    name: &str,
-    value: &Value,
-) -> Result<Option<ProjectionRef>, RlmProjectedSeedError> {
-    let Some(inner) = lash_rlm_types::projection_ref_inner(value) else {
-        return Ok(None);
-    };
-    serde_json::from_value::<ProjectionRef>(inner.clone())
-        .map(Some)
-        .map_err(|err| RlmProjectedSeedError::invalid_projection_ref(name, err))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,6 +534,81 @@ mod tests {
             json_to_flow_value(serde_json::Value::Null),
             FlowValue::Null,
             "JSON has no representation that can manufacture undefined"
+        );
+    }
+
+    #[tokio::test]
+    async fn reserved_projection_key_round_trips_as_plain_record() {
+        let already_prefixed = format!("{PROJECTED_JSON_TAG}{PROJECTED_JSON_TAG}");
+        let plain = FlowValue::Record(Arc::new(FlowRecord::from_iter([
+            (
+                PROJECTED_JSON_TAG.to_string(),
+                FlowValue::String("plain data".into()),
+            ),
+            (
+                already_prefixed,
+                FlowValue::String("also plain data".into()),
+            ),
+        ])));
+
+        let encoded = flow_to_json_value(&plain).await;
+        let host_value = normalize_tool_args_for_projection(
+            encoded,
+            &ToolArgumentProjectionPolicy::MaterializeProjectedValues,
+        )
+        .expect("escaped plain record should decode");
+        let recovered = json_to_flow_value(host_value);
+
+        assert_eq!(
+            recovered, plain,
+            "plain reserved-key records must survive lashlang-to-host-to-lashlang"
+        );
+    }
+
+    #[tokio::test]
+    async fn reserved_projection_key_survives_in_plain_seed_data() {
+        let plain = FlowValue::Record(Arc::new(FlowRecord::from_iter([(
+            PROJECTED_JSON_TAG.to_string(),
+            FlowValue::String("plain seed data".into()),
+        )])));
+        let seed = FlowValue::Record(Arc::new(FlowRecord::from_iter([(
+            "data".to_string(),
+            plain,
+        )])));
+        let args = FlowRecord::from_iter([("seed".to_string(), seed)]);
+
+        let host_args = flow_record_to_tool_args(
+            &args,
+            &ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
+        )
+        .await
+        .expect("escaped seed data should decode");
+        let seed = RlmSeed::from_tool_args(&host_args).expect("seed should classify");
+
+        assert_eq!(
+            seed.globals.get("data"),
+            Some(&serde_json::json!({ PROJECTED_JSON_TAG: "plain seed data" }))
+        );
+        assert!(seed.projected.is_empty());
+    }
+
+    #[test]
+    fn non_canonical_projection_wrapper_errors_loudly() {
+        let error = normalize_tool_args_for_projection(
+            serde_json::json!({
+                PROJECTED_JSON_TAG: {
+                    "kind": "materialized",
+                    "value": "forged",
+                },
+                "other": true,
+            }),
+            &ToolArgumentProjectionPolicy::MaterializeProjectedValues,
+        )
+        .expect_err("reserved key alongside another key must be rejected");
+
+        assert_eq!(
+            error.to_string(),
+            "non-canonical `__projected__` wrapper: reserved key must be the only object key"
         );
     }
 }

@@ -9,7 +9,8 @@ pub(super) fn normalize_projected_tool_args(
     let normalized = crate::projection::normalize_tool_args_for_projection(
         original.clone(),
         &ctx.argument_projection,
-    );
+    )
+    .map_err(|error| PluginError::Session(error.to_string()))?;
     if normalized == original {
         Ok(Vec::new())
     } else {
@@ -22,7 +23,9 @@ mod tests {
     use crate::projection::RlmSeed;
 
     fn projected(value: serde_json::Value) -> serde_json::Value {
-        serde_json::json!({ "__projected__": value })
+        serde_json::json!({
+            "__projected__": lash_rlm_types::RlmProjectedSeedEntry::Materialized(value),
+        })
     }
 
     fn received_tool_args(
@@ -30,6 +33,7 @@ mod tests {
         args: serde_json::Value,
     ) -> serde_json::Value {
         crate::projection::normalize_tool_args_for_projection(args, &policy)
+            .expect("projection transport should be canonical")
     }
 
     fn materializing_args(args: serde_json::Value) -> serde_json::Value {
@@ -99,7 +103,12 @@ mod tests {
                 "task": "inspect the file",
                 "capability": "explore",
                 "seed": {
-                    "projected_root": { "__projected__": "carry-over" },
+                    "projected_root": {
+                        "__projected__": {
+                            "kind": "materialized",
+                            "value": "carry-over"
+                        }
+                    },
                     "computed_record": {
                         "field": "materialize me"
                     }
@@ -128,7 +137,9 @@ mod tests {
             seed.projected.entries.as_slice(),
             &[(
                 "problem".to_string(),
-                serde_json::json!({ "prompt": "large prompt" })
+                lash_rlm_types::RlmProjectedSeedEntry::Materialized(
+                    serde_json::json!({ "prompt": "large prompt" })
+                )
             )]
         );
         assert!(seed.globals.is_empty());
@@ -217,7 +228,9 @@ mod tests {
             seed.projected.entries.as_slice(),
             &[(
                 "problem".to_string(),
-                serde_json::json!("large parent context")
+                lash_rlm_types::RlmProjectedSeedEntry::Materialized(serde_json::json!(
+                    "large parent context"
+                ))
             )]
         );
         assert_eq!(
@@ -261,7 +274,12 @@ mod tests {
                 normalized,
                 &serde_json::json!({
                     "seed": {
-                        "projected": {"__projected__": "preserve me"},
+                        "projected": {
+                            "__projected__": {
+                                "kind": "materialized",
+                                "value": "preserve me"
+                            }
+                        },
                         "computed": {"value": 7}
                     }
                 }),

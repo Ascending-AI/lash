@@ -6,7 +6,8 @@
 //! as `{"type": "image", "id": ..., "mime": ..., "label": ..., "size": ...,
 //! "width": ..., "height": ...}` and round-trip via `image_to_json` /
 //! `image_from_json_map`. Projected values serialize with the canonical
-//! `{"__projected__": <inner>}` wrapper (defined in `lash-rlm-types`).
+//! `{"__projected__": <tagged seed entry>}` wrapper (defined in
+//! `lash-rlm-types`).
 
 use std::sync::Arc;
 
@@ -16,6 +17,16 @@ use super::{ImageValue, ProjectedFuture, ResourceHandle, Value, debug_assert_exp
 use serde::Serialize;
 use serde::ser::{SerializeMap, SerializeSeq};
 use std::fmt::Write as _;
+
+const PROJECTED_JSON_TAG: &str = "__projected__";
+
+fn transport_record_key(key: &str) -> String {
+    if key.starts_with(PROJECTED_JSON_TAG) {
+        format!("{PROJECTED_JSON_TAG}{key}")
+    } else {
+        key.to_string()
+    }
+}
 
 pub(crate) fn json_number(value: f64) -> Option<serde_json::Number> {
     if !value.is_finite() {
@@ -112,6 +123,7 @@ pub(crate) fn to_json_direct(value: &Value) -> serde_json::Value {
 
 pub(crate) struct RuntimeJson<'a>(pub(crate) &'a Value);
 pub(crate) struct DirectJson<'a>(pub(crate) &'a Value);
+pub(crate) struct TransportJson<'a>(pub(crate) &'a Value);
 
 impl Serialize for RuntimeJson<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -136,10 +148,25 @@ impl Serialize for DirectJson<'_> {
     }
 }
 
+impl Serialize for TransportJson<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self.0 {
+            Value::Projected(projected) => {
+                TransportJson(&projected.materialize()).serialize(serializer)
+            }
+            value => serialize_value(value, serializer, ProjectedMode::Transport),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum ProjectedMode {
     Runtime,
     Direct,
+    Transport,
 }
 
 fn serialize_value<S>(
@@ -166,6 +193,9 @@ where
                 match projected_mode {
                     ProjectedMode::Runtime => sequence.serialize_element(&RuntimeJson(value))?,
                     ProjectedMode::Direct => sequence.serialize_element(&DirectJson(value))?,
+                    ProjectedMode::Transport => {
+                        sequence.serialize_element(&TransportJson(value))?
+                    }
                 }
             }
             sequence.end()
@@ -181,6 +211,9 @@ where
                 match projected_mode {
                     ProjectedMode::Runtime => map.serialize_entry(key, &RuntimeJson(value))?,
                     ProjectedMode::Direct => map.serialize_entry(key, &DirectJson(value))?,
+                    ProjectedMode::Transport => {
+                        map.serialize_entry(&transport_record_key(key), &TransportJson(value))?
+                    }
                 }
             }
             map.end()
@@ -189,6 +222,9 @@ where
             ProjectedMode::Runtime => RuntimeJson(&projected.materialize()).serialize(serializer),
             ProjectedMode::Direct => {
                 unreachable!("projected values require runtime json conversion")
+            }
+            ProjectedMode::Transport => {
+                TransportJson(&projected.materialize()).serialize(serializer)
             }
         },
         Value::Ref(_) => Err(serde::ser::Error::custom(
@@ -392,5 +428,52 @@ pub(crate) fn optional_u32_field(value: &serde_json::Value) -> Option<Option<u32
             .and_then(|value| u32::try_from(value).ok())
             .map(Some),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transport_json_escapes_projection_reserved_key_prefixes() {
+        let doubled = format!("{PROJECTED_JSON_TAG}{PROJECTED_JSON_TAG}");
+        let value = Value::Record(Arc::new(crate::Record::from_iter([
+            (
+                PROJECTED_JSON_TAG.to_string(),
+                Value::String("reserved".into()),
+            ),
+            (doubled.clone(), Value::String("prefixed".into())),
+        ])));
+
+        let runtime = serde_json::to_value(&value).expect("serialize runtime value");
+        let observed =
+            serde_json::to_value(RuntimeJson(&value)).expect("serialize observed runtime value");
+        let direct = serde_json::to_value(DirectJson(&value)).expect("serialize direct value");
+        let transport =
+            serde_json::to_value(TransportJson(&value)).expect("serialize transport value");
+
+        assert_eq!(
+            transport,
+            serde_json::json!({
+                (doubled.clone()): "reserved",
+                (format!("{PROJECTED_JSON_TAG}{doubled}")): "prefixed",
+            })
+        );
+        assert_eq!(
+            observed,
+            serde_json::json!({
+                PROJECTED_JSON_TAG: "reserved",
+                (doubled.clone()): "prefixed",
+            })
+        );
+        assert_eq!(runtime, observed);
+        assert_eq!(
+            direct,
+            serde_json::json!({
+                PROJECTED_JSON_TAG: "reserved",
+                (doubled): "prefixed",
+            })
+        );
     }
 }

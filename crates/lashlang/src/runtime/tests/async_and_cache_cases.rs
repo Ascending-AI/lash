@@ -1148,7 +1148,7 @@ async fn lash_type_wrapper_survives_round_trip_through_json() {
 // Projection propagation: `Value::Projected` carries through path expressions
 // (Field / Index) but is stripped by computation. This is the lashlang side
 // of the unified `seed:` channel for spawn_agent / continue_as: the host wire
-// format (`{"__projected__": <inner>}`) only needs a wrapper to survive the
+// format (`{"__projected__": <tagged seed entry>}`) only needs a wrapper to survive the
 // JSON boundary, but path-rooted entry-values must already be projected at
 // runtime so they serialize that way.
 // ----------------------------------------------------------------------------
