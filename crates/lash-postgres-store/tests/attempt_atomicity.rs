@@ -1469,7 +1469,8 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     .await;
     let first_run =
         tokio::spawn(async move { run_fig1293_turn(&mut first, effect_host.as_ref()).await });
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    // CI run 33656939416 attempt 1 exhausted the former 10s boundary wait under load.
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
         while !fired.load(Ordering::SeqCst) {
             tokio::task::yield_now().await;
         }
@@ -1574,13 +1575,13 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
     let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
     FIG1293_BLOCKING_CHILD_RUNS.store(0, Ordering::SeqCst);
     let model = fig1293_fault_batch_model();
+    // CI run 33656939416 attempt 2 lost the former 300ms replay lease under load.
+    let replay_lease_ttl = std::time::Duration::from_secs(1);
     let first_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::with_options(
         &storage,
         PostgresEffectReplayOptions {
-            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(
-                std::time::Duration::from_millis(300),
-            )
-            .expect("valid short FIG-1293 batch-cancel lease"),
+            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(replay_lease_ttl)
+                .expect("valid short FIG-1293 batch-cancel lease"),
         },
     ));
     let policy = fig1293_policy();
@@ -1662,7 +1663,7 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
         "the host is interrupted after success and failure commit but before child 3 starts",
     );
     assert_eq!(FIG1293_BLOCKING_CHILD_RUNS.load(Ordering::SeqCst), 0);
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    tokio::time::sleep(replay_lease_ttl + std::time::Duration::from_millis(200)).await;
 
     let replay_storage = PostgresStorage::connect(&database_url)
         .await
@@ -1670,10 +1671,8 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
     let replay_host = PostgresEffectHost::with_options(
         &replay_storage,
         PostgresEffectReplayOptions {
-            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(
-                std::time::Duration::from_millis(300),
-            )
-            .expect("valid short FIG-1293 batch-cancel replay lease"),
+            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(replay_lease_ttl)
+                .expect("valid short FIG-1293 batch-cancel replay lease"),
         },
     );
     let replay_effect_host: Arc<dyn EffectHost> = Arc::new(replay_host);
