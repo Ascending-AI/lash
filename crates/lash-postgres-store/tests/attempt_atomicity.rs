@@ -1022,10 +1022,19 @@ fn fig1293_literal_outputs(
         .collect()
 }
 
-fn assert_fig1293_literal_outputs(
+async fn assert_fig1293_literal_outputs(
     turn: &lash_core::facade_support::AssembledTurn,
+    registry: &dyn lash_core::ProcessRegistry,
     signal_sequence: u64,
 ) {
+    let tracked_process = registry
+        .get_process(
+            "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
+        )
+        .await
+        .expect("read FIG-1293 tracked command process")
+        .expect("FIG-1293 tracked command process remains retained");
+    let minted_incarnation = tracked_process.incarnation.registration_sequence();
     let outputs = fig1293_literal_outputs(turn);
     assert_eq!(
         outputs,
@@ -1036,7 +1045,7 @@ fn assert_fig1293_literal_outputs(
                     "__handle__": "process",
                     "done": false,
                     "id": "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
-                    "incarnation": 3,
+                    "incarnation": minted_incarnation,
                     "process_id": "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
                     "running": true,
                     "status": "running",
@@ -1206,7 +1215,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     let inline_policy = fig1293_policy();
     let mut native = fig1293_runtime(
         Arc::clone(&native_effect_host),
-        inline_registry,
+        Arc::clone(&inline_registry),
         inline_model,
         Arc::new(lash_core::facade_support::InMemorySessionStore::new()),
         inline_policy.clone(),
@@ -1219,7 +1228,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     )
     .await
     .expect("native FIG-1293 substrate turn timed out");
-    assert_fig1293_literal_outputs(&inline_turn, 2);
+    assert_fig1293_literal_outputs(&inline_turn, inline_registry.as_ref(), 2).await;
     assert_eq!(inline_model_calls.load(Ordering::SeqCst), 3);
 
     let postgres_registry: Arc<dyn lash_core::ProcessRegistry> =
@@ -1250,7 +1259,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     let replay_effect_host: Arc<dyn EffectHost> = Arc::new(storage.effect_host());
     let mut replay = fig1293_runtime(
         Arc::clone(&replay_effect_host),
-        postgres_registry,
+        Arc::clone(&postgres_registry),
         postgres_model,
         postgres_store,
         postgres_policy,
@@ -1263,7 +1272,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     )
     .await
     .expect("PostgreSQL FIG-1293 redrive timed out");
-    assert_fig1293_literal_outputs(&postgres_turn, 2);
+    assert_fig1293_literal_outputs(&postgres_turn, postgres_registry.as_ref(), 2).await;
     assert_eq!(postgres_model_calls.load(Ordering::SeqCst), 3);
 
     let envelope_json: Vec<String> = sqlx::query_scalar(
@@ -1483,7 +1492,7 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     ));
     let mut replay = fig1293_runtime(
         Arc::clone(&replay_effect_host),
-        registry,
+        Arc::clone(&registry),
         model,
         store,
         policy,
@@ -1496,7 +1505,7 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     )
     .await
     .expect("FIG-1293 child-boundary redrive timed out");
-    assert_fig1293_literal_outputs(&redriven, 2);
+    assert_fig1293_literal_outputs(&redriven, registry.as_ref(), 2).await;
     assert_eq!(
         model_calls.load(Ordering::SeqCst),
         3,
