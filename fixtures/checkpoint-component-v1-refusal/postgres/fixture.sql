@@ -228,6 +228,7 @@ ALTER SEQUENCE lash_durable_read_fixture.lash_pending_turn_inputs_enqueue_seq_se
 CREATE TABLE lash_durable_read_fixture.lash_process_change_clock (
     singleton boolean DEFAULT true NOT NULL,
     current_seq bigint NOT NULL,
+    tombstone_compaction_horizon bigint DEFAULT 0 NOT NULL,
     CONSTRAINT lash_process_change_clock_singleton_check CHECK (singleton)
 );
 
@@ -344,6 +345,7 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     is_waiting boolean NOT NULL,
     created_at_ms bigint NOT NULL,
     updated_at_ms bigint NOT NULL,
+    last_event_sequence bigint NOT NULL,
     change_seq bigint NOT NULL,
     status text NOT NULL,
     record_json text NOT NULL,
@@ -845,7 +847,7 @@ INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (1, 'durab
 -- Data for Name: lash_process_change_clock; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_process_change_clock VALUES (true, 0);
+INSERT INTO lash_durable_read_fixture.lash_process_change_clock VALUES (true, 0, 0);
 
 
 --
@@ -936,7 +938,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 74);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 75);
 
 
 --

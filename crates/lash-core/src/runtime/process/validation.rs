@@ -309,6 +309,12 @@ pub fn apply_process_event_projection(
             event.process_id, record.id
         )));
     }
+    if event.process_incarnation != record.incarnation {
+        return Err(PluginError::Session(format!(
+            "process event incarnation {} cannot project record incarnation {} for `{}`",
+            event.process_incarnation, record.incarnation, record.id
+        )));
+    }
 
     match event.event_type.as_str() {
         "process.first_started" => {
@@ -414,6 +420,7 @@ pub fn apply_process_event_projection(
     } else {
         record.updated_at_ms = event.occurred_at;
     }
+    record.last_event_sequence = event.sequence;
     Ok(())
 }
 

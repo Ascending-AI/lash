@@ -67,9 +67,10 @@ impl ProcessRegistry for PostgresProcessRegistry {
             "INSERT INTO lash_processes (
                 process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
                 identity_kind, identity_label, is_waiting,
-                created_at_ms, updated_at_ms, change_seq, status, record_json
+                created_at_ms, updated_at_ms, last_event_sequence,
+                change_seq, status, record_json
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
         )
         .bind(&record.id)
         .bind(record.incarnation.registration_sequence() as i64)
@@ -81,6 +82,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .bind(record.wait.is_some())
         .bind(record.created_at_ms as i64)
         .bind(record.updated_at_ms as i64)
+        .bind(record.last_event_sequence as i64)
         .bind(change_seq as i64)
         .bind(process_status_label(&record))
         .bind(record_json)
@@ -1119,7 +1121,16 @@ impl ProcessRegistry for PostgresProcessRegistry {
         cursor: ProcessChangeCursor,
         limit: usize,
     ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let horizon = process_change_horizon_tx(&mut tx).await?;
+        if cursor.store_sequence() < horizon {
+            return Err(PluginError::ProcessChangeCursorPruned {
+                requested_cursor: cursor,
+                tombstone_compaction_horizon: ProcessChangeCursor::from_store_sequence(horizon),
+            });
+        }
         if limit == 0 {
+            tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok((Vec::new(), cursor));
         }
         let rows = sqlx::query(
@@ -1142,7 +1153,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         )
         .bind(cursor.store_sequence() as i64)
         .bind(limit as i64)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
         let mut records = Vec::new();
@@ -1166,6 +1177,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 change_seq,
             )?);
         }
+        tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok((records, next_cursor))
     }
 
@@ -1184,7 +1196,27 @@ impl ProcessRegistry for PostgresProcessRegistry {
             None => Vec::new(),
         };
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        Ok(sqlx::query(
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        sqlx::query(
+            "SELECT current_seq FROM lash_process_change_clock
+             WHERE singleton = TRUE FOR UPDATE",
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let compacted_through: Option<i64> = sqlx::query_scalar(
+            "SELECT MAX(pruned_change_seq) FROM lash_process_tombstones
+             WHERE pruned_at_ms < $1
+               AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)
+               AND NOT (process_id = ANY($3::TEXT[]))",
+        )
+        .bind(cutoff_epoch_ms)
+        .bind(max_change_seq)
+        .bind(&outstanding_trigger_delivery_process_ids)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let deleted = sqlx::query(
             "DELETE FROM lash_process_tombstones
                  WHERE pruned_at_ms < $1
                    AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)
@@ -1193,10 +1225,25 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .bind(cutoff_epoch_ms)
         .bind(max_change_seq)
         .bind(&outstanding_trigger_delivery_process_ids)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?
-        .rows_affected() as usize)
+        .rows_affected() as usize;
+        if let Some(compacted_through) = compacted_through {
+            sqlx::query(
+                "UPDATE lash_process_change_clock
+                 SET tombstone_compaction_horizon = GREATEST(
+                     tombstone_compaction_horizon, $1
+                 )
+                 WHERE singleton = TRUE",
+            )
+            .bind(compacted_through)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        }
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok(deleted)
     }
 
     async fn claim_pending_wake_deliveries(

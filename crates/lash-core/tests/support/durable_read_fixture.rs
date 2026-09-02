@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 46;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 47;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -79,6 +79,27 @@ pub struct ExpectedFixture {
     pub await_event_key: AwaitEventKey,
     pub revoked_await_event_key: AwaitEventKey,
     pub wake_delivery: ProcessWakeDelivery,
+}
+
+fn assert_fixture_schema_version(found: u32) {
+    assert_eq!(
+        found, DURABLE_READ_FIXTURE_SCHEMA_VERSION,
+        "durable fixture schema version changed without regeneration"
+    );
+}
+
+#[test]
+fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
+    const PREDECESSOR: u32 = 46;
+    assert_eq!(
+        PREDECESSOR + 1,
+        DURABLE_READ_FIXTURE_SCHEMA_VERSION,
+        "durable-read fixture adjacency pin"
+    );
+    assert!(
+        std::panic::catch_unwind(|| assert_fixture_schema_version(PREDECESSOR)).is_err(),
+        "the immediate predecessor fixture schema must be refused"
+    );
 }
 
 pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
@@ -521,10 +542,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
 }
 
 pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixture) {
-    assert_eq!(
-        expected.fixture_schema_version, DURABLE_READ_FIXTURE_SCHEMA_VERSION,
-        "durable fixture schema version changed without regeneration"
-    );
+    assert_fixture_schema_version(expected.fixture_schema_version);
     let read = handles
         .runtime
         .load_session()

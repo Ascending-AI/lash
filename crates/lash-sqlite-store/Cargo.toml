@@ -65,5 +65,9 @@ name = "conformance"
 path = "tests/conformance.rs"
 
 [[test]]
+name = "process_change_horizon"
+path = "tests/process_change_horizon.rs"
+
+[[test]]
 name = "durable_read_fixture"
 path = "tests/durable_read_fixture.rs"

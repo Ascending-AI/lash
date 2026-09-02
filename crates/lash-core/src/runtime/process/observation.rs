@@ -28,6 +28,10 @@ pub struct ProcessWorkSnapshot {
 pub struct ObservedWorkItem {
     pub process: ObservedProcess,
     pub events: Vec<ObservedProcessEvent>,
+    /// Sequence of the newest event carried by `events`, or zero for an empty
+    /// tail. Comparing this with `process.last_event_sequence` reveals a
+    /// non-transactionally mis-paired record/event snapshot.
+    pub event_tail_sequence: u64,
     pub kind: String,
     pub label: String,
 }
@@ -36,6 +40,8 @@ pub struct ObservedWorkItem {
 pub struct ObservedProcess {
     pub process_id: ProcessId,
     pub incarnation: ProcessIncarnation,
+    /// Sequence of the newest event folded into this observed record.
+    pub last_event_sequence: u64,
     pub graph_key: String,
     pub kind: String,
     pub lifecycle: ProcessStatus,
@@ -82,6 +88,15 @@ pub struct ObservedProcessEvent {
     pub event_type: String,
     pub occurred_at_ms: u64,
     pub payload: serde_json::Value,
+}
+
+impl ObservedWorkItem {
+    /// Reports whether the independently read record and event tail came from
+    /// different process-event positions. Callers should retry the observation
+    /// instead of treating a mismatched item as a coherent snapshot.
+    pub fn has_mispaired_event_tail(&self) -> bool {
+        self.process.last_event_sequence != self.event_tail_sequence
+    }
 }
 
 /// Per-item event tail in session snapshots. Snapshots are polled by
@@ -160,13 +175,14 @@ impl ProcessWorkObserver {
         &self,
         record: ProcessRecord,
     ) -> Result<ObservedWorkItem, PluginError> {
-        let events = self
+        let events: Vec<_> = self
             .registry
             .recent_events(&record.id, SNAPSHOT_EVENT_TAIL)
             .await?
             .into_iter()
             .map(ObservedProcessEvent::from)
             .collect();
+        let event_tail_sequence = events.last().map_or(0, |event| event.sequence);
         let lease = self.registry.get_process_lease(&record.id).await?;
         let process = ObservedProcess::from_record(record, lease);
         let kind = process.identity.kind.clone();
@@ -178,6 +194,7 @@ impl ProcessWorkObserver {
         Ok(ObservedWorkItem {
             process,
             events,
+            event_tail_sequence,
             kind,
             label,
         })
@@ -286,6 +303,7 @@ impl ObservedProcess {
         let label = identity.label.clone().unwrap_or_else(|| kind.clone());
         let process_id = record.id;
         let incarnation = record.incarnation;
+        let last_event_sequence = record.last_event_sequence;
         let (lease_holder, lease_expires_at_ms) = match lease {
             Some(lease) => (Some(lease.owner), Some(lease.expires_at_epoch_ms)),
             None => (None, None),
@@ -294,6 +312,7 @@ impl ObservedProcess {
             graph_key: format!("process:{process_id}:incarnation:{incarnation}"),
             process_id,
             incarnation,
+            last_event_sequence,
             kind,
             lifecycle,
             identity,
@@ -452,6 +471,11 @@ mod tests {
         );
         assert_eq!(snapshot.items.len(), 1);
         assert_eq!(snapshot.items[0].events.len(), 2);
+        assert_eq!(
+            snapshot.items[0].process.last_event_sequence, snapshot.items[0].event_tail_sequence,
+            "a stable observation must pair record and event-tail positions"
+        );
+        assert!(!snapshot.items[0].has_mispaired_event_tail());
         assert!(
             snapshot.items[0]
                 .events
@@ -467,6 +491,32 @@ mod tests {
         assert!(
             cancelled.occurred_at_ms > 0,
             "event timestamps are epoch milliseconds"
+        );
+    }
+
+    #[tokio::test]
+    async fn observation_sequence_stamps_reveal_a_deliberately_mispaired_snapshot() {
+        let registry =
+            Arc::new(super::super::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
+        let scope = SessionScope::new("mispaired");
+        register_visible(
+            &registry,
+            &scope,
+            external_registration("mispaired-process", "Mispaired"),
+        )
+        .await;
+        let mut item = observer(registry)
+            .snapshot_for_session("mispaired")
+            .await
+            .expect("snapshot")
+            .items
+            .pop()
+            .expect("observed work item");
+
+        item.event_tail_sequence = item.event_tail_sequence.saturating_add(1);
+        assert!(
+            item.has_mispaired_event_tail(),
+            "different record and event-tail positions must be detectable"
         );
     }
 

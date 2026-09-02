@@ -311,7 +311,11 @@ impl RemoteProcessAwaitOutput {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
             Self::Settled { output } => output.validate(type_name),
-            Self::Abandoned { .. } | Self::NoLongerRetained { .. } => Ok(()),
+            Self::Abandoned { evidence, .. } => match &evidence.owner {
+                Some(owner) => owner.validate(type_name),
+                None => Ok(()),
+            },
+            Self::NoLongerRetained { .. } => Ok(()),
         }
     }
 }
@@ -522,6 +526,7 @@ impl RemoteProcessHandleView {
 pub struct RemoteProcessRecord {
     pub process_id: String,
     pub incarnation: u64,
+    pub last_event_sequence: u64,
     pub input: RemoteProcessInput,
     pub disposition: RemoteRecoveryContract,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -567,6 +572,9 @@ impl RemoteProcessRecord {
         }
         if let Some(external_ref) = &self.external_ref {
             external_ref.validate(type_name)?;
+        }
+        if let Some(first_started) = &self.first_started {
+            first_started.owner.validate(type_name)?;
         }
         if let Some(wait) = &self.wait {
             wait.validate(type_name)?;
@@ -633,6 +641,7 @@ pub struct RemoteProcessWorkItem {
     pub process: RemoteObservedProcess,
     #[serde(default)]
     pub events: Vec<RemoteObservedProcessEvent>,
+    pub event_tail_sequence: u64,
     pub kind: String,
     pub label: String,
 }
@@ -642,6 +651,16 @@ impl RemoteProcessWorkItem {
         self.process.validate(type_name)?;
         for event in &self.events {
             event.validate(type_name)?;
+        }
+        let actual_tail_sequence = self.events.last().map_or(0, |event| event.sequence);
+        if self.event_tail_sequence != actual_tail_sequence {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: format!(
+                    "work-item event-tail sequence {} contradicts newest carried event sequence {actual_tail_sequence}",
+                    self.event_tail_sequence
+                ),
+            });
         }
         require_non_empty(type_name, "kind", &self.kind)?;
         if self.kind != self.process.identity.kind {
@@ -677,6 +696,7 @@ impl RemoteProcessWorkItem {
 pub struct RemoteObservedProcess {
     pub process_id: String,
     pub incarnation: u64,
+    pub last_event_sequence: u64,
     pub graph_key: String,
     pub kind: String,
     pub identity: RemoteProcessIdentity,
@@ -691,7 +711,7 @@ pub struct RemoteObservedProcess {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_started: Option<RemoteProcessStarted>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lease_holder: Option<serde_json::Value>,
+    pub lease_holder: Option<RemoteLeaseOwnerIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lease_expires_at_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -782,6 +802,12 @@ impl RemoteObservedProcess {
         }
         self.input.validate(type_name)?;
         self.originator.validate(type_name)?;
+        if let Some(lease_holder) = &self.lease_holder {
+            lease_holder.validate(type_name)?;
+        }
+        if let Some(first_started) = &self.first_started {
+            first_started.owner.validate(type_name)?;
+        }
         if let Some(env_ref) = &self.env_ref {
             env_ref.validate(type_name)?;
         }
@@ -968,22 +994,39 @@ pub enum RemoteAbandonWriter {
     EngineGaveUp,
 }
 
-/// Wire mirror of Abandoned-terminal evidence. The dead/lapsed owner identity is
-/// carried opaquely (the wire has no lease-owner mirror), matching how other
-/// nested core types ride the wire as JSON.
+/// Wire mirror of one lease holder incarnation. Fencing identity is the full
+/// `(owner_id, incarnation_id)` pair; neither component may be erased into an
+/// untyped JSON carrier.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteLeaseOwnerIdentity {
+    pub owner_id: String,
+    pub incarnation_id: String,
+}
+
+impl RemoteLeaseOwnerIdentity {
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        require_non_empty(type_name, "lease_owner.owner_id", &self.owner_id)?;
+        require_non_empty(
+            type_name,
+            "lease_owner.incarnation_id",
+            &self.incarnation_id,
+        )
+    }
+}
+
+/// Wire mirror of Abandoned-terminal evidence.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteAbandonEvidence {
     pub writer: RemoteAbandonWriter,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owner: Option<serde_json::Value>,
+    pub owner: Option<RemoteLeaseOwnerIdentity>,
     pub epoch_ms: u64,
 }
 
 /// Wire mirror of the durable execution-started fact.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessStarted {
-    #[serde(default)]
-    pub owner: serde_json::Value,
+    pub owner: RemoteLeaseOwnerIdentity,
     #[serde(default)]
     pub fencing_token: u64,
     #[serde(default = "remote_first_process_attempt")]

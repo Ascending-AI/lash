@@ -3,7 +3,7 @@
 --
 
 
--- Dumped from database version 14.24
+-- Dumped from database version 16.15
 -- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
@@ -228,6 +228,7 @@ ALTER SEQUENCE lash_durable_read_fixture.lash_pending_turn_inputs_enqueue_seq_se
 CREATE TABLE lash_durable_read_fixture.lash_process_change_clock (
     singleton boolean DEFAULT true NOT NULL,
     current_seq bigint NOT NULL,
+    tombstone_compaction_horizon bigint DEFAULT 0 NOT NULL,
     CONSTRAINT lash_process_change_clock_singleton_check CHECK (singleton)
 );
 
@@ -344,6 +345,7 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     is_waiting boolean NOT NULL,
     created_at_ms bigint NOT NULL,
     updated_at_ms bigint NOT NULL,
+    last_event_sequence bigint NOT NULL,
     change_seq bigint NOT NULL,
     status text NOT NULL,
     record_json text NOT NULL,
@@ -844,7 +846,7 @@ INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (1, 'durab
 -- Data for Name: lash_process_change_clock; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_process_change_clock VALUES (true, 8);
+INSERT INTO lash_durable_read_fixture.lash_process_change_clock VALUES (true, 8, 0);
 
 
 --
@@ -901,8 +903,8 @@ INSERT INTO lash_durable_read_fixture.lash_process_wake_deliveries VALUES ('wake
 -- Data for Name: lash_processes; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('durable-read-waiting-process', 1, 'process-registration-definition:v2:blake3:396df2f86298e5e827fe4e8b6b9454b41be352700a945849b476a1b2fabdfbbe', 'host', NULL, 'durable-read-engine', 'Durable read fixture', true, 1700000000000, 1700000000000, 3, 'waiting', '{"id":"durable-read-waiting-process","incarnation":1,"registration_fingerprint":"process-registration-definition:v2:blake3:396df2f86298e5e827fe4e8b6b9454b41be352700a945849b476a1b2fabdfbbe","input":{"type":"engine","kind":"durable-read-engine","payload":{"fixture":"process"}},"disposition":"rerunnable","identity":{"kind":"durable-read-engine","label":"Durable read fixture","definition":{"fixture":"process"}},"event_types":[{"name":"process.cancel_requested","payload_schema":{"schema":{}},"semantics":{}},{"name":"process.completed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"completed","await_output":{"pointer":"/await_output"}}}},{"name":"process.failed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"failed","await_output":{"pointer":"/await_output"}}}},{"name":"process.cancelled","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"cancelled","await_output":{"pointer":"/await_output"}}}},{"name":"process.abandoned","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"abandoned","await_output":{"pointer":"/await_output"}}}}],"provenance":{"originator":{"type":"host"}},"env_ref":"process-env:v4:blake3:daf76b156fd4e60c481117453fb793e488e495df6d82e16c190df609fb200377","created_at_ms":1700000000000,"updated_at_ms":1700000000000,"wait":{"kind":{"kind":"signal","name":"fixture-ready","event_type":"process.signal.fixture-ready","key":"durable-read-wait-key","ordinal":1},"since_ms":123},"status":"waiting"}');
-INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('durable-read-wake-process', 4, 'process-registration-definition:v2:blake3:3e75f30f64551515e4a6d4df0d9364f54d7d06f3bcda6df09ca8952455df93c3', 'host', 'durable-read-fixture', 'external', NULL, false, 1700000000000, 1700000000000, 5, 'running', '{"id":"durable-read-wake-process","incarnation":4,"registration_fingerprint":"process-registration-definition:v2:blake3:3e75f30f64551515e4a6d4df0d9364f54d7d06f3bcda6df09ca8952455df93c3","input":{"type":"external","metadata":{"fixture":"wake"}},"disposition":"externally_owned","identity":{"kind":"external"},"event_types":[{"name":"process.cancel_requested","payload_schema":{"schema":{}},"semantics":{}},{"name":"process.completed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"completed","await_output":{"pointer":"/await_output"}}}},{"name":"process.failed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"failed","await_output":{"pointer":"/await_output"}}}},{"name":"process.cancelled","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"cancelled","await_output":{"pointer":"/await_output"}}}},{"name":"process.abandoned","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"abandoned","await_output":{"pointer":"/await_output"}}}},{"name":"fixture.wake","payload_schema":{"schema":{}},"semantics":{"wake":{"when":{"present":"/wake_input"},"input":{"pointer":"/wake_input"}}}}],"provenance":{"originator":{"type":"host"}},"created_at_ms":1700000000000,"updated_at_ms":1700000000000,"status":"running"}');
+INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('durable-read-waiting-process', 1, 'process-registration-definition:v2:blake3:396df2f86298e5e827fe4e8b6b9454b41be352700a945849b476a1b2fabdfbbe', 'host', NULL, 'durable-read-engine', 'Durable read fixture', true, 1700000000000, 1700000000000, 2, 3, 'waiting', '{"id":"durable-read-waiting-process","incarnation":1,"last_event_sequence":2,"registration_fingerprint":"process-registration-definition:v2:blake3:396df2f86298e5e827fe4e8b6b9454b41be352700a945849b476a1b2fabdfbbe","input":{"type":"engine","kind":"durable-read-engine","payload":{"fixture":"process"}},"disposition":"rerunnable","identity":{"kind":"durable-read-engine","label":"Durable read fixture","definition":{"fixture":"process"}},"event_types":[{"name":"process.cancel_requested","payload_schema":{"schema":{}},"semantics":{}},{"name":"process.completed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"completed","await_output":{"pointer":"/await_output"}}}},{"name":"process.failed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"failed","await_output":{"pointer":"/await_output"}}}},{"name":"process.cancelled","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"cancelled","await_output":{"pointer":"/await_output"}}}},{"name":"process.abandoned","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"abandoned","await_output":{"pointer":"/await_output"}}}}],"provenance":{"originator":{"type":"host"}},"env_ref":"process-env:v4:blake3:daf76b156fd4e60c481117453fb793e488e495df6d82e16c190df609fb200377","created_at_ms":1700000000000,"updated_at_ms":1700000000000,"wait":{"kind":{"kind":"signal","name":"fixture-ready","event_type":"process.signal.fixture-ready","key":"durable-read-wait-key","ordinal":1},"since_ms":123},"status":"waiting"}');
+INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('durable-read-wake-process', 4, 'process-registration-definition:v2:blake3:3e75f30f64551515e4a6d4df0d9364f54d7d06f3bcda6df09ca8952455df93c3', 'host', 'durable-read-fixture', 'external', NULL, false, 1700000000000, 1700000000000, 1, 5, 'running', '{"id":"durable-read-wake-process","incarnation":4,"last_event_sequence":1,"registration_fingerprint":"process-registration-definition:v2:blake3:3e75f30f64551515e4a6d4df0d9364f54d7d06f3bcda6df09ca8952455df93c3","input":{"type":"external","metadata":{"fixture":"wake"}},"disposition":"externally_owned","identity":{"kind":"external"},"event_types":[{"name":"process.cancel_requested","payload_schema":{"schema":{}},"semantics":{}},{"name":"process.completed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"completed","await_output":{"pointer":"/await_output"}}}},{"name":"process.failed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"failed","await_output":{"pointer":"/await_output"}}}},{"name":"process.cancelled","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"cancelled","await_output":{"pointer":"/await_output"}}}},{"name":"process.abandoned","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"abandoned","await_output":{"pointer":"/await_output"}}}},{"name":"fixture.wake","payload_schema":{"schema":{}},"semantics":{"wake":{"when":{"present":"/wake_input"},"input":{"pointer":"/wake_input"}}}}],"provenance":{"originator":{"type":"host"}},"created_at_ms":1700000000000,"updated_at_ms":1700000000000,"status":"running"}');
 
 
 --
@@ -945,7 +947,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 74);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 75);
 
 
 --

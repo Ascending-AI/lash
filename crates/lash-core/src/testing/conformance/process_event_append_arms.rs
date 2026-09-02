@@ -49,20 +49,46 @@ pub(super) async fn process_event_append_arms_are_ordered(registry: Arc<dyn Proc
         .append_event(host_id, host_request())
         .await
         .expect("host append takes the insert arm");
+    assert_eq!(inserted.last_event_sequence, inserted.event.sequence);
+    assert_eq!(
+        registry
+            .get_process(host_id)
+            .await
+            .expect("read inserted projection")
+            .expect("inserted process")
+            .last_event_sequence,
+        inserted.event.sequence,
+        "the record fold and append receipt must carry the inserted event sequence"
+    );
     assert_eq!(
         append_arm_footprint(&registry, host_id, target_session_id).await,
         (1, Some(inserted.event.sequence)),
         "the insert arm writes one event row and advances the floor to it"
     );
+    let later = registry
+        .append_event(
+            host_id,
+            ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "later append"}),
+            )
+            .with_replay_key("append-arm-host:wake:2"),
+        )
+        .await
+        .expect("a later host append takes the insert arm");
     let replayed = registry
         .append_event(host_id, host_request())
         .await
         .expect("host append takes the replay arm");
     assert_eq!(replayed.event.sequence, inserted.event.sequence);
     assert_eq!(
+        replayed.last_event_sequence, later.event.sequence,
+        "a replay receipt reports the process fold position, not the older replayed event"
+    );
+    assert_eq!(
         append_arm_footprint(&registry, host_id, target_session_id).await,
-        (1, Some(inserted.event.sequence)),
-        "the replay arm writes no event row and leaves the floor where the insert put it"
+        (2, Some(later.event.sequence)),
+        "the replay arm writes no event row and leaves the floor where the latest insert put it"
     );
 
     // Entry point 2: unleased completion under an explicit authority.

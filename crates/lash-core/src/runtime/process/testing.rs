@@ -105,6 +105,7 @@ impl TestLocalProcessRegistry {
                     record.change_seq = self.next_change_seq().await;
                 }
                 Ok(ProcessEventAppendReceipt {
+                    last_event_sequence: record.record.last_event_sequence,
                     event,
                     wake_delivery,
                 })
@@ -130,6 +131,7 @@ impl TestLocalProcessRegistry {
                     record.keyed_events.insert(replay.key, event.clone());
                 }
                 Ok(ProcessEventAppendReceipt {
+                    last_event_sequence: event.sequence,
                     event,
                     wake_delivery,
                 })
@@ -1102,6 +1104,14 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         cursor: ProcessChangeCursor,
         limit: usize,
     ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let horizon = *self.tombstone_compaction_horizon.lock().await;
+        if cursor.store_sequence() < horizon {
+            return Err(PluginError::ProcessChangeCursorPruned {
+                requested_cursor: cursor,
+                tombstone_compaction_horizon: ProcessChangeCursor::from_store_sequence(horizon),
+            });
+        }
         if limit == 0 {
             return Ok((Vec::new(), cursor));
         }
@@ -1156,6 +1166,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         watermark: ProjectionWatermark,
         trigger_store: Option<&dyn crate::TriggerStore>,
     ) -> Result<usize, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let max_change_seq = match watermark {
             ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
             ProjectionWatermark::NoProjector => None,
@@ -1170,12 +1181,25 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .collect::<std::collections::HashSet<_>>();
         let mut tombstones = self.tombstones.lock().await;
         let before = tombstones.len();
+        let mut compacted_through = None;
         tombstones.retain(|_, tombstone| {
-            tombstone.pruned_at_ms >= cutoff_epoch_ms
+            let retained = tombstone.pruned_at_ms >= cutoff_epoch_ms
                 || max_change_seq
                     .is_some_and(|max_change_seq| tombstone.pruned_change_seq > max_change_seq)
-                || outstanding_trigger_delivery_process_ids.contains(tombstone.process_id.as_str())
+                || outstanding_trigger_delivery_process_ids.contains(tombstone.process_id.as_str());
+            if !retained {
+                compacted_through = Some(
+                    compacted_through
+                        .unwrap_or(0)
+                        .max(tombstone.pruned_change_seq),
+                );
+            }
+            retained
         });
+        if let Some(compacted_through) = compacted_through {
+            let mut horizon = self.tombstone_compaction_horizon.lock().await;
+            *horizon = (*horizon).max(compacted_through);
+        }
         Ok(before - tombstones.len())
     }
 

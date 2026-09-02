@@ -163,6 +163,7 @@ struct GeneratedCase {
 struct ModelProcess {
     base: Option<ProcessRecord>,
     expected_record: Option<ProcessRecord>,
+    wake_target: Option<String>,
     observers: BTreeSet<String>,
     current_authority: Option<ProcessExecutionWriteAuthority>,
     superseded_authorities: Vec<ProcessExecutionWriteAuthority>,
@@ -210,6 +211,39 @@ impl ModelProcess {
             expected_record: Some(record),
             ..Self::default()
         };
+    }
+}
+
+fn advance_expected_event_sequence(record: &mut ProcessRecord) {
+    record.last_event_sequence = record
+        .last_event_sequence
+        .checked_add(1)
+        .expect("generated process event sequence remains in range");
+}
+
+async fn cursor_after_full_relist_if_required(
+    registry: &Arc<dyn ProcessRegistry>,
+) -> Result<ProcessChangeCursor, String> {
+    match registry
+        .processes_changed_since(ProcessChangeCursor::initial(), 1_000)
+        .await
+    {
+        Ok((_, cursor)) => Ok(cursor),
+        Err(crate::PluginError::ProcessChangeCursorPruned {
+            tombstone_compaction_horizon,
+            ..
+        }) => {
+            registry
+                .list_processes(&crate::ProcessListFilter::default())
+                .await
+                .map_err(|error| error.to_string())?;
+            registry
+                .processes_changed_since(tombstone_compaction_horizon, 1_000)
+                .await
+                .map(|(_, cursor)| cursor)
+                .map_err(|error| error.to_string())
+        }
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -540,6 +574,7 @@ async fn apply_operation(
                 // Keep this generated registry lifecycle to pin the narrower store behavior.
                 if entry.base.is_none() || entry.tombstoned {
                     entry.install_fresh(record);
+                    entry.wake_target = target;
                     model.process_counts.record_spawn();
                     shape.spawns = shape.spawns.saturating_add(1);
                 } else {
@@ -568,6 +603,7 @@ async fn apply_operation(
                     entry.superseded_authorities.push(previous);
                 }
                 if let Some(expected) = entry.expected_record.as_mut() {
+                    advance_expected_event_sequence(expected);
                     expected.first_started = Some(Box::new(started));
                 }
             }
@@ -593,6 +629,9 @@ async fn apply_operation(
             if result.is_ok()
                 && let Some(expected) = model.process_mut(&id).expected_record.as_mut()
             {
+                if expected.wait.as_ref() != Some(&wait_state(&id)) {
+                    advance_expected_event_sequence(expected);
+                }
                 expected.wait = Some(wait_state(&id));
                 expected.status = crate::ProcessStatus::Waiting;
             }
@@ -618,7 +657,9 @@ async fn apply_operation(
             if result.is_ok()
                 && let Some(expected) = model.process_mut(&id).expected_record.as_mut()
             {
-                expected.wait = None;
+                if expected.wait.take().is_some() {
+                    advance_expected_event_sequence(expected);
+                }
                 if !expected.is_terminal() {
                     expected.status = crate::ProcessStatus::Running;
                 }
@@ -639,6 +680,7 @@ async fn apply_operation(
                 && let Some(expected) = model.process_mut(&id).expected_record.as_mut()
                 && expected.external_ref.is_none()
             {
+                advance_expected_event_sequence(expected);
                 expected.external_ref = Some(external_ref);
             }
         }
@@ -690,6 +732,7 @@ async fn apply_operation(
                 if let Some(expected) = model.process_mut(&id).expected_record.as_mut() {
                     apply_process_event_projection(expected, &appended.event)
                         .map_err(|error| error.to_string())?;
+                    expected.last_event_sequence = appended.last_event_sequence;
                 }
                 if let Some(wake) = appended.wake_delivery {
                     let delivery =
@@ -718,6 +761,7 @@ async fn apply_operation(
             {
                 apply_process_event_projection(expected, &appended.event)
                     .map_err(|error| error.to_string())?;
+                expected.last_event_sequence = appended.last_event_sequence;
             }
         }
         StoreContractOp::Terminal {
@@ -740,6 +784,7 @@ async fn apply_operation(
                 {
                     shape.terminal_transitions = shape.terminal_transitions.saturating_add(1);
                     if let Some(expected) = model.process_mut(&id).expected_record.as_mut() {
+                        advance_expected_event_sequence(expected);
                         expected.wait = None;
                         expected.status = output
                             .terminal_status()
@@ -758,7 +803,12 @@ async fn apply_operation(
                 .await
                 .is_ok()
             {
-                model.process_mut(&id).observers.insert(session);
+                let process = model.process_mut(&id);
+                if process.observers.insert(session)
+                    && let Some(expected) = process.expected_record.as_mut()
+                {
+                    advance_expected_event_sequence(expected);
+                }
             }
         }
         StoreContractOp::RemoveObserver { process, session } => {
@@ -770,7 +820,12 @@ async fn apply_operation(
                 .await
                 .is_ok()
             {
-                model.process_mut(&id).observers.remove(&session);
+                let process = model.process_mut(&id);
+                if process.observers.remove(&session)
+                    && let Some(expected) = process.expected_record.as_mut()
+                {
+                    advance_expected_event_sequence(expected);
+                }
             }
         }
         StoreContractOp::Retarget { process, session } => {
@@ -782,6 +837,13 @@ async fn apply_operation(
                 .await
                 .is_ok()
             {
+                let process = model.process_mut(&id);
+                if process.wake_target != target {
+                    process.wake_target = target.clone();
+                    if let Some(expected) = process.expected_record.as_mut() {
+                        advance_expected_event_sequence(expected);
+                    }
+                }
                 for delivery in model.wake_deliveries.values_mut() {
                     if delivery.state() == WakeDeliveryState::Pending
                         && delivery.wake.process_id == id
@@ -949,11 +1011,7 @@ async fn apply_operation(
             }
         }
         StoreContractOp::Prune { watermark } => {
-            let (_, cursor) = handles
-                .registry
-                .processes_changed_since(ProcessChangeCursor::initial(), 1_000)
-                .await
-                .map_err(|error| error.to_string())?;
+            let cursor = cursor_after_full_relist_if_required(&handles.registry).await?;
             model.projection_cursor = cursor;
             let watermark = if *watermark {
                 ProjectionWatermark::UpTo(cursor)
@@ -1000,6 +1058,7 @@ async fn apply_operation(
                     .processes_changed_since(model.projection_cursor, 1_000)
                     .await
                     .map_err(|error| error.to_string())?;
+                model.projection_cursor = cursor;
                 ProjectionWatermark::UpTo(cursor)
             } else {
                 ProjectionWatermark::UpTo(model.projection_cursor)

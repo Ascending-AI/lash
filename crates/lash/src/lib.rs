@@ -554,9 +554,10 @@ pub mod remote {
     pub mod processes {
         pub use lash_remote_protocol::processes::{
             RemoteAbandonEvidence, RemoteAbandonRequest, RemoteAbandonWriter,
-            RemoteObservedProcess, RemoteObservedProcessEvent, RemotePersistProcessEnvReceipt,
-            RemotePersistProcessEnvRequest, RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput,
-            RemoteProcessAwaitRequest, RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
+            RemoteLeaseOwnerIdentity, RemoteObservedProcess, RemoteObservedProcessEvent,
+            RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
+            RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput, RemoteProcessAwaitRequest,
+            RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
             RemoteProcessDefinitionIdentity, RemoteProcessEvent, RemoteProcessEventSemantics,
             RemoteProcessEventSemanticsSpec, RemoteProcessEventType, RemoteProcessEventsRequest,
             RemoteProcessEventsResponse, RemoteProcessExecutionEnvRef,

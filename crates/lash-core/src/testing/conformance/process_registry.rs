@@ -1,6 +1,7 @@
 //! Cross-backend conformance for the durable process registry.
 
 use super::process_change_feed::process_change_feed_never_misses_concurrent_terminal_writers;
+use super::process_change_horizon::changes_after_full_relist_if_required;
 use super::process_event_append_arms::process_event_append_arms_are_ordered;
 use super::process_filters::{
     list_processes_bounds_retired_rows_without_hiding_live_rows,
@@ -440,10 +441,7 @@ async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn Pro
         )
         .await
         .expect("complete first process incarnation");
-    let (_, projected) = registry
-        .processes_changed_since(ProcessChangeCursor::initial(), 4096)
-        .await
-        .expect("project first process incarnation");
+    let (_, projected) = changes_after_full_relist_if_required(&registry, 4096).await;
     registry
         .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::UpTo(projected))
         .await
@@ -480,10 +478,7 @@ async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn Pro
         );
     }
 
-    let (changes, _) = registry
-        .processes_changed_since(ProcessChangeCursor::initial(), 4096)
-        .await
-        .expect("read retained incarnation history");
+    let (changes, _) = changes_after_full_relist_if_required(&registry, 4096).await;
     assert!(changes.iter().any(|change| {
         matches!(
             change,
@@ -2494,10 +2489,7 @@ async fn caller_departed_rows_are_reclaimed_by_retention(registry: Arc<dyn Proce
         .record_caller_departure(reclaimed_id)
         .await
         .expect("record caller departure");
-    let (_, projection_cursor) = registry
-        .processes_changed_since(crate::ProcessChangeCursor::initial(), 4096)
-        .await
-        .expect("project rows before pruning");
+    let (_, projection_cursor) = changes_after_full_relist_if_required(&registry, 4096).await;
     tokio::time::sleep(std::time::Duration::from_millis(2)).await;
     registry
         .prune_terminal_processes(

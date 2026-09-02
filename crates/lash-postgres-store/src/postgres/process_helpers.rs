@@ -4,6 +4,25 @@ pub(crate) fn process_status_label(record: &ProcessRecord) -> &'static str {
     record.status.label()
 }
 
+pub(crate) async fn process_change_horizon_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<u64, PluginError> {
+    let horizon: i64 = sqlx::query_scalar(
+        "SELECT tombstone_compaction_horizon
+         FROM lash_process_change_clock
+         WHERE singleton = TRUE
+         FOR SHARE",
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(plugin_sqlx_error)?;
+    plugin_u64_from_sql(
+        "ProcessChangeClock",
+        "tombstone_compaction_horizon",
+        horizon,
+    )
+}
+
 pub(crate) async fn load_process_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &str,
@@ -148,7 +167,7 @@ pub(crate) async fn save_process_tx(
     sqlx::query(
         "UPDATE lash_processes
          SET updated_at_ms = $2, change_seq = $3, status = $4,
-             is_waiting = $5, record_json = $6
+             is_waiting = $5, last_event_sequence = $6, record_json = $7
          WHERE process_id = $1",
     )
     .bind(&record.id)
@@ -156,6 +175,7 @@ pub(crate) async fn save_process_tx(
     .bind(change_seq as i64)
     .bind(process_status_label(record))
     .bind(record.wait.is_some())
+    .bind(record.last_event_sequence as i64)
     .bind(serde_json::to_string(record).map_err(process_decode_error)?)
     .execute(&mut **tx)
     .await
@@ -324,6 +344,7 @@ pub(crate) async fn apply_process_event_append_tx(
             apply_process_replay_repair_tx(tx, record, repair_record).await?;
             Ok((
                 ProcessEventAppendReceipt {
+                    last_event_sequence: record.last_event_sequence,
                     event,
                     wake_delivery,
                 },
@@ -371,6 +392,7 @@ pub(crate) async fn apply_process_event_append_tx(
                 .await?;
             Ok((
                 ProcessEventAppendReceipt {
+                    last_event_sequence: event.sequence,
                     event,
                     wake_delivery,
                 },

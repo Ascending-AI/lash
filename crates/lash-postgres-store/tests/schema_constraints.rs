@@ -187,13 +187,13 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     .await;
 
     let process_columns = "process_id, incarnation, registration_fingerprint, originator_id,
-        identity_kind, is_waiting, created_at_ms, updated_at_ms, change_seq,
+        identity_kind, is_waiting, created_at_ms, updated_at_ms, last_event_sequence, change_seq,
         status, record_json";
     assert_check_rejects(
         &mut connection,
         &format!(
             "INSERT INTO lash_processes ({process_columns}) VALUES
-             ('bad-status', 1, 'fingerprint', 'originator', 'standard', FALSE, 0, 0, 0,
+             ('bad-status', 1, 'fingerprint', 'originator', 'standard', FALSE, 0, 0, 0, 0,
               'paused', '{{}}')"
         ),
         "ck_processes_status",
@@ -201,7 +201,7 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     .await;
     sqlx::query(&format!(
         "INSERT INTO lash_processes ({process_columns}) VALUES
-         ('wake-parent', 1, 'fingerprint', 'originator', 'standard', FALSE, 0, 0, 0,
+         ('wake-parent', 1, 'fingerprint', 'originator', 'standard', FALSE, 0, 0, 0, 0,
           'running', '{{}}')"
     ))
     .execute(&mut connection)

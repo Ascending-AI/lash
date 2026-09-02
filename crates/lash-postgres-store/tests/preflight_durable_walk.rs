@@ -419,10 +419,10 @@ async fn seed_process(scratch: &ScratchSchema, process_id: &str, status: &str, w
             "INSERT INTO lash_processes (
                  process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
                  identity_kind, identity_label, is_waiting, created_at_ms, updated_at_ms,
-                 change_seq, status, record_json
+                 last_event_sequence, change_seq, status, record_json
              ) VALUES (
                  '{process_id}', 1, 'fingerprint', 'originator', {wake},
-                 'program', NULL, {waiting}, 0, 0, 1, '{status}',
+                 'program', NULL, {waiting}, 0, 0, 0, 1, '{status}',
                  '{{\"process\":\"{process_id}\"}}'
              )",
             waiting = status == "waiting",

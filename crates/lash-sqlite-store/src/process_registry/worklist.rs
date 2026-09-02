@@ -160,9 +160,9 @@ mod tests {
                      INSERT INTO processes (
                          process_id, incarnation, registration_fingerprint, originator_id,
                          identity_kind, is_waiting, created_at_ms, updated_at_ms,
-                         change_seq, status, record_json
+                         last_event_sequence, change_seq, status, record_json
                      )
-                     SELECT printf('plan-%05d', i), i, 'fp', 'host', 'test', 0, 0, 0, i,
+                     SELECT printf('plan-%05d', i), i, 'fp', 'host', 'test', 0, 0, 0, 0, i,
                             CASE WHEN i <= 100 THEN 'running' ELSE 'completed' END,
                             '{}'
                      FROM n;

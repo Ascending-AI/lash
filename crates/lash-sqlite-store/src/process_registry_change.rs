@@ -16,18 +16,45 @@ pub(crate) fn compact_process_tombstones_conn(
     let outstanding_trigger_delivery_process_ids =
         serde_json::to_string(outstanding_trigger_delivery_process_ids)
             .map_err(process_decode_error)?;
-    conn.execute(
-        "DELETE FROM process_tombstones
+    let compacted_through: Option<i64> = conn
+        .query_row(
+            "SELECT MAX(pruned_change_seq) FROM process_tombstones
+             WHERE pruned_at_ms < ?1
+               AND (?2 IS NULL OR pruned_change_seq <= ?2)
+               AND process_id NOT IN (SELECT value FROM json_each(?3))",
+            params![
+                cutoff_epoch_ms,
+                max_change_seq,
+                outstanding_trigger_delivery_process_ids
+            ],
+            |row| row.get(0),
+        )
+        .map_err(process_sqlite_error)?;
+    let deleted = conn
+        .execute(
+            "DELETE FROM process_tombstones
          WHERE pruned_at_ms < ?1
            AND (?2 IS NULL OR pruned_change_seq <= ?2)
            AND process_id NOT IN (SELECT value FROM json_each(?3))",
-        params![
-            cutoff_epoch_ms,
-            max_change_seq,
-            outstanding_trigger_delivery_process_ids
-        ],
-    )
-    .map_err(process_sqlite_error)
+            params![
+                cutoff_epoch_ms,
+                max_change_seq,
+                outstanding_trigger_delivery_process_ids
+            ],
+        )
+        .map_err(process_sqlite_error)?;
+    if let Some(compacted_through) = compacted_through {
+        conn.execute(
+            "UPDATE process_change_clock
+             SET tombstone_compaction_horizon = MAX(
+                 tombstone_compaction_horizon, ?1
+             )
+             WHERE singleton = 1",
+            params![compacted_through],
+        )
+        .map_err(process_sqlite_error)?;
+    }
+    Ok(deleted)
 }
 
 pub(crate) fn processes_changed_since_conn(
@@ -35,6 +62,40 @@ pub(crate) fn processes_changed_since_conn(
     cursor: ProcessChangeCursor,
     limit: usize,
 ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), lash_core::PluginError> {
+    let tx = conn.unchecked_transaction().map_err(process_sqlite_error)?;
+    let result = processes_changed_since_tx(&tx, cursor, limit);
+    if result.is_ok() {
+        tx.commit().map_err(process_sqlite_error)?;
+    }
+    result
+}
+
+fn processes_changed_since_tx(
+    conn: &Connection,
+    cursor: ProcessChangeCursor,
+    limit: usize,
+) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), lash_core::PluginError> {
+    let horizon = conn
+        .query_row(
+            "SELECT tombstone_compaction_horizon FROM process_change_clock WHERE singleton = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(process_sqlite_error)?;
+    let horizon = plugin_u64_from_sql(
+        "ProcessChangeClock",
+        "tombstone_compaction_horizon",
+        horizon,
+    )?;
+    if cursor.store_sequence() < horizon {
+        return Err(lash_core::PluginError::ProcessChangeCursorPruned {
+            requested_cursor: cursor,
+            tombstone_compaction_horizon: ProcessChangeCursor::from_store_sequence(horizon),
+        });
+    }
+    if limit == 0 {
+        return Ok((Vec::new(), cursor));
+    }
     let mut stmt = conn
         .prepare(
             "SELECT change_seq, kind, payload FROM (

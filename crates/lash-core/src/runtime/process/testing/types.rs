@@ -18,6 +18,7 @@ pub struct TestLocalProcessRegistry {
     pub(super) process_terminal_write_outcome: Arc<Mutex<Option<ProcessCompletionOutcome>>>,
     pub(super) process_lease_release_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) next_change_seq: Arc<Mutex<u64>>,
+    pub(super) tombstone_compaction_horizon: Arc<Mutex<u64>>,
     pub(super) observers: Arc<Mutex<HashMap<SessionId, HashSet<String>>>>,
     pub(super) wake_targets: Arc<Mutex<HashMap<String, SessionId>>>,
     pub(super) tombstones: Arc<Mutex<HashMap<(String, ProcessIncarnation), ProcessTombstone>>>,

@@ -492,6 +492,14 @@ async fn test_local_process_registry_pagination_satisfies_conformance() {
 }
 
 #[tokio::test]
+async fn test_local_change_feed_refuses_cursor_below_tombstone_compaction_horizon() {
+    crate::testing::conformance::process_change_cursor_below_tombstone_compaction_horizon_is_refused(
+        Arc::new(TestLocalProcessRegistry::default()),
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn test_local_process_prune_scopes_to_the_retention_filter() {
     crate::testing::conformance::process_prune_scoped_by_originator(Arc::new(
         TestLocalProcessRegistry::default(),

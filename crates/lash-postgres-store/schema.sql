@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 74.
+-- lash-postgres-store schema, component version 75.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -297,6 +297,7 @@ CREATE TABLE IF NOT EXISTS lash_attachment_condemnations (
 CREATE TABLE IF NOT EXISTS lash_process_change_clock (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
     current_seq BIGINT NOT NULL,
+    tombstone_compaction_horizon BIGINT NOT NULL DEFAULT 0,
     CHECK (singleton)
 );
 CREATE TABLE IF NOT EXISTS lash_processes (
@@ -310,6 +311,7 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     is_waiting BOOLEAN NOT NULL,
     created_at_ms BIGINT NOT NULL,
     updated_at_ms BIGINT NOT NULL,
+    last_event_sequence BIGINT NOT NULL,
     change_seq BIGINT NOT NULL,
     status TEXT NOT NULL,
     record_json TEXT NOT NULL,
@@ -592,11 +594,12 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 74)
+VALUES ('lash-postgres-store', 75)
 ON CONFLICT (component) DO NOTHING;
 
-INSERT INTO lash_process_change_clock (singleton, current_seq)
-VALUES (TRUE, 0)
+INSERT INTO lash_process_change_clock (
+    singleton, current_seq, tombstone_compaction_horizon
+) VALUES (TRUE, 0, 0)
 ON CONFLICT (singleton) DO NOTHING;
 
 INSERT INTO lash_await_event_meta (singleton, signing_secret)

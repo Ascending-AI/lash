@@ -1499,10 +1499,10 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 74, "Postgres component schema pin");
+    assert_eq!(current_version, 75, "Postgres component schema pin");
     assert_eq!(
         current_version - 1,
-        73,
+        74,
         "immediate predecessor adjacency pin"
     );
     let payload_hash_nullable: String = sqlx::query_scalar(
@@ -2227,6 +2227,20 @@ async fn postgres_process_registry_pagination_satisfies_conformance_when_configu
     reset(&storage).await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     lash_core::testing::conformance::process_registry_pagination(registry).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_change_feed_refuses_cursor_below_tombstone_compaction_horizon_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres prune-horizon conformance: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    lash_core::testing::conformance::process_change_cursor_below_tombstone_compaction_horizon_is_refused(
+        registry,
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
