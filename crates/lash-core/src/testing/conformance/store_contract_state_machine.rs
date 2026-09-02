@@ -2227,6 +2227,7 @@ fn runtime_wake_for(session_id: &str, process_id: &str, sequence: u64) -> Proces
         wake_id: format!("wake:{process_id}:{sequence}"),
         target_session_id: session_id.to_string(),
         process_id: process_id.to_string(),
+        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
         sequence,
         event_type: "property.wake".to_string(),
         event_invocation: RuntimeInvocation {

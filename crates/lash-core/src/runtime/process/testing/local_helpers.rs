@@ -15,15 +15,21 @@ impl TestLocalProcessRegistry {
     }
 
     pub(super) async fn process_miss(&self, process_id: &str) -> PluginError {
-        self.tombstones.lock().await.get(process_id).map_or_else(
-            || PluginError::ProcessUnknown {
-                process_id: process_id.to_string(),
-            },
-            |tombstone| PluginError::ProcessNoLongerRetained {
-                terminal_label: tombstone.terminal_label.clone(),
-                pruned_at_ms: tombstone.pruned_at_ms,
-            },
-        )
+        self.tombstones
+            .lock()
+            .await
+            .values()
+            .filter(|tombstone| tombstone.process_id == process_id)
+            .max_by_key(|tombstone| tombstone.incarnation)
+            .map_or_else(
+                || PluginError::ProcessUnknown {
+                    process_id: process_id.to_string(),
+                },
+                |tombstone| PluginError::ProcessNoLongerRetained {
+                    terminal_label: tombstone.terminal_label.clone(),
+                    pruned_at_ms: tombstone.pruned_at_ms,
+                },
+            )
     }
 
     pub(super) async fn insert_process(
@@ -49,12 +55,13 @@ impl TestLocalProcessRegistry {
         }
         let id = registration.id.clone();
         let wake_session_id = registration.wake_session_id.clone();
+        let change_seq = self.next_change_seq().await;
         let record = ProcessRecord::from_prepared_registration(
             registration,
             registration_fingerprint,
+            ProcessIncarnation::from_registration_sequence(change_seq),
             self.clock.timestamp_ms(),
         );
-        let change_seq = self.next_change_seq().await;
         managed.insert(
             id.clone(),
             ManagedProcessRecord {

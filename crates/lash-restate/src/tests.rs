@@ -2881,7 +2881,7 @@ async fn fig790_turn_event_pump_with_empty_channel_suspends_cleanly() {
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 struct Fig790ProcessAwaitRedriveInput {
-    process_id: String,
+    process_ref: lash_core::ProcessRef,
     cancel_on_suspend_wake: bool,
 }
 
@@ -2908,7 +2908,7 @@ impl Fig790ProcessAwaitRedrive for Fig790ProcessAwaitRedriveImpl {
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "fig790-process-await"),
                 RuntimeEffectCommand::process(ProcessCommand::Await {
-                    process_id: input.process_id,
+                    process_ref: input.process_ref,
                 }),
             ),
             registry_local_executor(Arc::clone(&self.registry)).with_process_turn_cancellation(
@@ -2999,7 +2999,10 @@ async fn fig790_pre_pr_suspended_process_await_redrives_to_terminal() {
     let pre_pr_call = fig790_pre_pr_suspended_process_call(process_id).await;
     let (endpoint, _registry) = fig790_process_await_endpoint(process_id).await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_id: process_id.to_string(),
+        process_ref: lash_core::ProcessRef::new(
+            process_id,
+            lash_core::ProcessIncarnation::from_registration_sequence(1),
+        ),
         cancel_on_suspend_wake: false,
     };
     let terminal = process_success(serde_json::json!({ "deployment_compat": "terminal" }));
@@ -3050,7 +3053,10 @@ async fn fig790_pre_pr_suspended_process_await_redrives_to_cancelled() {
     let pre_pr_call = fig790_pre_pr_suspended_process_call(process_id).await;
     let (endpoint, _registry) = fig790_process_await_endpoint(process_id).await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_id: process_id.to_string(),
+        process_ref: lash_core::ProcessRef::new(
+            process_id,
+            lash_core::ProcessIncarnation::from_registration_sequence(1),
+        ),
         cancel_on_suspend_wake: false,
     };
     let cancelled = fig790_cancelled_process_output(process_id);
@@ -3099,7 +3105,10 @@ async fn fig790_revoked_session_unwinds_turn_without_cancelling_process() {
     let process_id = "fig790-revoked-session";
     let (endpoint, registry) = fig790_process_await_endpoint(process_id).await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_id: process_id.to_string(),
+        process_ref: lash_core::ProcessRef::new(
+            process_id,
+            lash_core::ProcessIncarnation::from_registration_sequence(1),
+        ),
         cancel_on_suspend_wake: false,
     };
     let registration = serde_json::to_value(RestateDurableWaitRegistration::Revoked)
@@ -3193,7 +3202,10 @@ async fn fig790_registered_session_revocation_unwinds_without_cancelling_process
     let process_id = "fig790-registered-then-revoked";
     let (endpoint, registry) = fig790_process_await_endpoint(process_id).await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_id: process_id.to_string(),
+        process_ref: lash_core::ProcessRef::new(
+            process_id,
+            lash_core::ProcessIncarnation::from_registration_sequence(1),
+        ),
         cancel_on_suspend_wake: false,
     };
     let suspended = invoke_endpoint(
@@ -3264,7 +3276,10 @@ async fn fig790_process_terminal_wins_when_terminal_and_cancellation_are_both_re
     let process_id = "fig790-terminal-and-cancel-ready";
     let (endpoint, _registry) = fig790_process_await_endpoint(process_id).await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_id: process_id.to_string(),
+        process_ref: lash_core::ProcessRef::new(
+            process_id,
+            lash_core::ProcessIncarnation::from_registration_sequence(1),
+        ),
         cancel_on_suspend_wake: false,
     };
     let suspended = invoke_endpoint(
@@ -3338,7 +3353,10 @@ async fn fig790_cancel_during_suspension_of_a_process_turn_composes_with_fig779(
     let process_id = "fig790-cancel-during-suspension";
     let (endpoint, _registry) = fig790_process_await_endpoint(process_id).await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_id: process_id.to_string(),
+        process_ref: lash_core::ProcessRef::new(
+            process_id,
+            lash_core::ProcessIncarnation::from_registration_sequence(1),
+        ),
         cancel_on_suspend_wake: false,
     };
     let registered = serde_json::to_value(RestateDurableWaitRegistration::Registered)
@@ -3455,7 +3473,10 @@ async fn fig790_second_await_terminal_suspension_redrives_after_journaled_cancel
     let process_id = "fig790-second-await-redrive";
     let (endpoint, _registry) = fig790_process_await_endpoint(process_id).await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_id: process_id.to_string(),
+        process_ref: lash_core::ProcessRef::new(
+            process_id,
+            lash_core::ProcessIncarnation::from_registration_sequence(1),
+        ),
         cancel_on_suspend_wake: false,
     };
     let initial = invoke_endpoint(
@@ -7562,7 +7583,8 @@ async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_ou
 }
 
 #[tokio::test]
-async fn checked_in_v1_tool_intent_journal_refuses_the_v2_key_cutover_without_duplicate_effect() {
+async fn checked_in_v1_tool_intent_journal_refuses_the_process_reference_cutover_without_duplicate_effect()
+ {
     let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(include_bytes!(
         "../tests/fixtures/tool_intent_journals/v1-full-drain.json"
     ))
@@ -7589,12 +7611,8 @@ async fn checked_in_v1_tool_intent_journal_refuses_the_v2_key_cutover_without_du
         });
 
     assert!(
-        error.contains("tool_intent_replay_key_format_cutover"),
-        "the refusal must retain its typed format-cutover code: {error}"
-    );
-    assert!(
-        error.contains("tool-intent:v1:") && error.contains("tool-intent:v2:"),
-        "the refusal must name both sides of the key-family cutover: {error}"
+        error.contains("process_reference_format_cutover"),
+        "the refusal must retain its typed process-reference cutover code: {error}"
     );
     assert_eq!(
         registry
@@ -10133,8 +10151,8 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
                     ProcessCommand::Start { registration, .. } => {
                         registration.id == "process:subagent:fig1293-spawn-agent"
                     }
-                    ProcessCommand::Await { process_id } => {
-                        process_id == "process:subagent:fig1293-spawn-agent"
+                    ProcessCommand::Await { process_ref } => {
+                        process_ref.process_id == "process:subagent:fig1293-spawn-agent"
                     }
                     _ => false,
                 },
@@ -10194,6 +10212,7 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
                     "__handle__": "process",
                     "done": false,
                     "id": "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
+                    "incarnation": 3,
                     "process_id": "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
                     "running": true,
                     "status": "running",
@@ -11593,19 +11612,23 @@ async fn restate_controller_replays_process_start_await_command_sequence() {
             }),
         )
     };
-    let await_terminal = || {
-        RuntimeEffectEnvelope::new(
-            runtime_invocation(RuntimeEffectKind::Process, "process-await-replay"),
-            RuntimeEffectCommand::process(ProcessCommand::Await {
-                process_id: process_id.to_string(),
-            }),
-        )
-    };
     let terminal = process_success(serde_json::json!({ "done": true }));
 
     host.execute_effect(start(), registry_local_executor(registry.clone()))
         .await
         .expect("first start");
+    let process_ref = registry
+        .resolve_process_ref(process_id)
+        .await
+        .expect("resolve started process incarnation");
+    let await_terminal = || {
+        RuntimeEffectEnvelope::new(
+            runtime_invocation(RuntimeEffectKind::Process, "process-await-replay"),
+            RuntimeEffectCommand::process(ProcessCommand::Await {
+                process_ref: process_ref.clone(),
+            }),
+        )
+    };
     registry
         .complete_process(
             process_id,
@@ -11711,12 +11734,15 @@ async fn run_parent_shaped_start_await_suspend_flow(
     .await
     .expect("parent flow start child");
 
+    let process_ref = registry
+        .resolve_process_ref(process_id)
+        .await
+        .expect("resolve parent-flow child incarnation");
+
     host.execute_effect(
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "parent-flow-await-child"),
-            RuntimeEffectCommand::process(ProcessCommand::Await {
-                process_id: process_id.to_string(),
-            }),
+            RuntimeEffectCommand::process(ProcessCommand::Await { process_ref }),
         ),
         registry_local_executor(registry),
     )
@@ -11967,11 +11993,11 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
     let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
     let host = RestateRuntimeEffectController::new(context.clone()).with_trace_sink(sink_dyn);
     let registry = process_registry();
-    registry
+    let await_record = registry
         .register_process(external_registration("task-await-signal"))
         .await
         .expect("register");
-    registry
+    let signal_record = registry
         .register_process(
             external_registration("task-signal")
                 .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
@@ -11999,7 +12025,7 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "process-await"),
                 RuntimeEffectCommand::process(ProcessCommand::Await {
-                    process_id: "task-await-signal".to_string(),
+                    process_ref: lash_core::ProcessRef::from_record(&await_record),
                 }),
             ),
             registry_local_executor(registry.clone()),
@@ -12031,7 +12057,7 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "process-signal"),
                 RuntimeEffectCommand::process(ProcessCommand::Signal {
-                    process_id: "task-signal".to_string(),
+                    process_ref: lash_core::ProcessRef::from_record(&signal_record),
                     signal_name: "notify".to_string(),
                     signal_id: "notify".to_string(),
                     request: lash_core::ProcessEventAppendRequest::new(
@@ -12077,7 +12103,7 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "process-signal-2"),
                 RuntimeEffectCommand::process(ProcessCommand::Signal {
-                    process_id: "task-signal".to_string(),
+                    process_ref: lash_core::ProcessRef::from_record(&signal_record),
                     signal_name: "notify".to_string(),
                     signal_id: "notify-2".to_string(),
                     request: lash_core::ProcessEventAppendRequest::new(
@@ -12116,7 +12142,7 @@ async fn restate_controller_cancel_requests_call_workflow_cancel() {
     let host = RestateRuntimeEffectController::new(context.clone());
     let registry = process_registry();
     let registration = external_registration("task-cancel");
-    registry
+    let record = registry
         .register_process(registration)
         .await
         .expect("register");
@@ -12126,7 +12152,7 @@ async fn restate_controller_cancel_requests_call_workflow_cancel() {
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "background-cancel"),
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
-                    process_id: "task-cancel".to_string(),
+                    process_ref: lash_core::ProcessRef::from_record(&record),
                     reason: Some("user requested".to_string()),
                     replay: None,
                 }),
@@ -13579,7 +13605,7 @@ fn controller_handler_error_classification_keeps_lane_busy_retryable() {
 async fn terminal_child_failure_becomes_typed_process_output_for_the_awaiting_parent() {
     let registry = process_registry();
     let registration = rerunnable_registration("terminal-child-failure");
-    registry
+    let record = registry
         .register_process(registration.clone())
         .await
         .expect("register terminal-failure child");
@@ -13589,7 +13615,7 @@ async fn terminal_child_failure_becomes_typed_process_output_for_the_awaiting_pa
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "await-terminal-child-failure"),
             RuntimeEffectCommand::process(ProcessCommand::Await {
-                process_id: "terminal-child-failure".to_string(),
+                process_ref: lash_core::ProcessRef::from_record(&record),
             }),
         ),
         registry_local_executor(Arc::clone(&registry)),
@@ -13891,7 +13917,10 @@ fn runtime_handler_error_classification_makes_terminal_runtime_error_terminal() 
 
 #[test]
 fn boundary_with_armed_wait_is_declined_instead_of_terminalized() {
-    let mut record = lash_core::ProcessRecord::from_registration(rerunnable_registration("wait"));
+    let mut record = lash_core::ProcessRecord::from_registration(
+        rerunnable_registration("wait"),
+        lash_core::ProcessIncarnation::from_registration_sequence(1),
+    );
     record.wait = Some(lash_core::WaitState {
         since_ms: 1,
         kind: lash_core::WaitKind::Signal {
@@ -13991,12 +14020,14 @@ async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
         }]
     );
 
+    let process_ref = lash_core::ProcessRef::from_record(&record);
+
     let outcome = host
         .execute_effect(
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "background-smoke-cancel"),
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
-                    process_id: "task-smoke".to_string(),
+                    process_ref,
                     reason: Some("stop-smoke".to_string()),
                     replay: None,
                 }),
@@ -15066,6 +15097,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
         .expect("list reopened observations");
     assert_eq!(observed.len(), 1);
     assert_eq!(observed[0].id, "recover-tool");
+    let recovered_process_ref = lash_core::ProcessRef::from_record(&observed[0]);
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
             .await_terminal("recover-tool")
@@ -15119,7 +15151,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "recovery-cancel"),
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
-                    process_id: "recover-tool".to_string(),
+                    process_ref: recovered_process_ref,
                     reason: Some("post-rebuild cancel probe".to_string()),
                     replay: None,
                 }),
@@ -17918,10 +17950,10 @@ async fn restate_ingress_client_pins_effect_replay_with_idempotency_key() {
 
 async fn await_process_terminal_until_terminal(
     process_work: &dyn lash_core::ProcessWorkSubstrate,
-    process_id: &str,
+    process_ref: &lash_core::ProcessRef,
 ) -> Result<ProcessAwaitOutput, PluginError> {
     loop {
-        match process_work.await_process_terminal(process_id).await? {
+        match process_work.await_process_terminal(process_ref).await? {
             lash_core::ProcessTerminalWait::Terminal(output) => return Ok(output),
             lash_core::ProcessTerminalWait::Reattach => {}
         }
@@ -17935,10 +17967,15 @@ async fn restate_process_attach_calls_await_terminal_ingress() {
         body: r#"{"type":"success","value":"attached"}"#,
     }])
     .await;
-    let runner =
-        RestateProcessIngressRunner::new(base_url, process_registry(), continuation_store());
+    let registry = process_registry();
+    let record = registry
+        .register_process(external_registration("process-1"))
+        .await
+        .expect("register attach target");
+    let process_ref = lash_core::ProcessRef::from_record(&record);
+    let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
 
-    let output = await_process_terminal_until_terminal(&runner, "process-1")
+    let output = await_process_terminal_until_terminal(&runner, &process_ref)
         .await
         .expect("attach await");
     server.await.expect("capture server");
@@ -17956,7 +17993,7 @@ async fn cancel_during_successor_boundary_routes_root_and_await_terminal_resolve
         Some("retained-terminal".to_string())
     );
     let registry = process_registry();
-    registry
+    let record = registry
         .register_process(external_registration("retained-terminal"))
         .await
         .expect("register");
@@ -17973,9 +18010,12 @@ async fn cancel_during_successor_boundary_routes_root_and_await_terminal_resolve
         RestateProcessIngressRunner::new("http://127.0.0.1:1", registry, continuation_store());
 
     assert_eq!(
-        await_process_terminal_until_terminal(&runner, "retained-terminal")
-            .await
-            .expect("registry terminal bypasses expired workflow key"),
+        await_process_terminal_until_terminal(
+            &runner,
+            &lash_core::ProcessRef::from_record(&record),
+        )
+        .await
+        .expect("registry terminal bypasses expired workflow key"),
         expected
     );
 }
@@ -17987,10 +18027,15 @@ async fn restate_process_attach_maps_ingress_error_to_plugin_error() {
         body: r#"{"message":"boom"}"#,
     }])
     .await;
-    let runner =
-        RestateProcessIngressRunner::new(base_url, process_registry(), continuation_store());
+    let registry = process_registry();
+    let record = registry
+        .register_process(external_registration("process-1"))
+        .await
+        .expect("register attach error target");
+    let process_ref = lash_core::ProcessRef::from_record(&record);
+    let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
 
-    let err = await_process_terminal_until_terminal(&runner, "process-1")
+    let err = await_process_terminal_until_terminal(&runner, &process_ref)
         .await
         .expect_err("attach error");
     server.await.expect("capture server");
@@ -18006,14 +18051,20 @@ async fn restate_process_attach_maps_ingress_error_to_plugin_error() {
 #[tokio::test]
 async fn restate_process_attach_preserves_re_attach_signal_on_ceiling() {
     let (base_url, black_hole) = spawn_restate_http_black_hole().await;
+    let registry = process_registry();
+    let record = registry
+        .register_process(external_registration("process-1"))
+        .await
+        .expect("register attach ceiling target");
+    let process_ref = lash_core::ProcessRef::from_record(&record);
     let runner = RestateProcessIngressRunner::new(
         RestateConnection::with_config(base_url, short_restate_timeouts(100, 25)),
-        process_registry(),
+        registry,
         continuation_store(),
     );
 
     let wait = runner
-        .await_terminal_wait("process-1")
+        .await_terminal_wait(&process_ref)
         .await
         .expect("attach ceiling must request host re-attachment");
     black_hole.abort();
@@ -18030,15 +18081,21 @@ async fn restate_process_attach_reattaches_after_timeout_until_terminal() {
         body: r#"{"type":"success","value":{"reattached":true}}"#,
     })
     .await;
+    let registry = process_registry();
+    let record = registry
+        .register_process(external_registration("process-1"))
+        .await
+        .expect("register reattach target");
+    let process_ref = lash_core::ProcessRef::from_record(&record);
     let runner = RestateProcessIngressRunner::new(
         RestateConnection::with_config(base_url, short_restate_timeouts(100, 25)),
-        process_registry(),
+        registry,
         continuation_store(),
     );
 
     let output = loop {
         match runner
-            .await_process_terminal("process-1")
+            .await_process_terminal(&process_ref)
             .await
             .expect("process port re-enters after a bounded wait timeout")
         {
@@ -18139,14 +18196,14 @@ async fn restate_attach_before_run_resolves_with_delayed_workflow_output() {
     let driver = deployment.test_process_work();
     // A non-terminal process routes await_terminal through the ingress attach
     // rather than the registry short-circuit.
-    registry
+    let record = registry
         .register_process(external_registration("process-1"))
         .await
         .expect("register non-terminal process");
 
     let started = std::time::Instant::now();
     let output = driver
-        .await_process_terminal("process-1")
+        .await_process_terminal(&lash_core::ProcessRef::from_record(&record))
         .await
         .expect("attach await resolves with the eventual output");
     let lash_core::ProcessTerminalWait::Terminal(output) = output else {
@@ -18187,7 +18244,7 @@ async fn restate_driver_short_circuits_terminal_without_ingress_call() {
         RestateProcessDeployment::new(base_url, Arc::clone(&registry), continuation_store());
     let driver = deployment.test_process_work();
     let output = process_success(serde_json::json!("already-terminal"));
-    registry
+    let record = registry
         .register_process(external_registration("process-1"))
         .await
         .expect("register");
@@ -18201,7 +18258,7 @@ async fn restate_driver_short_circuits_terminal_without_ingress_call() {
         .expect("complete");
 
     let resolved = driver
-        .await_process_terminal("process-1")
+        .await_process_terminal(&lash_core::ProcessRef::from_record(&record))
         .await
         .expect("terminal short-circuit resolves without ingress");
     let lash_core::ProcessTerminalWait::Terminal(resolved) = resolved else {
@@ -18225,10 +18282,15 @@ async fn restate_process_attach_maps_malformed_ingress_body_to_plugin_error() {
         body: "this-is-not-valid-json",
     }])
     .await;
-    let runner =
-        RestateProcessIngressRunner::new(base_url, process_registry(), continuation_store());
+    let registry = process_registry();
+    let record = registry
+        .register_process(external_registration("process-1"))
+        .await
+        .expect("register malformed-body target");
+    let process_ref = lash_core::ProcessRef::from_record(&record);
+    let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
 
-    let err = await_process_terminal_until_terminal(&runner, "process-1")
+    let err = await_process_terminal_until_terminal(&runner, &process_ref)
         .await
         .expect_err("a malformed ingress body must surface as an error");
     server.await.expect("capture server");
@@ -18332,13 +18394,18 @@ async fn restate_process_attach_is_reentrant_across_sequential_awaits() {
         },
     ])
     .await;
-    let runner =
-        RestateProcessIngressRunner::new(base_url, process_registry(), continuation_store());
+    let registry = process_registry();
+    let record = registry
+        .register_process(external_registration("process-1"))
+        .await
+        .expect("register reentrant attach target");
+    let process_ref = lash_core::ProcessRef::from_record(&record);
+    let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
 
-    let first = await_process_terminal_until_terminal(&runner, "process-1")
+    let first = await_process_terminal_until_terminal(&runner, &process_ref)
         .await
         .expect("first attach await");
-    let second = await_process_terminal_until_terminal(&runner, "process-1")
+    let second = await_process_terminal_until_terminal(&runner, &process_ref)
         .await
         .expect("second attach await");
     server.await.expect("capture server");

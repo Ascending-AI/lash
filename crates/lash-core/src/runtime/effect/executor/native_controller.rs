@@ -311,19 +311,30 @@ impl NativeRuntimeEffectController {
         reason: Option<String>,
         replay: Option<crate::RuntimeReplay>,
     ) -> Result<ProcessRecord, PluginError> {
+        let process_ref = registry.resolve_process_ref(process_id).await?;
+        Self::request_process_cancel_ref(registry, &process_ref, reason, replay).await
+    }
+
+    pub(crate) async fn request_process_cancel_ref(
+        registry: Arc<dyn crate::ProcessRegistry>,
+        process_ref: &crate::ProcessRef,
+        reason: Option<String>,
+        replay: Option<crate::RuntimeReplay>,
+    ) -> Result<ProcessRecord, PluginError> {
         // Cancellation is a durable signal: the cancel event is what the
         // runner-run process observes, so the native controller appends it and
         // no longer tracks an in-process cancellation token.
-        let mut request =
-            crate::ProcessEventAppendRequest::cancel_requested(process_id, reason.clone());
+        let mut request = crate::ProcessEventAppendRequest::cancel_requested(
+            &process_ref.process_id,
+            reason.clone(),
+        );
         if let Some(replay) = replay {
             request = request.with_optional_replay(Some(replay));
         }
-        registry.append_event(process_id, request).await?;
-        registry
-            .get_process(process_id)
-            .await?
-            .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))
+        registry.append_event_ref(process_ref, request).await?;
+        registry.get_process_ref(process_ref).await?.ok_or_else(|| {
+            PluginError::Session(format!("unknown process `{}`", process_ref.process_id))
+        })
     }
 }
 

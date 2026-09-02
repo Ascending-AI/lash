@@ -144,6 +144,10 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
             "process_registry.rs",
             include_str!("../../src/postgres/process_registry.rs"),
         ),
+        (
+            "process_registry/prune_api.rs",
+            include_str!("../../src/postgres/process_registry/prune_api.rs"),
+        ),
         ("schema.sql", include_str!("../../schema.sql")),
     ];
     let mut live_sites = 0usize;

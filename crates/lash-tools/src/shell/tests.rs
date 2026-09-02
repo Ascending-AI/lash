@@ -204,8 +204,13 @@ mod tests {
                 .await?;
             let definition = record.identity.definition.clone();
             Ok(
-                lash_core::ProcessHandleView::new(record.id, record.identity, record.status)
-                    .with_definition(definition),
+                lash_core::ProcessHandleView::new(
+                    record.id,
+                    record.incarnation,
+                    record.identity,
+                    record.status,
+                )
+                .with_definition(definition),
             )
         }
 

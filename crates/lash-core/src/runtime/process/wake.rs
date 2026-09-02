@@ -1,7 +1,7 @@
 use crate::plugin::PluginError;
 
 use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWake, ProcessWakeDelivery};
-use super::model::{ProcessId, SessionId};
+use super::model::{ProcessId, ProcessIncarnation, SessionId};
 
 const PROCESS_WAKE_FAMILY_VERSION: u8 = 1;
 
@@ -85,6 +85,7 @@ pub fn process_wake_turn_cause(wake: &ProcessWakeDelivery) -> crate::TurnCause {
 pub struct ProcessWakeDeliveryRequest {
     pub target_session_id: SessionId,
     pub process_id: ProcessId,
+    pub process_incarnation: ProcessIncarnation,
     pub sequence: u64,
     pub event_type: String,
     pub event_invocation: crate::RuntimeInvocation,
@@ -100,6 +101,7 @@ pub fn process_wake_delivery(
     let ProcessWakeDeliveryRequest {
         target_session_id,
         process_id,
+        process_incarnation,
         sequence,
         event_type,
         event_invocation,
@@ -114,6 +116,7 @@ pub fn process_wake_delivery(
         wake_id,
         target_session_id,
         process_id,
+        process_incarnation,
         sequence,
         event_type,
         event_invocation,

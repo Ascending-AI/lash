@@ -91,7 +91,7 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
             ));
         };
         match *command {
-            crate::ProcessCommand::Await { process_id } => {
+            crate::ProcessCommand::Await { process_ref } => {
                 self.commands
                     .lock_recover()
                     .push(RecordedProcessCommand::Await);
@@ -115,25 +115,27 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
                     result: crate::ProcessEffectOutcome::Await {
                         output: Box::new(crate::ProcessAwaitOutput::from_tool_output(
                             crate::ToolCallOutput::success(
-                                serde_json::json!({ "process_id": process_id }),
+                                serde_json::json!({ "process_id": process_ref.process_id }),
                             ),
                         )),
                     },
                 })
             }
-            crate::ProcessCommand::Cancel { process_id, .. } => {
+            crate::ProcessCommand::Cancel { process_ref, .. } => {
                 self.commands
                     .lock_recover()
                     .push(RecordedProcessCommand::Cancel);
-                let record =
-                    crate::ProcessRecord::from_registration(crate::ProcessRegistration::new(
-                        process_id,
+                let record = crate::ProcessRecord::from_registration(
+                    crate::ProcessRegistration::new(
+                        process_ref.process_id,
                         crate::ProcessInput::External {
                             metadata: serde_json::Value::Null,
                         },
                         crate::RecoveryContract::ExternallyOwned,
                         crate::ProcessProvenance::host(),
-                    ));
+                    ),
+                    crate::ProcessIncarnation::from_registration_sequence(1),
+                );
                 Ok(crate::RuntimeEffectOutcome::Process {
                     result: crate::ProcessEffectOutcome::Cancel {
                         record: Box::new(record),
@@ -246,7 +248,10 @@ impl crate::ProcessService for EffectBackedProcessService {
             .execute(
                 scope,
                 crate::ProcessCommand::Await {
-                    process_id: process_id.to_string(),
+                    process_ref: crate::ProcessRef::new(
+                        process_id,
+                        crate::ProcessIncarnation::from_registration_sequence(1),
+                    ),
                 },
             )
             .await?
@@ -288,7 +293,10 @@ impl crate::ProcessService for EffectBackedProcessService {
             .execute(
                 scope,
                 crate::ProcessCommand::Cancel {
-                    process_id: process_id.to_string(),
+                    process_ref: crate::ProcessRef::new(
+                        process_id,
+                        crate::ProcessIncarnation::from_registration_sequence(1),
+                    ),
                     reason: Some("turn cancelled while awaiting process".to_string()),
                     replay: None,
                 },
@@ -443,9 +451,13 @@ async fn assert_cancelled_process_await_emits_one_await(already_cancelled: bool)
         cancellation.cancel();
     }
     let cancellation_for_call = cancellation.clone();
+    let process_ref = crate::ProcessRef::new(
+        "fig790-process",
+        crate::ProcessIncarnation::from_registration_sequence(1),
+    );
     let await_task = crate::task::spawn(async move {
         context
-            .await_process_with_cancellation("fig790-process", None, Some(cancellation_for_call))
+            .await_process_with_cancellation(&process_ref, None, Some(cancellation_for_call))
             .await
     });
 
@@ -497,7 +509,10 @@ async fn deleted_session_process_await_latches_typed_enclosing_effect_abort() {
     let reply = context
         .await_process_handle(
             "await-deleted-session-process".to_string(),
-            RuntimeExecutionContext::process_handle_json("fig790-process"),
+            RuntimeExecutionContext::process_handle_json(&crate::ProcessRef::new(
+                "fig790-process",
+                crate::ProcessIncarnation::from_registration_sequence(1),
+            )),
         )
         .await;
 

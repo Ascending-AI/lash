@@ -649,45 +649,52 @@ enum IngressSubmitOutcome {
 impl RestateProcessIngressRunner {
     pub(crate) async fn await_terminal_wait(
         &self,
-        process_id: &str,
+        process_ref: &lash_core::ProcessRef,
     ) -> Result<ProcessTerminalWait, PluginError> {
-        let record = self.registry.get_process(process_id).await?;
+        let record = self.registry.get_process_ref(process_ref).await?;
         if let Some(output) = record.as_ref().and_then(|record| record.outcome.as_ref()) {
             return Ok(ProcessTerminalWait::Terminal(output.clone()));
         }
-        self.ingress
+        let outcome = self
+            .ingress
             .call_workflow_json::<_, ProcessAwaitOutput>(
                 "LashProcessWorkflow",
-                process_id,
+                &process_ref.process_id,
                 "await_terminal",
                 &RestateProcessAwaitRequest {
-                    process_id: process_id.to_string(),
+                    process_id: process_ref.process_id.clone(),
                 },
             )
-            .await
-            .map(ProcessTerminalWait::Terminal)
-            .or_else(|err| {
-                if err.is_timeout() {
-                    Ok(ProcessTerminalWait::Reattach)
-                } else if err.is_service_unregistered() {
-                    // A shared handler, so the 404 has two readings and this
-                    // client cannot tell them apart: nothing binds the service,
-                    // or nothing is left of this process's invocation.
-                    Err(PluginError::Runtime(RuntimeError::new(
-                        RuntimeErrorCode::RestateProcessAwait,
-                        crate::ingress::unresolvable_call_target_message(
-                            "LashProcessWorkflow",
-                            "await_terminal",
-                            &err,
-                        ),
-                    )))
-                } else {
-                    Err(PluginError::Runtime(RuntimeError::new(
-                        RuntimeErrorCode::RestateProcessAwait,
-                        format!("ingress await for process `{process_id}` failed: {err}"),
-                    )))
-                }
-            })
+            .await;
+        let wait = outcome.map(ProcessTerminalWait::Terminal).or_else(|err| {
+            if err.is_timeout() {
+                Ok(ProcessTerminalWait::Reattach)
+            } else if err.is_service_unregistered() {
+                // A shared handler, so the 404 has two readings and this
+                // client cannot tell them apart: nothing binds the service,
+                // or nothing is left of this process's invocation.
+                Err(PluginError::Runtime(RuntimeError::new(
+                    RuntimeErrorCode::RestateProcessAwait,
+                    crate::ingress::unresolvable_call_target_message(
+                        "LashProcessWorkflow",
+                        "await_terminal",
+                        &err,
+                    ),
+                )))
+            } else {
+                Err(PluginError::Runtime(RuntimeError::new(
+                    RuntimeErrorCode::RestateProcessAwait,
+                    format!(
+                        "ingress await for process `{}` failed: {err}",
+                        process_ref.process_id
+                    ),
+                )))
+            }
+        })?;
+        if matches!(&wait, ProcessTerminalWait::Terminal(_)) {
+            self.registry.get_process_ref(process_ref).await?;
+        }
+        Ok(wait)
     }
 }
 
@@ -702,10 +709,10 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
 
     async fn await_process_terminal(
         &self,
-        process_id: &str,
+        process_ref: &lash_core::ProcessRef,
     ) -> Result<ProcessTerminalWait, PluginError> {
         lash_core::facade_support::release_process_execution_permit_while(
-            self.await_terminal_wait(process_id),
+            self.await_terminal_wait(process_ref),
         )
         .await
     }

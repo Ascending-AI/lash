@@ -937,6 +937,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         wake_id: "wake:source-lock".to_string(),
         target_session_id: session_id.to_string(),
         process_id: "wake-source-lock-process".to_string(),
+        process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "producer.wake".to_string(),
         event_invocation: lash_core::RuntimeInvocation::effect(
@@ -1498,7 +1499,12 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 73, "Postgres component schema pin");
+    assert_eq!(current_version, 74, "Postgres component schema pin");
+    assert_eq!(
+        current_version - 1,
+        73,
+        "immediate predecessor adjacency pin"
+    );
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
          WHERE table_schema = 'public'

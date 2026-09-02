@@ -596,6 +596,8 @@ fn project_recorded_intent_outcomes(
         return;
     }
 
+    project_started_process_handle(output, outcomes);
+
     let Some(sequence) = outcomes.iter().find_map(|outcome| match outcome {
         crate::ToolIntentExecutionOutcome::Executed {
             kind: crate::ToolIntentKind::SignalProcess,
@@ -641,6 +643,58 @@ fn project_recorded_intent_outcomes(
                 format!("malformed projected tool value: {error}"),
             ));
         }
+    }
+}
+
+fn project_started_process_handle(
+    output: &mut crate::ToolCallOutput,
+    outcomes: &[crate::ToolIntentExecutionOutcome],
+) {
+    let crate::ToolCallOutcome::Success(value) = &mut output.outcome else {
+        return;
+    };
+    let started_incarnation = |handle_id: &str| {
+        outcomes.iter().find_map(|outcome| match outcome {
+            crate::ToolIntentExecutionOutcome::Executed {
+                kind: crate::ToolIntentKind::StartProcess,
+                result,
+                ..
+            } if result.get("process_id").and_then(serde_json::Value::as_str)
+                == Some(handle_id) =>
+            {
+                result
+                    .get("incarnation")
+                    .and_then(serde_json::Value::as_u64)
+            }
+            _ => None,
+        })
+    };
+    match value {
+        crate::ToolValue::Object(object) if matches!(object.get("__handle__"), Some(crate::ToolValue::String(kind)) if kind == "process") =>
+        {
+            let incarnation = object.get("id").and_then(|id| match id {
+                crate::ToolValue::String(id) => started_incarnation(id),
+                _ => None,
+            });
+            if let Some(incarnation) = incarnation {
+                object.insert(
+                    "incarnation".to_string(),
+                    crate::ToolValue::Number(incarnation.into()),
+                );
+            }
+        }
+        crate::ToolValue::UntrustedJson(serde_json::Value::Object(object))
+            if object.get("__handle__").and_then(serde_json::Value::as_str) == Some("process") =>
+        {
+            let incarnation = object
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .and_then(started_incarnation);
+            if let Some(incarnation) = incarnation {
+                object.insert("incarnation".to_string(), serde_json::json!(incarnation));
+            }
+        }
+        _ => {}
     }
 }
 

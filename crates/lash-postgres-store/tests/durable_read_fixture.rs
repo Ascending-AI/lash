@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 73);
+    assert_eq!(PostgresStorage::schema_version(), 74);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -198,6 +198,24 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .await
         .expect("recreate the usage-delta table from the authoritative DDL");
     sqlx::raw_sql(
+        "DROP TABLE lash_process_parent_end_plans;
+         DROP TABLE lash_process_segment_handovers;
+         DROP TABLE lash_process_leases;
+         DROP TABLE lash_process_observers;
+         DROP TABLE lash_process_wake_deliveries;
+         DROP TABLE lash_process_events;
+         DROP TABLE lash_process_tombstones;
+         DROP TABLE lash_processes;
+         DROP TABLE lash_process_change_clock;",
+    )
+    .execute(&pool)
+    .await
+    .expect("discard pre-incarnation process registry rows");
+    sqlx::raw_sql(schema_process_registry_ddl())
+        .execute(&pool)
+        .await
+        .expect("recreate the process registry from the authoritative DDL");
+    sqlx::raw_sql(
         "ALTER TABLE lash_pending_turn_inputs
              DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_state,
              DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_state_ingress,
@@ -210,7 +228,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
                      OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
                          AND state IN ('deferred_next_turn', 'cancelled', 'completed')));
          UPDATE lash_schema_versions
-            SET version = 73
+            SET version = 74
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)
@@ -241,6 +259,18 @@ fn schema_table_ddl(table: &str) -> &'static str {
         .find(';')
         .unwrap_or_else(|| panic!("{table} DDL must end with a semicolon"));
     &statement[..=end]
+}
+
+fn schema_process_registry_ddl() -> &'static str {
+    let ddl = PostgresStorage::schema_ddl();
+    let start = ddl
+        .find("CREATE TABLE IF NOT EXISTS lash_process_change_clock (")
+        .expect("schema DDL must declare the process registry");
+    let end = ddl[start..]
+        .find("CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (")
+        .map(|offset| start + offset)
+        .expect("process registry DDL must precede tool-intent submissions");
+    &ddl[start..end]
 }
 
 async fn upgrade_prior_fixture_frame_identity(pool: &sqlx::PgPool) {

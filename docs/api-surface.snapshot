@@ -2076,6 +2076,8 @@ lash::persistence::PersistedSessionConfig::model
 lash::persistence::PersistedSessionConfig::new
 lash::persistence::PersistedSessionConfig::prompt
 lash::persistence::PersistedSessionConfig::provider_id
+lash::persistence::PersistedSessionConfig::subagent
+lash::persistence::PersistedSessionConfig::tool_access
 lash::persistence::PersistedSessionConfig::turn_budget
 lash::persistence::PersistedSessionRead
 lash::persistence::PersistedSessionRead::checkpoint
@@ -2336,6 +2338,7 @@ lash::persistence::RuntimeSessionState::append_active_conversation_messages
 lash::persistence::RuntimeSessionState::append_active_read_delta
 lash::persistence::RuntimeSessionState::apply_persisted_commit_result
 lash::persistence::RuntimeSessionState::apply_snapshot
+lash::persistence::RuntimeSessionState::authority
 lash::persistence::RuntimeSessionState::checkpoint_components
 lash::persistence::RuntimeSessionState::checkpoint_ref
 lash::persistence::RuntimeSessionState::current_agent_frame
@@ -3217,6 +3220,10 @@ lash::plugins::PluginError::ProcessAttemptsExhausted::max_attempts
 lash::plugins::PluginError::ProcessAttemptsExhausted::process_id
 lash::plugins::PluginError::ProcessCallerDeparted
 lash::plugins::PluginError::ProcessCallerDeparted::process_id
+lash::plugins::PluginError::ProcessIncarnationSuperseded
+lash::plugins::PluginError::ProcessIncarnationSuperseded::current_incarnation
+lash::plugins::PluginError::ProcessIncarnationSuperseded::process_id
+lash::plugins::PluginError::ProcessIncarnationSuperseded::requested_incarnation
 lash::plugins::PluginError::ProcessLeaseSuperseded
 lash::plugins::PluginError::ProcessLeaseSuperseded::process_id
 lash::plugins::PluginError::ProcessNoLongerRetained
@@ -4671,6 +4678,7 @@ lash::process::LashlangProcessInput::to_process_input
 lash::process::NativeProcessWork
 lash::process::NativeProcessWork::await_event
 lash::process::NativeProcessWork::await_terminal
+lash::process::NativeProcessWork::await_terminal_ref
 lash::process::NativeProcessWork::for_registry
 lash::process::NativeProcessWork::new
 lash::process::ObservedProcess
@@ -4685,6 +4693,7 @@ lash::process::ObservedProcess::external_ref
 lash::process::ObservedProcess::first_started
 lash::process::ObservedProcess::graph_key
 lash::process::ObservedProcess::identity
+lash::process::ObservedProcess::incarnation
 lash::process::ObservedProcess::input
 lash::process::ObservedProcess::kind
 lash::process::ObservedProcess::label
@@ -4736,6 +4745,7 @@ lash::process::ProcessAwaitOutput::into_tool_output
 lash::process::ProcessAwaitOutput::terminal_status
 lash::process::ProcessCancelReceipt
 lash::process::ProcessCancelReceipt::from_record
+lash::process::ProcessCancelReceipt::incarnation
 lash::process::ProcessCancelReceipt::process_id
 lash::process::ProcessCancelReceipt::status
 lash::process::ProcessChange
@@ -4779,6 +4789,7 @@ lash::process::ProcessEvent::invocation
 lash::process::ProcessEvent::occurred_at
 lash::process::ProcessEvent::payload
 lash::process::ProcessEvent::process_id
+lash::process::ProcessEvent::process_incarnation
 lash::process::ProcessEvent::semantics
 lash::process::ProcessEvent::sequence
 lash::process::ProcessEventAppendReceipt
@@ -4856,6 +4867,7 @@ lash::process::ProcessHandleView::definition
 lash::process::ProcessHandleView::from_record
 lash::process::ProcessHandleView::handle_type
 lash::process::ProcessHandleView::id
+lash::process::ProcessHandleView::incarnation
 lash::process::ProcessHandleView::kind
 lash::process::ProcessHandleView::label
 lash::process::ProcessHandleView::new
@@ -4871,6 +4883,9 @@ lash::process::ProcessIdentity::label
 lash::process::ProcessIdentity::new
 lash::process::ProcessIdentity::with_definition
 lash::process::ProcessIdentity::with_label
+lash::process::ProcessIncarnation
+lash::process::ProcessIncarnation::from_registration_sequence
+lash::process::ProcessIncarnation::registration_sequence
 lash::process::ProcessInput
 lash::process::ProcessInput::Engine
 lash::process::ProcessInput::Engine::kind
@@ -4976,6 +4991,7 @@ lash::process::ProcessRecord::from_registration
 lash::process::ProcessRecord::from_registration_with_clock
 lash::process::ProcessRecord::id
 lash::process::ProcessRecord::identity
+lash::process::ProcessRecord::incarnation
 lash::process::ProcessRecord::input
 lash::process::ProcessRecord::is_terminal
 lash::process::ProcessRecord::max_attempts
@@ -4986,6 +5002,11 @@ lash::process::ProcessRecord::registration_fingerprint
 lash::process::ProcessRecord::status
 lash::process::ProcessRecord::updated_at_ms
 lash::process::ProcessRecord::wait
+lash::process::ProcessRef
+lash::process::ProcessRef::from_record
+lash::process::ProcessRef::incarnation
+lash::process::ProcessRef::new
+lash::process::ProcessRef::process_id
 lash::process::ProcessRegistration
 lash::process::ProcessRegistration::disposition
 lash::process::ProcessRegistration::env_ref
@@ -5006,8 +5027,10 @@ lash::process::ProcessRegistration::with_process_provenance
 lash::process::ProcessRegistration::with_wake_session_id
 lash::process::ProcessRegistry
 lash::process::ProcessRegistry::add_observer
+lash::process::ProcessRegistry::add_observer_ref
 lash::process::ProcessRegistry::admit_tool_intent_submission
 lash::process::ProcessRegistry::append_event
+lash::process::ProcessRegistry::append_event_ref
 lash::process::ProcessRegistry::append_event_with_authority
 lash::process::ProcessRegistry::claim_pending_wake_deliveries
 lash::process::ProcessRegistry::claim_process_lease
@@ -5022,17 +5045,20 @@ lash::process::ProcessRegistry::complete_process_with_parent_end
 lash::process::ProcessRegistry::complete_tool_intent_parent_end
 lash::process::ProcessRegistry::complete_tool_intent_submission
 lash::process::ProcessRegistry::count_events_through
+lash::process::ProcessRegistry::count_events_through_ref
 lash::process::ProcessRegistry::count_non_terminal_processes
 lash::process::ProcessRegistry::defer_wake_delivery
 lash::process::ProcessRegistry::delete_session_process_state
 lash::process::ProcessRegistry::discard_wake_delivery
 lash::process::ProcessRegistry::events_after
+lash::process::ProcessRegistry::events_after_ref
 lash::process::ProcessRegistry::filter_tombstoned_process_ids
 lash::process::ProcessRegistry::filter_unregistered_process_ids
 lash::process::ProcessRegistry::get_pending_parent_end_plan
 lash::process::ProcessRegistry::get_process
 lash::process::ProcessRegistry::get_process_lease
 lash::process::ProcessRegistry::get_process_leases
+lash::process::ProcessRegistry::get_process_ref
 lash::process::ProcessRegistry::is_observer
 lash::process::ProcessRegistry::list_live_observed_by
 lash::process::ProcessRegistry::list_non_terminal_page
@@ -5056,6 +5082,7 @@ lash::process::ProcessRegistry::register_process_with_observers
 lash::process::ProcessRegistry::remove_observer
 lash::process::ProcessRegistry::renew_process_lease
 lash::process::ProcessRegistry::request_process_abandon
+lash::process::ProcessRegistry::resolve_process_ref
 lash::process::ProcessRegistry::retarget_subscription
 lash::process::ProcessRegistry::set_external_ref
 lash::process::ProcessRegistry::set_process_wait_with_authority
@@ -5071,6 +5098,7 @@ lash::process::ProcessRuntimeHost::queued_work
 lash::process::ProcessRuntimeHost::with_ports
 lash::process::ProcessService
 lash::process::ProcessService::await_process
+lash::process::ProcessService::await_process_ref
 lash::process::ProcessService::cancel
 lash::process::ProcessService::cancel_all_visible
 lash::process::ProcessService::cancel_recorded_intent
@@ -5089,6 +5117,7 @@ lash::process::ProcessService::start_from_recorded_intent
 lash::process::ProcessService::start_from_request
 lash::process::ProcessService::transfer
 lash::process::ProcessService::validate_visible
+lash::process::ProcessService::validate_visible_refs
 lash::process::ProcessSessionDeleteReport
 lash::process::ProcessSessionDeleteReport::cleared_subscription_count
 lash::process::ProcessSessionDeleteReport::discarded_wake_delivery_count
@@ -5177,6 +5206,7 @@ lash::process::ProcessTerminalWait::Reattach
 lash::process::ProcessTerminalWait::Terminal
 lash::process::ProcessTerminalWait::Terminal::0
 lash::process::ProcessTombstone
+lash::process::ProcessTombstone::incarnation
 lash::process::ProcessTombstone::process_id
 lash::process::ProcessTombstone::pruned_at_ms
 lash::process::ProcessTombstone::pruned_change_seq
@@ -5204,6 +5234,7 @@ lash::process::ProcessWakeDelivery::event_type
 lash::process::ProcessWakeDelivery::input
 lash::process::ProcessWakeDelivery::process_caused_by
 lash::process::ProcessWakeDelivery::process_id
+lash::process::ProcessWakeDelivery::process_incarnation
 lash::process::ProcessWakeDelivery::sequence
 lash::process::ProcessWakeDelivery::target_session_id
 lash::process::ProcessWakeDelivery::version
@@ -5223,7 +5254,7 @@ lash::process::ProcessWorkObserver::snapshot_for_session
 lash::process::ProcessWorkSnapshot
 lash::process::ProcessWorkSnapshot::items
 lash::process::ProcessWorkSnapshot::session_id
-lash::process::ProcessWorkSnapshot::visible_process_ids
+lash::process::ProcessWorkSnapshot::visible_processes
 lash::process::ProcessWorkSubstrate
 lash::process::ProcessWorkSubstrate::admit_pending_processes
 lash::process::ProcessWorkSubstrate::await_process_terminal
@@ -6207,6 +6238,7 @@ lash::remote::processes::RemoteObservedProcess::external_ref
 lash::remote::processes::RemoteObservedProcess::first_started
 lash::remote::processes::RemoteObservedProcess::graph_key
 lash::remote::processes::RemoteObservedProcess::identity
+lash::remote::processes::RemoteObservedProcess::incarnation
 lash::remote::processes::RemoteObservedProcess::input
 lash::remote::processes::RemoteObservedProcess::kind
 lash::remote::processes::RemoteObservedProcess::label
@@ -6233,6 +6265,7 @@ lash::remote::processes::RemotePersistProcessEnvRequest
 lash::remote::processes::RemotePersistProcessEnvRequest::env_spec
 lash::remote::processes::RemotePersistProcessEnvRequest::validate
 lash::remote::processes::RemoteProcessAwaitOutcome
+lash::remote::processes::RemoteProcessAwaitOutcome::incarnation
 lash::remote::processes::RemoteProcessAwaitOutcome::output
 lash::remote::processes::RemoteProcessAwaitOutcome::process_id
 lash::remote::processes::RemoteProcessAwaitOutcome::validate
@@ -6247,14 +6280,17 @@ lash::remote::processes::RemoteProcessAwaitOutput::Settled
 lash::remote::processes::RemoteProcessAwaitOutput::Settled::output
 lash::remote::processes::RemoteProcessAwaitOutput::validate
 lash::remote::processes::RemoteProcessAwaitRequest
+lash::remote::processes::RemoteProcessAwaitRequest::incarnation
 lash::remote::processes::RemoteProcessAwaitRequest::process_id
 lash::remote::processes::RemoteProcessAwaitRequest::validate
 lash::remote::processes::RemoteProcessCancelReceipt
+lash::remote::processes::RemoteProcessCancelReceipt::incarnation
 lash::remote::processes::RemoteProcessCancelReceipt::process_id
 lash::remote::processes::RemoteProcessCancelReceipt::record
 lash::remote::processes::RemoteProcessCancelReceipt::status
 lash::remote::processes::RemoteProcessCancelReceipt::validate
 lash::remote::processes::RemoteProcessCancelRequest
+lash::remote::processes::RemoteProcessCancelRequest::incarnation
 lash::remote::processes::RemoteProcessCancelRequest::process_id
 lash::remote::processes::RemoteProcessCancelRequest::reason
 lash::remote::processes::RemoteProcessCancelRequest::validate
@@ -6267,6 +6303,7 @@ lash::remote::processes::RemoteProcessEvent::invocation
 lash::remote::processes::RemoteProcessEvent::occurred_at_ms
 lash::remote::processes::RemoteProcessEvent::payload
 lash::remote::processes::RemoteProcessEvent::process_id
+lash::remote::processes::RemoteProcessEvent::process_incarnation
 lash::remote::processes::RemoteProcessEvent::semantics
 lash::remote::processes::RemoteProcessEvent::sequence
 lash::remote::processes::RemoteProcessEvent::validate
@@ -6285,10 +6322,12 @@ lash::remote::processes::RemoteProcessEventType::semantics
 lash::remote::processes::RemoteProcessEventType::validate
 lash::remote::processes::RemoteProcessEventsRequest
 lash::remote::processes::RemoteProcessEventsRequest::after_sequence
+lash::remote::processes::RemoteProcessEventsRequest::incarnation
 lash::remote::processes::RemoteProcessEventsRequest::process_id
 lash::remote::processes::RemoteProcessEventsRequest::validate
 lash::remote::processes::RemoteProcessEventsResponse
 lash::remote::processes::RemoteProcessEventsResponse::events
+lash::remote::processes::RemoteProcessEventsResponse::incarnation
 lash::remote::processes::RemoteProcessEventsResponse::process_id
 lash::remote::processes::RemoteProcessEventsResponse::validate
 lash::remote::processes::RemoteProcessExecutionEnvRef
@@ -6319,6 +6358,7 @@ lash::remote::processes::RemoteProcessHandleView
 lash::remote::processes::RemoteProcessHandleView::definition
 lash::remote::processes::RemoteProcessHandleView::handle_type
 lash::remote::processes::RemoteProcessHandleView::id
+lash::remote::processes::RemoteProcessHandleView::incarnation
 lash::remote::processes::RemoteProcessHandleView::kind
 lash::remote::processes::RemoteProcessHandleView::label
 lash::remote::processes::RemoteProcessHandleView::process_id
@@ -6376,10 +6416,15 @@ lash::remote::processes::RemoteProcessProvenance
 lash::remote::processes::RemoteProcessProvenance::caused_by
 lash::remote::processes::RemoteProcessProvenance::originator
 lash::remote::processes::RemoteProcessProvenance::validate
+lash::remote::processes::RemoteProcessRef
+lash::remote::processes::RemoteProcessRef::incarnation
+lash::remote::processes::RemoteProcessRef::process_id
+lash::remote::processes::RemoteProcessRef::validate
 lash::remote::processes::RemoteProcessSignalReceipt
 lash::remote::processes::RemoteProcessSignalReceipt::event
 lash::remote::processes::RemoteProcessSignalReceipt::validate
 lash::remote::processes::RemoteProcessSignalRequest
+lash::remote::processes::RemoteProcessSignalRequest::incarnation
 lash::remote::processes::RemoteProcessSignalRequest::payload
 lash::remote::processes::RemoteProcessSignalRequest::process_id
 lash::remote::processes::RemoteProcessSignalRequest::replay_key
@@ -6506,7 +6551,7 @@ lash::remote::processes::RemoteProcessWorkSnapshot
 lash::remote::processes::RemoteProcessWorkSnapshot::items
 lash::remote::processes::RemoteProcessWorkSnapshot::session_id
 lash::remote::processes::RemoteProcessWorkSnapshot::validate
-lash::remote::processes::RemoteProcessWorkSnapshot::visible_process_ids
+lash::remote::processes::RemoteProcessWorkSnapshot::visible_processes
 lash::remote::processes::RemoteRecoveryContract
 lash::remote::processes::RemoteRecoveryContract::ExternallyOwned
 lash::remote::processes::RemoteRecoveryContract::OwnerBound
@@ -7545,11 +7590,15 @@ lash::runtime::PersistentRuntimeServices::new
 lash::runtime::PersistentRuntimeServices::store
 lash::runtime::ProcessCommand
 lash::runtime::ProcessCommand::Await
-lash::runtime::ProcessCommand::Await::process_id
+lash::runtime::ProcessCommand::Await::process_ref
 lash::runtime::ProcessCommand::Cancel
-lash::runtime::ProcessCommand::Cancel::process_id
+lash::runtime::ProcessCommand::Cancel::process_ref
 lash::runtime::ProcessCommand::Cancel::reason
 lash::runtime::ProcessCommand::Cancel::replay
+lash::runtime::ProcessCommand::CancelRefused
+lash::runtime::ProcessCommand::CancelRefused::process_id
+lash::runtime::ProcessCommand::CancelRefused::reason
+lash::runtime::ProcessCommand::CancelRefused::refusal
 lash::runtime::ProcessCommand::DeleteSession
 lash::runtime::ProcessCommand::DeleteSession::session_id
 lash::runtime::ProcessCommand::EmitEvent
@@ -7564,7 +7613,7 @@ lash::runtime::ProcessCommand::ParentEnd::policy
 lash::runtime::ProcessCommand::ParentEnd::process_id
 lash::runtime::ProcessCommand::ParentEnd::reason
 lash::runtime::ProcessCommand::Signal
-lash::runtime::ProcessCommand::Signal::process_id
+lash::runtime::ProcessCommand::Signal::process_ref
 lash::runtime::ProcessCommand::Signal::request
 lash::runtime::ProcessCommand::Signal::signal_id
 lash::runtime::ProcessCommand::Signal::signal_name
@@ -7583,6 +7632,8 @@ lash::runtime::ProcessEffectOutcome::Await
 lash::runtime::ProcessEffectOutcome::Await::output
 lash::runtime::ProcessEffectOutcome::Cancel
 lash::runtime::ProcessEffectOutcome::Cancel::record
+lash::runtime::ProcessEffectOutcome::CancelRefused
+lash::runtime::ProcessEffectOutcome::CancelRefused::refusal
 lash::runtime::ProcessEffectOutcome::DeleteSession
 lash::runtime::ProcessEffectOutcome::DeleteSession::report
 lash::runtime::ProcessEffectOutcome::EmitEvent
@@ -7943,6 +7994,7 @@ lash::runtime::RuntimeErrorCode::PostgresEffectReplayLeaseLost
 lash::runtime::RuntimeErrorCode::PostgresEffectReplayMissing
 lash::runtime::RuntimeErrorCode::PostgresEffectReplayStore
 lash::runtime::RuntimeErrorCode::ProcessAlreadyTerminal
+lash::runtime::RuntimeErrorCode::ProcessIncarnationSuperseded
 lash::runtime::RuntimeErrorCode::ProcessNoLongerRetained
 lash::runtime::RuntimeErrorCode::ProcessNotVisible
 lash::runtime::RuntimeErrorCode::ProcessPanicked
@@ -8287,6 +8339,7 @@ lash::testing::TestClock::advance
 lash::testing::TestClock::new
 lash::testing::TestClock::set
 lash::testing::TestLocalProcessRegistry
+lash::testing::TestLocalProcessRegistry::insert_wake_delivery_for_testing
 lash::testing::TestLocalProcessRegistry::pause_next_append_after_outbox
 lash::testing::TestLocalProcessRegistry::pause_next_append_after_target_snapshot
 lash::testing::TestLocalProcessRegistry::pause_next_execution_write_after_validation

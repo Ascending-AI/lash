@@ -630,9 +630,11 @@ impl<'run> RuntimeExecutionContext<'run> {
             )
             .await
         {
-            Ok(_) => {
+            Ok(record) => {
                 self.record_started_process(&process_id);
-                crate::ToolInvocationReply::success(Self::process_handle_json(&process_id))
+                crate::ToolInvocationReply::success(Self::process_handle_json(
+                    &crate::ProcessRef::from_record(&record),
+                ))
             }
             Err(err) => crate::ToolInvocationReply::error(serde_json::json!(err.to_string())),
         }
@@ -759,9 +761,13 @@ impl<'run> RuntimeExecutionContext<'run> {
             .map(|context| Arc::clone(context.process_work.registry()))
             .ok_or_else(missing_process_execution_error)?;
         let event_type = crate::process_signal_event_type(signal_name)?;
+        let process_ref = registry
+            .resolve_process_ref(process_id)
+            .await
+            .map_err(crate::RuntimeEffectControllerError::from)?;
         let replay_key = format!("process:{process_id}:signal.{signal_name}:{signal_id}");
         let command = crate::ProcessCommand::Signal {
-            process_id: process_id.to_string(),
+            process_ref,
             signal_name: signal_name.to_string(),
             signal_id,
             request: crate::ProcessEventAppendRequest::new(event_type.clone(), payload)

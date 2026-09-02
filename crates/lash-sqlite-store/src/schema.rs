@@ -595,6 +595,7 @@ ALTER TABLE session_meta DROP COLUMN observer_intent_depth;
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
     process_id            TEXT PRIMARY KEY,
+    incarnation           INTEGER NOT NULL,
     registration_fingerprint     TEXT NOT NULL,
     originator_id         TEXT NOT NULL,
     wake_session_id       TEXT,
@@ -606,6 +607,7 @@ CREATE TABLE IF NOT EXISTS processes (
     change_seq            INTEGER NOT NULL,
     status                TEXT NOT NULL,
     record_json           TEXT NOT NULL,
+    UNIQUE(process_id, incarnation),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed'))
 );
 
@@ -640,12 +642,13 @@ VALUES (1, 0);
 
 CREATE TABLE IF NOT EXISTS process_events (
     process_id        TEXT NOT NULL,
+    process_incarnation INTEGER NOT NULL,
     sequence          INTEGER NOT NULL,
     event_type        TEXT NOT NULL,
     idempotency_key   TEXT,
     event_json        TEXT NOT NULL,
-    PRIMARY KEY (process_id, sequence),
-    FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
+    PRIMARY KEY (process_id, process_incarnation, sequence),
+    FOREIGN KEY (process_id, process_incarnation) REFERENCES processes(process_id, incarnation) ON DELETE CASCADE
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_process_events_key
@@ -662,6 +665,7 @@ CREATE TABLE IF NOT EXISTS wake_allocation_floors (
 CREATE TABLE IF NOT EXISTS process_wake_deliveries (
     delivery_id       TEXT PRIMARY KEY,
     process_id        TEXT NOT NULL,
+    process_incarnation INTEGER NOT NULL,
     target_session_id TEXT NOT NULL,
     sequence          INTEGER NOT NULL,
     state             TEXT NOT NULL,
@@ -674,7 +678,7 @@ CREATE TABLE IF NOT EXISTS process_wake_deliveries (
     delivery_json     TEXT NOT NULL,
     CONSTRAINT ck_process_wake_deliveries_state CHECK (state IN ('pending', 'enqueuing', 'enqueued', 'discarded')),
     CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound')),
-    FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
+    FOREIGN KEY (process_id, process_incarnation) REFERENCES processes(process_id, incarnation) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_wake_deliveries_pending
@@ -687,18 +691,21 @@ CREATE INDEX IF NOT EXISTS idx_wake_deliveries_group_sequence
 CREATE TABLE IF NOT EXISTS process_observers (
     session_id       TEXT NOT NULL,
     process_id       TEXT NOT NULL,
-    PRIMARY KEY (session_id, process_id),
-    FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
+    process_incarnation INTEGER NOT NULL,
+    PRIMARY KEY (session_id, process_id, process_incarnation),
+    FOREIGN KEY (process_id, process_incarnation) REFERENCES processes(process_id, incarnation) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_process_observers_process
     ON process_observers(process_id, session_id);
 
 CREATE TABLE IF NOT EXISTS process_tombstones (
-    process_id          TEXT PRIMARY KEY,
+    process_id          TEXT NOT NULL,
+    incarnation         INTEGER NOT NULL,
     terminal_label      TEXT NOT NULL,
     pruned_at_ms        INTEGER NOT NULL,
-    pruned_change_seq   INTEGER NOT NULL
+    pruned_change_seq   INTEGER NOT NULL,
+    PRIMARY KEY (process_id, incarnation)
 );
 CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
     ON process_tombstones(pruned_change_seq);
@@ -786,7 +793,10 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// Version 28 stores process-event time only in the event JSON as epoch
 /// milliseconds and removes the unread companion column. Existing process
 /// registries are rejected rather than migrated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 28;
+/// Version 29 makes the registration change sequence the structural process
+/// incarnation and carries it through events, observer edges, wake deliveries,
+/// and tombstones. Version-28 registries are rejected rather than rebound.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 29;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1349,14 +1359,14 @@ mod check_constraint_tests {
         process
             .execute_batch(PROCESS_SCHEMA)
             .expect("create process constraint fixture");
-        let process_columns = "process_id, registration_fingerprint, originator_id,
+        let process_columns = "process_id, incarnation, registration_fingerprint, originator_id,
             identity_kind, is_waiting, created_at_ms, updated_at_ms, change_seq,
             status, record_json";
         assert_check_rejects(
             &process,
             &format!(
                 "INSERT INTO processes ({process_columns}) VALUES
-                 ('bad-status', 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+                 ('bad-status', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
                   'paused', '{{}}')"
             ),
             "ck_processes_status",
@@ -1364,25 +1374,25 @@ mod check_constraint_tests {
         process
             .execute_batch(&format!(
                 "INSERT INTO processes ({process_columns}) VALUES
-                 ('wake-parent', 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+                 ('wake-parent', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
                   'running', '{{}}')"
             ))
             .expect("insert valid wake parent");
         assert_check_rejects(
             &process,
             "INSERT INTO process_wake_deliveries (
-                 delivery_id, process_id, target_session_id, sequence, state,
+                 delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
                  next_attempt_at_ms, expires_at_ms, delivery_json
-             ) VALUES ('bad-state', 'wake-parent', 'target', 1, 'claimed', 0, 1, '{}')",
+             ) VALUES ('bad-state', 'wake-parent', 1, 'target', 1, 'claimed', 0, 1, '{}')",
             "ck_process_wake_deliveries_state",
         );
         assert_check_rejects(
             &process,
             "INSERT INTO process_wake_deliveries (
-                 delivery_id, process_id, target_session_id, sequence, state,
+                 delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
                  next_attempt_at_ms, expires_at_ms, discard_reason, delivery_json
              ) VALUES (
-                 'bad-discard', 'wake-parent', 'target', 2, 'discarded', 0, 1,
+                 'bad-discard', 'wake-parent', 1, 'target', 2, 'discarded', 0, 1,
                  'unroutable', '{}'
              )",
             "ck_process_wake_deliveries_discard_reason",

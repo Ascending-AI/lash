@@ -803,7 +803,7 @@ impl RuntimeExecutionContext<'_> {
 
     pub(super) async fn await_process_with_cancellation(
         &self,
-        process_id: &str,
+        process_ref: &crate::ProcessRef,
         parent_invocation: Option<crate::RuntimeInvocation>,
         cancellation: Option<tokio_util::sync::CancellationToken>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
@@ -815,7 +815,7 @@ impl RuntimeExecutionContext<'_> {
         crate::runtime::release_process_execution_permit_while(
             self.dispatch
                 .processes
-                .await_process(process_id, process_scope),
+                .await_process_ref(process_ref, process_scope),
         )
         .await
     }

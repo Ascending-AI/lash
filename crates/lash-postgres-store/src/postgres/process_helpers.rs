@@ -45,7 +45,8 @@ pub(crate) async fn require_process_tx(
     }
     let row = sqlx::query(
         "SELECT terminal_label, pruned_at_ms
-         FROM lash_process_tombstones WHERE process_id = $1",
+         FROM lash_process_tombstones WHERE process_id = $1
+         ORDER BY incarnation DESC LIMIT 1",
     )
     .bind(process_id)
     .fetch_optional(&mut **tx)
@@ -62,6 +63,59 @@ pub(crate) async fn require_process_tx(
     Err(registry_transitions::absent_process_error(
         process_id, tombstone,
     ))
+}
+
+pub(crate) async fn require_process_ref_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    process_ref: &ProcessRef,
+) -> Result<ProcessRecord, PluginError> {
+    if let Some(record) = load_process_tx(tx, &process_ref.process_id).await? {
+        if record.incarnation == process_ref.incarnation {
+            return Ok(record);
+        }
+        return Err(registry_transitions::process_incarnation_superseded(
+            process_ref,
+            record.incarnation,
+        ));
+    }
+    let exact = sqlx::query(
+        "SELECT terminal_label, pruned_at_ms FROM lash_process_tombstones
+         WHERE process_id = $1 AND incarnation = $2",
+    )
+    .bind(&process_ref.process_id)
+    .bind(process_ref.incarnation.registration_sequence() as i64)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(plugin_sqlx_error)?;
+    if let Some(row) = exact {
+        return Err(registry_transitions::process_no_longer_retained(
+            registry_transitions::ProcessTombstoneStamp {
+                terminal_label: row.get(0),
+                pruned_at_ms: plugin_u64_from_sql("ProcessTombstone", "pruned_at_ms", row.get(1))?,
+            },
+        ));
+    }
+    let latest: Option<i64> = sqlx::query_scalar(
+        "SELECT incarnation FROM lash_process_tombstones
+         WHERE process_id = $1 ORDER BY incarnation DESC LIMIT 1",
+    )
+    .bind(&process_ref.process_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(plugin_sqlx_error)?;
+    match latest {
+        Some(incarnation) => Err(registry_transitions::process_incarnation_superseded(
+            process_ref,
+            ProcessIncarnation::from_registration_sequence(plugin_u64_from_sql(
+                "ProcessTombstone",
+                "incarnation",
+                incarnation,
+            )?),
+        )),
+        None => Err(registry_transitions::unknown_process(
+            &process_ref.process_id,
+        )),
+    }
 }
 
 pub(crate) fn decode_matching_process(
@@ -295,11 +349,12 @@ pub(crate) async fn apply_process_event_append_tx(
             }
             sqlx::query(
                 "INSERT INTO lash_process_events (
-                    process_id, sequence, event_type, idempotency_key, event_json
+                    process_id, process_incarnation, sequence, event_type, idempotency_key, event_json
                  )
-                 VALUES ($1, $2, $3, $4, $5)",
+                 VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(&process_id)
+            .bind(event.process_incarnation.registration_sequence() as i64)
             .bind(sequence as i64)
             .bind(event.event_type.as_str())
             .bind(event.invocation.replay_key())
@@ -384,14 +439,15 @@ pub(crate) async fn insert_wake_delivery_tx(
     let delivery = lash_core::WakeDelivery::pending(wake.clone(), config)?;
     sqlx::query(
         "INSERT INTO lash_process_wake_deliveries (
-            delivery_id, process_id, target_session_id, sequence, state,
+            delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
             claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
             discard_reason, delivery_json
-         ) VALUES ($1, $2, $3, $4, 'pending', NULL, 0, NULL, $5, $6, NULL, $7)
+         ) VALUES ($1, $2, $3, $4, $5, 'pending', NULL, 0, NULL, $6, $7, NULL, $8)
          ON CONFLICT (delivery_id) DO NOTHING",
     )
     .bind(&delivery.delivery_id)
     .bind(&delivery.wake.process_id)
+    .bind(delivery.wake.process_incarnation.registration_sequence() as i64)
     .bind(&delivery.wake.target_session_id)
     .bind(delivery.wake.sequence as i64)
     .bind(delivery.next_attempt_at_ms as i64)

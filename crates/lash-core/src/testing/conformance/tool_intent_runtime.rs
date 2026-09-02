@@ -60,7 +60,7 @@ pub async fn public_signal_intent_wakes_parked_process(
     let session_id = format!("{prefix}-session");
     let turn_id = format!("{prefix}-turn");
     let process_id = format!("{prefix}-target");
-    registry
+    let registered = registry
         .register_process_with_observers(
             crate::ProcessRegistration::new(
                 process_id.clone(),
@@ -79,17 +79,18 @@ pub async fn public_signal_intent_wakes_parked_process(
         )
         .await
         .expect("register public signal-intent target");
+    let process_ref = crate::ProcessRef::from_record(&registered);
     let terminal = crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
         serde_json::json!({"signal": "observed"}),
     ));
     let terminal_wait = {
         let process_work = Arc::clone(&process_work);
-        let process_id = process_id.clone();
+        let process_ref = process_ref.clone();
         crate::task::spawn(async move {
             let mut reattachments = 0_usize;
             loop {
                 match process_work
-                    .await_process_terminal(&process_id)
+                    .await_process_terminal(&process_ref)
                     .await
                     .expect(
                         "wait for the public signal-intent target through the process substrate",

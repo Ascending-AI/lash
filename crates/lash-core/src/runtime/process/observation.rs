@@ -7,8 +7,8 @@ use crate::plugin::PluginError;
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
     AbandonRequest, ProcessExecutionEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity,
-    ProcessInput, ProcessLease, ProcessListFilter, ProcessOriginator, ProcessRecord,
-    ProcessStarted, ProcessStatus, RecoveryContract, SessionScope, WaitState,
+    ProcessIncarnation, ProcessInput, ProcessLease, ProcessListFilter, ProcessOriginator,
+    ProcessRecord, ProcessStarted, ProcessStatus, RecoveryContract, SessionScope, WaitState,
 };
 use super::registry::ProcessRegistry;
 
@@ -20,7 +20,7 @@ pub struct ProcessWorkObserver {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessWorkSnapshot {
     pub session_id: String,
-    pub visible_process_ids: Vec<ProcessId>,
+    pub visible_processes: Vec<super::model::ProcessRef>,
     pub items: Vec<ObservedWorkItem>,
 }
 
@@ -35,6 +35,7 @@ pub struct ObservedWorkItem {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ObservedProcess {
     pub process_id: ProcessId,
+    pub incarnation: ProcessIncarnation,
     pub graph_key: String,
     pub kind: String,
     pub lifecycle: ProcessStatus,
@@ -112,13 +113,18 @@ impl ProcessWorkObserver {
                 .then_with(|| right.process.created_at_ms.cmp(&left.process.created_at_ms))
                 .then_with(|| left.process.process_id.cmp(&right.process.process_id))
         });
-        let visible_process_ids = items
+        let visible_processes = items
             .iter()
-            .map(|item| item.process.process_id.clone())
+            .map(|item| {
+                super::model::ProcessRef::new(
+                    item.process.process_id.clone(),
+                    item.process.incarnation,
+                )
+            })
             .collect();
         Ok(ProcessWorkSnapshot {
             session_id,
-            visible_process_ids,
+            visible_processes,
             items,
         })
     }
@@ -279,13 +285,15 @@ impl ObservedProcess {
         let kind = identity.kind.clone();
         let label = identity.label.clone().unwrap_or_else(|| kind.clone());
         let process_id = record.id;
+        let incarnation = record.incarnation;
         let (lease_holder, lease_expires_at_ms) = match lease {
             Some(lease) => (Some(lease.owner), Some(lease.expires_at_epoch_ms)),
             None => (None, None),
         };
         Self {
-            graph_key: format!("process:{process_id}"),
+            graph_key: format!("process:{process_id}:incarnation:{incarnation}"),
             process_id,
+            incarnation,
             kind,
             lifecycle,
             identity,
@@ -435,7 +443,13 @@ mod tests {
             .expect("snapshot");
 
         assert_eq!(snapshot.session_id, "visible");
-        assert_eq!(snapshot.visible_process_ids, vec!["visible-process"]);
+        assert_eq!(
+            snapshot.visible_processes,
+            vec![crate::ProcessRef::new(
+                "visible-process",
+                snapshot.items[0].process.incarnation,
+            )]
+        );
         assert_eq!(snapshot.items.len(), 1);
         assert_eq!(snapshot.items[0].events.len(), 2);
         assert!(
@@ -570,7 +584,14 @@ mod tests {
             .await
             .expect("snapshot");
 
-        assert_eq!(snapshot.visible_process_ids, vec!["older", "newer"]);
+        assert_eq!(
+            snapshot
+                .visible_processes
+                .iter()
+                .map(|process| process.process_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["older", "newer"]
+        );
     }
 
     #[tokio::test]

@@ -34,9 +34,10 @@ pub(super) async fn prune_process_rows_tx(
          ),
          inserted_tombstones AS (
              INSERT INTO lash_process_tombstones (
-                 process_id, terminal_label, pruned_at_ms, pruned_change_seq
+                 process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq
              )
              SELECT candidate.process_id,
+                    process.incarnation,
                     process.status,
                     $2,
                     clock.current_seq - (SELECT count(*) FROM candidates)

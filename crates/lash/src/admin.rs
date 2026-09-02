@@ -397,8 +397,12 @@ impl SessionAdmin {
                 "process work is unavailable in this runtime".to_string(),
             ))
         })?;
+        let process_ref = self
+            .process_registry()?
+            .resolve_process_ref(process_id)
+            .await?;
         loop {
-            match process_work.await_process_terminal(process_id).await? {
+            match process_work.await_process_terminal(&process_ref).await? {
                 lash_core::ProcessTerminalWait::Terminal(output) => return Ok(output),
                 lash_core::ProcessTerminalWait::Reattach => {}
             }

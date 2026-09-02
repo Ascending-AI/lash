@@ -24,16 +24,28 @@ impl TestLocalProcessRegistry {
                 .cmp(&right.0)
                 .then_with(|| left.1.sequence.cmp(&right.1.sequence))
         });
+        let process_incarnations = managed
+            .iter()
+            .map(|(process_id, entry)| {
+                (
+                    process_id.clone(),
+                    entry.record.incarnation.registration_sequence(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
         drop(managed);
 
         let observers = self.observers.lock().await;
         let mut observer_rows = observers
             .iter()
             .flat_map(|(session_id, process_ids)| {
-                process_ids
-                    .iter()
-                    .cloned()
-                    .map(|process_id| (session_id.clone(), process_id))
+                process_ids.iter().cloned().map(|process_id| {
+                    let incarnation = process_incarnations
+                        .get(&process_id)
+                        .expect("observer edge references a managed process")
+                        .to_owned();
+                    (session_id.clone(), process_id, incarnation)
+                })
             })
             .collect::<Vec<_>>();
         observer_rows.sort();

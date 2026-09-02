@@ -81,7 +81,9 @@ where
             let report = registry.delete_session_process_state(&session_id).await?;
             Ok(ProcessEffectOutcome::DeleteSession { report })
         }
-        ProcessCommand::Await { process_id } => {
+        ProcessCommand::Await { process_ref } => {
+            registry.get_process_ref(&process_ref).await?;
+            let process_id = process_ref.process_id;
             // Replay-determinism class inventory: PR #166 removed the process
             // start gate. FIG-788 always redrives the process runner, retains
             // ordinal handovers until terminal delivery resolves, and schedules
@@ -202,21 +204,26 @@ where
             })
         }
         ProcessCommand::Cancel {
-            process_id,
+            process_ref,
             reason,
             replay,
         } => {
-            let record = registry.get_process(&process_id).await?.ok_or_else(|| {
-                lash_core::runtime::registry_transitions::unknown_process(&process_id)
+            let record = registry.get_process_ref(&process_ref).await?.ok_or_else(|| {
+                lash_core::runtime::registry_transitions::unknown_process(&process_ref.process_id)
             })?;
-            let mut request =
-                lash_core::ProcessEventAppendRequest::cancel_requested(&process_id, reason.clone());
+            let mut request = lash_core::ProcessEventAppendRequest::cancel_requested(
+                &process_ref.process_id,
+                reason.clone(),
+            );
             if let Some(replay) = replay {
                 request = request.with_optional_replay(Some(replay));
             }
-            registry.append_event(&process_id, request).await?;
+            registry.append_event_ref(&process_ref, request).await?;
             context
-                .request_process_workflow_cancel(RestateProcessCancelRequest { process_id, reason })
+                .request_process_workflow_cancel(RestateProcessCancelRequest {
+                    process_id: process_ref.process_id,
+                    reason,
+                })
                 .await
                 .map_err(|err| {
                     PluginError::Runtime(RuntimeError::new(
@@ -227,6 +234,9 @@ where
             Ok(ProcessEffectOutcome::Cancel {
                 record: Box::new(record),
             })
+        }
+        ProcessCommand::CancelRefused { refusal, .. } => {
+            Ok(ProcessEffectOutcome::CancelRefused { refusal })
         }
         ProcessCommand::ParentEnd {
             identity,
@@ -292,22 +302,26 @@ where
             })
         }
         ProcessCommand::Signal {
-            process_id,
+            process_ref,
             signal_name,
             request,
             ..
         } => {
-            let result = registry.append_event(&process_id, request).await?;
+            let result = registry.append_event_ref(&process_ref, request).await?;
             let ordinal = signal_ordinal_for_event(
                 registry.as_ref(),
-                &process_id,
+                &process_ref,
                 result.event.event_type.as_str(),
                 result.event.sequence,
             )
             .await?;
             let key = restate_await_event_key(
-                &ExecutionScope::process(process_id.clone()),
-                AwaitEventWaitIdentity::process_signal(process_id.clone(), signal_name, ordinal),
+                &ExecutionScope::process(process_ref.process_id.clone()),
+                AwaitEventWaitIdentity::process_signal(
+                    process_ref.process_id,
+                    signal_name,
+                    ordinal,
+                ),
             )
             .map_err(PluginError::Runtime)?;
             context
@@ -342,4 +356,3 @@ where
     }
     outcome
 }
-

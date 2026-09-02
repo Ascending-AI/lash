@@ -57,13 +57,13 @@ fn attachment_gc_requires_explicit_root_set() {
 /// compile.
 ///
 /// Both fixtures assert an `E0046` whose `help:` line renders the async-trait
-/// desugared signature, and rustc abbreviates `std::pin::Pin` to `Pin` in the
-/// dependency-poorer no-default-features graph that the feature-boundary job
-/// compiles. The expectation is therefore pinned to the workspace graph, the
-/// same way the `rlm` fixtures above are.
+/// desugared signature. The `testing` feature changes rustc's choice of a
+/// qualified `Pin` path, so this diagnostic law is pinned to the isolated RLM
+/// feature-boundary graph; the workspace graph exercises the testing facade
+/// separately.
 #[test]
 fn store_seam_answers_have_no_defaults() {
-    if !cfg!(feature = "rlm") {
+    if !cfg!(feature = "rlm") || cfg!(feature = "testing") {
         return;
     }
     let t = trybuild::TestCases::new();

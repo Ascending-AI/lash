@@ -17,7 +17,10 @@ fn registration(id: &str) -> ProcessRegistration {
 
 #[test]
 fn process_event_old_system_time_json_is_rejected() {
-    let record = ProcessRecord::from_registration(registration("process-old-time-shape"));
+    let record = ProcessRecord::from_registration(
+        registration("process-old-time-shape"),
+        ProcessIncarnation::from_registration_sequence(1),
+    );
     let plan = prepare_process_event_append(
         &record,
         ProcessEventAppendRequest::new("process.caller_departed", serde_json::Value::Null)
@@ -157,6 +160,7 @@ fn wake_delivery(
         wake_id: "wake:abc".to_string(),
         target_session_id: "target".to_string(),
         process_id: "process-1".to_string(),
+        process_incarnation: ProcessIncarnation::from_registration_sequence(1),
         sequence: 7,
         event_type: event_type.clone(),
         event_invocation: crate::RuntimeInvocation {
@@ -231,7 +235,10 @@ fn selector_extracts_payload_pointer_const_template_and_present() {
 
 #[test]
 fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
-    let record = ProcessRecord::from_registration(registration("process-repair-waiting"));
+    let record = ProcessRecord::from_registration(
+        registration("process-repair-waiting"),
+        ProcessIncarnation::from_registration_sequence(1),
+    );
     let wait = WaitState {
         kind: WaitKind::Signal {
             name: "ready".to_string(),
@@ -307,7 +314,10 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
 
 #[test]
 fn replayed_terminal_event_repairs_non_terminal_status_projection() {
-    let record = ProcessRecord::from_registration(registration("process-repair"));
+    let record = ProcessRecord::from_registration(
+        registration("process-repair"),
+        ProcessIncarnation::from_registration_sequence(1),
+    );
     let request = ProcessEventAppendRequest::new(
         "process.completed",
         serde_json::json!({
@@ -358,7 +368,10 @@ fn replayed_generic_tail_repairs_projection_across_sender_floor_gap() {
             payload_schema: crate::LashSchema::any(),
             semantics: ProcessEventSemanticsSpec::default(),
         }]);
-    let mut stale_record = ProcessRecord::from_registration(registration);
+    let mut stale_record = ProcessRecord::from_registration(
+        registration,
+        ProcessIncarnation::from_registration_sequence(1),
+    );
     stale_record.updated_at_ms = 0;
     let request =
         ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 1}))
@@ -399,7 +412,10 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
             payload_schema: crate::LashSchema::any(),
             semantics: ProcessEventSemanticsSpec::default(),
         }]);
-    let record = ProcessRecord::from_registration(registration);
+    let record = ProcessRecord::from_registration(
+        registration,
+        ProcessIncarnation::from_registration_sequence(1),
+    );
     let first_request =
         ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 1}))
             .with_replay_key("process-generic-stale-replay:1");
@@ -497,6 +513,99 @@ fn wake_registration(id: &str, target_session_id: &str) -> ProcessRegistration {
                 ..ProcessEventSemanticsSpec::default()
             },
         }])
+}
+
+async fn register_successor(
+    registry: &TestLocalProcessRegistry,
+    process_id: &str,
+) -> (ProcessRef, ProcessRef) {
+    let old = registry
+        .register_process(registration(process_id))
+        .await
+        .expect("register old incarnation");
+    let old_ref = ProcessRef::from_record(&old);
+    registry
+        .complete_process(
+            process_id,
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!("old"),
+            )),
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete old incarnation");
+    registry
+        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune old incarnation");
+    let current = registry
+        .register_process(registration(process_id))
+        .await
+        .expect("register successor incarnation");
+    let current_ref = ProcessRef::from_record(&current);
+    assert_ne!(old_ref.incarnation, current_ref.incarnation);
+    (old_ref, current_ref)
+}
+
+#[tokio::test]
+async fn superseded_event_cursor_is_refused_instead_of_reading_the_successor() {
+    let registry = TestLocalProcessRegistry::default();
+    let (old_ref, _) = register_successor(&registry, "reused-event-cursor").await;
+
+    let result = registry.events_after_ref(&old_ref, 0).await;
+
+    assert!(
+        matches!(
+            result,
+            Err(crate::PluginError::ProcessIncarnationSuperseded { .. })
+        ),
+        "old event cursor must refuse the successor, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn superseded_observer_edge_is_refused_instead_of_attaching_to_the_successor() {
+    let registry = TestLocalProcessRegistry::default();
+    let (old_ref, _) = register_successor(&registry, "reused-observer-edge").await;
+
+    let result = registry
+        .add_observer_ref(
+            "stale-observer",
+            &old_ref,
+            ProcessObserverBy::host("stale-edge"),
+        )
+        .await;
+
+    assert!(
+        matches!(
+            result,
+            Err(crate::PluginError::ProcessIncarnationSuperseded { .. })
+        ),
+        "old observer edge must refuse the successor, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn reuse_retains_the_old_tombstone_beside_the_new_live_incarnation() {
+    let registry = TestLocalProcessRegistry::default();
+    let (old_ref, current_ref) = register_successor(&registry, "reused-change-feed").await;
+
+    let (changes, _) = registry
+        .processes_changed_since(ProcessChangeCursor::initial(), 100)
+        .await
+        .expect("read full process change feed");
+    assert!(changes.iter().any(|change| matches!(
+        change,
+        ProcessChange::Deleted { tombstone }
+            if tombstone.process_id == old_ref.process_id
+                && tombstone.incarnation == old_ref.incarnation
+    )));
+    assert!(changes.iter().any(|change| matches!(
+        change,
+        ProcessChange::Upsert { record }
+            if record.id == current_ref.process_id
+                && record.incarnation == current_ref.incarnation
+    )));
 }
 
 #[tokio::test]

@@ -31,11 +31,65 @@ use super::RecordedRuntimeEffect;
 /// exists to prevent. The two variants stay mutually exclusive because
 /// [`GaveUpEntry`] denies unknown fields and carries a field name no recorded
 /// effect has, while a recorded effect requires `envelope` and `outcome`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub(crate) enum JournaledEffectRecord {
     Recorded(RecordedRuntimeEffect),
     GaveUp(GaveUpEntry),
+}
+
+impl<'de> Deserialize<'de> for JournaledEffectRecord {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if journal_carries_pre_incarnation_process_command(&value) {
+            return Err(serde::de::Error::custom(
+                "process_reference_format_cutover: a pre-incarnation process command cannot be replayed because its bare process_id does not identify one process lifetime",
+            ));
+        }
+        if value
+            .as_object()
+            .is_some_and(|object| object.contains_key("envelope") && object.contains_key("outcome"))
+        {
+            return serde_json::from_value(value)
+                .map(Self::Recorded)
+                .map_err(serde::de::Error::custom);
+        }
+        serde_json::from_value(value)
+            .map(Self::GaveUp)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+fn journal_carries_pre_incarnation_process_command(value: &serde_json::Value) -> bool {
+    value
+        .get("envelope")
+        .and_then(|envelope| envelope.get("json"))
+        .and_then(serde_json::Value::as_str)
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+        .is_some_and(|envelope| contains_pre_incarnation_process_command(&envelope))
+}
+
+fn contains_pre_incarnation_process_command(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(object) => {
+            let is_pre_incarnation_command = matches!(
+                object.get("op").and_then(serde_json::Value::as_str),
+                Some("await" | "cancel" | "signal")
+            ) && object.contains_key("process_id")
+                && !object.contains_key("process_ref");
+            is_pre_incarnation_command
+                || object
+                    .values()
+                    .any(contains_pre_incarnation_process_command)
+        }
+        serde_json::Value::Array(values) => {
+            values.iter().any(contains_pre_incarnation_process_command)
+        }
+        _ => false,
+    }
 }
 
 /// The fixed-size poison entry: one budget, no envelope, no error text.

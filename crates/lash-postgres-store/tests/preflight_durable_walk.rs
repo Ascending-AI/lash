@@ -417,11 +417,11 @@ async fn seed_process(scratch: &ScratchSchema, process_id: &str, status: &str, w
     scratch
         .apply(&format!(
             "INSERT INTO lash_processes (
-                 process_id, registration_fingerprint, originator_id, wake_session_id,
+                 process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
                  identity_kind, identity_label, is_waiting, created_at_ms, updated_at_ms,
                  change_seq, status, record_json
              ) VALUES (
-                 '{process_id}', 'fingerprint', 'originator', {wake},
+                 '{process_id}', 1, 'fingerprint', 'originator', {wake},
                  'program', NULL, {waiting}, 0, 0, 1, '{status}',
                  '{{\"process\":\"{process_id}\"}}'
              )",
@@ -444,10 +444,10 @@ async fn seed_wake(scratch: &ScratchSchema, delivery_id: &str, process_id: &str,
     scratch
         .apply(&format!(
             "INSERT INTO lash_process_wake_deliveries (
-                 delivery_id, process_id, target_session_id, sequence, state,
+                 delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
                  next_attempt_at_ms, expires_at_ms, delivery_json
              ) VALUES (
-                 '{delivery_id}', '{process_id}', 'session-target', 1, '{state}',
+                 '{delivery_id}', '{process_id}', 1, 'session-target', 1, '{state}',
                  0, 0, '{{\"delivery\":\"{delivery_id}\"}}'
              )"
         ))

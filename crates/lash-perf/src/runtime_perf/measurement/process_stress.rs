@@ -408,6 +408,7 @@ fn process_list_tool_payload(entries: &[lash_core::ProcessRecord]) -> serde_json
             .map(|record| {
                 lash_core::ProcessHandleView::new(
                     record.id.clone(),
+                    record.incarnation,
                     record.identity.clone(),
                     record.status,
                 )

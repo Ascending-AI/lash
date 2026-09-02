@@ -184,16 +184,16 @@ mod asserted_process_examples {
         RemoteProcessExternalRef, RemoteProcessHandleView, RemoteProcessInput,
         RemoteProcessListFilter, RemoteProcessListResponse, RemoteProcessModelLimits,
         RemoteProcessModelSpec, RemoteProcessOriginator, RemoteProcessPluginOptions,
-        RemoteProcessProvenance, RemoteProcessSignalReceipt, RemoteProcessSignalRequest,
-        RemoteProcessStartReceipt, RemoteProcessStartRequest, RemoteProcessStarted,
-        RemoteProcessStatus, RemoteProcessStatusFilter, RemoteProcessTerminalSemantics,
-        RemoteProcessTerminalSpec, RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
-        RemoteProcessToolCancellation, RemoteProcessToolFailure, RemoteProcessToolFailureSource,
-        RemoteProcessToolRetryStatus, RemoteProcessValueSelector, RemoteProcessWaitKind,
-        RemoteProcessWaitState, RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem,
-        RemoteProcessWorkSnapshot, RemoteRecoveryContract, RemoteRuntimeEffectKind,
-        RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeScope, RemoteRuntimeSubject,
-        RemoteSessionScope, RemoteToolFailureClass, RemoteTurnBudget,
+        RemoteProcessProvenance, RemoteProcessRef, RemoteProcessSignalReceipt,
+        RemoteProcessSignalRequest, RemoteProcessStartReceipt, RemoteProcessStartRequest,
+        RemoteProcessStarted, RemoteProcessStatus, RemoteProcessStatusFilter,
+        RemoteProcessTerminalSemantics, RemoteProcessTerminalSpec, RemoteProcessToolCallOutcome,
+        RemoteProcessToolCallOutput, RemoteProcessToolCancellation, RemoteProcessToolFailure,
+        RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus, RemoteProcessValueSelector,
+        RemoteProcessWaitKind, RemoteProcessWaitState, RemoteProcessWake, RemoteProcessWakeSpec,
+        RemoteProcessWorkItem, RemoteProcessWorkSnapshot, RemoteRecoveryContract,
+        RemoteRuntimeEffectKind, RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeScope,
+        RemoteRuntimeSubject, RemoteSessionScope, RemoteToolFailureClass, RemoteTurnBudget,
     };
     use lash::remote::turn_result::RemoteCausalRef;
     use lash_remote_protocol::processes::{RemoteProcessIdentity, RemoteProcessRecord};
@@ -221,6 +221,7 @@ mod asserted_process_examples {
     fn running_record() -> RemoteProcessRecord {
         RemoteProcessRecord {
             process_id: "invoice-export".to_string(),
+            incarnation: 42,
             input: RemoteProcessInput::Engine {
                 kind: "report-export".to_string(),
                 payload: json!({ "format": "csv", "rows": 12 }),
@@ -338,6 +339,7 @@ mod asserted_process_examples {
     fn signal_event() -> RemoteProcessEvent {
         RemoteProcessEvent {
             process_id: "invoice-export".to_string(),
+            process_incarnation: 42,
             sequence: 3,
             event_type: "signal.approval".to_string(),
             payload: json!({ "approved": true, "reviewer": "ops@example.com" }),
@@ -355,7 +357,8 @@ mod asserted_process_examples {
     fn observed_process() -> RemoteObservedProcess {
         RemoteObservedProcess {
             process_id: "invoice-export".to_string(),
-            graph_key: "process:invoice-export".to_string(),
+            incarnation: 42,
+            graph_key: "process:invoice-export:incarnation:42".to_string(),
             kind: "report-export".to_string(),
             identity: process_identity(),
             lifecycle: RemoteProcessStatus::Waiting,
@@ -563,6 +566,7 @@ mod asserted_process_examples {
                 handle_type: "process".to_string(),
                 id: "invoice-export".to_string(),
                 process_id: "invoice-export".to_string(),
+                incarnation: 42,
                 kind: "report-export".to_string(),
                 label: Some("Nightly invoice export".to_string()),
                 definition: Some(RemoteProcessDefinitionIdentity {
@@ -612,7 +616,10 @@ mod asserted_process_examples {
         let snapshot = RemoteProcessWorkSnapshot {
             // Bare body: the standalone transport call supplies the envelope.
             session_id: "session-finance".to_string(),
-            visible_process_ids: vec!["invoice-export".to_string()],
+            visible_processes: vec![RemoteProcessRef {
+                process_id: "invoice-export".to_string(),
+                incarnation: 42,
+            }],
             items: vec![RemoteProcessWorkItem {
                 process: observed_process(),
                 events: vec![RemoteObservedProcessEvent {
@@ -637,8 +644,8 @@ mod asserted_process_examples {
         RemoteProcessWorkSnapshot::validate(&snapshot).expect("valid visible work snapshot");
         let snapshot_json = serde_json::to_value(&snapshot).expect("work snapshot serializes");
         assert_eq!(
-            snapshot_json["visible_process_ids"],
-            json!(["invoice-export"])
+            snapshot_json["visible_processes"],
+            json!([{"process_id": "invoice-export", "incarnation": 42}])
         );
         assert_eq!(
             snapshot_json["items"][0]["process"]["status_label"],
@@ -647,7 +654,10 @@ mod asserted_process_examples {
         assert_eq!(snapshot_json["items"][0]["process"]["terminal"], false);
         let projected_process = &snapshot_json["items"][0]["process"];
         assert_eq!(projected_process["process_id"], "invoice-export");
-        assert_eq!(projected_process["graph_key"], "process:invoice-export");
+        assert_eq!(
+            projected_process["graph_key"],
+            "process:invoice-export:incarnation:42"
+        );
         assert_eq!(projected_process["kind"], "report-export");
         assert_eq!(
             projected_process["identity"]["label"],
@@ -695,6 +705,7 @@ mod asserted_process_examples {
         let signal = RemoteProcessSignalRequest {
             // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
+            incarnation: 42,
             signal_name: "approval".to_string(),
             signal_id: "approval-1".to_string(),
             payload: json!({ "approved": true, "reviewer": "ops@example.com" }),
@@ -791,12 +802,14 @@ mod asserted_process_examples {
         let events_request = RemoteProcessEventsRequest {
             // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
+            incarnation: 42,
             after_sequence: 2,
         };
         RemoteProcessEventsRequest::validate(&events_request).expect("valid event-tail request");
         let events_response = RemoteProcessEventsResponse {
             // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
+            incarnation: 42,
             events: vec![signal_event()],
         };
         RemoteProcessEventsResponse::validate(&events_response).expect("valid event-tail response");
@@ -855,11 +868,13 @@ mod asserted_process_examples {
         let await_request = RemoteProcessAwaitRequest {
             // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
+            incarnation: 42,
         };
         RemoteProcessAwaitRequest::validate(&await_request).expect("valid process await request");
         let await_result = RemoteProcessAwaitOutcome {
             // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
+            incarnation: 42,
             output: RemoteProcessAwaitOutput::Settled {
                 output: RemoteProcessToolCallOutput {
                     outcome: RemoteProcessToolCallOutcome::Success(
@@ -880,12 +895,14 @@ mod asserted_process_examples {
         let cancel_request = RemoteProcessCancelRequest {
             // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
+            incarnation: 42,
             reason: Some("operator requested cancellation".to_string()),
         };
         RemoteProcessCancelRequest::validate(&cancel_request).expect("valid cancellation request");
         let cancel_result = RemoteProcessCancelReceipt {
             // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
+            incarnation: 42,
             status: RemoteProcessStatus::Cancelled,
             record: None,
         };
@@ -1575,24 +1592,5 @@ mod replay_provenance_examples {
 }
 
 #[cfg(test)]
-mod envelope_examples {
-    use lash::remote::turn_input::RemoteTurnInput;
-    use lash::remote::{Envelope, REMOTE_PROTOCOL_VERSION};
-
-    #[test]
-    fn shared_envelope_stamps_once_and_round_trips() {
-        let input = RemoteTurnInput::text("hello");
-        let wire = input.encode_json().expect("encode");
-        let value: serde_json::Value = serde_json::from_slice(&wire).expect("JSON");
-        assert_eq!(value["protocol_version"], REMOTE_PROTOCOL_VERSION);
-        let decoded = RemoteTurnInput::decode_json(&wire).expect("decode");
-        assert_eq!(decoded, input);
-
-        let envelope = Envelope::new(decoded);
-        assert_eq!(envelope.protocol_version(), REMOTE_PROTOCOL_VERSION);
-        let wire = envelope.encode_json().expect("encode envelope");
-        let decoded = Envelope::<RemoteTurnInput>::decode_json(&wire).expect("decode envelope");
-        assert_eq!(decoded.body, input);
-        assert_eq!(decoded.into_body(), input);
-    }
-}
+#[path = "remote_protocol/envelope_examples.rs"]
+mod envelope_examples;

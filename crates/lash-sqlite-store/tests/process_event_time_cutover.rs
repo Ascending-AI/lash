@@ -1,7 +1,7 @@
 use lash_sqlite_store::SqliteProcessRegistry;
 
-const RETAINED_PRIOR_PROCESS_GENERATION: i32 = 27;
-const CURRENT_PROCESS_GENERATION: i32 = 28;
+const RETAINED_PRIOR_PROCESS_GENERATION: i32 = 28;
+const CURRENT_PROCESS_GENERATION: i32 = 29;
 
 #[tokio::test]
 async fn sqlite_process_registry_refuses_the_immediate_predecessor_at_open() {
@@ -10,7 +10,7 @@ async fn sqlite_process_registry_refuses_the_immediate_predecessor_at_open() {
         CURRENT_PROCESS_GENERATION
     );
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("pre-epoch-ms-processes.db");
+    let path = dir.path().join("pre-incarnation-processes.db");
     drop(
         SqliteProcessRegistry::open(&path, dir.path().join("sessions"))
             .await

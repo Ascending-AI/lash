@@ -80,7 +80,13 @@ impl SessionObserverIntent {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionObservedProcessOutcome {
-    Observed,
+    Observed {
+        incarnation: crate::ProcessIncarnation,
+    },
+    IncarnationSuperseded {
+        requested_incarnation: crate::ProcessIncarnation,
+        current_incarnation: crate::ProcessIncarnation,
+    },
     NotFound,
     NoLongerRetained {
         terminal_label: String,

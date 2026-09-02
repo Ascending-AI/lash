@@ -646,6 +646,7 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
 
     let summary = lash_core::ProcessHandleView::new(
         "process:record",
+        lash_core::ProcessIncarnation::from_registration_sequence(1),
         lash_core::ProcessIdentity::new("external").with_label(Some("External".to_string())),
         lash_core::ProcessStatus::Completed,
     )
@@ -681,7 +682,10 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
 
     let snapshot = lash_core::facade_support::ProcessWorkSnapshot {
         session_id: "session-a".to_string(),
-        visible_process_ids: vec!["process:observed".to_string()],
+        visible_processes: vec![lash_core::ProcessRef::new(
+            "process:observed",
+            lash_core::ProcessIncarnation::from_registration_sequence(1),
+        )],
         items: vec![lash_core::facade_support::ObservedWorkItem {
             process: observed,
             events: vec![lash_core::facade_support::ObservedProcessEvent {
@@ -708,33 +712,44 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
 
     let cancel = RemoteProcessCancelReceipt::from(lash_core::ProcessCancelReceipt {
         process_id: "process:cancel".to_string(),
+        incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         status: lash_core::ProcessStatus::Cancelled,
     });
     let core = lash_core::ProcessCancelReceipt::try_from(cancel).expect("core cancel summary");
     assert_eq!(core.status, lash_core::ProcessStatus::Cancelled);
 
     let await_result = RemoteProcessAwaitOutcome::try_from((
-        "process:await".to_string(),
+        lash_core::ProcessRef::new(
+            "process:await",
+            lash_core::ProcessIncarnation::from_registration_sequence(1),
+        ),
         lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
             lash_core::ToolCancellation::runtime("stopped"),
         )),
     ))
     .expect("remote await result");
-    let (process_id, output) =
-        <(String, lash_core::ProcessAwaitOutput)>::try_from(await_result).expect("await result");
-    assert_eq!(process_id, "process:await");
+    let (process_ref, output) =
+        <(lash_core::ProcessRef, lash_core::ProcessAwaitOutput)>::try_from(await_result)
+            .expect("await result");
+    assert_eq!(process_ref.process_id, "process:await");
     assert!(matches!(
         output,
         lash_core::ProcessAwaitOutput::Settled { ref output }
             if matches!(output.outcome, lash_core::ToolCallOutcome::Cancelled(_))
     ));
 
-    let events_response =
-        RemoteProcessEventsResponse::try_from(("process:record".to_string(), vec![event]))
-            .expect("remote process events");
-    let (process_id, events) = <(String, Vec<lash_core::ProcessEvent>)>::try_from(events_response)
-        .expect("events response");
-    assert_eq!(process_id, "process:record");
+    let events_response = RemoteProcessEventsResponse::try_from((
+        lash_core::ProcessRef::new(
+            "process:record",
+            lash_core::ProcessIncarnation::from_registration_sequence(1),
+        ),
+        vec![event],
+    ))
+    .expect("remote process events");
+    let (process_ref, events) =
+        <(lash_core::ProcessRef, Vec<lash_core::ProcessEvent>)>::try_from(events_response)
+            .expect("events response");
+    assert_eq!(process_ref.process_id, "process:record");
     assert_eq!(events.len(), 1);
 }
 
@@ -808,17 +823,21 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
 
     let cancel = RemoteProcessCancelRequest {
         process_id: "process:cancel".to_string(),
+        incarnation: 1,
         reason: Some("host requested".to_string()),
     };
     cancel.validate().expect("valid cancel");
     let command = lash_core::ProcessCommand::from(cancel);
     assert!(matches!(
         command,
-        lash_core::ProcessCommand::Cancel { process_id, .. } if process_id == "process:cancel"
+        lash_core::ProcessCommand::Cancel { process_ref, .. }
+            if process_ref.process_id == "process:cancel"
+                && process_ref.incarnation.registration_sequence() == 1
     ));
 
     let signal = RemoteProcessSignalRequest {
         process_id: "process:signal".to_string(),
+        incarnation: 1,
         signal_name: "ready".to_string(),
         signal_id: "signal:1".to_string(),
         payload: serde_json::json!({ "ok": true }),
@@ -830,20 +849,24 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     let command = lash_core::ProcessCommand::try_from(signal).expect("signal command");
     assert!(matches!(
         command,
-        lash_core::ProcessCommand::Signal { process_id, signal_name, signal_id, .. }
-            if process_id == "process:signal"
+        lash_core::ProcessCommand::Signal { process_ref, signal_name, signal_id, .. }
+            if process_ref.process_id == "process:signal"
+                && process_ref.incarnation.registration_sequence() == 1
                 && signal_name == "ready"
                 && signal_id == "signal:1"
     ));
 
     let await_request = RemoteProcessAwaitRequest {
         process_id: "process:await".to_string(),
+        incarnation: 1,
     };
     await_request.validate().expect("valid await");
     let command = lash_core::ProcessCommand::from(await_request);
     assert!(matches!(
         command,
-        lash_core::ProcessCommand::Await { process_id } if process_id == "process:await"
+        lash_core::ProcessCommand::Await { process_ref }
+            if process_ref.process_id == "process:await"
+                && process_ref.incarnation.registration_sequence() == 1
     ));
 }
 
@@ -1989,7 +2012,10 @@ fn process_record(process_id: &str) -> lash_core::ProcessRecord {
     )
     .with_event_types([process_event_type()])
     .with_wake_session_id(Some("session-a".to_string()));
-    let mut record = lash_core::ProcessRecord::from_registration(registration);
+    let mut record = lash_core::ProcessRecord::from_registration(
+        registration,
+        lash_core::ProcessIncarnation::from_registration_sequence(1),
+    );
     record.external_ref = Some(lash_core::ProcessExternalRef {
         backend: "worker".to_string(),
         id: "external:1".to_string(),
@@ -2010,6 +2036,7 @@ fn process_record(process_id: &str) -> lash_core::ProcessRecord {
 fn process_event(process_id: &str) -> lash_core::ProcessEvent {
     lash_core::ProcessEvent {
         process_id: process_id.to_string(),
+        process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.completed".to_string(),
         payload: serde_json::json!({ "await_output": { "type": "success", "value": true } }),
@@ -2040,7 +2067,8 @@ fn process_event(process_id: &str) -> lash_core::ProcessEvent {
 fn observed_process() -> lash_core::facade_support::ObservedProcess {
     lash_core::facade_support::ObservedProcess {
         process_id: "process:observed".to_string(),
-        graph_key: "process:process:observed".to_string(),
+        incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
+        graph_key: "process:process:observed:incarnation:1".to_string(),
         kind: "external".to_string(),
         identity: lash_core::ProcessIdentity::new("external")
             .with_label(Some("External".to_string())),

@@ -3,7 +3,7 @@ use crate::plugin::PluginError;
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
     ProcessCancelReceipt, ProcessCompletionOutcome, ProcessHandleView, ProcessListMode,
-    ProcessRecord, ProcessRegistration, ProcessStartOptions, ProcessStartRequest,
+    ProcessRecord, ProcessRef, ProcessRegistration, ProcessStartOptions, ProcessStartRequest,
 };
 use super::op_scope::ProcessOpScope;
 
@@ -118,6 +118,14 @@ pub trait ProcessService: Send + Sync {
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessAwaitOutput, PluginError>;
 
+    async fn await_process_ref(
+        &self,
+        process_ref: &ProcessRef,
+        scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessAwaitOutput, PluginError> {
+        self.await_process(&process_ref.process_id, scope).await
+    }
+
     async fn list_visible(
         &self,
         session_id: &str,
@@ -131,6 +139,19 @@ pub trait ProcessService: Send + Sync {
         process_ids: &[String],
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError>;
+
+    async fn validate_visible_refs(
+        &self,
+        session_id: &str,
+        process_refs: &[ProcessRef],
+        scope: ProcessOpScope<'_>,
+    ) -> Result<(), PluginError> {
+        let process_ids = process_refs
+            .iter()
+            .map(|process_ref| process_ref.process_id.clone())
+            .collect::<Vec<_>>();
+        self.validate_visible(session_id, &process_ids, scope).await
+    }
 
     async fn cancel(
         &self,
@@ -416,8 +437,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        ProcessAwaitOutput, ProcessEvent, ProcessInput, ProcessProvenance, ProcessRegistration,
-        ProcessStatus,
+        ProcessAwaitOutput, ProcessEvent, ProcessIncarnation, ProcessInput, ProcessProvenance,
+        ProcessRegistration, ProcessStatus,
     };
 
     struct RecordingProcessService {
@@ -443,14 +464,17 @@ mod tests {
             self.visible_entries = process_ids
                 .into_iter()
                 .map(|process_id| {
-                    ProcessRecord::from_registration(ProcessRegistration::new(
-                        process_id,
-                        ProcessInput::External {
-                            metadata: json!(null),
-                        },
-                        crate::RecoveryContract::ExternallyOwned,
-                        ProcessProvenance::host(),
-                    ))
+                    ProcessRecord::from_registration(
+                        ProcessRegistration::new(
+                            process_id,
+                            ProcessInput::External {
+                                metadata: json!(null),
+                            },
+                            crate::RecoveryContract::ExternallyOwned,
+                            ProcessProvenance::host(),
+                        ),
+                        ProcessIncarnation::from_registration_sequence(1),
+                    )
                 })
                 .collect();
             self
@@ -619,14 +643,17 @@ mod tests {
     }
 
     fn cancelled_record(process_id: &str) -> ProcessRecord {
-        let mut record = ProcessRecord::from_registration(ProcessRegistration::new(
-            process_id,
-            ProcessInput::External {
-                metadata: json!(null),
-            },
-            crate::RecoveryContract::ExternallyOwned,
-            ProcessProvenance::host(),
-        ));
+        let mut record = ProcessRecord::from_registration(
+            ProcessRegistration::new(
+                process_id,
+                ProcessInput::External {
+                    metadata: json!(null),
+                },
+                crate::RecoveryContract::ExternallyOwned,
+                ProcessProvenance::host(),
+            ),
+            ProcessIncarnation::from_registration_sequence(1),
+        );
         record.status = ProcessStatus::Cancelled;
         record.outcome = Some(ProcessAwaitOutput::from_tool_output(
             crate::ToolCallOutput::cancelled(crate::ToolCancellation::runtime("cancelled")),

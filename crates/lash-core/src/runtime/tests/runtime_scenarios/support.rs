@@ -551,6 +551,7 @@ impl RuntimeQueueIngress {
                 wake_id: format!("wake:{session_id}:{text}"),
                 target_session_id: session_id.to_string(),
                 process_id: format!("process:{text}"),
+                process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
                 sequence: 1,
                 event_type: "process.wake".to_string(),
                 event_invocation: RuntimeInvocation {

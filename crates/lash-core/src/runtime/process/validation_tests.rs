@@ -3,8 +3,9 @@ use super::{
     process_registration_fingerprint, validate_process_registration,
 };
 use crate::{
-    AbandonRequest, ProcessEventAppendRequest, ProcessExternalRef, ProcessInput, ProcessProvenance,
-    ProcessRecord, ProcessRegistration, ProcessStarted, RecoveryContract, WaitKind, WaitState,
+    AbandonRequest, ProcessEventAppendRequest, ProcessExternalRef, ProcessIncarnation,
+    ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessStarted,
+    RecoveryContract, WaitKind, WaitState,
 };
 
 fn fixture_registration(id: &str) -> ProcessRegistration {
@@ -518,6 +519,7 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
     let encoded = serde_json::to_vec(&ProcessRecord::from_prepared_registration(
         registration,
         registration_fingerprint,
+        ProcessIncarnation::from_registration_sequence(1),
         1,
     ))
     .expect("encode pre-upgrade row");
@@ -596,7 +598,10 @@ fn host_signal_replay_key_with_fold_validation_suffix_does_not_panic() {
             payload_schema: crate::LashSchema::any(),
             semantics: crate::ProcessEventSemanticsSpec::default(),
         }]);
-    let record = ProcessRecord::from_registration(registration);
+    let record = ProcessRecord::from_registration(
+        registration,
+        ProcessIncarnation::from_registration_sequence(1),
+    );
     let request = ProcessEventAppendRequest::new(
         "signal.ready",
         serde_json::json!({

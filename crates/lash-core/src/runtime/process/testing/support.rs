@@ -55,6 +55,15 @@ impl Default for TestLocalProcessRegistry {
 }
 
 impl TestLocalProcessRegistry {
+    /// Inject a structurally valid wake row for delivery-driver boundary tests.
+    #[doc(hidden)]
+    pub async fn insert_wake_delivery_for_testing(
+        &self,
+        wake: crate::ProcessWakeDelivery,
+    ) -> Result<(), PluginError> {
+        self.insert_wake_delivery(Some(&wake)).await
+    }
+
     /// Inject worklist page-read errors after the given successful reads.
     #[doc(hidden)]
     pub async fn set_worklist_page_errors_for_testing(

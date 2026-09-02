@@ -101,6 +101,10 @@ impl From<PluginError> for RuntimeEffectControllerError {
             err @ PluginError::ProcessNoLongerRetained { .. } => {
                 Self::new(RuntimeErrorCode::ProcessNoLongerRetained, err.to_string())
             }
+            err @ PluginError::ProcessIncarnationSuperseded { .. } => Self::new(
+                RuntimeErrorCode::ProcessIncarnationSuperseded,
+                err.to_string(),
+            ),
             err => Self::new(RuntimeErrorCode::Plugin, err.to_string()),
         }
     }
@@ -158,6 +162,14 @@ mod tests {
                     pruned_at_ms: 42,
                 },
                 RuntimeErrorCode::ProcessNoLongerRetained,
+            ),
+            (
+                PluginError::ProcessIncarnationSuperseded {
+                    process_id: "reused".to_string(),
+                    requested_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+                    current_incarnation: crate::ProcessIncarnation::from_registration_sequence(2),
+                },
+                RuntimeErrorCode::ProcessIncarnationSuperseded,
             ),
         ] {
             assert_eq!(RuntimeEffectControllerError::from(error).code, expected);

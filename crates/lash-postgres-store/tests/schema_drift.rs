@@ -29,7 +29,7 @@ use harness::{
     ScratchSchema, assert_mutation_is_rejected, pool_with_search_path, postgres_server_version_num,
 };
 
-const RETAINED_PRIOR_COMPONENT_GENERATION: i32 = 72;
+const RETAINED_PRIOR_COMPONENT_GENERATION: i32 = 73;
 
 /// Append-request replay depends on one durable receipt per session and turn.
 /// Dropping the receipt table's primary key would silently admit conflicting
@@ -350,15 +350,17 @@ async fn a_same_column_set_guard_with_another_predicate_is_rejected() {
 async fn a_foreign_key_missing_its_cascade_is_rejected() {
     assert_mutation_is_rejected(
         "ALTER TABLE lash_process_events
-             DROP CONSTRAINT lash_process_events_process_id_fkey;
+             DROP CONSTRAINT lash_process_events_process_id_process_incarnation_fkey;
          ALTER TABLE lash_process_events
-             ADD CONSTRAINT lash_process_events_process_id_fkey
-             FOREIGN KEY (process_id) REFERENCES lash_processes(process_id)",
+             ADD CONSTRAINT lash_process_events_process_id_process_incarnation_fkey
+             FOREIGN KEY (process_id, process_incarnation)
+             REFERENCES lash_processes(process_id, incarnation)",
         &[
             "FOREIGN KEY DRIFT",
-            "lash_process_events: expected foreign key (process_id) references lash_processes \
-             (process_id) on delete cascade, found (process_id) references lash_processes \
-             (process_id) on delete no action",
+            "lash_process_events: expected foreign key (process_id, process_incarnation) \
+             references lash_processes (process_id, incarnation) on delete cascade, found \
+             (process_id, process_incarnation) references lash_processes (process_id, \
+             incarnation) on delete no action",
         ],
         |finding| {
             matches!(
@@ -538,10 +540,11 @@ async fn an_alter_built_equivalent_schema_opens_clean() {
                  ADD CONSTRAINT host_named_subscription_key
                  UNIQUE (owner_scope, subscription_key);
              ALTER TABLE lash_process_observers
-                 DROP CONSTRAINT lash_process_observers_process_id_fkey;
+                 DROP CONSTRAINT lash_process_observers_process_id_process_incarnation_fkey;
              ALTER TABLE lash_process_observers
                  ADD CONSTRAINT host_named_observer_process
-                 FOREIGN KEY (process_id) REFERENCES lash_processes(process_id)
+                 FOREIGN KEY (process_id, process_incarnation)
+                 REFERENCES lash_processes(process_id, incarnation)
                  ON DELETE CASCADE;
 
              -- The dedup guard rebuilt as a constraint-free index with another
@@ -977,7 +980,7 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
         let rendered = error.to_string();
         assert!(
             rendered.contains("has version 43")
-                && rendered.contains("expected 73")
+                && rendered.contains("expected 74")
                 && rendered.contains("does not relax it"),
             "the version boundary must dominate the incompatible queued-work shape: {rendered}"
         );
@@ -1075,7 +1078,7 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
             let rendered = error.to_string();
             assert!(
                 rendered.contains("has version 65")
-                    && rendered.contains("expected 73")
+                    && rendered.contains("expected 74")
                     && rendered.contains("no applicable migration")
                     && rendered.contains("does not relax it"),
                 "the destructive version boundary was lost for {provisioning:?} + {check:?}: \
@@ -1356,7 +1359,7 @@ async fn report_remedies_match_the_finding_class() {
 
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 73 WHERE component = 'lash-postgres-store';
+            "UPDATE lash_schema_versions SET version = 74 WHERE component = 'lash-postgres-store';
              DROP INDEX idx_lash_process_events_key",
         )
         .await;
@@ -1487,7 +1490,7 @@ async fn the_schema_gate_emits_its_decision_basis() {
         capture,
         &scratch.name,
         "allowed",
-        &["found_version=Some(73)", "finding_total=0"],
+        &["found_version=Some(74)", "finding_total=0"],
     );
 
     // (b) denied on shape.
@@ -1659,7 +1662,7 @@ fn assert_evidence_with_provisioning(
             )
         });
     let provisioning = format!("provisioning={provisioning}");
-    for field in ["component=lash-postgres-store", "expected_version=73"]
+    for field in ["component=lash-postgres-store", "expected_version=74"]
         .iter()
         .chain(std::iter::once(&provisioning.as_str()))
         .chain(extra)

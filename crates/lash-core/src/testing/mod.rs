@@ -887,6 +887,29 @@ struct EffectBackedProcessService {
 }
 
 impl EffectBackedProcessService {
+    async fn cancel_command(
+        &self,
+        process_id: &str,
+        reason: Option<String>,
+    ) -> Result<crate::ProcessCommand, crate::PluginError> {
+        match self.registry.resolve_process_ref(process_id).await {
+            Ok(process_ref) => Ok(crate::ProcessCommand::Cancel {
+                process_ref,
+                reason,
+                replay: None,
+            }),
+            Err(refusal @ crate::PluginError::ProcessUnknown { .. })
+            | Err(refusal @ crate::PluginError::ProcessNoLongerRetained { .. }) => {
+                Ok(crate::ProcessCommand::CancelRefused {
+                    process_id: process_id.to_string(),
+                    reason,
+                    refusal,
+                })
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     async fn execute(
         &self,
         scope: crate::ProcessOpScope<'_>,
@@ -1024,7 +1047,10 @@ impl crate::ProcessService for EffectBackedProcessService {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         let command = crate::ProcessCommand::Await {
-            process_id: process_id.to_string(),
+            process_ref: crate::ProcessRef::new(
+                process_id,
+                crate::ProcessIncarnation::from_registration_sequence(1),
+            ),
         };
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Await { output } => Ok(*output),
@@ -1073,13 +1099,12 @@ impl crate::ProcessService for EffectBackedProcessService {
         process_id: &str,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let command = crate::ProcessCommand::Cancel {
-            process_id: process_id.to_string(),
-            reason: Some("requested by tool".to_string()),
-            replay: None,
-        };
+        let command = self
+            .cancel_command(process_id, Some("requested by tool".to_string()))
+            .await?;
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
+            crate::ProcessEffectOutcome::CancelRefused { refusal } => Err(refusal),
             _ => unreachable!("cancel command returns cancel outcome"),
         }
     }
@@ -1091,13 +1116,10 @@ impl crate::ProcessService for EffectBackedProcessService {
         reason: Option<String>,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let command = crate::ProcessCommand::Cancel {
-            process_id: process_id.to_string(),
-            reason,
-            replay: None,
-        };
+        let command = self.cancel_command(process_id, reason).await?;
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
+            crate::ProcessEffectOutcome::CancelRefused { refusal } => Err(refusal),
             _ => unreachable!("cancel command returns cancel outcome"),
         }
     }
@@ -1141,8 +1163,9 @@ impl crate::ProcessService for EffectBackedProcessService {
         let request = crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
             format!("process:{process_id}:signal.{signal_name}:{signal_id}"),
         );
+        let process_ref = self.registry.resolve_process_ref(process_id).await?;
         let command = crate::ProcessCommand::Signal {
-            process_id: process_id.to_string(),
+            process_ref,
             signal_name,
             signal_id,
             request,

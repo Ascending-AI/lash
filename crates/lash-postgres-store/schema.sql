@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 73.
+-- lash-postgres-store schema, component version 74.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -301,6 +301,7 @@ CREATE TABLE IF NOT EXISTS lash_process_change_clock (
 );
 CREATE TABLE IF NOT EXISTS lash_processes (
     process_id TEXT PRIMARY KEY,
+    incarnation BIGINT NOT NULL,
     registration_fingerprint TEXT NOT NULL,
     originator_id TEXT NOT NULL,
     wake_session_id TEXT,
@@ -312,7 +313,8 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     change_seq BIGINT NOT NULL,
     status TEXT NOT NULL,
     record_json TEXT NOT NULL,
-    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed'))
+    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
+    UNIQUE(process_id, incarnation)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_processes_status
     ON lash_processes(status);
@@ -334,12 +336,14 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_wake_session
     ON lash_processes(wake_session_id);
 
 CREATE TABLE IF NOT EXISTS lash_process_events (
-    process_id TEXT NOT NULL REFERENCES lash_processes(process_id) ON DELETE CASCADE,
+    process_id TEXT NOT NULL,
+    process_incarnation BIGINT NOT NULL,
     sequence BIGINT NOT NULL,
     event_type TEXT NOT NULL,
     idempotency_key TEXT,
     event_json TEXT NOT NULL,
-    PRIMARY KEY (process_id, sequence)
+    PRIMARY KEY (process_id, process_incarnation, sequence),
+    FOREIGN KEY (process_id, process_incarnation) REFERENCES lash_processes(process_id, incarnation) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_process_events_key
     ON lash_process_events(process_id, idempotency_key)
@@ -354,7 +358,8 @@ CREATE TABLE IF NOT EXISTS lash_wake_allocation_floors (
 
 CREATE TABLE IF NOT EXISTS lash_process_wake_deliveries (
     delivery_id TEXT PRIMARY KEY,
-    process_id TEXT NOT NULL REFERENCES lash_processes(process_id) ON DELETE CASCADE,
+    process_id TEXT NOT NULL,
+    process_incarnation BIGINT NOT NULL,
     target_session_id TEXT NOT NULL,
     sequence BIGINT NOT NULL,
     state TEXT NOT NULL,
@@ -366,7 +371,8 @@ CREATE TABLE IF NOT EXISTS lash_process_wake_deliveries (
     discard_reason TEXT,
     delivery_json TEXT NOT NULL,
     CONSTRAINT ck_process_wake_deliveries_state CHECK (state IN ('pending', 'enqueuing', 'enqueued', 'discarded')),
-    CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound'))
+    CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound')),
+    FOREIGN KEY (process_id, process_incarnation) REFERENCES lash_processes(process_id, incarnation) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_lash_wake_deliveries_pending
     ON lash_process_wake_deliveries(
@@ -379,17 +385,21 @@ CREATE INDEX IF NOT EXISTS idx_lash_wake_deliveries_group_sequence
 
 CREATE TABLE IF NOT EXISTS lash_process_observers (
     session_id TEXT NOT NULL,
-    process_id TEXT NOT NULL REFERENCES lash_processes(process_id) ON DELETE CASCADE,
-    PRIMARY KEY (session_id, process_id)
+    process_id TEXT NOT NULL,
+    process_incarnation BIGINT NOT NULL,
+    PRIMARY KEY (session_id, process_id, process_incarnation),
+    FOREIGN KEY (process_id, process_incarnation) REFERENCES lash_processes(process_id, incarnation) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_lash_process_observers_process
     ON lash_process_observers(process_id, session_id);
 
 CREATE TABLE IF NOT EXISTS lash_process_tombstones (
-    process_id TEXT PRIMARY KEY,
+    process_id TEXT NOT NULL,
+    incarnation BIGINT NOT NULL,
     terminal_label TEXT NOT NULL,
     pruned_at_ms BIGINT NOT NULL,
-    pruned_change_seq BIGINT NOT NULL
+    pruned_change_seq BIGINT NOT NULL,
+    PRIMARY KEY (process_id, incarnation)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_process_tombstones_change
     ON lash_process_tombstones(pruned_change_seq);
@@ -582,7 +592,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 73)
+VALUES ('lash-postgres-store', 74)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (singleton, current_seq)

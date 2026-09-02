@@ -1,9 +1,9 @@
 use serde_json::json;
 
 use super::super::model::{
-    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessIdentity, ProcessInput,
-    ProcessListFilter, ProcessListMode, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    ProcessStatus, RecoveryContract, WaitKind, WaitState,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessIdentity, ProcessIncarnation,
+    ProcessInput, ProcessListFilter, ProcessListMode, ProcessProvenance, ProcessRecord,
+    ProcessRegistration, ProcessStatus, RecoveryContract, WaitKind, WaitState,
 };
 
 #[test]
@@ -119,6 +119,7 @@ fn engine_entry(
         .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
             "process-env:test:{process_id}"
         )))),
+        ProcessIncarnation::from_registration_sequence(1),
     );
     record.status = status;
     record

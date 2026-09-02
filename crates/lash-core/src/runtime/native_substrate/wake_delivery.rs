@@ -225,6 +225,12 @@ impl WakeDeliveryDriver {
         for delivery in registry.claim_pending_wake_deliveries(limit).await? {
             report.inspected += 1;
             let claim_token = delivery.claim_token()?;
+            registry
+                .get_process_ref(&crate::ProcessRef::new(
+                    delivery.wake.process_id.clone(),
+                    delivery.wake.process_incarnation,
+                ))
+                .await?;
             if clock.timestamp_ms() >= delivery.expires_at_ms {
                 Self::settle(
                     registry.as_ref(),
@@ -620,6 +626,85 @@ mod tests {
     use std::time::Duration;
 
     use super::{WakeDeliveryDriver, WorkCadencePolicy, retry_delay_ms};
+    use crate::ProcessRegistry;
+
+    fn external_registration(process_id: &str) -> crate::ProcessRegistration {
+        crate::ProcessRegistration::new(
+            process_id,
+            crate::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            crate::RecoveryContract::ExternallyOwned,
+            crate::ProcessProvenance::host(),
+        )
+    }
+
+    #[tokio::test]
+    async fn superseded_wake_delivery_is_refused_before_enqueueing_the_successor() {
+        let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+        let old = registry
+            .register_process(external_registration("reused-wake-delivery"))
+            .await
+            .expect("register old incarnation");
+        registry
+            .complete_process(
+                &old.id,
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                    serde_json::Value::Null,
+                )),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete old incarnation");
+        registry
+            .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
+            .await
+            .expect("prune old incarnation");
+        let current = registry
+            .register_process(external_registration("reused-wake-delivery"))
+            .await
+            .expect("register successor incarnation");
+        assert_ne!(old.incarnation, current.incarnation);
+        registry
+            .insert_wake_delivery_for_testing(crate::ProcessWakeDelivery {
+                version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+                wake_id: format!("wake:v1:blake3:{}", "a".repeat(64)),
+                target_session_id: "wake-target".to_string(),
+                process_id: old.id.clone(),
+                process_incarnation: old.incarnation,
+                sequence: 1,
+                event_type: "producer.wake".to_string(),
+                event_invocation: crate::RuntimeInvocation::effect(
+                    crate::RuntimeScope::new("wake-target"),
+                    "wake-effect",
+                    crate::RuntimeEffectKind::Process,
+                    "wake-replay",
+                ),
+                process_caused_by: None,
+                authority: crate::QueuedWorkAuthority::default(),
+                input: "wake".to_string(),
+                created_at_ms: 0,
+            })
+            .await
+            .expect("inject old-incarnation wake");
+
+        let result = WakeDeliveryDriver::drive_pending_once(
+            registry,
+            Arc::new(crate::InMemorySessionStoreFactory::new()),
+            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::SystemClock),
+            1,
+        )
+        .await;
+
+        assert!(
+            matches!(
+                result,
+                Err(crate::PluginError::ProcessIncarnationSuperseded { .. })
+            ),
+            "old wake delivery must refuse the successor, got {result:?}"
+        );
+    }
 
     #[test]
     fn terminal_constructor_rejects_zero_poll_delay_directly() {

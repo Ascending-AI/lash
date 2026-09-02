@@ -1036,6 +1036,7 @@ fn assert_fig1293_literal_outputs(
                     "__handle__": "process",
                     "done": false,
                     "id": "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
+                    "incarnation": 3,
                     "process_id": "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
                     "running": true,
                     "status": "running",
@@ -1362,8 +1363,8 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
                     lash_core::ProcessCommand::Start { registration, .. } => {
                         registration.id == "process:subagent:fig1293-spawn-agent"
                     }
-                    lash_core::ProcessCommand::Await { process_id } => {
-                        process_id == "process:subagent:fig1293-spawn-agent"
+                    lash_core::ProcessCommand::Await { process_ref } => {
+                        process_ref.process_id == "process:subagent:fig1293-spawn-agent"
                     }
                     _ => false,
                 },

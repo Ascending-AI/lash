@@ -16,10 +16,10 @@ use lash_sansio::sync::MutexExt;
 
 async fn await_process_terminal(
     process_work: &dyn lash_core::ProcessWorkSubstrate,
-    process_id: &str,
+    process_ref: &lash_core::ProcessRef,
 ) -> std::result::Result<lash_core::ProcessAwaitOutput, lash_core::PluginError> {
     loop {
-        match process_work.await_process_terminal(process_id).await? {
+        match process_work.await_process_terminal(process_ref).await? {
             lash_core::ProcessTerminalWait::Terminal(output) => return Ok(output),
             lash_core::ProcessTerminalWait::Reattach => continue,
         }
@@ -426,6 +426,12 @@ impl Processes {
 
     /// Waits for the identified process to produce terminal output.
     pub async fn await_output(&self, process_id: &str) -> Result<lash_core::ProcessAwaitOutput> {
+        let process_ref = self
+            .core
+            .process_registry()
+            .ok_or(EmbedError::MissingProcessRegistry)?
+            .resolve_process_ref(process_id)
+            .await?;
         let ports = self.core.substrate_slot.ports().await;
         let resolved = self
             .core
@@ -435,7 +441,7 @@ impl Processes {
         let process_work = resolved
             .process_work()
             .ok_or(EmbedError::MissingProcessRegistry)?;
-        Ok(await_process_terminal(process_work.as_ref(), process_id).await?)
+        Ok(await_process_terminal(process_work.as_ref(), &process_ref).await?)
     }
 
     /// Requests cancellation of the identified process.
@@ -444,8 +450,14 @@ impl Processes {
         process_id: &str,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessCancelReceipt> {
+        let process_ref = self
+            .core
+            .process_registry()
+            .ok_or(EmbedError::MissingProcessRegistry)?
+            .resolve_process_ref(process_id)
+            .await?;
         let command = lash_core::ProcessCommand::Cancel {
-            process_id: process_id.to_string(),
+            process_ref,
             reason: Some("requested by host".to_string()),
             replay: None,
         };
@@ -469,8 +481,14 @@ impl Processes {
         request: lash_core::ProcessEventAppendRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessEvent> {
+        let process_ref = self
+            .core
+            .process_registry()
+            .ok_or(EmbedError::MissingProcessRegistry)?
+            .resolve_process_ref(process_id)
+            .await?;
         let command = lash_core::ProcessCommand::Signal {
-            process_id: process_id.to_string(),
+            process_ref,
             signal_name: signal_name.into(),
             signal_id: signal_id.into(),
             request,
@@ -849,9 +867,9 @@ mod terminal_wait_tests {
 
         async fn await_process_terminal(
             &self,
-            process_id: &str,
+            process_ref: &lash_core::ProcessRef,
         ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
-            assert_eq!(process_id, "admin-reattach-process");
+            assert_eq!(process_ref.process_id, "admin-reattach-process");
             if self.waits.fetch_add(1, Ordering::SeqCst) == 0 {
                 Ok(lash_core::ProcessTerminalWait::Reattach)
             } else {
@@ -872,9 +890,15 @@ mod terminal_wait_tests {
             terminal: terminal.clone(),
         };
 
-        let output = await_process_terminal(&port, "admin-reattach-process")
-            .await
-            .expect("reattachment reaches terminal output");
+        let output = await_process_terminal(
+            &port,
+            &lash_core::ProcessRef::new(
+                "admin-reattach-process",
+                lash_core::ProcessIncarnation::from_registration_sequence(1),
+            ),
+        )
+        .await
+        .expect("reattachment reaches terminal output");
 
         assert_eq!(output, terminal);
         assert_eq!(port.waits.load(Ordering::SeqCst), 2);

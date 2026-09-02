@@ -14,10 +14,10 @@ use super::events::{
 };
 use super::model::{
     AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessCompletionOutcome,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessId, ProcessLease,
-    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter, ProcessObserverBy,
-    ProcessRecord, ProcessRegistration, ProcessSessionDeleteReport, ProcessStartOutcome,
-    ProcessStarted, ProcessTombstone, SessionId, WaitState,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessId, ProcessIncarnation,
+    ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter,
+    ProcessObserverBy, ProcessRecord, ProcessRegistration, ProcessSessionDeleteReport,
+    ProcessStartOutcome, ProcessStarted, ProcessTombstone, SessionId, WaitState,
 };
 use super::references::ProcessLiveReferenceView;
 use super::registry::{ProcessPruneReport, ProcessRegistry, ProjectionWatermark};
@@ -508,6 +508,26 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let Some(record) = managed.get_mut(process_id) else {
             return Err(self.process_miss(process_id).await);
         };
+        self.append_managed_event(record, request).await
+    }
+
+    async fn append_event_ref(
+        &self,
+        process_ref: &crate::ProcessRef,
+        request: ProcessEventAppendRequest,
+    ) -> Result<ProcessEventAppendReceipt, PluginError> {
+        super::validate_generic_process_event_append(&request)?;
+        let _transaction = self.transaction.lock().await;
+        let mut managed = self.managed.lock().await;
+        let Some(record) = managed.get_mut(&process_ref.process_id) else {
+            return Err(self.process_miss(&process_ref.process_id).await);
+        };
+        if record.record.incarnation != process_ref.incarnation {
+            return Err(super::registry_transitions::process_incarnation_superseded(
+                process_ref,
+                record.record.incarnation,
+            ));
+        }
         self.append_managed_event(record, request).await
     }
 
@@ -1051,7 +1071,13 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         if let Some(record) = self.managed.lock().await.get(process_id) {
             return Ok(Some(record.record.clone()));
         }
-        if self.tombstones.lock().await.contains_key(process_id) {
+        if self
+            .tombstones
+            .lock()
+            .await
+            .keys()
+            .any(|(tombstoned_process_id, _)| tombstoned_process_id == process_id)
+        {
             return Err(self.process_miss(process_id).await);
         }
         Ok(None)
@@ -1477,9 +1503,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                     pruned_events += record.events.len();
                     let pruned_change_seq = self.next_change_seq().await;
                     self.tombstones.lock().await.insert(
-                        id.clone(),
+                        (id.clone(), record.record.incarnation),
                         ProcessTombstone {
                             process_id: id.clone(),
+                            incarnation: record.record.incarnation,
                             terminal_label: record.record.status.label().to_string(),
                             pruned_at_ms,
                             pruned_change_seq,

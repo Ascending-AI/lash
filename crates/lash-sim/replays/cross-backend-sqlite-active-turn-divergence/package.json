@@ -4,8 +4,8 @@
   "status": "resolved_harness_replay_fidelity_gap_no_product_bug",
   "trace": "trace.json",
   "generator_version": "lash-sim.generated-workload.v9",
-  "source": "generated full-random (seed 14123330213291275571, seed_index 0) DST trace refreshed with canonical occurrence identity and structural process/event wake identity against generator lash-sim.generated-workload.v9 on 2026-08-05; refreshed with recorded non-empty tool-intent outcomes on 2026-08-12; regenerated on 2026-08-24 against rebased main with trace schema 9, typed exec diagnostics, and ordered provider-turn summaries; regenerated on 2026-08-27 for BLAKE3 identity formats; regenerated on 2026-09-01 for checked durable frame keys; surfaced by the broad/full generated lane",
-  "source_trace_sha256": "ec369bd9840ad95e63a4e8f63a869279bf752e5d62a43169cb592dc2e5962a2d",
+  "source": "generated full-random (seed 14123330213291275571, seed_index 0) DST trace refreshed with canonical occurrence identity and structural process/event wake identity against generator lash-sim.generated-workload.v9 on 2026-08-05; refreshed with recorded non-empty tool-intent outcomes on 2026-08-12; regenerated on 2026-08-24 against rebased main with trace schema 9, typed exec diagnostics, and ordered provider-turn summaries; regenerated on 2026-08-27 for BLAKE3 identity formats; regenerated on 2026-09-01 for checked durable frame keys; regenerated on 2026-09-02 for incarnation-pinned process wake format v2; surfaced by the broad/full generated lane",
+  "source_trace_sha256": "fb4940874c4a4d0509806cc927c2f37d2e5055ae350854ca4f2d439ea4704a27",
   "seed": 14123330213291275571,
   "profile": "full-random",
   "classification": "RESOLVED. This was NOT a product bug. The apparent cross-backend divergence was a replay-FIDELITY gap in the harness's own SQLite re-drive: the old `replay-sqlite` path re-drove a recorded trace in fixed order with provider exchanges GATED to the original in-memory run's recorded (exchange_index,event_index) counts, which deadlocked on the active-turn queued-input enqueue and could surface an extra exchange / empty output. Driven directly through one driver, the real in-memory store and the real lash-sqlite-store commit identical output.",
@@ -13,7 +13,7 @@
   "resolution": "The cross-backend lane no longer uses a separate gated, fixed-exchange-count serial re-drive. It now re-runs the SAME generated workload through the SAME scheduler-driven, concurrency-faithful driver (run_generated_workload / drive_generated_workload), parameterized only by the store factory (replay_workload_on_sqlite in crates/lash-sim/src/runner.rs), and compares the resulting abstract world summary against the in-memory reference. Apples-to-apples by construction, so the fidelity gap cannot exist.",
   "model_replay": "passes (this trace is model-replayable; the trace and abstract model were always sound)",
   "minimization": "not applied — the former fidelity gap was scale-dependent (it only appeared in the gated re-drive at broad/full scale). The full broad-lane trace is retained as the canonical fixture pinning the active-turn-cancel shape.",
-  "scale_evidence": "491 events, 4 sessions, each with an active-turn queued-input cancel followed by subsequent provider turns (e.g. session-003 has 7 provider outputs after its cancel).",
+  "scale_evidence": "528 events, 4 sessions, each with an active-turn queued-input cancel followed by subsequent provider turns (e.g. session-003 has 7 provider outputs after its cancel).",
   "replay_backends": [
     "model",
     "sqlite"

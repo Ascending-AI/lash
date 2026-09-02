@@ -322,6 +322,18 @@ const RETIRED_HARD_CUTOVER_COLUMNS: &[(&str, &str)] = &[("lash_graph_nodes", "se
 /// table and fails the build when they drift, so the drift is a local check
 /// rather than a container-gate surprise.
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
+    // Component 73 lacks structural process incarnation columns. This
+    // refusal-only row retains the immediate predecessor after component 74;
+    // no row targets component 74, so open never migrates an ambiguous name.
+    SchemaMigration {
+        from: 72,
+        to: 73,
+        source_missing_tables: &[],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &[],
+        statements: &[],
+    },
     // Component 72 stored epoch milliseconds twice for every process event:
     // once in event_json and once in an unread companion column. This
     // refusal-only row retains that immediate predecessor after component 73
@@ -329,7 +341,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // component 73.
     SchemaMigration {
         from: 71,
-        to: 72,
+        to: 73,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -342,7 +354,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary. It is inapplicable at open because no row targets component 73.
     SchemaMigration {
         from: 70,
-        to: 72,
+        to: 73,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -354,7 +366,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary.
     SchemaMigration {
         from: 69,
-        to: 72,
+        to: 73,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -366,7 +378,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // historical refusal-only row retains the older boundary.
     SchemaMigration {
         from: 68,
-        to: 72,
+        to: 73,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -378,7 +390,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // historical refusal-only row retains the older boundary.
     SchemaMigration {
         from: 67,
-        to: 72,
+        to: 73,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -389,7 +401,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // cutover. This historical refusal-only row retains the older boundary.
     SchemaMigration {
         from: 66,
-        to: 72,
+        to: 73,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -401,7 +413,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // generation explicit in the retained component-67 migration catalog.
     SchemaMigration {
         from: 65,
-        to: 72,
+        to: 73,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -410,7 +422,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 64,
-        to: 72,
+        to: 73,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -423,7 +435,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // any source-shape matching or migration DDL can advance its stamp.
     SchemaMigration {
         from: 63,
-        to: 72,
+        to: 73,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -435,7 +447,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 62,
-        to: 72,
+        to: 73,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -457,7 +469,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // classifies the source as divergent before source-shape preflight or DDL.
     SchemaMigration {
         from: 61,
-        to: 72,
+        to: 73,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -471,7 +483,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // It is refusal-only: it never runs DDL or advances the stamp.
     SchemaMigration {
         from: 60,
-        to: 72,
+        to: 73,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -480,7 +492,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 59,
-        to: 72,
+        to: 73,
         source_missing_tables: &[],
         source_missing_columns: &[("lash_session_meta", "session_state_version")],
         source_missing_guards: &[],
@@ -499,7 +511,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // second queue read.
     SchemaMigration {
         from: 58,
-        to: 72,
+        to: 73,
         source_missing_tables: &["lash_turn_cancel_requests"],
         source_missing_columns: &[("lash_session_meta", "session_state_version")],
         source_missing_guards: &[],
@@ -521,7 +533,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // the documented legacy sentinel values.
     SchemaMigration {
         from: 57,
-        to: 72,
+        to: 73,
         source_missing_tables: &["lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -552,7 +564,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // arm an indexed NOT EXISTS predicate.
     SchemaMigration {
         from: 56,
-        to: 72,
+        to: 73,
         source_missing_tables: &["lash_checkpoint_blob_refs", "lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -590,7 +602,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // occurrence reclaim eligibility from 56 and checkpoint edges from 57.
     SchemaMigration {
         from: 55,
-        to: 72,
+        to: 73,
         source_missing_tables: &["lash_checkpoint_blob_refs", "lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -635,7 +647,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // source shape a 54 store must present is the current one.
     SchemaMigration {
         from: 54,
-        to: 72,
+        to: 73,
         source_missing_tables: &["lash_checkpoint_blob_refs", "lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -681,7 +693,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // `lash_runtime_effect_replay`) and the 55 drain index over them.
     SchemaMigration {
         from: 53,
-        to: 72,
+        to: 73,
         source_missing_tables: &[
             "lash_runtime_effect_group",
             "lash_checkpoint_blob_refs",
@@ -740,7 +752,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 52,
-        to: 72,
+        to: 73,
         source_missing_tables: &[
             "lash_runtime_effect_group",
             "lash_checkpoint_blob_refs",
@@ -803,7 +815,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 51,
-        to: 72,
+        to: 73,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_runtime_effect_group",
@@ -871,7 +883,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // creation-only migration that lands every later generation at once.
     SchemaMigration {
         from: 50,
-        to: 72,
+        to: 73,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_process_parent_end_plans",

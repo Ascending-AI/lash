@@ -116,7 +116,9 @@ pub use usage_activity::*;
 // Bumped to 51: trigger occurrences carry typed fired or dropped
 // outcomes. Exact-version negotiation prevents older peers from erasing the
 // audit fate of a non-fired occurrence.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 51;
+// Bumped to 52: durable process references carry their registration
+// incarnation, refusing version-51 peers that could rebind to a reused ID.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 52;
 
 /// One versioned remote-protocol message.
 ///

@@ -1,9 +1,9 @@
 use serde_json::json;
 
 use super::model::{
-    ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessListFilter, ProcessListMode,
-    ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessStatus,
-    RecoveryContract, SessionScope,
+    ProcessExecutionEnvRef, ProcessIdentity, ProcessIncarnation, ProcessInput, ProcessListFilter,
+    ProcessListMode, ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration,
+    ProcessStatus, RecoveryContract, SessionScope,
 };
 
 fn record(process_id: &str, label: &str, created_at_ms: u64) -> ProcessRecord {
@@ -21,6 +21,7 @@ fn record(process_id: &str, label: &str, created_at_ms: u64) -> ProcessRecord {
         .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
             "process-env:test:{process_id}"
         )))),
+        ProcessIncarnation::from_registration_sequence(1),
     );
     record.created_at_ms = created_at_ms;
     record

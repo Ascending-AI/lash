@@ -719,6 +719,9 @@ impl ToolIntentIngress {
             lash_core::ProcessEffectOutcome::Cancel { .. } => {
                 lash_core::ToolIntentKind::CancelProcess
             }
+            lash_core::ProcessEffectOutcome::CancelRefused { .. } => {
+                lash_core::ToolIntentKind::CancelProcess
+            }
             lash_core::ProcessEffectOutcome::EmitEvent { .. } => {
                 lash_core::ToolIntentKind::EmitProcessEvent
             }
@@ -777,6 +780,12 @@ impl ToolIntentIngress {
                     .unwrap_or(serde_json::Value::Null),
                 None,
             ),
+            lash_core::ProcessEffectOutcome::CancelRefused { refusal } => {
+                return Err(RealizationFailure::Command(
+                    kind,
+                    crate::EmbedError::Plugin(refusal),
+                ));
+            }
             lash_core::ProcessEffectOutcome::EmitEvent { event, .. } => (
                 serde_json::to_value(*event).unwrap_or(serde_json::Value::Null),
                 None,
@@ -853,6 +862,10 @@ impl ToolIntentIngress {
                 }
             }
             lash_core::ToolIntent::SignalProcess(intent) => {
+                let process_ref = self
+                    .process_registry()?
+                    .resolve_process_ref(&intent.process_id)
+                    .await?;
                 let event_type =
                     lash_core::facade_support::process_signal_event_type(&intent.signal_name)?;
                 let request = lash_core::ProcessEventAppendRequest::new(event_type, intent.payload)
@@ -861,22 +874,28 @@ impl ToolIntentIngress {
                         intent.process_id, intent.signal_name, identity.replay_key
                     ));
                 lash_core::ProcessCommand::Signal {
-                    process_id: intent.process_id,
+                    process_ref,
                     signal_name: intent.signal_name,
                     signal_id: identity.replay_key.clone(),
                     request,
                 }
             }
-            lash_core::ToolIntent::CancelProcess(intent) => lash_core::ProcessCommand::Cancel {
-                process_id: intent.process_id,
-                reason: intent.reason,
-                replay: Some(lash_core::RuntimeReplay {
-                    key: identity.replay_key.clone(),
-                    attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
-                        identity.clone(),
-                    )),
-                }),
-            },
+            lash_core::ToolIntent::CancelProcess(intent) => {
+                let process_ref = self
+                    .process_registry()?
+                    .resolve_process_ref(&intent.process_id)
+                    .await?;
+                lash_core::ProcessCommand::Cancel {
+                    process_ref,
+                    reason: intent.reason,
+                    replay: Some(lash_core::RuntimeReplay {
+                        key: identity.replay_key.clone(),
+                        attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
+                            identity.clone(),
+                        )),
+                    }),
+                }
+            }
             lash_core::ToolIntent::EmitProcessEvent(intent) => {
                 let request =
                     lash_core::ProcessEventAppendRequest::new(intent.event_type, intent.payload)

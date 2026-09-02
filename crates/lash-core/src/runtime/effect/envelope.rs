@@ -560,7 +560,7 @@ impl RuntimeEffectCommand {
 }
 
 /// Serializable operation against the process admin plane.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 // justification: RuntimeEffectCommand already boxes every ProcessCommand, so boxing its Start payload again is redundant.
 #[allow(clippy::large_enum_variant)]
@@ -593,13 +593,18 @@ pub enum ProcessCommand {
         session_id: String,
     },
     Await {
-        process_id: String,
+        process_ref: crate::ProcessRef,
     },
     Cancel {
-        process_id: String,
+        process_ref: crate::ProcessRef,
         reason: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         replay: Option<crate::RuntimeReplay>,
+    },
+    CancelRefused {
+        process_id: String,
+        reason: Option<String>,
+        refusal: crate::PluginError,
     },
     ParentEnd {
         identity: crate::ToolIntentIdentity,
@@ -608,7 +613,7 @@ pub enum ProcessCommand {
         reason: String,
     },
     Signal {
-        process_id: String,
+        process_ref: crate::ProcessRef,
         signal_name: String,
         signal_id: String,
         request: crate::ProcessEventAppendRequest,
@@ -617,6 +622,166 @@ pub enum ProcessCommand {
         process_id: String,
         request: crate::ProcessEventAppendRequest,
     },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+enum ProcessCommandDecode {
+    Start {
+        registration: ProcessRegistration,
+        #[serde(default)]
+        observers: Vec<String>,
+        #[serde(default)]
+        env_spec: Box<Option<crate::ProcessExecutionEnvSpec>>,
+        #[serde(default)]
+        execution_context: Box<ProcessExecutionContext>,
+    },
+    List {
+        session_scope: SessionScope,
+        #[serde(default)]
+        mode: ProcessListMode,
+    },
+    Transfer {
+        from_scope: SessionScope,
+        to_scope: SessionScope,
+        process_ids: Vec<String>,
+    },
+    DeleteSession {
+        session_id: String,
+    },
+    Await {
+        process_ref: crate::ProcessRef,
+    },
+    Cancel {
+        process_ref: crate::ProcessRef,
+        reason: Option<String>,
+        #[serde(default)]
+        replay: Option<crate::RuntimeReplay>,
+    },
+    CancelRefused {
+        process_id: String,
+        reason: Option<String>,
+        refusal: crate::PluginError,
+    },
+    ParentEnd {
+        identity: crate::ToolIntentIdentity,
+        process_id: String,
+        policy: crate::ProcessParentEndPolicy,
+        reason: String,
+    },
+    Signal {
+        process_ref: crate::ProcessRef,
+        signal_name: String,
+        signal_id: String,
+        request: crate::ProcessEventAppendRequest,
+    },
+    EmitEvent {
+        process_id: String,
+        request: crate::ProcessEventAppendRequest,
+    },
+}
+
+impl<'de> Deserialize<'de> for ProcessCommand {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if let Some(object) = value.as_object()
+            && matches!(
+                object.get("op").and_then(serde_json::Value::as_str),
+                Some("await" | "cancel" | "signal")
+            )
+            && object.contains_key("process_id")
+            && !object.contains_key("process_ref")
+        {
+            return Err(serde::de::Error::custom(
+                "process_reference_format_cutover: a pre-incarnation process command cannot be replayed because its bare process_id does not identify one process lifetime",
+            ));
+        }
+        let decoded: ProcessCommandDecode =
+            serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        Ok(match decoded {
+            ProcessCommandDecode::Start {
+                registration,
+                observers,
+                env_spec,
+                execution_context,
+            } => Self::Start {
+                registration,
+                observers,
+                env_spec: *env_spec,
+                execution_context,
+            },
+            ProcessCommandDecode::List {
+                session_scope,
+                mode,
+            } => Self::List {
+                session_scope,
+                mode,
+            },
+            ProcessCommandDecode::Transfer {
+                from_scope,
+                to_scope,
+                process_ids,
+            } => Self::Transfer {
+                from_scope,
+                to_scope,
+                process_ids,
+            },
+            ProcessCommandDecode::DeleteSession { session_id } => {
+                Self::DeleteSession { session_id }
+            }
+            ProcessCommandDecode::Await { process_ref } => Self::Await { process_ref },
+            ProcessCommandDecode::Cancel {
+                process_ref,
+                reason,
+                replay,
+            } => Self::Cancel {
+                process_ref,
+                reason,
+                replay,
+            },
+            ProcessCommandDecode::CancelRefused {
+                process_id,
+                reason,
+                refusal,
+            } => Self::CancelRefused {
+                process_id,
+                reason,
+                refusal,
+            },
+            ProcessCommandDecode::ParentEnd {
+                identity,
+                process_id,
+                policy,
+                reason,
+            } => Self::ParentEnd {
+                identity,
+                process_id,
+                policy,
+                reason,
+            },
+            ProcessCommandDecode::Signal {
+                process_ref,
+                signal_name,
+                signal_id,
+                request,
+            } => Self::Signal {
+                process_ref,
+                signal_name,
+                signal_id,
+                request,
+            },
+            ProcessCommandDecode::EmitEvent {
+                process_id,
+                request,
+            } => Self::EmitEvent {
+                process_id,
+                request,
+            },
+        })
+    }
 }
 
 fn boxed_process_execution_context_is_empty(context: &ProcessExecutionContext) -> bool {
@@ -665,18 +830,29 @@ impl ProcessCommand {
                 )
             }
             Self::DeleteSession { session_id } => format!("process:delete-session:{session_id}"),
-            Self::Await { process_id } => format!("process:await:{process_id}"),
-            Self::Cancel { process_id, .. } => format!("process:cancel:{process_id}"),
+            // Effect IDs are persisted replay identity and retain their
+            // pre-incarnation spelling. The journaled command payload carries
+            // the structural ProcessRef and refuses a superseded lifetime.
+            Self::Await { process_ref } => format!("process:await:{}", process_ref.process_id),
+            Self::Cancel { process_ref, .. } => {
+                format!("process:cancel:{}", process_ref.process_id)
+            }
+            Self::CancelRefused { process_id, .. } => {
+                format!("process:cancel:{process_id}")
+            }
             Self::ParentEnd { identity, .. } => {
                 format!("process:parent-end:{}", identity.replay_key)
             }
             Self::Signal {
-                process_id,
+                process_ref,
                 signal_name,
                 signal_id,
                 ..
             } => {
-                format!("process:signal:{process_id}:signal.{signal_name}:{signal_id}")
+                format!(
+                    "process:signal:{}:signal.{signal_name}:{signal_id}",
+                    process_ref.process_id
+                )
             }
             Self::EmitEvent {
                 process_id,
@@ -717,6 +893,9 @@ pub enum ProcessEffectOutcome {
     },
     Cancel {
         record: Box<ProcessRecord>,
+    },
+    CancelRefused {
+        refusal: crate::PluginError,
     },
     ParentEnd {
         outcome: Box<crate::ToolIntentParentEndOutcome>,

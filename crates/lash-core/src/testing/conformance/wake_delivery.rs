@@ -102,21 +102,22 @@ async fn assert_process_terminal_wait(
     process_id: &str,
     witness: ProcessTerminalWaitWitness,
 ) {
-    registry
+    let registered = registry
         .register_process(process_registry::registration(process_id))
         .await
         .expect("register terminal-wait conformance process");
+    let process_ref = crate::ProcessRef::from_record(&registered);
     let terminal = crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
         serde_json::json!({"terminal_wait": "observed"}),
     ));
     let wait = {
         let process_work = Arc::clone(process_work);
-        let process_id = process_id.to_string();
+        let process_ref = process_ref.clone();
         crate::task::spawn(async move {
             let mut reattachments = 0_usize;
             loop {
                 match process_work
-                    .await_process_terminal(&process_id)
+                    .await_process_terminal(&process_ref)
                     .await
                     .expect("wait for terminal process through peer substrate")
                 {
@@ -1493,6 +1494,7 @@ async fn mixed_era_floor_and_ordering(
             wake_id: format!("wake:mixed-era:{sequence}"),
             target_session_id: target_session_id.to_string(),
             process_id: process_id.to_string(),
+            process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
             sequence,
             event_type: "producer.wake".to_string(),
             event_invocation: crate::RuntimeInvocation::effect(
@@ -1521,6 +1523,7 @@ async fn mixed_era_floor_and_ordering(
                 wake_id: "wake:mixed-era:3".to_string(),
                 target_session_id: target_session_id.to_string(),
                 process_id: process_id.to_string(),
+                process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
                 sequence: 3,
                 event_type: "producer.wake".to_string(),
                 event_invocation: crate::RuntimeInvocation::effect(
@@ -1555,6 +1558,7 @@ async fn mixed_era_floor_and_ordering(
                 wake_id: "wake:mixed-era:2".to_string(),
                 target_session_id: target_session_id.to_string(),
                 process_id: process_id.to_string(),
+                process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
                 sequence: 2,
                 event_type: "producer.wake".to_string(),
                 event_invocation: crate::RuntimeInvocation::effect(
@@ -1650,6 +1654,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
         wake_id: "wake:store-rewind:10".to_string(),
         target_session_id: target_session_id.to_string(),
         process_id: process_id.to_string(),
+        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
         sequence: 10,
         event_type: "producer.wake".to_string(),
         event_invocation: crate::RuntimeInvocation::effect(
