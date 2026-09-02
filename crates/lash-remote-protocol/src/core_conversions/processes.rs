@@ -768,6 +768,25 @@ impl From<RemoteAbandonWriter> for lash_core::AbandonWriter {
     }
 }
 
+impl From<lash_core::LeaseOwnerIdentity> for RemoteLeaseOwnerIdentity {
+    fn from(value: lash_core::LeaseOwnerIdentity) -> Self {
+        let lash_core::LeaseOwnerIdentity {
+            owner_id,
+            incarnation_id,
+        } = value;
+        Self {
+            owner_id,
+            incarnation_id,
+        }
+    }
+}
+
+impl From<RemoteLeaseOwnerIdentity> for lash_core::LeaseOwnerIdentity {
+    fn from(value: RemoteLeaseOwnerIdentity) -> Self {
+        Self::opaque(value.owner_id, value.incarnation_id)
+    }
+}
+
 impl TryFrom<lash_core::AbandonEvidence> for RemoteAbandonEvidence {
     type Error = RemoteProtocolError;
 
@@ -779,9 +798,7 @@ impl TryFrom<lash_core::AbandonEvidence> for RemoteAbandonEvidence {
         } = value;
         Ok(Self {
             writer: writer.into(),
-            owner: owner
-                .map(|owner| encode_remote_json(owner, "RemoteAbandonEvidence", "owner"))
-                .transpose()?,
+            owner: owner.map(Into::into),
             epoch_ms,
         })
     }
@@ -798,9 +815,7 @@ impl TryFrom<RemoteAbandonEvidence> for lash_core::AbandonEvidence {
         } = value;
         Ok(Self {
             writer: writer.into(),
-            owner: owner
-                .map(|owner| decode_remote_json(owner, "RemoteAbandonEvidence", "owner"))
-                .transpose()?,
+            owner: owner.map(Into::into),
             epoch_ms,
         })
     }
@@ -817,7 +832,7 @@ impl TryFrom<lash_core::ProcessStarted> for RemoteProcessStarted {
             started_at_ms,
         } = value;
         Ok(Self {
-            owner: encode_remote_json(owner, "RemoteProcessStarted", "owner")?,
+            owner: owner.into(),
             fencing_token,
             attempt,
             started_at_ms,
@@ -836,7 +851,7 @@ impl TryFrom<RemoteProcessStarted> for lash_core::ProcessStarted {
             started_at_ms,
         } = value;
         Ok(Self {
-            owner: decode_remote_json(owner, "RemoteProcessStarted", "owner")?,
+            owner: owner.into(),
             fencing_token,
             attempt,
             started_at_ms,
@@ -1494,6 +1509,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
         let lash_core::ProcessRecord {
             id,
             incarnation,
+            last_event_sequence,
             registration_fingerprint: _,
             input,
             disposition,
@@ -1514,6 +1530,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
         Ok(Self {
             process_id: id,
             incarnation: incarnation.registration_sequence(),
+            last_event_sequence,
             input: input.as_ref().clone().try_into()?,
             disposition: disposition.into(),
             max_attempts,
@@ -1545,6 +1562,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
         let RemoteProcessRecord {
             process_id,
             incarnation,
+            last_event_sequence,
             input,
             disposition,
             max_attempts,
@@ -1579,6 +1597,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
         );
         record.created_at_ms = created_at_ms;
         record.updated_at_ms = updated_at_ms;
+        record.last_event_sequence = last_event_sequence;
         record.external_ref = external_ref.map(Into::into);
         record.first_started = first_started
             .map(|started| started.try_into().map(Box::new))
@@ -1598,6 +1617,7 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
         let lash_core::facade_support::ObservedProcess {
             process_id,
             incarnation,
+            last_event_sequence,
             graph_key,
             kind,
             identity,
@@ -1624,6 +1644,7 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
         Ok(Self {
             process_id,
             incarnation: incarnation.registration_sequence(),
+            last_event_sequence,
             graph_key,
             kind,
             identity: identity.into(),
@@ -1635,9 +1656,7 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             created_at_ms,
             updated_at_ms,
             first_started: first_started.map(TryInto::try_into).transpose()?,
-            lease_holder: lease_holder
-                .map(|owner| encode_remote_json(owner, "RemoteObservedProcess", "lease_holder"))
-                .transpose()?,
+            lease_holder: lease_holder.map(Into::into),
             lease_expires_at_ms,
             abandon_request: abandon_request.map(Into::into),
             input: input.try_into()?,
@@ -1662,6 +1681,7 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
         let RemoteObservedProcess {
             process_id,
             incarnation,
+            last_event_sequence,
             graph_key: _,
             kind: _,
             identity,
@@ -1695,6 +1715,7 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
         Ok(Self {
             process_id,
             incarnation: lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
+            last_event_sequence,
             graph_key,
             kind,
             identity,
@@ -1706,9 +1727,7 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             created_at_ms,
             updated_at_ms,
             first_started: first_started.map(TryInto::try_into).transpose()?,
-            lease_holder: lease_holder
-                .map(|owner| decode_remote_json(owner, "RemoteObservedProcess", "lease_holder"))
-                .transpose()?,
+            lease_holder: lease_holder.map(Into::into),
             lease_expires_at_ms,
             abandon_request: abandon_request.map(Into::into),
             input: input.try_into()?,
@@ -1732,12 +1751,14 @@ impl TryFrom<lash_core::facade_support::ObservedWorkItem> for RemoteProcessWorkI
         let lash_core::facade_support::ObservedWorkItem {
             process,
             events,
+            event_tail_sequence,
             kind,
             label,
         } = value;
         Ok(Self {
             process: process.try_into()?,
             events: events.into_iter().map(Into::into).collect(),
+            event_tail_sequence,
             kind,
             label,
         })
@@ -1752,6 +1773,7 @@ impl TryFrom<RemoteProcessWorkItem> for lash_core::facade_support::ObservedWorkI
         let RemoteProcessWorkItem {
             process,
             events,
+            event_tail_sequence,
             kind: _,
             label: _,
         } = value;
@@ -1765,6 +1787,7 @@ impl TryFrom<RemoteProcessWorkItem> for lash_core::facade_support::ObservedWorkI
         Ok(Self {
             process,
             events: events.into_iter().map(Into::into).collect(),
+            event_tail_sequence,
             kind,
             label,
         })

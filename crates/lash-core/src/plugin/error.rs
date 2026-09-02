@@ -101,6 +101,16 @@ pub enum PluginError {
         requested_incarnation: crate::ProcessIncarnation,
         current_incarnation: crate::ProcessIncarnation,
     },
+    /// A Process Change Feed cursor predates deletion history removed by
+    /// Tombstone Compaction. The consumer must perform a full relist before
+    /// resuming from the reported horizon.
+    #[error(
+        "process change cursor {requested_cursor:?} is below tombstone-compaction horizon {tombstone_compaction_horizon:?}; a full relist is required"
+    )]
+    ProcessChangeCursorPruned {
+        requested_cursor: crate::ProcessChangeCursor,
+        tombstone_compaction_horizon: crate::ProcessChangeCursor,
+    },
     #[error(transparent)]
     RuntimeEffectController(#[from] crate::RuntimeEffectControllerError),
     #[error("process `{process_id}` execution was already started by {by:?}")]
@@ -192,6 +202,7 @@ impl PluginError {
             | Self::ClockBeforeUnixEpoch { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::ProcessIncarnationSuperseded { .. }
+            | Self::ProcessChangeCursorPruned { .. }
             | Self::ProcessNoLongerRetained { .. }
             | Self::ProcessCallerDeparted { .. }
             | Self::ProcessAlreadyTerminal { .. }

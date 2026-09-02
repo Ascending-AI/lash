@@ -285,7 +285,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 74 makes the registration change sequence the structural process
 // incarnation and carries it through events, observer edges, wake deliveries,
 // and tombstones. Component-73 databases are rejected at open.
-const SCHEMA_VERSION: i32 = 74;
+// Version 75 folds the newest event sequence into every process row and
+// persists the Process Prune horizon established by Tombstone Compaction.
+// Component-74 databases are rejected at open.
+const SCHEMA_VERSION: i32 = 75;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

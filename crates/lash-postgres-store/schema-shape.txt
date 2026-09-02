@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 74
+version 75
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null
@@ -121,6 +121,7 @@ table lash_pending_turn_inputs
 table lash_process_change_clock
   column current_seq bigint not-null
   column singleton boolean not-null default
+  column tombstone_compaction_horizon bigint not-null default
   primary-key (singleton)
 table lash_process_events
   column event_json text not-null
@@ -189,6 +190,7 @@ table lash_processes
   column identity_label text nullable
   column incarnation bigint not-null
   column is_waiting boolean not-null
+  column last_event_sequence bigint not-null
   column originator_id text not-null
   column process_id text not-null
   column record_json text not-null

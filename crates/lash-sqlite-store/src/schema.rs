@@ -604,6 +604,7 @@ CREATE TABLE IF NOT EXISTS processes (
     is_waiting            INTEGER NOT NULL,
     created_at_ms         INTEGER NOT NULL,
     updated_at_ms         INTEGER NOT NULL,
+    last_event_sequence   INTEGER NOT NULL,
     change_seq            INTEGER NOT NULL,
     status                TEXT NOT NULL,
     record_json           TEXT NOT NULL,
@@ -634,11 +635,13 @@ CREATE INDEX IF NOT EXISTS idx_processes_wake_session
 
 CREATE TABLE IF NOT EXISTS process_change_clock (
     singleton    INTEGER PRIMARY KEY CHECK (singleton = 1),
-    current_seq  INTEGER NOT NULL DEFAULT 0
+    current_seq  INTEGER NOT NULL DEFAULT 0,
+    tombstone_compaction_horizon INTEGER NOT NULL DEFAULT 0
 );
 
-INSERT OR IGNORE INTO process_change_clock (singleton, current_seq)
-VALUES (1, 0);
+INSERT OR IGNORE INTO process_change_clock (
+    singleton, current_seq, tombstone_compaction_horizon
+) VALUES (1, 0, 0);
 
 CREATE TABLE IF NOT EXISTS process_events (
     process_id        TEXT NOT NULL,
@@ -796,7 +799,10 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// Version 29 makes the registration change sequence the structural process
 /// incarnation and carries it through events, observer edges, wake deliveries,
 /// and tombstones. Version-28 registries are rejected rather than rebound.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 29;
+/// Version 30 folds the newest event sequence into every process row and
+/// persists the Process Prune horizon established by Tombstone Compaction.
+/// Version-29 registries are rejected rather than migrated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 30;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1360,13 +1366,13 @@ mod check_constraint_tests {
             .execute_batch(PROCESS_SCHEMA)
             .expect("create process constraint fixture");
         let process_columns = "process_id, incarnation, registration_fingerprint, originator_id,
-            identity_kind, is_waiting, created_at_ms, updated_at_ms, change_seq,
+            identity_kind, is_waiting, created_at_ms, updated_at_ms, last_event_sequence, change_seq,
             status, record_json";
         assert_check_rejects(
             &process,
             &format!(
                 "INSERT INTO processes ({process_columns}) VALUES
-                 ('bad-status', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+                 ('bad-status', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0, 0,
                   'paused', '{{}}')"
             ),
             "ck_processes_status",
@@ -1374,7 +1380,7 @@ mod check_constraint_tests {
         process
             .execute_batch(&format!(
                 "INSERT INTO processes ({process_columns}) VALUES
-                 ('wake-parent', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+                 ('wake-parent', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0, 0,
                   'running', '{{}}')"
             ))
             .expect("insert valid wake parent");

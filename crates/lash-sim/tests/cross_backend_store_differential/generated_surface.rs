@@ -1819,7 +1819,7 @@ async fn reset_postgres_surface(storage: &PostgresStorage) {
     .execute(storage.pool())
     .await
     .unwrap();
-    sqlx::query("INSERT INTO lash_process_change_clock (singleton, current_seq) VALUES (TRUE, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0").execute(storage.pool()).await.unwrap();
+    sqlx::query("INSERT INTO lash_process_change_clock (singleton, current_seq, tombstone_compaction_horizon) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, tombstone_compaction_horizon = 0").execute(storage.pool()).await.unwrap();
 }
 
 async fn surface_runners(

@@ -142,9 +142,10 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         "INSERT INTO processes (
                             process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
                             identity_kind, identity_label, is_waiting,
-                            created_at_ms, updated_at_ms, change_seq, status, record_json
+                            created_at_ms, updated_at_ms, last_event_sequence,
+                            change_seq, status, record_json
                          )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                         params![
                             record.id.as_str(),
                             record.incarnation.registration_sequence() as i64,
@@ -156,6 +157,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             i64::from(record.wait.is_some()),
                             record.created_at_ms as i64,
                             record.updated_at_ms as i64,
+                            record.last_event_sequence as i64,
                             change_seq as i64,
                             process_status_label(&record),
                             process_encode_json(&record)?,
@@ -1191,9 +1193,6 @@ impl ProcessRegistry for SqliteProcessRegistry {
         cursor: ProcessChangeCursor,
         limit: usize,
     ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), lash_core::PluginError> {
-        if limit == 0 {
-            return Ok((Vec::new(), cursor));
-        }
         self.conn
             .call(move |conn| {
                 Ok(
@@ -1219,15 +1218,15 @@ impl ProcessRegistry for SqliteProcessRegistry {
             None => Vec::new(),
         };
         self.conn
-            .call(move |conn| {
-                Ok(
+            .write_flow(move |tx| {
+                Ok(tx_outcome(
                     crate::process_registry_change::compact_process_tombstones_conn(
-                        conn,
+                        tx,
                         cutoff_epoch_ms,
                         max_change_seq,
                         &outstanding_trigger_delivery_process_ids,
                     ),
-                )
+                ))
             })
             .await
             .map_err(process_sqlite_error)?

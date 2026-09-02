@@ -3220,6 +3220,9 @@ lash::plugins::PluginError::ProcessAttemptsExhausted::max_attempts
 lash::plugins::PluginError::ProcessAttemptsExhausted::process_id
 lash::plugins::PluginError::ProcessCallerDeparted
 lash::plugins::PluginError::ProcessCallerDeparted::process_id
+lash::plugins::PluginError::ProcessChangeCursorPruned
+lash::plugins::PluginError::ProcessChangeCursorPruned::requested_cursor
+lash::plugins::PluginError::ProcessChangeCursorPruned::tombstone_compaction_horizon
 lash::plugins::PluginError::ProcessIncarnationSuperseded
 lash::plugins::PluginError::ProcessIncarnationSuperseded::current_incarnation
 lash::plugins::PluginError::ProcessIncarnationSuperseded::process_id
@@ -4697,6 +4700,7 @@ lash::process::ObservedProcess::incarnation
 lash::process::ObservedProcess::input
 lash::process::ObservedProcess::kind
 lash::process::ObservedProcess::label
+lash::process::ObservedProcess::last_event_sequence
 lash::process::ObservedProcess::lease_expires_at_ms
 lash::process::ObservedProcess::lease_holder
 lash::process::ObservedProcess::lifecycle
@@ -4712,7 +4716,9 @@ lash::process::ObservedProcessEvent::occurred_at_ms
 lash::process::ObservedProcessEvent::payload
 lash::process::ObservedProcessEvent::sequence
 lash::process::ObservedWorkItem
+lash::process::ObservedWorkItem::event_tail_sequence
 lash::process::ObservedWorkItem::events
+lash::process::ObservedWorkItem::has_mispaired_event_tail
 lash::process::ObservedWorkItem::kind
 lash::process::ObservedWorkItem::label
 lash::process::ObservedWorkItem::process
@@ -4794,6 +4800,7 @@ lash::process::ProcessEvent::semantics
 lash::process::ProcessEvent::sequence
 lash::process::ProcessEventAppendReceipt
 lash::process::ProcessEventAppendReceipt::event
+lash::process::ProcessEventAppendReceipt::last_event_sequence
 lash::process::ProcessEventAppendReceipt::wake_delivery
 lash::process::ProcessEventAppendRequest
 lash::process::ProcessEventAppendRequest::abandon_requested
@@ -4994,6 +5001,7 @@ lash::process::ProcessRecord::identity
 lash::process::ProcessRecord::incarnation
 lash::process::ProcessRecord::input
 lash::process::ProcessRecord::is_terminal
+lash::process::ProcessRecord::last_event_sequence
 lash::process::ProcessRecord::max_attempts
 lash::process::ProcessRecord::originator_id
 lash::process::ProcessRecord::outcome
@@ -6226,6 +6234,10 @@ lash::remote::processes::RemoteAbandonWriter::EngineGaveUp
 lash::remote::processes::RemoteAbandonWriter::OwnerDrain
 lash::remote::processes::RemoteAbandonWriter::ReconciledRequest
 lash::remote::processes::RemoteAbandonWriter::Sweep
+lash::remote::processes::RemoteLeaseOwnerIdentity
+lash::remote::processes::RemoteLeaseOwnerIdentity::incarnation_id
+lash::remote::processes::RemoteLeaseOwnerIdentity::owner_id
+lash::remote::processes::RemoteLeaseOwnerIdentity::validate
 lash::remote::processes::RemoteObservedProcess
 lash::remote::processes::RemoteObservedProcess::abandon_request
 lash::remote::processes::RemoteObservedProcess::caused_by
@@ -6242,6 +6254,7 @@ lash::remote::processes::RemoteObservedProcess::incarnation
 lash::remote::processes::RemoteObservedProcess::input
 lash::remote::processes::RemoteObservedProcess::kind
 lash::remote::processes::RemoteObservedProcess::label
+lash::remote::processes::RemoteObservedProcess::last_event_sequence
 lash::remote::processes::RemoteObservedProcess::lease_expires_at_ms
 lash::remote::processes::RemoteObservedProcess::lease_holder
 lash::remote::processes::RemoteObservedProcess::lifecycle
@@ -6542,6 +6555,7 @@ lash::remote::processes::RemoteProcessWakeSpec::input
 lash::remote::processes::RemoteProcessWakeSpec::validate
 lash::remote::processes::RemoteProcessWakeSpec::when
 lash::remote::processes::RemoteProcessWorkItem
+lash::remote::processes::RemoteProcessWorkItem::event_tail_sequence
 lash::remote::processes::RemoteProcessWorkItem::events
 lash::remote::processes::RemoteProcessWorkItem::kind
 lash::remote::processes::RemoteProcessWorkItem::label
@@ -8889,6 +8903,7 @@ lash::testing::conformance::live_replay_store_capacity_trim
 lash::testing::conformance::live_replay_store_ttl_trim
 lash::testing::conformance::old_format_append_receipt_returns_public_leaf
 lash::testing::conformance::orphaned_direct_turn_input_is_drivable_by_another_worker
+lash::testing::conformance::process_change_cursor_below_tombstone_compaction_horizon_is_refused
 lash::testing::conformance::process_continuation_store
 lash::testing::conformance::process_execution_env_store
 lash::testing::conformance::process_execution_env_store_reopenable

@@ -30,6 +30,7 @@ impl Default for TestLocalProcessRegistry {
             process_terminal_write_outcome: Arc::new(Mutex::new(None)),
             process_lease_release_error: Arc::new(Mutex::new(None)),
             next_change_seq: Arc::new(Mutex::new(0)),
+            tombstone_compaction_horizon: Arc::new(Mutex::new(0)),
             observers: Arc::new(Mutex::new(HashMap::<_, HashSet<_>>::new())),
             wake_targets: Arc::new(Mutex::new(HashMap::new())),
             tombstones: Arc::new(Mutex::new(HashMap::new())),

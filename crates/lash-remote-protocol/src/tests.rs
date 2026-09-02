@@ -1555,6 +1555,7 @@ fn remote_process_dtos_json_round_trip() {
             process: RemoteObservedProcess {
                 process_id: "process:1".to_string(),
                 incarnation: 1,
+                last_event_sequence: 1,
                 graph_key: "process:process:1:incarnation:1".to_string(),
                 kind: "external".to_string(),
                 identity: RemoteProcessIdentity {
@@ -1590,6 +1591,7 @@ fn remote_process_dtos_json_round_trip() {
                 occurred_at_ms: 2,
                 payload: serde_json::json!({ "ok": true }),
             }],
+            event_tail_sequence: 1,
             kind: "external".to_string(),
             label: "Import".to_string(),
         }],
@@ -2300,6 +2302,7 @@ fn remote_process_record() -> RemoteProcessRecord {
     RemoteProcessRecord {
         process_id: "process:1".to_string(),
         incarnation: 1,
+        last_event_sequence: 0,
         input: RemoteProcessInput::External {
             metadata: serde_json::json!({ "label": "Import" }),
         },

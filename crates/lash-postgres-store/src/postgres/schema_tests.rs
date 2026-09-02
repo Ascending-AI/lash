@@ -1,26 +1,28 @@
 use super::*;
 
+const RETAINED_MIGRATION_ENDPOINT: i32 = SCHEMA_VERSION - 1;
+
 #[test]
 fn current_destructive_cutover_has_no_migration_arm() {
     assert!(
         SCHEMA_MIGRATIONS
             .iter()
             .all(|migration| migration.to != SCHEMA_VERSION),
-        "component 74 must reject every pre-cutover schema rather than migrate it"
+        "component 75 must reject every pre-cutover schema rather than migrate it"
     );
 
     let predecessor = SCHEMA_MIGRATIONS
         .iter()
-        .find(|migration| migration.from == 68 && migration.to == 73)
+        .find(|migration| migration.from == 68 && migration.to == RETAINED_MIGRATION_ENDPOINT)
         .expect("the historical component 68 refusal boundary must remain declared");
     assert!(
         predecessor.is_recreate_boundary(),
-        "component 68 must not migrate into the pending-input cutover"
+        "component 68 must not migrate into the retained predecessor"
     );
 
     let declared = SCHEMA_MIGRATIONS
         .iter()
-        .find(|migration| migration.from == 64 && migration.to == 73)
+        .find(|migration| migration.from == 64 && migration.to == RETAINED_MIGRATION_ENDPOINT)
         .expect("the historical component 64 creation-only migration must remain declared");
 
     assert_eq!(
@@ -121,7 +123,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
     });
     SchemaReport {
         schema: Some("public".to_string()),
-        expected_version: 73,
+        expected_version: RETAINED_MIGRATION_ENDPOINT,
         found_version: Some(53),
         findings,
     }
@@ -132,7 +134,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
 fn published_53_findings() -> Vec<SchemaFinding> {
     vec![
         SchemaFinding::VersionMismatch {
-            expected: 73,
+            expected: RETAINED_MIGRATION_ENDPOINT,
             found: Some(53),
         },
         SchemaFinding::UnexpectedColumn {

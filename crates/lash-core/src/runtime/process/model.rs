@@ -980,6 +980,10 @@ impl ProcessStatus {
 pub struct ProcessRecord {
     pub id: ProcessId,
     pub incarnation: ProcessIncarnation,
+    /// Sequence of the newest event folded into this record. Registration
+    /// starts at zero; every event append advances the value in the same
+    /// transaction that persists the event and projected record.
+    pub last_event_sequence: u64,
     pub registration_fingerprint: String,
     pub input: Arc<ProcessInput>,
     /// Declared recovery contract. Required with no serde default: pre-column
@@ -1085,6 +1089,7 @@ impl ProcessRecord {
         Self {
             id: registration.id,
             incarnation,
+            last_event_sequence: 0,
             registration_fingerprint,
             input: registration.input,
             disposition: registration.disposition,

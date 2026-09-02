@@ -171,34 +171,33 @@ fn remote_process_await_outputs() -> anyhow::Result<()> {
 #[cfg(test)]
 mod asserted_process_examples {
     use std::collections::BTreeMap;
-
     // Process examples construct bare bodies; transport owns the envelope.
     use lash::remote::processes::{
-        RemoteAbandonEvidence, RemoteAbandonRequest, RemoteAbandonWriter, RemoteObservedProcess,
-        RemoteObservedProcessEvent, RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
-        RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput, RemoteProcessAwaitRequest,
-        RemoteProcessCancelReceipt, RemoteProcessCancelRequest, RemoteProcessDefinitionIdentity,
-        RemoteProcessEvent, RemoteProcessEventSemantics, RemoteProcessEventSemanticsSpec,
-        RemoteProcessEventType, RemoteProcessEventsRequest, RemoteProcessEventsResponse,
-        RemoteProcessExecutionEnvRef, RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy,
-        RemoteProcessExternalRef, RemoteProcessHandleView, RemoteProcessInput,
-        RemoteProcessListFilter, RemoteProcessListResponse, RemoteProcessModelLimits,
-        RemoteProcessModelSpec, RemoteProcessOriginator, RemoteProcessPluginOptions,
-        RemoteProcessProvenance, RemoteProcessRef, RemoteProcessSignalReceipt,
-        RemoteProcessSignalRequest, RemoteProcessStartReceipt, RemoteProcessStartRequest,
-        RemoteProcessStarted, RemoteProcessStatus, RemoteProcessStatusFilter,
-        RemoteProcessTerminalSemantics, RemoteProcessTerminalSpec, RemoteProcessToolCallOutcome,
-        RemoteProcessToolCallOutput, RemoteProcessToolCancellation, RemoteProcessToolFailure,
-        RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus, RemoteProcessValueSelector,
-        RemoteProcessWaitKind, RemoteProcessWaitState, RemoteProcessWake, RemoteProcessWakeSpec,
-        RemoteProcessWorkItem, RemoteProcessWorkSnapshot, RemoteRecoveryContract,
-        RemoteRuntimeEffectKind, RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeScope,
-        RemoteRuntimeSubject, RemoteSessionScope, RemoteToolFailureClass, RemoteTurnBudget,
+        RemoteAbandonEvidence, RemoteAbandonRequest, RemoteAbandonWriter, RemoteLeaseOwnerIdentity,
+        RemoteObservedProcess, RemoteObservedProcessEvent, RemotePersistProcessEnvReceipt,
+        RemotePersistProcessEnvRequest, RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput,
+        RemoteProcessAwaitRequest, RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
+        RemoteProcessDefinitionIdentity, RemoteProcessEvent, RemoteProcessEventSemantics,
+        RemoteProcessEventSemanticsSpec, RemoteProcessEventType, RemoteProcessEventsRequest,
+        RemoteProcessEventsResponse, RemoteProcessExecutionEnvRef, RemoteProcessExecutionEnvSpec,
+        RemoteProcessExecutionPolicy, RemoteProcessExternalRef, RemoteProcessHandleView,
+        RemoteProcessInput, RemoteProcessListFilter, RemoteProcessListResponse,
+        RemoteProcessModelLimits, RemoteProcessModelSpec, RemoteProcessOriginator,
+        RemoteProcessPluginOptions, RemoteProcessProvenance, RemoteProcessRef,
+        RemoteProcessSignalReceipt, RemoteProcessSignalRequest, RemoteProcessStartReceipt,
+        RemoteProcessStartRequest, RemoteProcessStarted, RemoteProcessStatus,
+        RemoteProcessStatusFilter, RemoteProcessTerminalSemantics, RemoteProcessTerminalSpec,
+        RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput, RemoteProcessToolCancellation,
+        RemoteProcessToolFailure, RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus,
+        RemoteProcessValueSelector, RemoteProcessWaitKind, RemoteProcessWaitState,
+        RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem, RemoteProcessWorkSnapshot,
+        RemoteRecoveryContract, RemoteRuntimeEffectKind, RemoteRuntimeInvocation,
+        RemoteRuntimeReplay, RemoteRuntimeScope, RemoteRuntimeSubject, RemoteSessionScope,
+        RemoteToolFailureClass, RemoteTurnBudget,
     };
     use lash::remote::turn_result::RemoteCausalRef;
     use lash_remote_protocol::processes::{RemoteProcessIdentity, RemoteProcessRecord};
     use serde_json::json;
-
     fn process_identity() -> RemoteProcessIdentity {
         RemoteProcessIdentity {
             kind: "report-export".to_string(),
@@ -218,10 +217,18 @@ mod asserted_process_examples {
         .expect("canonical process environment reference")
     }
 
+    fn lease_owner() -> RemoteLeaseOwnerIdentity {
+        RemoteLeaseOwnerIdentity {
+            owner_id: "worker-berlin".to_string(),
+            incarnation_id: "boot-9".to_string(),
+        }
+    }
+
     fn running_record() -> RemoteProcessRecord {
         RemoteProcessRecord {
             process_id: "invoice-export".to_string(),
             incarnation: 42,
+            last_event_sequence: 2,
             input: RemoteProcessInput::Engine {
                 kind: "report-export".to_string(),
                 payload: json!({ "format": "csv", "rows": 12 }),
@@ -240,11 +247,7 @@ mod asserted_process_examples {
                 metadata: Some(json!({ "region": "eu-central-1" })),
             }),
             first_started: Some(RemoteProcessStarted {
-                owner: json!({
-                    "owner_id": "worker-berlin",
-                    "incarnation_id": "boot-9",
-                    "liveness": { "type": "opaque" }
-                }),
+                owner: lease_owner(),
                 fencing_token: 1,
                 attempt: 1,
                 started_at_ms: 1_720_000_000_010,
@@ -358,6 +361,7 @@ mod asserted_process_examples {
         RemoteObservedProcess {
             process_id: "invoice-export".to_string(),
             incarnation: 42,
+            last_event_sequence: 2,
             graph_key: "process:invoice-export:incarnation:42".to_string(),
             kind: "report-export".to_string(),
             identity: process_identity(),
@@ -369,11 +373,7 @@ mod asserted_process_examples {
             created_at_ms: 1_720_000_000_000,
             updated_at_ms: 1_720_000_000_100,
             first_started: running_record().first_started,
-            lease_holder: Some(json!({
-                "owner_id": "worker-berlin",
-                "incarnation_id": "boot-9",
-                "liveness": { "type": "opaque" }
-            })),
+            lease_holder: Some(lease_owner()),
             lease_expires_at_ms: Some(1_720_000_060_000),
             abandon_request: None,
             input: RemoteProcessInput::Engine {
@@ -628,6 +628,7 @@ mod asserted_process_examples {
                     occurred_at_ms: 1_720_000_000_150,
                     payload: json!({ "completed_rows": 8, "total_rows": 12 }),
                 }],
+                event_tail_sequence: 2,
                 kind: "report-export".to_string(),
                 label: "Nightly invoice export".to_string(),
             }],
@@ -861,7 +862,11 @@ mod asserted_process_examples {
         RemoteProcessListResponse::validate(&list_response).expect("valid process list response");
         assert_eq!(list_response.records[0].process_id, "invoice-export");
         assert_eq!(
-            list_response.records[0].lease_holder.as_ref().unwrap()["owner_id"],
+            list_response.records[0]
+                .lease_holder
+                .as_ref()
+                .unwrap()
+                .owner_id,
             "worker-berlin"
         );
 
@@ -966,7 +971,7 @@ mod asserted_process_examples {
         let abandoned = RemoteProcessAwaitOutput::Abandoned {
             evidence: RemoteAbandonEvidence {
                 writer: RemoteAbandonWriter::OwnerDrain,
-                owner: Some(json!({ "owner_id": "worker-berlin" })),
+                owner: Some(lease_owner()),
                 epoch_ms: 1_720_000_060_000,
             },
             control: None,

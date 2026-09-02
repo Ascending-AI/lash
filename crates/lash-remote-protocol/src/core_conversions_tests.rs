@@ -694,6 +694,7 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
                 occurred_at_ms: 12,
                 payload: serde_json::json!({ "text": "hi" }),
             }],
+            event_tail_sequence: 1,
             kind: "external".to_string(),
             label: "External".to_string(),
         }],
@@ -2068,6 +2069,7 @@ fn observed_process() -> lash_core::facade_support::ObservedProcess {
     lash_core::facade_support::ObservedProcess {
         process_id: "process:observed".to_string(),
         incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
+        last_event_sequence: 0,
         graph_key: "process:process:observed:incarnation:1".to_string(),
         kind: "external".to_string(),
         identity: lash_core::ProcessIdentity::new("external")
@@ -2100,6 +2102,7 @@ fn observed_work_item() -> lash_core::facade_support::ObservedWorkItem {
     lash_core::facade_support::ObservedWorkItem {
         process: observed_process(),
         events: Vec::new(),
+        event_tail_sequence: 0,
         kind: "external".to_string(),
         label: "External".to_string(),
     }
@@ -2192,6 +2195,19 @@ fn observed_work_item_decode_rejects_label_that_contradicts_process() {
         .expect_err("a peer work-item label that contradicts its process must be rejected");
     assert!(
         error.to_string().contains("work-item label"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn observed_work_item_decode_rejects_a_mispaired_event_tail() {
+    let mut remote = RemoteProcessWorkItem::try_from(observed_work_item()).expect("remote item");
+    remote.event_tail_sequence = remote.event_tail_sequence.saturating_add(1);
+
+    let error = lash_core::facade_support::ObservedWorkItem::try_from(remote)
+        .expect_err("a peer work-item event tail from another snapshot must be rejected");
+    assert!(
+        error.to_string().contains("event-tail sequence"),
         "unexpected error: {error}"
     );
 }

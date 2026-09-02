@@ -519,6 +519,9 @@ pub struct ProcessEvent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessEventAppendReceipt {
     pub event: ProcessEvent,
+    /// Sequence durably folded into the process record when this append
+    /// settled. On replay this can be newer than `event.sequence`.
+    pub last_event_sequence: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake_delivery: Option<ProcessWakeDelivery>,
 }

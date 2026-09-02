@@ -413,7 +413,7 @@ impl SqliteProcessRegistry {
         conn.execute(
             "UPDATE processes
              SET updated_at_ms = ?2, change_seq = ?3, status = ?4,
-                 is_waiting = ?5, record_json = ?6
+                 is_waiting = ?5, last_event_sequence = ?6, record_json = ?7
              WHERE process_id = ?1",
             params![
                 record.id.as_str(),
@@ -421,6 +421,7 @@ impl SqliteProcessRegistry {
                 change_seq as i64,
                 process_status_label(record),
                 i64::from(record.wait.is_some()),
+                record.last_event_sequence as i64,
                 process_encode_json(record)?
             ],
         )
@@ -537,6 +538,7 @@ impl SqliteProcessRegistry {
                 };
                 Ok((
                     ProcessEventAppendReceipt {
+                        last_event_sequence: record.last_event_sequence,
                         event,
                         wake_delivery,
                     },
@@ -598,6 +600,7 @@ impl SqliteProcessRegistry {
                 )?;
                 Ok((
                     ProcessEventAppendReceipt {
+                        last_event_sequence: event.sequence,
                         event,
                         wake_delivery,
                     },
