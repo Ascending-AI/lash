@@ -7,6 +7,9 @@ use thiserror::Error;
 /// wiring a store; the history below is why each boundary is a version rather
 /// than a decode failure.
 ///
+// v17 cuts serialized protocol driver scratch state over to its collapsed
+// step representation: typed failure state and a required code field. Older
+// snapshots fail closed with the standard drain-or-recreate remedy.
 // v16 cuts the projection reference carrier over to the shared typed seed
 // entry family used by durable RLM seed events. Older snapshots fail closed
 // with the standard drain-or-recreate remedy.
@@ -25,7 +28,7 @@ use thiserror::Error;
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
-pub const RLM_SNAPSHOT_VERSION: u32 = 16;
+pub const RLM_SNAPSHOT_VERSION: u32 = 17;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

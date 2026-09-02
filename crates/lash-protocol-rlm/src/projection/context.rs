@@ -6,8 +6,7 @@ use lash_core::{
     facade_support::ChronologicalPayload,
 };
 use lash_rlm_types::{
-    RlmAttachmentRef, RlmHistoryItem, RlmHistoryRole, RlmImageRef, RlmProtocolEvent,
-    RlmTrajectoryEntry,
+    RlmAttachmentRef, RlmHistoryItem, RlmHistoryRole, RlmProtocolEvent, RlmTrajectoryEntry,
 };
 use lashlang::{
     ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest,
@@ -355,7 +354,7 @@ fn history_item_from_message(message: &Message) -> Option<RlmHistoryItem> {
 }
 
 fn history_item_from_lashlang_step(entry: &RlmTrajectoryEntry) -> RlmHistoryItem {
-    RlmHistoryItem::from_trajectory_entry(entry, entry.images.iter().map(image_ref).collect())
+    RlmHistoryItem::from_trajectory_entry(entry)
 }
 
 fn message_history_text(message: &Message) -> String {
@@ -375,21 +374,6 @@ fn history_role(role: MessageRole) -> RlmHistoryRole {
         MessageRole::System => RlmHistoryRole::System,
         MessageRole::Assistant => RlmHistoryRole::Assistant,
         MessageRole::Event => RlmHistoryRole::Event,
-    }
-}
-
-fn image_ref(image: &lash_core::AttachmentRef) -> RlmImageRef {
-    let (width, height) = match image.type_metadata.as_ref() {
-        Some(lash_core::AttachmentTypeMetadata::Image { width, height }) => (*width, *height),
-        None => (None, None),
-    };
-    RlmImageRef {
-        id: image.id.to_string(),
-        media_type: image.media_type.clone(),
-        width,
-        height,
-        bytes: image.byte_len as usize,
-        label: image.label.clone(),
     }
 }
 

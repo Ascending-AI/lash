@@ -510,7 +510,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             Ok(state) => state,
             Err(err) => return invalid_driver_state_actions(err),
         };
-        state.executed_code = Some(cell.code.clone());
+        state.code = cell.code.clone();
         state.reasoning = reasoning;
         state.prose = cell.prose.clone();
 
@@ -561,9 +561,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
 
         match result {
             Ok(response) => {
-                let exec_error = response.error.map(|failure| {
-                    crate::feedback::render(&failure, self.dialect.prompt_vocabulary().cell_noun)
-                });
+                let error = response.error;
                 if !response.degraded_bindings.is_empty() {
                     actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                         "projection_rehydration",
@@ -596,14 +594,15 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         state.output.push(observation.text);
                     }
                 }
-                if let Some(rendered_error) = exec_error {
-                    state.exec_error = Some(rendered_error);
+                if let Some(error) = error {
+                    state.error = Some(error);
                 }
                 if let Some(finish_value) = response.terminal_finish {
                     state.terminal_finish = Some(finish_value);
                 }
                 if let Some(outcome) = terminal_outcome {
                     actions.push(DriverAction::AppendEvents(trajectory_events(
+                        self.dialect.prompt_vocabulary(),
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
@@ -618,9 +617,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 }
             }
             Err(error) => {
-                state.exec_error = Some(crate::feedback::render(
-                    &lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error),
-                    self.dialect.prompt_vocabulary().cell_noun,
+                state.error = Some(lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Host,
+                    error,
                 ));
             }
         }
@@ -643,6 +642,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     &ctx,
                     &mut actions,
                     trajectory_events(
+                        self.dialect.prompt_vocabulary(),
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
@@ -661,6 +661,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             }
 
             actions.push(DriverAction::AppendEvents(trajectory_events(
+                self.dialect.prompt_vocabulary(),
                 ctx.turn_id(),
                 ctx.protocol_iteration(),
                 &state,
@@ -682,9 +683,16 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             self.dialect.as_ref(),
             &ctx,
             &mut actions,
-            trajectory_events(ctx.turn_id(), ctx.protocol_iteration(), &state, None, None),
+            trajectory_events(
+                self.dialect.prompt_vocabulary(),
+                ctx.turn_id(),
+                ctx.protocol_iteration(),
+                &state,
+                None,
+                None,
+            ),
             Vec::new(),
-            if state.exec_error.is_some() {
+            if state.error.is_some() {
                 AttemptProgress::Stalled
             } else {
                 AttemptProgress::Executed
@@ -1126,17 +1134,23 @@ fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::Attachment
 }
 
 fn trajectory_entry(
+    vocabulary: crate::dialect::DialectPromptVocabulary,
     turn_id: &str,
     protocol_iteration: usize,
     state: &RlmDriverState,
     validation_error: Option<String>,
     final_output: Option<Value>,
 ) -> RlmTrajectoryEntry {
-    let error = validation_error.or_else(|| state.exec_error.clone());
+    let error = validation_error.or_else(|| {
+        state
+            .error
+            .as_ref()
+            .map(|failure| crate::feedback::render(failure, vocabulary.cell_noun))
+    });
     RlmTrajectoryEntry {
         id: format!("lashlang_step_{turn_id}_{protocol_iteration}"),
         protocol_iteration,
-        code: state.executed_code.clone().unwrap_or_default(),
+        code: state.code.clone(),
         output: state.output.clone(),
         images: state.images.clone(),
         calls: state.calls.clone(),
@@ -1151,6 +1165,7 @@ fn rlm_message_id(turn_id: &str, protocol_iteration: usize, purpose: &str) -> St
 }
 
 fn trajectory_events(
+    vocabulary: crate::dialect::DialectPromptVocabulary,
     turn_id: &str,
     protocol_iteration: usize,
     state: &RlmDriverState,
@@ -1164,6 +1179,7 @@ fn trajectory_events(
         events.push(event);
     }
     events.push(trajectory_event(trajectory_entry(
+        vocabulary,
         turn_id,
         protocol_iteration,
         state,
@@ -1545,14 +1561,25 @@ mod tests {
     fn trajectory_capture_preserves_model_visible_error() {
         let raw_error = "read failed at /workspace/private/secret.txt";
         let state = RlmDriverState {
-            exec_error: Some(raw_error.to_string()),
+            code: "read()".to_string(),
+            error: Some(lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Host,
+                raw_error,
+            )),
             ..RlmDriverState::default()
         };
 
-        let entry = trajectory_entry("turn", 0, &state, None, None);
+        let vocabulary = crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY;
+        let entry = trajectory_entry(vocabulary, "turn", 0, &state, None, None);
         let error = entry.error.expect("captured public error");
 
-        assert_eq!(error, raw_error);
+        assert_eq!(entry.code, "read()");
+        assert_eq!(
+            error,
+            format!(
+                "{raw_error}\n\nNext: the host failed while handling this block. Retry it; if the failure persists, report the host problem."
+            )
+        );
     }
 
     #[test]

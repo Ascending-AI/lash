@@ -25,7 +25,6 @@ pub struct RlmTrajectoryEntry {
     /// `output: String` and `observations: Vec<String>` — those carried
     /// the same content twice, wasting tokens on every history-bearing
     /// iteration.
-    #[serde(default, alias = "observations")]
     pub output: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<AttachmentRef>,
@@ -35,6 +34,7 @@ pub struct RlmTrajectoryEntry {
     pub calls_omitted: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Driver-adjudicated terminal value, recorded only after validating the executor's request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_output: Option<serde_json::Value>,
 }
@@ -86,6 +86,24 @@ pub struct RlmImageRef {
     pub label: Option<String>,
 }
 
+impl RlmImageRef {
+    /// Build the model-visible image metadata from its durable attachment reference.
+    pub fn from_attachment(attachment: &lash_sansio::AttachmentRef) -> Self {
+        let (width, height) = match attachment.type_metadata.as_ref() {
+            Some(lash_sansio::AttachmentTypeMetadata::Image { width, height }) => (*width, *height),
+            None => (None, None),
+        };
+        Self {
+            id: attachment.id.to_string(),
+            media_type: attachment.media_type.clone(),
+            width,
+            height,
+            bytes: attachment.byte_len as usize,
+            label: attachment.label.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RlmHistoryItem {
@@ -100,7 +118,6 @@ pub enum RlmHistoryItem {
         id: String,
         protocol_iteration: usize,
         code: String,
-        #[serde(default, alias = "observations")]
         output: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         images: Vec<RlmImageRef>,
@@ -121,13 +138,17 @@ impl RlmHistoryItem {
     /// The image representations intentionally remain distinct: persisted
     /// entries retain attachment references, while history items expose the
     /// compact image metadata used by the model.
-    pub fn from_trajectory_entry(entry: &RlmTrajectoryEntry, images: Vec<RlmImageRef>) -> Self {
+    pub fn from_trajectory_entry(entry: &RlmTrajectoryEntry) -> Self {
         Self::LashlangStep {
             id: entry.id.clone(),
             protocol_iteration: entry.protocol_iteration,
             code: entry.code.clone(),
             output: entry.output.clone(),
-            images,
+            images: entry
+                .images
+                .iter()
+                .map(RlmImageRef::from_attachment)
+                .collect(),
             calls: entry.calls.clone(),
             calls_omitted: entry.calls_omitted,
             error: entry.error.clone(),
@@ -143,7 +164,7 @@ mod rlm_step_serde_tests {
     use serde::de::{IgnoredAny, MapAccess, Visitor};
     use serde::{Deserializer as _, Serialize};
 
-    use super::{RlmHistoryItem, RlmImageRef, RlmTrajectoryEntry};
+    use super::{RlmHistoryItem, RlmTrajectoryEntry};
 
     fn serialized_field_order<T: Serialize>(value: &T) -> Vec<String> {
         struct FieldOrderVisitor;
@@ -196,7 +217,10 @@ mod rlm_step_serde_tests {
                 id: "image-1".parse().expect("valid attachment id"),
                 media_type: "image/png".parse().expect("valid media type"),
                 byte_len: 42,
-                type_metadata: None,
+                type_metadata: Some(lash_sansio::AttachmentTypeMetadata::image(
+                    Some(640),
+                    Some(480),
+                )),
                 label: Some("plot".to_string()),
             }],
             calls: vec![lash_sansio::ExecutedCallRecord {
@@ -209,21 +233,24 @@ mod rlm_step_serde_tests {
         }
     }
 
-    fn populated_images() -> Vec<RlmImageRef> {
-        vec![RlmImageRef {
-            id: "image-1".to_string(),
-            media_type: "image/png".parse().expect("valid media type"),
-            width: Some(640),
-            height: Some(480),
-            bytes: 42,
-            label: Some("plot".to_string()),
-        }]
-    }
-
     #[test]
     fn trajectory_and_history_step_serde_shapes_stay_in_parity() {
         let entry = populated_entry();
-        let history = RlmHistoryItem::from_trajectory_entry(&entry, populated_images());
+        let history = RlmHistoryItem::from_trajectory_entry(&entry);
+
+        assert!(matches!(
+            &history,
+            RlmHistoryItem::LashlangStep { images, .. }
+                if matches!(
+                    images.as_slice(),
+                    [image]
+                        if image.id == "image-1"
+                            && image.width == Some(640)
+                            && image.height == Some(480)
+                            && image.bytes == 42
+                            && image.label.as_deref() == Some("plot")
+                )
+        ));
 
         let expected_shared_fields = [
             "id",
@@ -258,7 +285,7 @@ mod rlm_step_serde_tests {
             error: None,
             final_output: None,
         };
-        let sparse_history = RlmHistoryItem::from_trajectory_entry(&sparse_entry, Vec::new());
+        let sparse_history = RlmHistoryItem::from_trajectory_entry(&sparse_entry);
         let expected_sparse_fields = ["id", "protocol_iteration", "code", "output"]
             .into_iter()
             .map(str::to_string)
@@ -270,52 +297,25 @@ mod rlm_step_serde_tests {
     }
 
     #[test]
-    fn legacy_observations_decode_with_matching_defaults() {
-        let legacy_entry: RlmTrajectoryEntry = serde_json::from_value(serde_json::json!({
+    fn legacy_observations_alias_is_rejected() {
+        let entry_error = serde_json::from_value::<RlmTrajectoryEntry>(serde_json::json!({
             "id": "legacy-step",
             "protocol_iteration": 4,
             "code": "print('legacy')",
             "observations": ["legacy output"],
         }))
-        .expect("legacy trajectory entry decodes");
-        assert_eq!(legacy_entry.output, vec!["legacy output"]);
-        assert!(legacy_entry.images.is_empty());
-        assert!(legacy_entry.calls.is_empty());
-        assert_eq!(legacy_entry.calls_omitted, 0);
-        assert!(legacy_entry.error.is_none());
-        assert!(legacy_entry.final_output.is_none());
+        .expect_err("legacy trajectory alias must be rejected");
+        assert!(entry_error.to_string().contains("missing field `output`"));
 
-        let legacy_history: RlmHistoryItem = serde_json::from_value(serde_json::json!({
+        let history_error = serde_json::from_value::<RlmHistoryItem>(serde_json::json!({
             "kind": "lashlang_step",
             "id": "legacy-step",
             "protocol_iteration": 4,
             "code": "print('legacy')",
             "observations": ["legacy output"],
         }))
-        .expect("legacy history item decodes");
-        let RlmHistoryItem::LashlangStep {
-            id,
-            protocol_iteration,
-            code,
-            output,
-            images,
-            calls,
-            calls_omitted,
-            error,
-            final_output,
-        } = legacy_history
-        else {
-            panic!("legacy payload decoded to the wrong history item");
-        };
-        assert_eq!(id, legacy_entry.id);
-        assert_eq!(protocol_iteration, legacy_entry.protocol_iteration);
-        assert_eq!(code, legacy_entry.code);
-        assert_eq!(output, legacy_entry.output);
-        assert!(images.is_empty());
-        assert!(calls.is_empty());
-        assert_eq!(calls_omitted, 0);
-        assert!(error.is_none());
-        assert!(final_output.is_none());
+        .expect_err("legacy history alias must be rejected");
+        assert!(history_error.to_string().contains("missing field `output`"));
     }
 }
 
