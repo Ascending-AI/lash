@@ -1591,7 +1591,11 @@ finish initial
             .await
             .expect("old work before reset");
         assert_eq!(
-            old_work_before_reset.visible_process_ids,
+            old_work_before_reset
+                .visible_processes
+                .into_iter()
+                .map(|process_ref| process_ref.process_id)
+                .collect::<Vec<_>>(),
             started.started_process_ids()
         );
         append_started_graph(
@@ -1659,7 +1663,11 @@ finish initial
             .await
             .expect("old work after reset submission");
         assert_eq!(
-            old_work_after_reset.visible_process_ids,
+            old_work_after_reset
+                .visible_processes
+                .into_iter()
+                .map(|process_ref| process_ref.process_id)
+                .collect::<Vec<_>>(),
             started.started_process_ids(),
             "mock Restate ingress must not consume deletion work inline"
         );

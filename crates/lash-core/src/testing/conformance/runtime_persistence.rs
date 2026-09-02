@@ -2888,6 +2888,7 @@ pub fn queued_process_wake_draft(
         wake_id: format!("wake:{session_id}:{text}"),
         target_session_id: session_id.to_string(),
         process_id: format!("process:{text}"),
+        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {
@@ -7657,6 +7658,7 @@ fn policy_test_wake(session_id: &str, process_id: &str, sequence: u64) -> Proces
         wake_id: format!("wake:{process_id}:{sequence}"),
         target_session_id: session_id.to_string(),
         process_id: process_id.to_string(),
+        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {
@@ -9555,6 +9557,7 @@ async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
         wake_id: "wake-1".to_string(),
         target_session_id: "root".to_string(),
         process_id: "process-1".to_string(),
+        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
         sequence: 7,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {

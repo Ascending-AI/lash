@@ -533,6 +533,7 @@ fn observed_process_summary(
 ) -> lash_core::ProcessHandleView {
     lash_core::ProcessHandleView::new(
         process.process_id,
+        process.incarnation,
         process.identity.clone(),
         process.lifecycle,
     )
@@ -595,6 +596,7 @@ async fn assert_remote_process_dto_surface(
         .expect("list process records for remote DTO round trip");
     for record in records {
         let process_id = record.id.clone();
+        let process_ref = lash_core::ProcessRef::from_record(&record);
         let remote_record = lash_remote_protocol::RemoteProcessRecord::try_from(record)
             .expect("process record should convert to remote DTO");
         remote_record
@@ -614,22 +616,24 @@ async fn assert_remote_process_dto_surface(
             .map(|event| (event.sequence, event.event_type.clone()))
             .collect::<Vec<_>>();
         let remote_events = lash_remote_protocol::RemoteProcessEventsResponse::try_from((
-            process_id.clone(),
+            process_ref.clone(),
             events,
         ))
         .expect("process events serialize for the remote protocol");
         remote_events
             .validate()
             .expect("remote process event tail should validate");
-        let (round_trip_process_id, round_trip_events): (String, Vec<lash_core::ProcessEvent>) =
-            remote_events
-                .try_into()
-                .expect("remote process event tail should convert back");
+        let (round_trip_process_ref, round_trip_events): (
+            lash_core::ProcessRef,
+            Vec<lash_core::ProcessEvent>,
+        ) = remote_events
+            .try_into()
+            .expect("remote process event tail should convert back");
         let round_trip_tail = round_trip_events
             .iter()
             .map(|event| (event.sequence, event.event_type.clone()))
             .collect::<Vec<_>>();
-        assert_eq!(round_trip_process_id, process_id);
+        assert_eq!(round_trip_process_ref, process_ref);
         assert_eq!(round_trip_tail, expected_tail);
     }
 }

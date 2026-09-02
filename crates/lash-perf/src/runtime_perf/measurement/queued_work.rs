@@ -428,6 +428,7 @@ fn queued_work_stress_wake(
         wake_id: format!("wake:{session_id}:{sequence}"),
         target_session_id: session_id.to_string(),
         process_id: process_id.clone(),
+        process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(sequence),
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core::RuntimeInvocation {

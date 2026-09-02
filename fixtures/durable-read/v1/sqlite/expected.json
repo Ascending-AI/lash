@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 45,
+  "fixture_schema_version": 46,
   "head_revision": 3,
   "node_ids_in_read_order": [
     "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940",
@@ -514,10 +514,11 @@
     "signature": "daea63b63ac72e5c4f6e7410c016de0e0cfa50b2b91409c5a25035f44c85700e"
   },
   "wake_delivery": {
-    "version": 1,
+    "version": 2,
     "wake_id": "wake:v1:blake3:c7a090afe2d3e8c770fa5cbb13211e777855eac33f2daf6550c9d1b7061069d0",
     "target_session_id": "durable-read-fixture",
     "process_id": "durable-read-wake-process",
+    "process_incarnation": 4,
     "sequence": 1,
     "event_type": "fixture.wake",
     "event_invocation": {

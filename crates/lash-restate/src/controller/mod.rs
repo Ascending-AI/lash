@@ -1244,14 +1244,14 @@ async fn execute_restate_journaled_effect(
 include!("process_command.rs");
 async fn signal_ordinal_for_event(
     registry: &dyn ProcessRegistry,
-    process_id: &str,
+    process_ref: &lash_core::ProcessRef,
     event_type: &str,
     sequence: u64,
 ) -> Result<u64, PluginError> {
     // COUNT at the store, not a full log fetch: per-signal cost must stay
     // flat for long-lived processes that accumulate large event histories.
     registry
-        .count_events_through(process_id, event_type, sequence)
+        .count_events_through_ref(process_ref, event_type, sequence)
         .await
 }
 

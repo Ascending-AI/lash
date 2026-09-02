@@ -91,6 +91,16 @@ pub enum PluginError {
     /// An operation referenced a process id that the registry never knew.
     #[error("unknown process `{process_id}`")]
     ProcessUnknown { process_id: String },
+    /// A durable reference names a different lifetime than the currently
+    /// retained process with the same host-facing id.
+    #[error(
+        "process `{process_id}` incarnation {requested_incarnation} was superseded by incarnation {current_incarnation}"
+    )]
+    ProcessIncarnationSuperseded {
+        process_id: String,
+        requested_incarnation: crate::ProcessIncarnation,
+        current_incarnation: crate::ProcessIncarnation,
+    },
     #[error(transparent)]
     RuntimeEffectController(#[from] crate::RuntimeEffectControllerError),
     #[error("process `{process_id}` execution was already started by {by:?}")]
@@ -181,6 +191,7 @@ impl PluginError {
             | Self::UnstagedUsageConfirmation { .. }
             | Self::ClockBeforeUnixEpoch { .. }
             | Self::MonotonicCounterOverflow { .. }
+            | Self::ProcessIncarnationSuperseded { .. }
             | Self::ProcessNoLongerRetained { .. }
             | Self::ProcessCallerDeparted { .. }
             | Self::ProcessAlreadyTerminal { .. }

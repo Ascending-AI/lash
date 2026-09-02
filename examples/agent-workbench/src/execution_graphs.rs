@@ -108,8 +108,9 @@ impl<'a> GraphProjection<'a> {
             processes.insert(item.process.process_id.clone(), Some(item.process));
         }
         let visible_process_ids = snapshot
-            .visible_process_ids
+            .visible_processes
             .into_iter()
+            .map(|process_ref| process_ref.process_id)
             .collect::<BTreeSet<_>>();
 
         let graph_by_key = graphs

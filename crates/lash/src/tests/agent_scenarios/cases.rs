@@ -343,7 +343,7 @@ fn agent_scenario_awaited_process_attachment_is_a_parent_commit_gc_root() -> Res
             )
             .response(lashlang_block(
                 r#"
-handle = { __handle__: "process", id: "awaited-attachment-child" }
+handle = { __handle__: "process", id: "awaited-attachment-child", incarnation: 1 }
 attachment = (await handle)?
 finish attachment"#,
             ))

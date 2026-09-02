@@ -59,14 +59,12 @@ impl<'scope> ProcessCommandRunner<'scope> {
         }
     }
 
-    async fn await_process(
+    async fn await_process_ref(
         &self,
-        process_id: &str,
+        process_ref: crate::ProcessRef,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         match self
-            .run(crate::ProcessCommand::Await {
-                process_id: process_id.to_string(),
-            })
+            .run(crate::ProcessCommand::Await { process_ref })
             .await?
         {
             crate::ProcessEffectOutcome::Await { output } => Ok(*output),
@@ -93,12 +91,12 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn cancel(
         &self,
-        process_id: &str,
+        process_ref: crate::ProcessRef,
         reason: Option<String>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::Cancel {
-                process_id: process_id.to_string(),
+                process_ref,
                 reason,
                 replay: None,
             })
@@ -106,6 +104,31 @@ impl<'scope> ProcessCommandRunner<'scope> {
         {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
             _ => Err(wrong_process_outcome("cancel")),
+        }
+    }
+
+    async fn cancel_named(
+        &self,
+        process_id: &str,
+        reason: Option<String>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        match self.registry.resolve_process_ref(process_id).await {
+            Ok(process_ref) => self.cancel(process_ref, reason).await,
+            Err(refusal @ crate::PluginError::ProcessUnknown { .. })
+            | Err(refusal @ crate::PluginError::ProcessNoLongerRetained { .. }) => {
+                match self
+                    .run(crate::ProcessCommand::CancelRefused {
+                        process_id: process_id.to_string(),
+                        reason,
+                        refusal,
+                    })
+                    .await?
+                {
+                    crate::ProcessEffectOutcome::CancelRefused { refusal } => Err(refusal),
+                    _ => Err(wrong_process_outcome("cancel_refused")),
+                }
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -132,14 +155,14 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn signal(
         &self,
-        process_id: &str,
+        process_ref: crate::ProcessRef,
         signal_name: String,
         signal_id: String,
         request: crate::ProcessEventAppendRequest,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::Signal {
-                process_id: process_id.to_string(),
+                process_ref,
                 signal_name,
                 signal_id,
                 request,
@@ -153,12 +176,12 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn signal_recorded(
         &self,
-        process_id: &str,
+        process_ref: crate::ProcessRef,
         signal_name: String,
         signal_id: String,
         request: crate::ProcessEventAppendRequest,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.signal(process_id, signal_name, signal_id, request)
+        self.signal(process_ref, signal_name, signal_id, request)
             .await
     }
 
@@ -524,8 +547,36 @@ impl ProcessCapability {
         process_id: &str,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+        let process_ref = match current
+            .host
+            .process_registry()
+            .ok_or_else(|| crate::PluginError::Session("process registry unavailable".to_string()))?
+            .resolve_process_ref(process_id)
+            .await
+        {
+            Ok(process_ref) => process_ref,
+            Err(crate::PluginError::ProcessNoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }) => {
+                return Ok(crate::ProcessAwaitOutput::NoLongerRetained {
+                    terminal_label,
+                    pruned_at_ms,
+                });
+            }
+            Err(error) => return Err(error),
+        };
+        self.await_process_ref(current, process_ref, scope).await
+    }
+
+    pub(in crate::runtime::session_manager) async fn await_process_ref(
+        &self,
+        current: &CurrentSessionCapability,
+        process_ref: crate::ProcessRef,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         self.command_runner(current, &scope)?
-            .await_process(process_id)
+            .await_process_ref(process_ref)
             .await
     }
 
@@ -669,14 +720,9 @@ impl ProcessCapability {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
-        if runner.registry().get_process(process_id).await?.is_none() {
-            return Err(crate::runtime::registry_transitions::unknown_process(
-                process_id,
-            ));
-        }
         let _ = (managed, session_id);
         runner
-            .cancel(process_id, Some("requested by host".to_string()))
+            .cancel_named(process_id, Some("requested by host".to_string()))
             .await
     }
 
@@ -690,13 +736,8 @@ impl ProcessCapability {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
-        if runner.registry().get_process(process_id).await?.is_none() {
-            return Err(crate::runtime::registry_transitions::unknown_process(
-                process_id,
-            ));
-        }
         let _ = (managed, session_id);
-        runner.cancel(process_id, reason).await
+        runner.cancel_named(process_id, reason).await
     }
 
     pub(in crate::runtime::session_manager) async fn cancel_recorded_intent(
@@ -706,9 +747,8 @@ impl ProcessCapability {
         reason: Option<String>,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.command_runner(current, &scope)?
-            .cancel(process_id, reason)
-            .await
+        let runner = self.command_runner(current, &scope)?;
+        runner.cancel_named(process_id, reason).await
     }
 
     pub(in crate::runtime::session_manager) async fn finish_recorded_intent_parent(
@@ -773,7 +813,12 @@ impl ProcessCapability {
             format!("process:{process_id}:signal.{signal_name}:{signal_id}"),
         );
         runner
-            .signal(process_id, signal_name, signal_id, request)
+            .signal(
+                crate::ProcessRef::from_record(&record),
+                signal_name,
+                signal_id,
+                request,
+            )
             .await
     }
 
@@ -791,8 +836,10 @@ impl ProcessCapability {
         let request = crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
             format!("process:{process_id}:signal.{signal_name}:{signal_id}"),
         );
-        self.command_runner(current, &scope)?
-            .signal_recorded(process_id, signal_name, signal_id, request)
+        let runner = self.command_runner(current, &scope)?;
+        let process_ref = runner.registry().resolve_process_ref(process_id).await?;
+        runner
+            .signal_recorded(process_ref, signal_name, signal_id, request)
             .await
     }
 

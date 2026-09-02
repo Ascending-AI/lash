@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::{PluginError, ProcessAwaitOutput, ProcessEvent, ProcessRegistry, WorkCadencePolicy};
+use crate::{
+    PluginError, ProcessAwaitOutput, ProcessEvent, ProcessRef, ProcessRegistry, WorkCadencePolicy,
+};
 
 use super::super::process::ProcessChangeHub;
 
@@ -52,15 +54,35 @@ impl NativeProcessAwaiter {
         self
     }
 
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) async fn await_terminal(
         &self,
         process_id: &str,
     ) -> Result<ProcessAwaitOutput, PluginError> {
-        if let Some(output) = self.try_terminal(process_id).await? {
+        match self.registry.resolve_process_ref(process_id).await {
+            Ok(process_ref) => self.await_terminal_ref(&process_ref).await,
+            Err(PluginError::ProcessNoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }) => Ok(ProcessAwaitOutput::NoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub(crate) async fn await_terminal_ref(
+        &self,
+        process_ref: &ProcessRef,
+    ) -> Result<ProcessAwaitOutput, PluginError> {
+        if let Some(output) = self.try_terminal_ref(process_ref).await? {
             return Ok(output);
         }
         crate::runtime::process_worker::release_process_execution_permit_while(
-            self.wait_for(process_id, || self.try_terminal(process_id)),
+            self.wait_for(&process_ref.process_id, || {
+                self.try_terminal_ref(process_ref)
+            }),
         )
         .await
     }
@@ -71,15 +93,26 @@ impl NativeProcessAwaiter {
         event_type: &str,
         after_sequence: u64,
     ) -> Result<ProcessEvent, PluginError> {
+        let process_ref = self.registry.resolve_process_ref(process_id).await?;
+        self.await_event_ref(&process_ref, event_type, after_sequence)
+            .await
+    }
+
+    pub(crate) async fn await_event_ref(
+        &self,
+        process_ref: &ProcessRef,
+        event_type: &str,
+        after_sequence: u64,
+    ) -> Result<ProcessEvent, PluginError> {
         if let Some(event) = self
-            .read_event(process_id, event_type, after_sequence)
+            .read_event_ref(process_ref, event_type, after_sequence)
             .await?
         {
             return Ok(event);
         }
         crate::runtime::process_worker::release_process_execution_permit_while(
-            self.wait_for(process_id, || {
-                self.read_event(process_id, event_type, after_sequence)
+            self.wait_for(&process_ref.process_id, || {
+                self.read_event_ref(process_ref, event_type, after_sequence)
             }),
         )
         .await
@@ -119,15 +152,15 @@ impl NativeProcessAwaiter {
         }
     }
 
-    async fn try_terminal(
+    async fn try_terminal_ref(
         &self,
-        process_id: &str,
+        process_ref: &ProcessRef,
     ) -> Result<Option<ProcessAwaitOutput>, PluginError> {
-        let record = match self.registry.get_process(process_id).await {
+        let record = match self.registry.get_process_ref(process_ref).await {
             Ok(Some(record)) => record,
             Ok(None) => {
                 return Err(PluginError::ProcessUnknown {
-                    process_id: process_id.to_string(),
+                    process_id: process_ref.process_id.clone(),
                 });
             }
             Err(PluginError::ProcessNoLongerRetained {
@@ -143,21 +176,21 @@ impl NativeProcessAwaiter {
         };
         if record.status == crate::ProcessStatus::CallerDeparted {
             return Err(PluginError::ProcessCallerDeparted {
-                process_id: process_id.to_string(),
+                process_id: process_ref.process_id.clone(),
             });
         }
         Ok(record.outcome)
     }
 
-    async fn read_event(
+    async fn read_event_ref(
         &self,
-        process_id: &str,
+        process_ref: &ProcessRef,
         event_type: &str,
         after_sequence: u64,
     ) -> Result<Option<ProcessEvent>, PluginError> {
         Ok(self
             .registry
-            .events_after(process_id, after_sequence)
+            .events_after_ref(process_ref, after_sequence)
             .await?
             .into_iter()
             .find(|event| event.event_type == event_type))

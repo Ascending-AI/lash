@@ -10,7 +10,7 @@ use super::events::{
 use super::model::{
     AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessId, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
-    ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRegistration,
+    ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRef, ProcessRegistration,
     ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted, SessionId, WaitState,
 };
 use super::references::ProcessLiveReferenceView;
@@ -338,6 +338,7 @@ mod wake_delivery_identity_tests {
             wake_id: format!("wake:v1:blake3:{}", "a".repeat(64)),
             target_session_id: "session".to_string(),
             process_id: "process".to_string(),
+            process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
             sequence: 1,
             event_type: "process.wake".to_string(),
             event_invocation: crate::RuntimeInvocation::effect(
@@ -366,6 +367,7 @@ mod wake_delivery_identity_tests {
                 wake_id: wake_id.to_string(),
                 target_session_id: "session".to_string(),
                 process_id: "process".to_string(),
+                process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
                 sequence: 1,
                 event_type: "process.wake".to_string(),
                 event_invocation: crate::RuntimeInvocation::effect(
@@ -548,6 +550,32 @@ pub trait ProcessRegistry: Send + Sync {
         None
     }
 
+    /// Resolve a host-facing reusable process name to the currently retained
+    /// structural identity. Internal durable references must keep the returned
+    /// pair rather than resolving the name again.
+    async fn resolve_process_ref(&self, process_id: &str) -> Result<ProcessRef, PluginError> {
+        match self.get_process(process_id).await? {
+            Some(record) => Ok(ProcessRef::from_record(&record)),
+            None => Err(super::registry_transitions::unknown_process(process_id)),
+        }
+    }
+
+    /// Read one exact process incarnation and refuse a successor with the same
+    /// host-facing name.
+    async fn get_process_ref(
+        &self,
+        process_ref: &ProcessRef,
+    ) -> Result<Option<ProcessRecord>, PluginError> {
+        match self.get_process(&process_ref.process_id).await? {
+            Some(record) if record.incarnation == process_ref.incarnation => Ok(Some(record)),
+            Some(record) => Err(super::registry_transitions::process_incarnation_superseded(
+                process_ref,
+                record.incarnation,
+            )),
+            None => Ok(None),
+        }
+    }
+
     /// Process ids may be registered again after their terminal incarnation is
     /// pruned. A durable sender floor retained per `(target_session_id,
     /// process_id)` makes a later incarnation continue above every sequence
@@ -588,6 +616,18 @@ pub trait ProcessRegistry: Send + Sync {
         process_id: &str,
         by: ProcessObserverBy,
     ) -> Result<(), PluginError>;
+
+    /// Attach an observer edge to one exact process incarnation.
+    async fn add_observer_ref(
+        &self,
+        session_id: &str,
+        process_ref: &ProcessRef,
+        by: ProcessObserverBy,
+    ) -> Result<(), PluginError> {
+        self.get_process_ref(process_ref).await?;
+        self.add_observer(session_id, &process_ref.process_id, by)
+            .await
+    }
 
     async fn remove_observer(
         &self,
@@ -678,6 +718,16 @@ pub trait ProcessRegistry: Send + Sync {
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendReceipt, PluginError>;
 
+    /// Append a host-owned event to one exact process incarnation.
+    async fn append_event_ref(
+        &self,
+        process_ref: &ProcessRef,
+        request: ProcessEventAppendRequest,
+    ) -> Result<ProcessEventAppendReceipt, PluginError> {
+        self.get_process_ref(process_ref).await?;
+        self.append_event(&process_ref.process_id, request).await
+    }
+
     /// Append an event emitted by the currently executing process attempt.
     ///
     /// Implementations validate `authority` and append in one atomic write.
@@ -694,6 +744,17 @@ pub trait ProcessRegistry: Send + Sync {
         after_sequence: u64,
     ) -> Result<Vec<ProcessEvent>, PluginError>;
 
+    /// Read an event cursor pinned to one process incarnation.
+    async fn events_after_ref(
+        &self,
+        process_ref: &ProcessRef,
+        after_sequence: u64,
+    ) -> Result<Vec<ProcessEvent>, PluginError> {
+        self.get_process_ref(process_ref).await?;
+        self.events_after(&process_ref.process_id, after_sequence)
+            .await
+    }
+
     /// Count events of `event_type` with `sequence <= up_to_sequence`.
     ///
     /// This is the signal-ordinal query: the Nth occurrence of a signal event
@@ -708,6 +769,21 @@ pub trait ProcessRegistry: Send + Sync {
     ) -> Result<u64, PluginError> {
         Ok(self
             .events_after(process_id, 0)
+            .await?
+            .into_iter()
+            .filter(|event| event.sequence <= up_to_sequence && event.event_type == event_type)
+            .count() as u64)
+    }
+
+    /// Count matching events through a cursor pinned to one incarnation.
+    async fn count_events_through_ref(
+        &self,
+        process_ref: &ProcessRef,
+        event_type: &str,
+        up_to_sequence: u64,
+    ) -> Result<u64, PluginError> {
+        Ok(self
+            .events_after_ref(process_ref, 0)
             .await?
             .into_iter()
             .filter(|event| event.sequence <= up_to_sequence && event.event_type == event_type)

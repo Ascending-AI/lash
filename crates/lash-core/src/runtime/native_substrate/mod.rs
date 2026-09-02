@@ -47,16 +47,16 @@ pub trait ProcessWorkSubstrate: Send + Sync {
         reason: &str,
     ) -> Result<ProcessAdmissionReport, PluginError>;
 
-    /// Wait for `process_id` to reach a terminal state.
+    /// Wait for one pinned process incarnation to reach a terminal state.
     ///
     /// There is no polling fallback and no "attach if provided". [`ProcessTerminalWait::Reattach`]
     /// is recoverable: the port bounded one transport attachment while the
     /// durable wait stayed live, so the caller re-enters with the same explicit
-    /// `process_id` (never an implicit "latest" process). The caller owns the
+    /// `process_ref` (never an implicit "latest" process). The caller owns the
     /// overall wait bound through its cancellation select.
     async fn await_process_terminal(
         &self,
-        process_id: &str,
+        process_ref: &crate::ProcessRef,
     ) -> Result<ProcessTerminalWait, PluginError>;
 }
 

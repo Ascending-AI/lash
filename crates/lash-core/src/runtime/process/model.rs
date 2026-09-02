@@ -19,6 +19,76 @@ pub type ProcessId = String;
 pub type SessionId = String;
 pub type ProcessOutcome = ProcessAwaitOutput;
 
+/// Store-minted identity of one lifetime of a reusable [`ProcessId`].
+///
+/// The value is the process registry change sequence allocated by the
+/// registration transaction. A bare process id is only a host-facing name;
+/// durable references pin this value so they cannot silently rebind after the
+/// name is pruned and registered again.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(transparent)]
+pub struct ProcessIncarnation(u64);
+
+impl ProcessIncarnation {
+    /// Wrap the registration change sequence allocated by a process store.
+    pub fn from_registration_sequence(sequence: u64) -> Self {
+        Self(sequence)
+    }
+
+    /// Expose the registration change sequence to process-store implementors.
+    pub fn registration_sequence(self) -> u64 {
+        self.0
+    }
+}
+
+impl fmt::Display for ProcessIncarnation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+/// Structural identity of one process lifetime.
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
+pub struct ProcessRef {
+    pub process_id: ProcessId,
+    pub incarnation: ProcessIncarnation,
+}
+
+impl ProcessRef {
+    /// Pin a reusable process name to one store-minted incarnation.
+    pub fn new(process_id: impl Into<ProcessId>, incarnation: ProcessIncarnation) -> Self {
+        Self {
+            process_id: process_id.into(),
+            incarnation,
+        }
+    }
+
+    /// Pin the identity carried by a retained process record.
+    pub fn from_record(record: &ProcessRecord) -> Self {
+        Self::new(record.id.clone(), record.incarnation)
+    }
+}
+
+impl fmt::Display for ProcessRef {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}@{}", self.process_id, self.incarnation)
+    }
+}
+
 /// Opaque position in a store's Process Change Feed.
 ///
 /// The wrapped sequence is meaningful only to the registry backend that issued
@@ -909,6 +979,7 @@ impl ProcessStatus {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessRecord {
     pub id: ProcessId,
+    pub incarnation: ProcessIncarnation,
     pub registration_fingerprint: String,
     pub input: Arc<ProcessInput>,
     /// Declared recovery contract. Required with no serde default: pre-column
@@ -977,14 +1048,18 @@ impl WaitState {
 impl ProcessRecord {
     /// Builds a `ProcessRecord` from registration data for store and durable-substrate implementors
     /// while persisting and coordinating durable process execution.
-    pub fn from_registration(registration: ProcessRegistration) -> Self {
-        Self::from_registration_with_clock(registration, &crate::SystemClock)
+    pub fn from_registration(
+        registration: ProcessRegistration,
+        incarnation: ProcessIncarnation,
+    ) -> Self {
+        Self::from_registration_with_clock(registration, incarnation, &crate::SystemClock)
     }
 
     /// Builds a `ProcessRecord` from registration with clock data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn from_registration_with_clock(
         registration: ProcessRegistration,
+        incarnation: ProcessIncarnation,
         clock: &dyn crate::Clock,
     ) -> Self {
         let registration = prepare_process_registration(registration)
@@ -994,6 +1069,7 @@ impl ProcessRecord {
         Self::from_prepared_registration(
             registration,
             registration_fingerprint,
+            incarnation,
             clock.timestamp_ms(),
         )
     }
@@ -1003,10 +1079,12 @@ impl ProcessRecord {
     pub fn from_prepared_registration(
         registration: ProcessRegistration,
         registration_fingerprint: String,
+        incarnation: ProcessIncarnation,
         now_ms: u64,
     ) -> Self {
         Self {
             id: registration.id,
+            incarnation,
             registration_fingerprint,
             input: registration.input,
             disposition: registration.disposition,
@@ -1221,6 +1299,7 @@ pub struct ProcessHandleView {
     pub handle_type: String,
     pub id: ProcessId,
     pub process_id: ProcessId,
+    pub incarnation: ProcessIncarnation,
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -1234,6 +1313,7 @@ impl ProcessHandleView {
     /// persisting and coordinating durable process execution.
     pub fn new(
         process_id: impl Into<ProcessId>,
+        incarnation: ProcessIncarnation,
         identity: ProcessIdentity,
         status: ProcessStatus,
     ) -> Self {
@@ -1242,6 +1322,7 @@ impl ProcessHandleView {
             handle_type: "process".to_string(),
             id: process_id.clone(),
             process_id,
+            incarnation,
             kind: identity.kind,
             label: identity.label,
             definition: identity.definition,
@@ -1259,13 +1340,19 @@ impl ProcessHandleView {
     /// Builds a `ProcessHandleView` from record data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn from_record(record: ProcessRecord) -> Self {
-        Self::new(record.id, record.identity, record.status)
+        Self::new(
+            record.id,
+            record.incarnation,
+            record.identity,
+            record.status,
+        )
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessCancelReceipt {
     pub process_id: ProcessId,
+    pub incarnation: ProcessIncarnation,
     pub status: ProcessStatus,
 }
 
@@ -1275,6 +1362,7 @@ impl ProcessCancelReceipt {
     pub fn from_record(record: ProcessRecord) -> Self {
         Self {
             process_id: record.id,
+            incarnation: record.incarnation,
             status: record.status,
         }
     }
@@ -1582,6 +1670,7 @@ impl ProcessObserverBy {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessTombstone {
     pub process_id: ProcessId,
+    pub incarnation: ProcessIncarnation,
     pub terminal_label: String,
     pub pruned_at_ms: u64,
     pub pruned_change_seq: u64,

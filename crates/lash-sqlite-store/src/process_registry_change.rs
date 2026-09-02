@@ -44,6 +44,7 @@ pub(crate) fn processes_changed_since_conn(
                  SELECT pruned_change_seq, 'deleted' AS kind,
                         json_object(
                             'process_id', process_id,
+                            'incarnation', incarnation,
                             'terminal_label', terminal_label,
                             'pruned_at_ms', pruned_at_ms,
                             'pruned_change_seq', pruned_change_seq
@@ -136,9 +137,10 @@ fn prune_process_rows_conn(
     // update and insert per process.
     conn.execute(
         "INSERT INTO process_tombstones (
-             process_id, terminal_label, pruned_at_ms, pruned_change_seq
+             process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq
          )
          SELECT process.process_id,
+                process.incarnation,
                 process.status,
                 ?2,
                 ?3 + CAST(candidate.key AS INTEGER)

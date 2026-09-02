@@ -331,6 +331,17 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
+    async fn await_process_ref(
+        &self,
+        process_ref: &crate::ProcessRef,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+        self.services
+            .processes
+            .await_process_ref(&self.services.current, process_ref.clone(), scope)
+            .await
+    }
+
     async fn list_visible(
         &self,
         session_id: &str,
@@ -379,6 +390,32 @@ impl crate::ProcessService for RuntimeSessionProcessService {
                 )
                 .await
         }
+    }
+
+    async fn validate_visible_refs(
+        &self,
+        session_id: &str,
+        process_refs: &[crate::ProcessRef],
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        let process_ids = process_refs
+            .iter()
+            .map(|process_ref| process_ref.process_id.clone())
+            .collect::<Vec<_>>();
+        self.validate_visible(session_id, &process_ids, scope)
+            .await?;
+        let registry = self
+            .services
+            .current
+            .host
+            .process_registry()
+            .ok_or_else(|| {
+                crate::PluginError::Session("process registry unavailable".to_string())
+            })?;
+        for process_ref in process_refs {
+            registry.get_process_ref(process_ref).await?;
+        }
+        Ok(())
     }
 
     async fn cancel(

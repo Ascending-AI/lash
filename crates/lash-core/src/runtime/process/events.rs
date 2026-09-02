@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::model::{ProcessId, ProcessObserverBy, ProcessStatus, RecoveryContract};
+use super::model::{
+    ProcessId, ProcessIncarnation, ProcessObserverBy, ProcessStatus, RecoveryContract,
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessEventType {
@@ -505,6 +507,7 @@ pub fn validate_process_signal_name(signal_name: &str) -> Result<(), crate::Plug
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessEvent {
     pub process_id: ProcessId,
+    pub process_incarnation: ProcessIncarnation,
     pub sequence: u64,
     pub event_type: String,
     pub payload: serde_json::Value,
@@ -710,15 +713,15 @@ fn cancellation_replay_key(process_id: &str, reason: Option<&str>) -> String {
     )
 }
 
-pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 1;
+pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessWakeDelivery {
-    #[serde(default = "default_process_wake_delivery_format_version")]
     pub version: u32,
     pub wake_id: String,
     pub target_session_id: String,
     pub process_id: ProcessId,
+    pub process_incarnation: ProcessIncarnation,
     pub sequence: u64,
     pub event_type: String,
     pub event_invocation: crate::RuntimeInvocation,
@@ -730,10 +733,6 @@ pub struct ProcessWakeDelivery {
     pub authority: crate::QueuedWorkAuthority,
     pub input: String,
     pub created_at_ms: u64,
-}
-
-fn default_process_wake_delivery_format_version() -> u32 {
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION
 }
 
 fn process_wake_authority_is_empty(authority: &crate::QueuedWorkAuthority) -> bool {

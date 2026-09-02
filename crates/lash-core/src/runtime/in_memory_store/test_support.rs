@@ -645,6 +645,7 @@ mod tests {
             wake_id: "rewound-commit-wake".to_string(),
             target_session_id: session_id.to_string(),
             process_id: process_id.to_string(),
+            process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
             sequence: 7,
             event_type: "producer.wake".to_string(),
             event_invocation: crate::RuntimeInvocation {

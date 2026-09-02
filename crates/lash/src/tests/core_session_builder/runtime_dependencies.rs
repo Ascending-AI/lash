@@ -435,9 +435,9 @@ impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
 
     async fn await_process_terminal(
         &self,
-        process_id: &str,
+        process_ref: &lash_core::ProcessRef,
     ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
-        panic!("unexpected terminal wait for {process_id}")
+        panic!("unexpected terminal wait for {process_ref}")
     }
 }
 

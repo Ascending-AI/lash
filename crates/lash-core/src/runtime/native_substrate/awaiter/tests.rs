@@ -64,6 +64,51 @@ fn success(value: serde_json::Value) -> ProcessAwaitOutput {
     ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value))
 }
 
+#[tokio::test]
+async fn superseded_await_receipt_is_refused_instead_of_returning_the_successor_outcome() {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let old = registry
+        .register_process(registration("reused-await"))
+        .await
+        .expect("register old incarnation");
+    let old_ref = crate::ProcessRef::from_record(&old);
+    registry
+        .complete_process(
+            &old.id,
+            success(serde_json::json!("old")),
+            crate::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete old incarnation");
+    registry
+        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune old incarnation");
+    let current = registry
+        .register_process(registration("reused-await"))
+        .await
+        .expect("register successor incarnation");
+    registry
+        .complete_process(
+            &current.id,
+            success(serde_json::json!("successor")),
+            crate::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete successor incarnation");
+    let awaiter = NativeProcessAwaiter::for_registry(registry);
+
+    let result = awaiter.await_terminal_ref(&old_ref).await;
+
+    assert!(
+        matches!(
+            result,
+            Err(crate::PluginError::ProcessIncarnationSuperseded { .. })
+        ),
+        "old await receipt must refuse the successor, got {result:?}"
+    );
+}
+
 /// ADR 0016 pins the default awaiter cadence while allowing native deployments
 /// to tune both bounds through `WorkCadencePolicy`.
 #[test]
@@ -646,12 +691,13 @@ async fn caller_departed_refuses_before_terminal_outcome() {
         .await
         .expect("get_process")
         .expect("record exists");
+    let process_ref = crate::ProcessRef::from_record(&record);
     record.status = crate::ProcessStatus::CallerDeparted;
     record.outcome = Some(success(serde_json::json!("completed-value")));
 
     raw.set_process_read_override(record).await;
     let awaiter_err = awaiter
-        .await_terminal("proc-departed")
+        .await_terminal_ref(&process_ref)
         .await
         .expect_err("awaiter must refuse CallerDeparted even if outcome is present");
     assert!(

@@ -692,7 +692,7 @@ fn schema_congruence_rejects_a_dropped_registered_constraint() {
             "Postgres",
             POSTGRES_SCHEMA_SOURCE,
             POSTGRES_EXPECTED_CONSTRAINTS,
-            "    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed'))\n",
+            "    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),\n",
         ),
     ] {
         let dropped = source.replacen(declaration, "", 1);

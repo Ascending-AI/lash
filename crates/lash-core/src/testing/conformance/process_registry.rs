@@ -11,15 +11,19 @@ use super::process_references::{
     live_reference_summary_tracks_non_terminal_reference_counts,
 };
 use super::*;
-use crate::{ProcessRecord, TestProcessRegistryWriteExt};
+use crate::{
+    PluginError, ProcessObserverBy, ProcessRecord, ProcessRef, ProjectionWatermark,
+    TestProcessRegistryWriteExt,
+};
 
-// The shared registry fixture leaves 57 modeled registrations after its
-// compaction probes; the cold refold fixture below adds the 58th. Three of
-// those registrations and two of those prunes come from the append-arm
+// The shared registry fixture leaves 59 modeled registrations after its
+// compaction probes; the cold refold fixture below adds the 60th. The
+// incarnation-reuse contract contributes two registrations and one prune;
+// three more registrations and two more prunes come from the append-arm
 // contract, whose two completed rows are terminal and prune-eligible by the
 // time retention runs.
-const REOPEN_BASELINE_SPAWNS: usize = 58;
-const REOPEN_BASELINE_PRUNED: usize = 6;
+const REOPEN_BASELINE_SPAWNS: usize = 60;
+const REOPEN_BASELINE_PRUNED: usize = 7;
 
 fn settled_success(value: serde_json::Value) -> ProcessAwaitOutput {
     ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value))
@@ -414,11 +418,80 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     .await;
     process_attempt_budget_is_typed(Arc::clone(&registry)).await;
     tombstones_make_pruned_processes_distinguishable(Arc::clone(&registry)).await;
+    reused_process_ids_refuse_superseded_incarnations(Arc::clone(&registry)).await;
     lifecycle_transition_refusals_are_backend_invariant(Arc::clone(&registry)).await;
     process_event_append_arms_are_ordered(Arc::clone(&registry)).await;
     caller_departure_state_machine(Arc::clone(&registry)).await;
     caller_departed_rows_are_reclaimed_by_retention(Arc::clone(&registry)).await;
     terminal_completion_atomically_retains_parent_end_plan(registry).await;
+}
+
+async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn ProcessRegistry>) {
+    let process_id = "incarnation-reuse-conformance";
+    let first = registry
+        .register_process(registration(process_id))
+        .await
+        .expect("register first process incarnation");
+    registry
+        .complete_process(
+            process_id,
+            settled_success(serde_json::json!({"incarnation": "first"})),
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete first process incarnation");
+    let (_, projected) = registry
+        .processes_changed_since(ProcessChangeCursor::initial(), 4096)
+        .await
+        .expect("project first process incarnation");
+    registry
+        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::UpTo(projected))
+        .await
+        .expect("prune first process incarnation");
+
+    let second = registry
+        .register_process(registration(process_id))
+        .await
+        .expect("register second process incarnation");
+    assert_ne!(first.incarnation, second.incarnation);
+    let first_ref = ProcessRef::from_record(&first);
+    for refusal in [
+        registry.events_after_ref(&first_ref, 0).await.map(|_| ()),
+        registry
+            .add_observer_ref(
+                "incarnation-stale-observer",
+                &first_ref,
+                ProcessObserverBy::host("incarnation-conformance"),
+            )
+            .await,
+    ] {
+        assert!(
+            matches!(
+                refusal,
+                Err(PluginError::ProcessIncarnationSuperseded {
+                    ref process_id,
+                    requested_incarnation,
+                    current_incarnation,
+                }) if process_id == "incarnation-reuse-conformance"
+                    && requested_incarnation == first.incarnation
+                    && current_incarnation == second.incarnation
+            ),
+            "old durable references must refuse the live successor: {refusal:?}"
+        );
+    }
+
+    let (changes, _) = registry
+        .processes_changed_since(ProcessChangeCursor::initial(), 4096)
+        .await
+        .expect("read retained incarnation history");
+    assert!(changes.iter().any(|change| {
+        matches!(
+            change,
+            ProcessChange::Deleted { tombstone }
+                if tombstone.process_id == process_id
+                    && tombstone.incarnation == first.incarnation
+        )
+    }));
 }
 
 async fn process_lease_batch_read_matches_point_reads(registry: Arc<dyn ProcessRegistry>) {

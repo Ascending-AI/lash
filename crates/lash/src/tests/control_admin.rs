@@ -16,9 +16,9 @@ impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
 
     async fn await_process_terminal(
         &self,
-        process_id: &str,
+        process_ref: &lash_core::ProcessRef,
     ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
-        panic!("unexpected terminal wait for {process_id}")
+        panic!("unexpected terminal wait for {process_ref}")
     }
 }
 
@@ -937,7 +937,7 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
         let core = builder.build(crate::testing::runtime_lease_owner())?;
         let session = core.session(&parent_session_id).open().await?;
 
-        registry
+        let registered_process = registry
             .register_process(lash_core::ProcessRegistration::new(
                 &create_process_id,
                 lash_core::ProcessInput::External {
@@ -967,7 +967,9 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
             child.observed_processes,
             vec![lash_core::test_support::SessionObservedProcessReceipt {
                 process_id: create_process_id.clone(),
-                outcome: lash_core::test_support::SessionObservedProcessOutcome::Observed,
+                outcome: lash_core::test_support::SessionObservedProcessOutcome::Observed {
+                    incarnation: registered_process.incarnation,
+                },
                 attribution:
                     lash_core::test_support::SessionObserverIntentAttribution::HostRequested,
             }]

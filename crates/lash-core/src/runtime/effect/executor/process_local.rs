@@ -2,10 +2,10 @@ use super::*;
 
 async fn await_process_terminal(
     process_work: &dyn crate::ProcessWorkSubstrate,
-    process_id: &str,
+    process_ref: &crate::ProcessRef,
 ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
     loop {
-        match process_work.await_process_terminal(process_id).await? {
+        match process_work.await_process_terminal(process_ref).await? {
             crate::ProcessTerminalWait::Terminal(output) => return Ok(output),
             crate::ProcessTerminalWait::Reattach => continue,
         }
@@ -88,16 +88,16 @@ impl ProcessLocalExecution {
                 let report = registry.delete_session_process_state(&session_id).await?;
                 Ok(ProcessEffectOutcome::DeleteSession { report })
             }
-            ProcessCommand::Await { process_id } => {
-                let await_terminal = || await_process_terminal(process_work.as_ref(), &process_id);
+            ProcessCommand::Await { process_ref } => {
+                let await_terminal = || await_process_terminal(process_work.as_ref(), &process_ref);
                 let output = if let Some(turn_cancellation) = turn_cancellation {
                     tokio::select! {
                         biased;
                         output = await_terminal() => output?,
                         _ = turn_cancellation.cancellation.cancelled() => {
-                            NativeRuntimeEffectController::request_process_cancel(
+                            NativeRuntimeEffectController::request_process_cancel_ref(
                                 Arc::clone(&registry),
-                                &process_id,
+                                &process_ref,
                                 Some("turn cancelled while awaiting process".to_string()),
                                 None,
                             )
@@ -113,13 +113,13 @@ impl ProcessLocalExecution {
                 })
             }
             ProcessCommand::Cancel {
-                process_id,
+                process_ref,
                 reason,
                 replay,
             } => {
-                let record = NativeRuntimeEffectController::request_process_cancel(
+                let record = NativeRuntimeEffectController::request_process_cancel_ref(
                     registry,
-                    &process_id,
+                    &process_ref,
                     reason,
                     replay,
                 )
@@ -127,6 +127,9 @@ impl ProcessLocalExecution {
                 Ok(ProcessEffectOutcome::Cancel {
                     record: Box::new(record),
                 })
+            }
+            ProcessCommand::CancelRefused { refusal, .. } => {
+                Ok(ProcessEffectOutcome::CancelRefused { refusal })
             }
             ProcessCommand::ParentEnd {
                 identity,
@@ -171,7 +174,7 @@ impl ProcessLocalExecution {
                 })
             }
             ProcessCommand::Signal {
-                process_id,
+                process_ref,
                 signal_name,
                 request,
                 ..
@@ -182,13 +185,10 @@ impl ProcessLocalExecution {
                         "local process signal execution requires its effect controller",
                     )
                 })?;
-                if registry.get_process(&process_id).await?.is_none() {
-                    return Err(crate::PluginError::ProcessNotVisible { process_id }.into());
-                }
-                let result = registry.append_event(&process_id, request).await?;
+                let result = registry.append_event_ref(&process_ref, request).await?;
                 let waiting_ordinal =
                     registry
-                        .get_process(&process_id)
+                        .get_process_ref(&process_ref)
                         .await?
                         .and_then(|record| match record.wait {
                             Some(crate::WaitState {
@@ -209,8 +209,8 @@ impl ProcessLocalExecution {
                     Some(ordinal) => ordinal,
                     None => {
                         registry
-                            .count_events_through(
-                                &process_id,
+                            .count_events_through_ref(
+                                &process_ref,
                                 result.event.event_type.as_str(),
                                 result.event.sequence,
                             )
@@ -220,9 +220,9 @@ impl ProcessLocalExecution {
                 if ordinal > 0 {
                     let key = effect_controller
                         .await_event_key(
-                            &crate::ExecutionScope::process(&process_id),
+                            &crate::ExecutionScope::process(&process_ref.process_id),
                             crate::AwaitEventWaitIdentity::process_signal(
-                                &process_id,
+                                &process_ref.process_id,
                                 &signal_name,
                                 ordinal,
                             ),
@@ -278,9 +278,9 @@ mod terminal_wait_tests {
 
         async fn await_process_terminal(
             &self,
-            process_id: &str,
+            process_ref: &crate::ProcessRef,
         ) -> Result<crate::ProcessTerminalWait, crate::PluginError> {
-            assert_eq!(process_id, "reattach-process");
+            assert_eq!(process_ref.process_id, "reattach-process");
             if self.waits.fetch_add(1, Ordering::SeqCst) == 0 {
                 Ok(crate::ProcessTerminalWait::Reattach)
             } else {
@@ -299,9 +299,15 @@ mod terminal_wait_tests {
             terminal: terminal.clone(),
         };
 
-        let output = await_process_terminal(&port, "reattach-process")
-            .await
-            .expect("reattachment reaches terminal output");
+        let output = await_process_terminal(
+            &port,
+            &crate::ProcessRef::new(
+                "reattach-process",
+                crate::ProcessIncarnation::from_registration_sequence(1),
+            ),
+        )
+        .await
+        .expect("reattachment reaches terminal output");
 
         assert_eq!(output, terminal);
         assert_eq!(port.waits.load(Ordering::SeqCst), 2);
@@ -320,7 +326,7 @@ mod tests {
         let event_type =
             crate::runtime::process_signal_event_type(signal_name).expect("signal event type");
         let registry = Arc::new(crate::TestLocalProcessRegistry::default());
-        registry
+        let record = registry
             .register_process(
                 crate::ProcessRegistration::new(
                     process_id,
@@ -366,7 +372,7 @@ mod tests {
                         "signal-divergent-ordinal",
                     ),
                     crate::RuntimeEffectCommand::process(crate::ProcessCommand::Signal {
-                        process_id: process_id.to_string(),
+                        process_ref: crate::ProcessRef::from_record(&record),
                         signal_name: signal_name.to_string(),
                         signal_id: "signal-1".to_string(),
                         request: crate::ProcessEventAppendRequest::new(

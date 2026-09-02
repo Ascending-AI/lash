@@ -186,14 +186,14 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     )
     .await;
 
-    let process_columns = "process_id, registration_fingerprint, originator_id,
+    let process_columns = "process_id, incarnation, registration_fingerprint, originator_id,
         identity_kind, is_waiting, created_at_ms, updated_at_ms, change_seq,
         status, record_json";
     assert_check_rejects(
         &mut connection,
         &format!(
             "INSERT INTO lash_processes ({process_columns}) VALUES
-             ('bad-status', 'fingerprint', 'originator', 'standard', FALSE, 0, 0, 0,
+             ('bad-status', 1, 'fingerprint', 'originator', 'standard', FALSE, 0, 0, 0,
               'paused', '{{}}')"
         ),
         "ck_processes_status",
@@ -201,7 +201,7 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     .await;
     sqlx::query(&format!(
         "INSERT INTO lash_processes ({process_columns}) VALUES
-         ('wake-parent', 'fingerprint', 'originator', 'standard', FALSE, 0, 0, 0,
+         ('wake-parent', 1, 'fingerprint', 'originator', 'standard', FALSE, 0, 0, 0,
           'running', '{{}}')"
     ))
     .execute(&mut connection)
@@ -210,19 +210,19 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_process_wake_deliveries (
-             delivery_id, process_id, target_session_id, sequence, state,
+             delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
              next_attempt_at_ms, expires_at_ms, delivery_json
-         ) VALUES ('bad-state', 'wake-parent', 'target', 1, 'claimed', 0, 1, '{}')",
+         ) VALUES ('bad-state', 'wake-parent', 1, 'target', 1, 'claimed', 0, 1, '{}')",
         "ck_process_wake_deliveries_state",
     )
     .await;
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_process_wake_deliveries (
-             delivery_id, process_id, target_session_id, sequence, state,
+             delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
              next_attempt_at_ms, expires_at_ms, discard_reason, delivery_json
          ) VALUES (
-             'bad-discard', 'wake-parent', 'target', 2, 'discarded', 0, 1,
+             'bad-discard', 'wake-parent', 1, 'target', 2, 'discarded', 0, 1,
              'unroutable', '{}'
          )",
         "ck_process_wake_deliveries_discard_reason",

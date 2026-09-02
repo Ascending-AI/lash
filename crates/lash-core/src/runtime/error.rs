@@ -125,6 +125,7 @@ pub enum RuntimeErrorCode {
     /// ADR 0051 effect-host implementor diagnostic for a process-command
     /// refusal whose terminal target has been replaced by a retention tombstone.
     ProcessNoLongerRetained,
+    ProcessIncarnationSuperseded,
     ProcessRegistryUnavailable,
     ProcessSignalWaitCancelled,
     ProcessSignalWaitTimeout,
@@ -538,6 +539,7 @@ impl RuntimeErrorCode {
             Self::ProcessNotVisible => "process_not_visible",
             Self::ProcessAlreadyTerminal => "process_already_terminal",
             Self::ProcessNoLongerRetained => "process_no_longer_retained",
+            Self::ProcessIncarnationSuperseded => "process_incarnation_superseded",
             Self::ProcessRegistryUnavailable => "process_registry_unavailable",
             Self::ProcessSignalWaitCancelled => "process_signal_wait_cancelled",
             Self::ProcessSignalWaitTimeout => "process_signal_wait_timeout",
@@ -762,6 +764,7 @@ impl RuntimeErrorCode {
                 | Self::ProcessNotVisible
                 | Self::ProcessAlreadyTerminal
                 | Self::ProcessNoLongerRetained
+                | Self::ProcessIncarnationSuperseded
                 | Self::ProcessRegistryUnavailable
                 | Self::ProcessSignalWaitCancelled
                 | Self::ProcessSignalWaitTimeout
@@ -906,6 +909,7 @@ impl RuntimeErrorCode {
             "process_not_visible" => Self::ProcessNotVisible,
             "process_already_terminal" => Self::ProcessAlreadyTerminal,
             "process_no_longer_retained" => Self::ProcessNoLongerRetained,
+            "process_incarnation_superseded" => Self::ProcessIncarnationSuperseded,
             "process_registry_unavailable" => Self::ProcessRegistryUnavailable,
             "process_signal_wait_cancelled" => Self::ProcessSignalWaitCancelled,
             "process_signal_wait_timeout" => Self::ProcessSignalWaitTimeout,
@@ -1295,6 +1299,7 @@ mod tests {
             | RuntimeErrorCode::ProcessNotVisible
             | RuntimeErrorCode::ProcessAlreadyTerminal
             | RuntimeErrorCode::ProcessNoLongerRetained
+            | RuntimeErrorCode::ProcessIncarnationSuperseded
             | RuntimeErrorCode::ProcessRegistryUnavailable
             | RuntimeErrorCode::ProcessSignalWaitCancelled
             | RuntimeErrorCode::ProcessSignalWaitTimeout
@@ -1455,6 +1460,7 @@ mod tests {
             RuntimeErrorCode::ProcessNotVisible,
             RuntimeErrorCode::ProcessAlreadyTerminal,
             RuntimeErrorCode::ProcessNoLongerRetained,
+            RuntimeErrorCode::ProcessIncarnationSuperseded,
             RuntimeErrorCode::ProcessRegistryUnavailable,
             RuntimeErrorCode::ProcessSignalWaitCancelled,
             RuntimeErrorCode::ProcessSignalWaitTimeout,

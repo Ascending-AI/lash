@@ -509,6 +509,11 @@ impl RuntimeBoundaryHarness {
             .get("sequence")
             .and_then(Value::as_u64)
             .unwrap_or(1);
+        let process_incarnation = event
+            .payload
+            .get("incarnation")
+            .and_then(Value::as_u64)
+            .unwrap_or(1);
         let source_key = lash_core::facade_support::process_wake_source_key(&process_id, sequence);
         let replay_key = event
             .payload
@@ -520,6 +525,9 @@ impl RuntimeBoundaryHarness {
             lash_core::facade_support::ProcessWakeDeliveryRequest {
                 target_session_id: session.clone(),
                 process_id: process_id.clone(),
+                process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(
+                    process_incarnation,
+                ),
                 sequence,
                 event_type: "process.wake".to_string(),
                 event_invocation: RuntimeInvocation {
@@ -1481,6 +1489,7 @@ fn worker_failover_work(
         lash_core::facade_support::ProcessWakeDeliveryRequest {
             target_session_id: session.to_string(),
             process_id: process_id.clone(),
+            process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
             sequence: 1,
             event_type: "process.wake".to_string(),
             event_invocation: RuntimeInvocation {

@@ -830,6 +830,12 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         )
         .await
         .expect("prune terminal process");
+    let named_incarnation = registry
+        .get_process("named-process")
+        .await
+        .expect("read named process")
+        .expect("named process retained")
+        .incarnation;
 
     let child = runtime
         .session_lifecycle_service()
@@ -855,7 +861,9 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         child.observed_processes[0],
         crate::SessionObservedProcessReceipt {
             process_id: "named-process".to_string(),
-            outcome: crate::SessionObservedProcessOutcome::Observed,
+            outcome: crate::SessionObservedProcessOutcome::Observed {
+                incarnation: named_incarnation,
+            },
             attribution: crate::SessionObserverIntentAttribution::HostRequested,
         }
     );

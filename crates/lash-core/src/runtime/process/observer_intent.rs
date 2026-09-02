@@ -78,13 +78,8 @@ async fn apply_process_observers(
             }
             SessionObserverIntentAttribution::ForkInherited => ProcessObserverBy::ForkInheritance,
         };
-        let outcome = apply_process_observer(
-            process_registry,
-            session_id,
-            &intent.process_id,
-            observer_by,
-        )
-        .await;
+        let outcome =
+            apply_process_observer(process_registry, session_id, intent, observer_by).await;
         results.push(SessionObservedProcessReceipt {
             process_id: intent.process_id.clone(),
             attribution: intent.attribution,
@@ -97,7 +92,7 @@ async fn apply_process_observers(
 async fn apply_process_observer(
     process_registry: Option<&dyn ProcessRegistry>,
     session_id: &str,
-    process_id: &str,
+    intent: &SessionObserverIntent,
     observer_by: ProcessObserverBy,
 ) -> SessionObservedProcessOutcome {
     let Some(process_registry) = process_registry else {
@@ -106,9 +101,49 @@ async fn apply_process_observer(
         };
     };
 
-    match process_registry.get_process(process_id).await {
+    let process_ref = match intent.process_incarnation {
+        Some(incarnation) => crate::ProcessRef::new(
+            intent.process_id.clone(),
+            crate::ProcessIncarnation::from_registration_sequence(incarnation),
+        ),
+        None => match process_registry
+            .resolve_process_ref(&intent.process_id)
+            .await
+        {
+            Ok(process_ref) => process_ref,
+            Err(crate::PluginError::ProcessNoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }) => {
+                return SessionObservedProcessOutcome::NoLongerRetained {
+                    terminal_label,
+                    pruned_at_ms,
+                };
+            }
+            Err(crate::PluginError::ProcessUnknown { .. }) => {
+                return SessionObservedProcessOutcome::NotFound;
+            }
+            Err(error) => {
+                return SessionObservedProcessOutcome::Unavailable {
+                    message: error.to_string(),
+                };
+            }
+        },
+    };
+
+    match process_registry.get_process_ref(&process_ref).await {
         Ok(Some(_)) => {}
         Ok(None) => return SessionObservedProcessOutcome::NotFound,
+        Err(crate::PluginError::ProcessIncarnationSuperseded {
+            requested_incarnation,
+            current_incarnation,
+            ..
+        }) => {
+            return SessionObservedProcessOutcome::IncarnationSuperseded {
+                requested_incarnation,
+                current_incarnation,
+            };
+        }
         Err(crate::PluginError::ProcessNoLongerRetained {
             terminal_label,
             pruned_at_ms,
@@ -126,10 +161,20 @@ async fn apply_process_observer(
     }
 
     match process_registry
-        .add_observer(session_id, process_id, observer_by)
+        .add_observer_ref(session_id, &process_ref, observer_by)
         .await
     {
-        Ok(()) => SessionObservedProcessOutcome::Observed,
+        Ok(()) => SessionObservedProcessOutcome::Observed {
+            incarnation: process_ref.incarnation,
+        },
+        Err(crate::PluginError::ProcessIncarnationSuperseded {
+            requested_incarnation,
+            current_incarnation,
+            ..
+        }) => SessionObservedProcessOutcome::IncarnationSuperseded {
+            requested_incarnation,
+            current_incarnation,
+        },
         Err(crate::PluginError::ProcessNoLongerRetained {
             terminal_label,
             pruned_at_ms,
@@ -141,7 +186,7 @@ async fn apply_process_observer(
             // A process may disappear between the point read and the
             // replay-keyed observer append. Re-read to preserve the most
             // specific typed outcome without hiding an unrelated apply error.
-            match process_registry.get_process(process_id).await {
+            match process_registry.get_process_ref(&process_ref).await {
                 Ok(None) => SessionObservedProcessOutcome::NotFound,
                 Err(crate::PluginError::ProcessNoLongerRetained {
                     terminal_label,
@@ -149,6 +194,14 @@ async fn apply_process_observer(
                 }) => SessionObservedProcessOutcome::NoLongerRetained {
                     terminal_label,
                     pruned_at_ms,
+                },
+                Err(crate::PluginError::ProcessIncarnationSuperseded {
+                    requested_incarnation,
+                    current_incarnation,
+                    ..
+                }) => SessionObservedProcessOutcome::IncarnationSuperseded {
+                    requested_incarnation,
+                    current_incarnation,
                 },
                 Ok(Some(_)) | Err(_) => SessionObservedProcessOutcome::Unavailable {
                     message: apply_error.to_string(),

@@ -131,7 +131,8 @@ impl SqliteProcessRegistry {
         let tombstone = conn
             .query_row(
                 "SELECT terminal_label, pruned_at_ms
-                 FROM process_tombstones WHERE process_id = ?1",
+                 FROM process_tombstones WHERE process_id = ?1
+                 ORDER BY incarnation DESC LIMIT 1",
                 params![process_id],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
             )
@@ -154,12 +155,75 @@ impl SqliteProcessRegistry {
         ))
     }
 
+    pub(crate) fn require_process_ref_conn(
+        conn: &rusqlite::Connection,
+        process_ref: &ProcessRef,
+    ) -> Result<ProcessRecord, lash_core::PluginError> {
+        if let Some(record) = Self::load_process_conn(conn, &process_ref.process_id)? {
+            if record.incarnation == process_ref.incarnation {
+                return Ok(record);
+            }
+            return Err(registry_transitions::process_incarnation_superseded(
+                process_ref,
+                record.incarnation,
+            ));
+        }
+        let exact_tombstone = conn
+            .query_row(
+                "SELECT terminal_label, pruned_at_ms
+                 FROM process_tombstones
+                 WHERE process_id = ?1 AND incarnation = ?2",
+                params![
+                    process_ref.process_id,
+                    process_ref.incarnation.registration_sequence() as i64,
+                ],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
+            .map_err(process_sqlite_error)?;
+        if let Some((terminal_label, pruned_at_ms)) = exact_tombstone {
+            return Err(registry_transitions::process_no_longer_retained(
+                registry_transitions::ProcessTombstoneStamp {
+                    terminal_label,
+                    pruned_at_ms: plugin_u64_from_sql(
+                        "ProcessTombstone",
+                        "pruned_at_ms",
+                        pruned_at_ms,
+                    )?,
+                },
+            ));
+        }
+        let latest_incarnation = conn
+            .query_row(
+                "SELECT incarnation FROM process_tombstones
+                 WHERE process_id = ?1 ORDER BY incarnation DESC LIMIT 1",
+                params![process_ref.process_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(process_sqlite_error)?;
+        match latest_incarnation {
+            Some(incarnation) => Err(registry_transitions::process_incarnation_superseded(
+                process_ref,
+                ProcessIncarnation::from_registration_sequence(plugin_u64_from_sql(
+                    "ProcessTombstone",
+                    "incarnation",
+                    incarnation,
+                )?),
+            )),
+            None => Err(registry_transitions::unknown_process(
+                &process_ref.process_id,
+            )),
+        }
+    }
+
     pub(crate) async fn set_observer(
         &self,
         session_id: &str,
         process_id: &str,
         by: ProcessObserverBy,
         add: bool,
+        expected_incarnation: Option<ProcessIncarnation>,
     ) -> Result<(), lash_core::PluginError> {
         let session_id = session_id.to_string();
         let process_id = process_id.to_string();
@@ -168,18 +232,24 @@ impl SqliteProcessRegistry {
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
-                    let mut record = Self::require_process_conn(tx, &process_id)?;
+                    let mut record = match expected_incarnation {
+                        Some(incarnation) => Self::require_process_ref_conn(
+                            tx,
+                            &ProcessRef::new(process_id.clone(), incarnation),
+                        )?,
+                        None => Self::require_process_conn(tx, &process_id)?,
+                    };
                     let changed = if add {
                         tx.execute(
-                            "INSERT OR IGNORE INTO process_observers (session_id, process_id)
-                             VALUES (?1, ?2)",
-                            params![session_id, process_id],
+                            "INSERT OR IGNORE INTO process_observers (session_id, process_id, process_incarnation)
+                             VALUES (?1, ?2, ?3)",
+                            params![session_id, process_id, record.incarnation.registration_sequence() as i64],
                         )
                     } else {
                         tx.execute(
                             "DELETE FROM process_observers
-                             WHERE session_id = ?1 AND process_id = ?2",
-                            params![session_id, process_id],
+                             WHERE session_id = ?1 AND process_id = ?2 AND process_incarnation = ?3",
+                            params![session_id, process_id, record.incarnation.registration_sequence() as i64],
                         )
                     }
                     .map_err(process_sqlite_error)?;
@@ -492,11 +562,12 @@ impl SqliteProcessRegistry {
                 }
                 conn.execute(
                     "INSERT INTO process_events (
-                        process_id, sequence, event_type, idempotency_key, event_json
+                        process_id, process_incarnation, sequence, event_type, idempotency_key, event_json
                      )
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
                         process_id,
+                        event.process_incarnation.registration_sequence() as i64,
                         sequence as i64,
                         event.event_type.as_str(),
                         event.invocation.replay_key(),
@@ -566,13 +637,14 @@ impl SqliteProcessRegistry {
         let delivery = lash_core::WakeDelivery::pending(wake.clone(), config)?;
         conn.execute(
             "INSERT OR IGNORE INTO process_wake_deliveries (
-                delivery_id, process_id, target_session_id, sequence, state,
+                delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
                 claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
                 discard_reason, delivery_json
-             ) VALUES (?1, ?2, ?3, ?4, 'pending', NULL, 0, NULL, ?5, ?6, NULL, ?7)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', NULL, 0, NULL, ?6, ?7, NULL, ?8)",
             params![
                 delivery.delivery_id,
                 delivery.wake.process_id,
+                delivery.wake.process_incarnation.registration_sequence() as i64,
                 delivery.wake.target_session_id,
                 delivery.wake.sequence as i64,
                 delivery.next_attempt_at_ms as i64,

@@ -128,7 +128,7 @@ struct ProcessLeaseObservation {
 struct ProcessRows {
     records: Vec<serde_json::Value>,
     events: Vec<serde_json::Value>,
-    observers: Vec<(String, String)>,
+    observers: Vec<(String, String, u64)>,
     leases: Vec<ProcessLeaseObservation>,
     wake_deliveries: Vec<serde_json::Value>,
     wake_allocation_floors: Vec<(String, String, u64)>,
@@ -524,6 +524,7 @@ impl SurfaceRunner {
                             "__handle__": "process",
                             "id": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
                             "process_id": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
+                            "incarnation": 1,
                             "kind": "external",
                             "status": "running"
                         }),
@@ -548,6 +549,7 @@ impl SurfaceRunner {
                             "__handle__": "process",
                             "id": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
                             "process_id": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
+                            "incarnation": 2,
                             "kind": "external",
                             "status": "running"
                         }),
@@ -910,11 +912,11 @@ impl SurfaceRunner {
                                     {"type": "text", "text": "{\"ok\":true}"},
                                     {
                                         "type": "text",
-                                        "text": "[tool intent start_process #0 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f\",\"kind\":\"external\",\"process_id\":\"tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f\",\"status\":\"running\"}]"
+                                        "text": "[tool intent start_process #0 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f\",\"incarnation\":1,\"kind\":\"external\",\"process_id\":\"tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f\",\"status\":\"running\"}]"
                                     },
                                     {
                                         "type": "text",
-                                        "text": "[tool intent start_process #1 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397\",\"kind\":\"external\",\"process_id\":\"tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397\",\"status\":\"running\"}]"
+                                        "text": "[tool intent start_process #1 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397\",\"incarnation\":2,\"kind\":\"external\",\"process_id\":\"tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397\",\"status\":\"running\"}]"
                                     }
                                 ]
                             },
@@ -935,6 +937,7 @@ impl SurfaceRunner {
                                         "__handle__": "process",
                                         "id": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
                                         "process_id": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
+                                        "incarnation": 1,
                                         "kind": "external",
                                         "status": "running"
                                     },
@@ -958,6 +961,7 @@ impl SurfaceRunner {
                                         "__handle__": "process",
                                         "id": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
                                         "process_id": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
+                                        "incarnation": 2,
                                         "kind": "external",
                                         "status": "running"
                                     },
@@ -1342,12 +1346,18 @@ fn read_sqlite_surface(
     );
     let observers = {
         let mut stmt = process
-            .prepare("SELECT session_id, process_id FROM process_observers ORDER BY session_id, process_id")
+            .prepare("SELECT session_id, process_id, process_incarnation FROM process_observers ORDER BY session_id, process_id, process_incarnation")
             .unwrap();
-        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap()
+        stmt.query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                u64::try_from(row.get::<_, i64>(2)?).expect("non-negative process incarnation"),
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
     };
     let leases = {
         let mut stmt = process
@@ -1441,14 +1451,15 @@ fn read_sqlite_surface(
     };
     let tombstones = sqlite_simple_json_rows(
         &process,
-        "SELECT process_id, terminal_label, pruned_at_ms, pruned_change_seq
-         FROM process_tombstones ORDER BY process_id",
+        "SELECT process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq
+         FROM process_tombstones ORDER BY process_id, incarnation",
         |row| {
             Ok(normalized_json(serde_json::json!({
                 "process_id": row.get::<_, String>(0)?,
-                "terminal_label": row.get::<_, String>(1)?,
-                "pruned_at_ms": row.get::<_, i64>(2)?,
-                "pruned_change_seq": row.get::<_, i64>(3)?,
+                "incarnation": row.get::<_, i64>(1)?,
+                "terminal_label": row.get::<_, String>(2)?,
+                "pruned_at_ms": row.get::<_, i64>(3)?,
+                "pruned_change_seq": row.get::<_, i64>(4)?,
             })))
         },
     );
@@ -1594,11 +1605,20 @@ async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
     .unwrap();
     let events = event_rows.into_iter().map(|(process_id, event)| normalized_json(serde_json::json!({"process_id": process_id, "event": serde_json::from_str::<serde_json::Value>(&event).unwrap()}))).collect();
     let observers = sqlx::query_as(
-        "SELECT session_id, process_id FROM lash_process_observers ORDER BY session_id, process_id",
+        "SELECT session_id, process_id, process_incarnation FROM lash_process_observers ORDER BY session_id, process_id, process_incarnation",
     )
     .fetch_all(pool)
     .await
-    .unwrap();
+    .unwrap()
+    .into_iter()
+    .map(|(session_id, process_id, incarnation): (String, String, i64)| {
+        (
+            session_id,
+            process_id,
+            u64::try_from(incarnation).expect("non-negative process incarnation"),
+        )
+    })
+    .collect();
     type PgLeaseRow = (
         String,
         Option<String>,
@@ -1692,8 +1712,8 @@ async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
         .into_iter()
         .map(|(session, process, sequence)| (session, process, sequence as u64))
         .collect();
-    let tombstone_rows: Vec<(String, String, i64, i64)> = sqlx::query_as("SELECT process_id, terminal_label, pruned_at_ms, pruned_change_seq FROM lash_process_tombstones ORDER BY process_id").fetch_all(pool).await.unwrap();
-    let tombstones = tombstone_rows.into_iter().map(|(process_id, terminal_label, pruned_at_ms, pruned_change_seq)| normalized_json(serde_json::json!({"process_id": process_id, "terminal_label": terminal_label, "pruned_at_ms": pruned_at_ms, "pruned_change_seq": pruned_change_seq}))).collect();
+    let tombstone_rows: Vec<(String, i64, String, i64, i64)> = sqlx::query_as("SELECT process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq FROM lash_process_tombstones ORDER BY process_id, incarnation").fetch_all(pool).await.unwrap();
+    let tombstones = tombstone_rows.into_iter().map(|(process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq)| normalized_json(serde_json::json!({"process_id": process_id, "incarnation": incarnation, "terminal_label": terminal_label, "pruned_at_ms": pruned_at_ms, "pruned_change_seq": pruned_change_seq}))).collect();
     let fence_rows: Vec<(String, String, i64)> = sqlx::query_as("SELECT session_id, process_id, allocation_floor FROM lash_wake_redelivery_fences ORDER BY session_id, process_id").fetch_all(pool).await.unwrap();
     let wake_redelivery_fences = fence_rows
         .into_iter()

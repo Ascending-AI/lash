@@ -551,6 +551,7 @@ pub fn prepare_process_event_append(
     }
     let event = ProcessEvent {
         process_id: process_id.to_string(),
+        process_incarnation: record.incarnation,
         sequence,
         event_type: request.event_type,
         payload: request.payload,
@@ -613,6 +614,7 @@ fn prepare_wake_delivery(
     process_wake_delivery(ProcessWakeDeliveryRequest {
         target_session_id: target_session_id.to_string(),
         process_id: process_id.to_string(),
+        process_incarnation: record.incarnation,
         sequence,
         event_type,
         event_invocation,

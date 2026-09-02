@@ -28,7 +28,7 @@ use crate::store::session_execution_lease::LeaseOwnerIdentity;
 use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWakeDelivery};
 #[cfg(test)]
 use super::model::ProcessStatus;
-use super::model::{PROCESS_LEASE_SCHEMA_VERSION, ProcessLease};
+use super::model::{PROCESS_LEASE_SCHEMA_VERSION, ProcessLease, ProcessRef};
 use super::registry::{
     WakeDelivery, WakeDeliveryDisposition, WakeDeliveryState, WakeDiscardReason,
 };
@@ -52,7 +52,7 @@ fn decode_process_wake_delivery(delivery_json: &str) -> Result<ProcessWakeDelive
         serde_json::from_str(delivery_json).map_err(registry_row_decode_error)?;
     let found = probe
         .version
-        .unwrap_or(PROCESS_WAKE_DELIVERY_FORMAT_VERSION);
+        .unwrap_or(PROCESS_WAKE_DELIVERY_FORMAT_VERSION - 1);
     if found != PROCESS_WAKE_DELIVERY_FORMAT_VERSION {
         return Err(PluginError::ProcessWakeDeliveryFormatVersionMismatch {
             expected: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
@@ -329,6 +329,19 @@ pub fn process_no_longer_retained(stamp: ProcessTombstoneStamp) -> PluginError {
     PluginError::ProcessNoLongerRetained {
         terminal_label: stamp.terminal_label,
         pruned_at_ms: stamp.pruned_at_ms,
+    }
+}
+
+/// Refusal for a durable reference whose reusable name now identifies another
+/// process lifetime.
+pub fn process_incarnation_superseded(
+    requested: &ProcessRef,
+    current_incarnation: super::model::ProcessIncarnation,
+) -> PluginError {
+    PluginError::ProcessIncarnationSuperseded {
+        process_id: requested.process_id.clone(),
+        requested_incarnation: requested.incarnation,
+        current_incarnation,
     }
 }
 
@@ -1167,6 +1180,7 @@ mod tests {
             wake_id: format!("wake:v1:sha256:{}", "a".repeat(64)),
             target_session_id: "session".to_string(),
             process_id: "process".to_string(),
+            process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
             sequence: 4,
             event_type: "process.wake".to_string(),
             event_invocation: crate::RuntimeInvocation::effect(
@@ -1215,23 +1229,29 @@ mod tests {
     }
 
     #[test]
-    fn a_version_absent_wake_delivery_projects_as_v1() {
+    fn a_version_absent_v1_wake_delivery_is_refused() {
         let mut payload: serde_json::Value =
             serde_json::from_str(&wake_delivery_json()).expect("wake delivery JSON");
         payload
             .as_object_mut()
             .expect("wake delivery object")
             .remove("version");
-        let delivery = WakeDeliveryRow {
+        let error = WakeDeliveryRow {
             delivery_json: serde_json::to_string(&payload).expect("wake delivery JSON"),
             ..wake_row()
         }
         .project()
-        .expect("a pre-version wake delivery row projects as v1");
+        .expect_err("a pre-version wake delivery row must be refused");
 
+        assert!(matches!(
+            error,
+            PluginError::ProcessWakeDeliveryFormatVersionMismatch { expected, found }
+                if expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && found == 1
+        ));
         assert_eq!(
-            delivery.wake.version, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-            "version-absent rows retain the current v1 meaning"
+            1 + 1,
+            PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+            "wake delivery predecessor adjacency pin"
         );
     }
 
@@ -1239,7 +1259,7 @@ mod tests {
     fn a_future_wake_delivery_version_is_refused_with_expected_and_found() {
         let mut payload: serde_json::Value =
             serde_json::from_str(&wake_delivery_json()).expect("wake delivery JSON");
-        payload["version"] = serde_json::json!(2);
+        payload["version"] = serde_json::json!(3);
         let error = WakeDeliveryRow {
             delivery_json: serde_json::to_string(&payload).expect("future wake delivery JSON"),
             ..wake_row()
@@ -1251,7 +1271,7 @@ mod tests {
             matches!(
                 &error,
                 PluginError::ProcessWakeDeliveryFormatVersionMismatch { expected, found }
-                    if *expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && *found == 2
+                    if *expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && *found == 3
             ),
             "unexpected refusal: {error}"
         );

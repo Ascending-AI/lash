@@ -321,7 +321,7 @@ impl crate::ProcessWorkSubstrate for LateBoundProcessWork {
 
     async fn await_process_terminal(
         &self,
-        process_id: &str,
+        process_ref: &crate::ProcessRef,
     ) -> Result<crate::ProcessTerminalWait, PluginError> {
         crate::NativeProcessWork::for_registry(Arc::clone(
             self.worker
@@ -330,7 +330,7 @@ impl crate::ProcessWorkSubstrate for LateBoundProcessWork {
                 .config
                 .process_registry(),
         ))
-        .await_terminal(process_id)
+        .await_terminal_ref(process_ref)
         .await
         .map(crate::ProcessTerminalWait::Terminal)
     }

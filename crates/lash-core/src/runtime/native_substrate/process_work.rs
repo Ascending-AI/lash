@@ -54,6 +54,14 @@ impl NativeProcessWork {
         self.terminal_awaiter.await_terminal(process_id).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
+    pub async fn await_terminal_ref(
+        &self,
+        process_ref: &crate::ProcessRef,
+    ) -> Result<ProcessAwaitOutput, PluginError> {
+        self.terminal_awaiter.await_terminal_ref(process_ref).await
+    }
+
     /// Test-support event wait over the registry-only native port.
     #[cfg(any(test, feature = "testing"))]
     pub async fn await_event(
@@ -89,10 +97,10 @@ impl ProcessWorkSubstrate for NativeProcessWork {
 
     async fn await_process_terminal(
         &self,
-        process_id: &str,
+        process_ref: &crate::ProcessRef,
     ) -> Result<ProcessTerminalWait, PluginError> {
         self.terminal_awaiter
-            .await_terminal(process_id)
+            .await_terminal_ref(process_ref)
             .await
             .map(ProcessTerminalWait::Terminal)
     }

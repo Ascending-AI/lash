@@ -572,7 +572,10 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let command = crate::ProcessCommand::Cancel {
-        process_id: LIVE_PROCESS.to_string(),
+        process_ref: crate::ProcessRef::new(
+            LIVE_PROCESS,
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        ),
         reason: Some("outside any attempt".to_string()),
         replay: None,
     };
@@ -622,7 +625,10 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
         ),
         crate::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
             let command = crate::ProcessCommand::Cancel {
-                process_id: LIVE_PROCESS.to_string(),
+                process_ref: crate::ProcessRef::new(
+                    LIVE_PROCESS,
+                    crate::ProcessIncarnation::from_registration_sequence(1),
+                ),
                 reason: Some("test-only sentinel leak".to_string()),
                 replay: None,
             };

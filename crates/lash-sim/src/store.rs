@@ -835,6 +835,11 @@ impl ModelStore {
                     .get("sequence")
                     .and_then(Value::as_u64)
                     .unwrap_or(1);
+                let process_incarnation = event
+                    .payload
+                    .get("incarnation")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1);
                 let replay_key = event
                     .payload
                     .get("replay_key")
@@ -853,6 +858,10 @@ impl ModelStore {
                     lash_core::facade_support::ProcessWakeDeliveryRequest {
                         target_session_id: session.clone(),
                         process_id: process_id.clone(),
+                        process_incarnation:
+                            lash_core::ProcessIncarnation::from_registration_sequence(
+                                process_incarnation,
+                            ),
                         sequence,
                         event_type: "process.wake".to_string(),
                         event_invocation: lash_core::RuntimeInvocation {

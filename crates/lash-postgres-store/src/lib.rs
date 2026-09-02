@@ -56,18 +56,19 @@ use lash_core::{
     AttachmentOwnerKind, AwaitEventResolver, BlobRef, DeliveryPolicy, EffectHost, ExecutionScope,
     GcReport, LeaseOwnerIdentity, PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange,
     ProcessChangeCursor, ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest, ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease,
-    ProcessLeaseCompletion, ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport,
-    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted,
-    QueuedWorkStore, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimePersistence,
-    ScopedEffectController, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionListFilter, SessionMeta,
-    SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest, SessionStoreFactory,
-    SessionSummary, StoreError, StoreMaintenance, TokenLedgerEntry, TurnInputStore, VacuumReport,
-    facade_support::ProcessStartPlan, facade_support::ProcessTransition,
-    facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
+    ProcessEventAppendRequest, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessIncarnation, ProcessLease, ProcessLeaseCompletion, ProcessLiveReferenceView,
+    ProcessObserverBy, ProcessPruneReport, ProcessRecord, ProcessRef, ProcessRegistration,
+    ProcessRegistry, ProcessStartOutcome, ProcessStarted, QueuedWorkStore, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeError, RuntimePersistence, ScopedEffectController,
+    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
+    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore,
+    SessionListFilter, SessionMeta, SessionNodeRecord, SessionRelationKind,
+    SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, StoreError, StoreMaintenance,
+    TokenLedgerEntry, TurnInputStore, VacuumReport, facade_support::ProcessStartPlan,
+    facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
+    facade_support::registry_transitions,
 };
 use lash_core::{
     PluginError, TriggerDeliveryReservation, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
@@ -281,7 +282,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 73 stores process-event time only in the event JSON as epoch
 // milliseconds and removes the unread companion column. Component-72
 // databases are rejected at open; there is deliberately no migration arm.
-const SCHEMA_VERSION: i32 = 73;
+// Version 74 makes the registration change sequence the structural process
+// incarnation and carries it through events, observer edges, wake deliveries,
+// and tombstones. Component-73 databases are rejected at open.
+const SCHEMA_VERSION: i32 = 74;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

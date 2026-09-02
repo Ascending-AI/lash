@@ -241,6 +241,7 @@ fn exclusive_draft(session_id: &str, text: &str) -> QueuedWorkBatchDraft {
         wake_id: format!("wake:{text}"),
         target_session_id: session_id.to_string(),
         process_id: process_id.clone(),
+        process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {

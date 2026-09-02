@@ -130,6 +130,7 @@
                 .await
                 .expect("process read should succeed")
                 .expect("started process record should exist");
+            let process_ref = lash::process::ProcessRef::from_record(&record);
             let remote_record = lash_remote_protocol::RemoteProcessRecord::try_from(record)
                 .expect("started process record should convert to remote DTO");
             remote_record
@@ -149,15 +150,15 @@
                 .map(|event| (event.sequence, event.event_type.clone()))
                 .collect::<Vec<_>>();
             let remote_events = lash_remote_protocol::RemoteProcessEventsResponse::try_from((
-                process_id.clone(),
+                process_ref.clone(),
                 events,
             ))
             .expect("process events serialize for the remote protocol");
             remote_events
                 .validate()
                 .expect("remote started process event tail should validate");
-            let (round_trip_process_id, round_trip_events): (
-                String,
+            let (round_trip_process_ref, round_trip_events): (
+                lash::process::ProcessRef,
                 Vec<lash::process::ProcessEvent>,
             ) = remote_events
                 .try_into()
@@ -166,7 +167,7 @@
                 .iter()
                 .map(|event| (event.sequence, event.event_type.clone()))
                 .collect::<Vec<_>>();
-            assert_eq!(round_trip_process_id, *process_id);
+            assert_eq!(round_trip_process_ref, process_ref);
             assert_eq!(round_trip_tail, expected_tail);
         }
         let listed_ids = observed

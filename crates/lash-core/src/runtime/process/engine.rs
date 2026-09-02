@@ -280,11 +280,16 @@ impl ProcessEngineProcessContext {
         &self,
         process_id: &str,
     ) -> Result<ProcessAwaitOutput, crate::PluginError> {
+        let process_ref = self
+            .process_work
+            .registry()
+            .resolve_process_ref(process_id)
+            .await?;
         loop {
             match self
                 .process_work
                 .port()
-                .await_process_terminal(process_id)
+                .await_process_terminal(&process_ref)
                 .await?
             {
                 crate::ProcessTerminalWait::Terminal(output) => return Ok(output),

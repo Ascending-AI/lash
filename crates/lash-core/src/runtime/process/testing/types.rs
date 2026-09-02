@@ -20,7 +20,7 @@ pub struct TestLocalProcessRegistry {
     pub(super) next_change_seq: Arc<Mutex<u64>>,
     pub(super) observers: Arc<Mutex<HashMap<SessionId, HashSet<String>>>>,
     pub(super) wake_targets: Arc<Mutex<HashMap<String, SessionId>>>,
-    pub(super) tombstones: Arc<Mutex<HashMap<String, ProcessTombstone>>>,
+    pub(super) tombstones: Arc<Mutex<HashMap<(String, ProcessIncarnation), ProcessTombstone>>>,
     pub(super) leases: Arc<Mutex<ManagedLeaseMap>>,
     pub(crate) process_lease_point_reads: Arc<Mutex<usize>>,
     pub(crate) process_lease_batch_reads: Arc<Mutex<usize>>,
@@ -50,7 +50,7 @@ pub struct TestLocalProcessRegistry {
 pub struct RawProcessRegistryStateForTesting {
     pub records: Vec<(ProcessRecord, u64)>,
     pub events: Vec<(String, ProcessEvent)>,
-    pub observers: Vec<(String, String)>,
+    pub observers: Vec<(String, String, u64)>,
     pub leases: Vec<ProcessLease>,
     pub wake_deliveries: Vec<crate::WakeDelivery>,
     pub wake_allocation_floors: Vec<(SessionId, String, u64)>,

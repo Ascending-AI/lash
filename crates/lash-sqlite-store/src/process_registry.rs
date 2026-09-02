@@ -7,6 +7,10 @@ mod leases;
 mod list_tests;
 #[path = "process_registry/parent_end.rs"]
 mod parent_end;
+#[path = "process_registry/prune_api.rs"]
+mod prune_api;
+#[path = "process_registry/retention.rs"]
+mod retention;
 mod segment_handover;
 mod support;
 #[path = "process_registry/tool_intent_submission.rs"]
@@ -126,22 +130,24 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             registration_fingerprint
                         )));
                     }
+                    let change_seq = Self::next_change_seq_conn(tx)?;
                     let record = ProcessRecord::from_prepared_registration(
                         registration,
                         registration_fingerprint,
+                        ProcessIncarnation::from_registration_sequence(change_seq),
                         now,
                     );
                     let originator_id = record.originator_id();
-                    let change_seq = Self::next_change_seq_conn(tx)?;
                     tx.execute(
                         "INSERT INTO processes (
-                            process_id, registration_fingerprint, originator_id, wake_session_id,
+                            process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
                             identity_kind, identity_label, is_waiting,
                             created_at_ms, updated_at_ms, change_seq, status, record_json
                          )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                         params![
                             record.id.as_str(),
+                            record.incarnation.registration_sequence() as i64,
                             record.registration_fingerprint.as_str(),
                             originator_id.as_str(),
                             wake_session_id,
@@ -160,9 +166,9 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     let process_id = record.id.clone();
                     for session_id in &observers {
                         tx.execute(
-                            "INSERT INTO process_observers (session_id, process_id)
-                             VALUES (?1, ?2)",
-                            params![session_id, record.id.as_str()],
+                            "INSERT INTO process_observers (session_id, process_id, process_incarnation)
+                             VALUES (?1, ?2, ?3)",
+                            params![session_id, record.id.as_str(), record.incarnation.registration_sequence() as i64],
                         )
                         .map_err(process_sqlite_error)?;
                         Self::append_event_conn(
@@ -227,7 +233,24 @@ impl ProcessRegistry for SqliteProcessRegistry {
         process_id: &str,
         by: ProcessObserverBy,
     ) -> Result<(), lash_core::PluginError> {
-        self.set_observer(session_id, process_id, by, true).await
+        self.set_observer(session_id, process_id, by, true, None)
+            .await
+    }
+
+    async fn add_observer_ref(
+        &self,
+        session_id: &str,
+        process_ref: &ProcessRef,
+        by: ProcessObserverBy,
+    ) -> Result<(), lash_core::PluginError> {
+        self.set_observer(
+            session_id,
+            &process_ref.process_id,
+            by,
+            true,
+            Some(process_ref.incarnation),
+        )
+        .await
     }
 
     async fn remove_observer(
@@ -236,7 +259,8 @@ impl ProcessRegistry for SqliteProcessRegistry {
         process_id: &str,
         by: ProcessObserverBy,
     ) -> Result<(), lash_core::PluginError> {
-        self.set_observer(session_id, process_id, by, false).await
+        self.set_observer(session_id, process_id, by, false, None)
+            .await
     }
 
     async fn transfer_observers(
@@ -259,8 +283,8 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         let removed = tx
                             .execute(
                                 "DELETE FROM process_observers
-                                 WHERE session_id = ?1 AND process_id = ?2",
-                                params![from_session_id, process_id],
+                                 WHERE session_id = ?1 AND process_id = ?2 AND process_incarnation = ?3",
+                                params![from_session_id, process_id, record.incarnation.registration_sequence() as i64],
                             )
                             .map_err(process_sqlite_error)?;
                         if removed == 0 {
@@ -269,9 +293,9 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             )));
                         }
                         tx.execute(
-                            "INSERT OR IGNORE INTO process_observers (session_id, process_id)
-                             VALUES (?1, ?2)",
-                            params![to_session_id, process_id],
+                            "INSERT OR IGNORE INTO process_observers (session_id, process_id, process_incarnation)
+                             VALUES (?1, ?2, ?3)",
+                            params![to_session_id, process_id, record.incarnation.registration_sequence() as i64],
                         )
                         .map_err(process_sqlite_error)?;
                         Self::append_event_conn(
@@ -315,6 +339,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     "SELECT p.record_json
                      FROM process_observers o
                      JOIN processes p ON p.process_id = o.process_id
+                                     AND p.incarnation = o.process_incarnation
                      WHERE o.session_id = ?1
                      ORDER BY p.process_id",
                 )?;
@@ -377,17 +402,21 @@ impl ProcessRegistry for SqliteProcessRegistry {
         self.conn
             .call(move |conn| {
                 Ok((|| {
-                    Self::require_process_conn(conn, &process_id)?;
+                    let record = Self::require_process_conn(conn, &process_id)?;
                     let mut stmt = conn
                         .prepare(
                             "SELECT session_id FROM process_observers
-                             WHERE process_id = ?1 ORDER BY session_id",
+                             WHERE process_id = ?1 AND process_incarnation = ?2
+                             ORDER BY session_id",
                         )
                         .map_err(process_sqlite_error)?;
-                    stmt.query_map(params![process_id], |row| row.get(0))
-                        .map_err(process_sqlite_error)?
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(process_sqlite_error)
+                    stmt.query_map(
+                        params![process_id, record.incarnation.registration_sequence()],
+                        |row| row.get(0),
+                    )
+                    .map_err(process_sqlite_error)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(process_sqlite_error)
                 })())
             })
             .await
@@ -492,6 +521,34 @@ impl ProcessRegistry for SqliteProcessRegistry {
         Ok(result)
     }
 
+    async fn append_event_ref(
+        &self,
+        process_ref: &ProcessRef,
+        request: ProcessEventAppendRequest,
+    ) -> Result<ProcessEventAppendReceipt, lash_core::PluginError> {
+        facade_support::validate_generic_process_event_append(&request)?;
+        let process_ref = process_ref.clone();
+        let occurred_at_ms = self.clock.timestamp_ms();
+        let wake_delivery_config = self.wake_delivery_config;
+        let (result, _appended) = self
+            .conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let mut record = Self::require_process_ref_conn(tx, &process_ref)?;
+                    Self::append_event_conn(
+                        tx,
+                        &mut record,
+                        request,
+                        occurred_at_ms,
+                        wake_delivery_config,
+                    )
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)??;
+        Ok(result)
+    }
+
     async fn append_event_with_authority(
         &self,
         process_id: &str,
@@ -538,18 +595,23 @@ impl ProcessRegistry for SqliteProcessRegistry {
         self.conn
             .call(move |conn| {
                 Ok((|| {
-                    Self::require_process_conn(conn, &process_id)?;
+                    let record = Self::require_process_conn(conn, &process_id)?;
                     let mut stmt = conn
                         .prepare(
                             "SELECT event_json FROM process_events
-                             WHERE process_id = ?1 AND sequence > ?2
+                             WHERE process_id = ?1 AND process_incarnation = ?2 AND sequence > ?3
                              ORDER BY sequence ASC",
                         )
                         .map_err(process_sqlite_error)?;
                     let rows = stmt
-                        .query_map(params![process_id, after_sequence as i64], |row| {
-                            row.get::<_, String>(0)
-                        })
+                        .query_map(
+                            params![
+                                process_id,
+                                record.incarnation.registration_sequence() as i64,
+                                after_sequence as i64
+                            ],
+                            |row| row.get::<_, String>(0),
+                        )
                         .map_err(process_sqlite_error)?;
                     let mut events = Vec::new();
                     for row in rows {
@@ -559,6 +621,44 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         );
                     }
                     Ok(events)
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn events_after_ref(
+        &self,
+        process_ref: &ProcessRef,
+        after_sequence: u64,
+    ) -> Result<Vec<ProcessEvent>, lash_core::PluginError> {
+        let process_ref = process_ref.clone();
+        self.conn
+            .call(move |conn| {
+                Ok((|| {
+                    Self::require_process_ref_conn(conn, &process_ref)?;
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT event_json FROM process_events
+                             WHERE process_id = ?1 AND process_incarnation = ?2 AND sequence > ?3
+                             ORDER BY sequence ASC",
+                        )
+                        .map_err(process_sqlite_error)?;
+                    let rows = stmt
+                        .query_map(
+                            params![
+                                process_ref.process_id,
+                                process_ref.incarnation.registration_sequence() as i64,
+                                after_sequence as i64,
+                            ],
+                            |row| row.get::<_, String>(0),
+                        )
+                        .map_err(process_sqlite_error)?;
+                    rows.map(|row| {
+                        serde_json::from_str(&row.map_err(process_sqlite_error)?)
+                            .map_err(process_decode_error)
+                    })
+                    .collect()
                 })())
             })
             .await
@@ -581,6 +681,38 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         "SELECT COUNT(*) FROM process_events
                          WHERE process_id = ?1 AND event_type = ?2 AND sequence <= ?3",
                         params![process_id, event_type, up_to_sequence as i64],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .map(|count| count as u64)
+                    .map_err(process_sqlite_error)
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn count_events_through_ref(
+        &self,
+        process_ref: &ProcessRef,
+        event_type: &str,
+        up_to_sequence: u64,
+    ) -> Result<u64, lash_core::PluginError> {
+        let process_ref = process_ref.clone();
+        let event_type = event_type.to_string();
+        self.conn
+            .call(move |conn| {
+                Ok((|| {
+                    Self::require_process_ref_conn(conn, &process_ref)?;
+                    conn.query_row(
+                        "SELECT COUNT(*) FROM process_events
+                         WHERE process_id = ?1 AND process_incarnation = ?2
+                           AND event_type = ?3 AND sequence <= ?4",
+                        params![
+                            process_ref.process_id,
+                            process_ref.incarnation.registration_sequence() as i64,
+                            event_type,
+                            up_to_sequence as i64,
+                        ],
                         |row| row.get::<_, i64>(0),
                     )
                     .map(|count| count as u64)
@@ -946,7 +1078,8 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     let tombstone: Option<(String, i64)> = conn
                         .query_row(
                             "SELECT terminal_label, pruned_at_ms
-                             FROM process_tombstones WHERE process_id = ?1",
+                             FROM process_tombstones WHERE process_id = ?1
+                             ORDER BY incarnation DESC LIMIT 1",
                             params![process_id],
                             |row| Ok((row.get(0)?, row.get(1)?)),
                         )
@@ -967,6 +1100,17 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     Ok(None)
                 })())
             })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn get_process_ref(
+        &self,
+        process_ref: &ProcessRef,
+    ) -> Result<Option<ProcessRecord>, lash_core::PluginError> {
+        let process_ref = process_ref.clone();
+        self.conn
+            .call(move |conn| Ok(Self::require_process_ref_conn(conn, &process_ref).map(Some)))
             .await
             .map_err(process_sqlite_error)?
     }
@@ -1320,74 +1464,14 @@ impl ProcessRegistry for SqliteProcessRegistry {
         &self,
         process_ids: &[String],
     ) -> Result<Vec<String>, lash_core::PluginError> {
-        if process_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let process_ids_json = serde_json::to_string(process_ids).map_err(process_decode_error)?;
-        self.conn
-            .call(move |conn| {
-                Ok((|| {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT candidate.value
-                             FROM json_each(?1) AS candidate
-                             WHERE NOT EXISTS (
-                                 SELECT 1 FROM processes p
-                                 WHERE p.process_id = candidate.value
-                             )
-                               AND NOT EXISTS (
-                                 SELECT 1 FROM process_tombstones t
-                                 WHERE t.process_id = candidate.value
-                             )
-                             ORDER BY candidate.key ASC",
-                        )
-                        .map_err(process_sqlite_error)?;
-                    let rows = stmt
-                        .query_map(params![process_ids_json], |row| row.get::<_, String>(0))
-                        .map_err(process_sqlite_error)?;
-                    rows.collect::<Result<Vec<_>, _>>()
-                        .map_err(process_sqlite_error)
-                })())
-            })
-            .await
-            .map_err(process_sqlite_error)?
+        retention::filter_unregistered_process_ids(self, process_ids).await
     }
 
     async fn filter_tombstoned_process_ids(
         &self,
         process_ids: &[String],
     ) -> Result<Vec<String>, lash_core::PluginError> {
-        if process_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let process_ids_json = serde_json::to_string(process_ids).map_err(process_decode_error)?;
-        self.conn
-            .call(move |conn| {
-                Ok((|| {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT candidate.value
-                             FROM json_each(?1) AS candidate
-                             WHERE EXISTS (
-                                 SELECT 1 FROM process_tombstones t
-                                 WHERE t.process_id = candidate.value
-                             )
-                               AND NOT EXISTS (
-                                 SELECT 1 FROM processes p
-                                 WHERE p.process_id = candidate.value
-                             )
-                             ORDER BY candidate.key ASC",
-                        )
-                        .map_err(process_sqlite_error)?;
-                    let rows = stmt
-                        .query_map(params![process_ids_json], |row| row.get::<_, String>(0))
-                        .map_err(process_sqlite_error)?;
-                    rows.collect::<Result<Vec<_>, _>>()
-                        .map_err(process_sqlite_error)
-                })())
-            })
-            .await
-            .map_err(process_sqlite_error)?
+        retention::filter_tombstoned_process_ids(self, process_ids).await
     }
 
     async fn live_reference_summary(
@@ -1455,61 +1539,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
         filter: Option<ProcessListFilter>,
         watermark: lash_core::ProjectionWatermark,
     ) -> Result<ProcessPruneReport, lash_core::PluginError> {
-        let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        let pruned_at_ms = self.clock.timestamp_ms() as i64;
-        let max_change_seq = match watermark {
-            lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
-            lash_core::ProjectionWatermark::NoProjector => None,
-        };
-        if let Some(root) = self.process_session_store_root.as_ref() {
-            let selection_filter = filter.clone();
-            let prunable = self
-                .conn
-                .call(move |conn| {
-                    crate::process_registry_change::prunable_terminal_process_ids_conn(
-                        conn,
-                        cutoff,
-                        selection_filter,
-                        max_change_seq,
-                    )
-                    .map_err(|err| {
-                        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
-                            err.to_string(),
-                        )))
-                    })
-                })
-                .await
-                .map_err(process_sqlite_error)?;
-            // Delete process-owned session stores first. If this fails, the
-            // terminal process row remains and the prune leaks conservatively;
-            // the final transaction below revalidates eligibility before it
-            // removes any process row.
-            for process_id in prunable {
-                for session_id in facade_support::process_runtime_session_ids(&process_id) {
-                    delete_session_from_catalog(
-                        root,
-                        &session_id,
-                        SqliteConnectionPolicy::default(),
-                    )
-                    .await
-                    .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
-                }
-            }
-        }
-        self.conn
-            .write_flow(move |tx| {
-                Ok(tx_outcome(
-                    crate::process_registry_change::prune_terminal_processes_conn(
-                        tx,
-                        cutoff,
-                        pruned_at_ms,
-                        filter,
-                        max_change_seq,
-                    ),
-                ))
-            })
-            .await
-            .map_err(process_sqlite_error)?
+        prune_api::prune_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
     }
 }
 
