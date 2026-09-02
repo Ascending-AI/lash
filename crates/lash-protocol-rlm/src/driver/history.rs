@@ -218,33 +218,13 @@ pub(super) fn render_history_messages(
                 messages.push(LlmMessage::new(LlmRole::Assistant, cell_blocks));
 
                 // The step's printed outputs become a user observation message.
-                let image_refs = step
-                    .images
-                    .iter()
-                    .map(|image| {
-                        let (width, height) = image_dimensions(image);
-                        RlmImageRef {
-                            id: image.id.to_string(),
-                            media_type: image.media_type.clone(),
-                            width,
-                            height,
-                            bytes: image.byte_len as usize,
-                            label: image.label.clone(),
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                let obs_text = step_output_text(StepOutputInput {
-                    vocabulary: input.dialect.prompt_vocabulary(),
-                    index: history_projection
+                let obs_text = step_output_text(
+                    input.dialect.prompt_vocabulary(),
+                    history_projection
                         .projected_index_for_chronological(entry.index)
                         .unwrap_or(entry.index),
-                    output: &step.output,
-                    images: &image_refs,
-                    calls: &step.calls,
-                    calls_omitted: step.calls_omitted,
-                    error: step.error.as_deref(),
-                    final_output: step.final_output.as_ref(),
-                });
+                    &step,
+                );
                 let mut obs_blocks = vec![text_block(obs_text, false)];
                 append_borrowed_entry_image_blocks(entry, attachments, &mut obs_blocks);
                 messages.push(LlmMessage::new(LlmRole::User, obs_blocks));
@@ -556,30 +536,13 @@ fn message_text(
 /// handles), images, executed calls, error, and final value. Calls intentionally
 /// render even on success: the model pays the token cost to distinguish work
 /// that ran from work that failed before dispatch. Never empty.
-struct StepOutputInput<'a> {
+fn step_output_text(
     vocabulary: crate::dialect::DialectPromptVocabulary,
     index: usize,
-    output: &'a [String],
-    images: &'a [RlmImageRef],
-    calls: &'a [lash_rlm_types::RlmExecutedCall],
-    calls_omitted: usize,
-    error: Option<&'a str>,
-    final_output: Option<&'a serde_json::Value>,
-}
-
-fn step_output_text(input: StepOutputInput<'_>) -> String {
-    let StepOutputInput {
-        vocabulary,
-        index,
-        output,
-        images,
-        calls,
-        calls_omitted,
-        error,
-        final_output,
-    } = input;
+    entry: &lash_rlm_types::RlmTrajectoryEntry,
+) -> String {
     let mut out = String::new();
-    for (output_index, item) in output.iter().enumerate() {
+    for (output_index, item) in entry.output.iter().enumerate() {
         let (preview, projected_lossy) = project_history_output(item);
         let raw_len = item.chars().count();
         let full_ref = projected_ref(
@@ -595,13 +558,18 @@ fn step_output_text(input: StepOutputInput<'_>) -> String {
             "history[{index}].output[{output_index}] ({raw_len} chars{full_ref}):\n{preview}"
         );
     }
-    if !images.is_empty() {
+    if !entry.images.is_empty() {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
         out.push_str("Images:");
-        for (image_index, image) in images.iter().enumerate() {
-            let rendered = serde_json::to_string(image)
+        for (image_index, image) in entry
+            .images
+            .iter()
+            .map(RlmImageRef::from_attachment)
+            .enumerate()
+        {
+            let rendered = serde_json::to_string(&image)
                 .unwrap_or_else(|_| "{\"error\":\"unrenderable image\"}".to_string());
             let _ = write!(
                 out,
@@ -609,25 +577,29 @@ fn step_output_text(input: StepOutputInput<'_>) -> String {
             );
         }
     }
-    if !calls.is_empty() {
+    if !entry.calls.is_empty() {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
         out.push_str("Calls:");
-        if calls_omitted > 0 {
-            let _ = write!(out, "\n- … {calls_omitted} earlier executed calls omitted");
+        if entry.calls_omitted > 0 {
+            let _ = write!(
+                out,
+                "\n- … {} earlier executed calls omitted",
+                entry.calls_omitted
+            );
         }
-        for call in calls {
+        for call in &entry.calls {
             let _ = write!(out, "\n- {} → {}", call.operation, call.outcome.as_str());
         }
     }
-    if let Some(error) = error {
+    if let Some(error) = &entry.error {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
         out.push_str(error);
     }
-    if let Some(final_output) = final_output {
+    if let Some(final_output) = &entry.final_output {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
@@ -685,13 +657,6 @@ fn attachment_summary(
         AttachmentSource::ProviderFile { id, .. } => {
             (None, None, "provider_file".to_string(), id.clone())
         }
-    }
-}
-
-fn image_dimensions(image: &lash_core::AttachmentRef) -> (Option<u32>, Option<u32>) {
-    match image.type_metadata.as_ref() {
-        Some(lash_core::AttachmentTypeMetadata::Image { width, height }) => (*width, *height),
-        None => (None, None),
     }
 }
 

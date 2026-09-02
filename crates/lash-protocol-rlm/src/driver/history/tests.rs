@@ -2,7 +2,8 @@ use lash_core::llm::types::{LlmContentBlock, ProviderReasoningReplay};
 use lash_core::session_model::{ConversationRecord, MessageRole, Part};
 use lash_core::{MessageOrigin, SessionHistoryRecord};
 
-use super::{RlmHistoryRenderInput, render_history_messages};
+use super::{RlmHistoryRenderInput, render_history_messages, step_output_text};
+use crate::dialect::RlmDialect;
 use crate::projection::rlm_protocol_event;
 
 fn replay(item_id: &str, encrypted_content: &str) -> ProviderReasoningReplay {
@@ -97,6 +98,40 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMess
         },
         &mut Vec::new(),
     )
+}
+
+#[test]
+fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
+    let dialect = crate::dialect::LashlangDialect::prompt_only(
+        lash_lashlang_runtime::LashlangSurface::default(),
+    );
+    let entry = lash_rlm_types::RlmTrajectoryEntry {
+        id: "lashlang_step_image".to_string(),
+        protocol_iteration: 0,
+        code: "print chart".to_string(),
+        output: Vec::new(),
+        images: vec![lash_core::AttachmentRef {
+            id: "chart".parse().expect("valid attachment id"),
+            media_type: "image/png".parse().expect("valid media type"),
+            byte_len: 123,
+            type_metadata: Some(lash_core::AttachmentTypeMetadata::image(
+                Some(800),
+                Some(600),
+            )),
+            label: Some("chart".to_string()),
+        }],
+        calls: Vec::new(),
+        calls_omitted: 0,
+        error: None,
+        final_output: None,
+    };
+
+    let rendered = step_output_text(dialect.prompt_vocabulary(), 7, &entry);
+
+    assert_eq!(
+        rendered,
+        "Images:\n- history[7].images[0]: {\"id\":\"chart\",\"media_type\":\"image/png\",\"width\":800,\"height\":600,\"bytes\":123,\"label\":\"chart\"}"
+    );
 }
 
 #[test]
