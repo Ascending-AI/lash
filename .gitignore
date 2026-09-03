@@ -31,6 +31,7 @@ __pycache__/
 .coverage
 coverage/
 .DS_Store
+._*
 Thumbs.db
 *.swp
 *.swo
