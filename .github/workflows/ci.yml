@@ -763,22 +763,77 @@ jobs:
         if: always()
         run: sccache --show-stats
 
-  # The workspace test suite, sharded by nextest partitions so it drops off the
-  # critical path. Restore-only against the linux-debug cache the test-doc job
-  # writes; sccache absorbs the workspace test-binary codegen that rust-cache's
-  # read-only restore cannot save, sharing it across the shards and runs.
-  # --no-fail-fast so one failure never hides the rest (the alpha.82 lesson).
-  #
-  # Four partitions, not three: with the old three, shard 3 ran 30% longer than
-  # shard 1 (12m09s vs 9m20s) and set the wall time for the whole lane. nextest
-  # partitions by count, which balances test *numbers* and not test *durations*,
-  # so the residual skew is reduced by making each partition smaller rather than
-  # by hand-assigning tests to shards.
+  # Build the exact event SHA once; all four partitions execute these binaries.
+  # Service-backed jobs retain their independent feature graphs and services.
+  nextest-archive:
+    name: Build workspace test archive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Restore cargo cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          shared-key: linux-debug
+          save-if: false
+
+      - name: Install protoc and nextest
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc,nextest
+
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
+
+      - name: Archive workspace tests
+        run: |
+          # shellcheck disable=SC2086
+          cargo nextest archive --workspace --locked ${LASH_CI_FEATURES} \
+            --archive-file "${RUNNER_TEMP}/lash-nextest.tar.zst"
+
+      - name: Upload test archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nextest-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lash-nextest.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+      - name: Report sccache stats
+        if: always()
+        run: sccache --show-stats
+
   test-shard:
     name: Test shard ${{ matrix.shard }}/4
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    needs: plan
+    needs: [plan, nextest-archive]
     if: needs.plan.outputs.rust == 'true'
 
     strategy:
@@ -814,8 +869,7 @@ jobs:
         with:
           node-version: 24
 
-      # Same action and shared key as the test-doc writer so every shard reads
-      # the writer's GitHub cache instead of rebuilding the dependency graph.
+      # Runtime tests that invoke cargo still need the shared dependency cache.
       - name: Restore cargo cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -840,10 +894,16 @@ jobs:
       # and the trybuild ui binary (run by test-doc's seal step every push):
       # each of those tests is a single 3-9 minute serial run, so any one of
       # them set the shard's wall-clock regardless of parallelism.
+      - name: Download test archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nextest-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/nextest-download
+
       - name: Test workspace shard
         run: |
-          # shellcheck disable=SC2086
-          cargo nextest run --profile ci --workspace --locked ${LASH_CI_FEATURES} \
+          cargo nextest run --profile ci --workspace-remap "$GITHUB_WORKSPACE" \
+            --archive-file "${RUNNER_TEMP}/nextest-download/lash-nextest.tar.zst" \
             --no-fail-fast --partition count:${{ matrix.shard }}/4
 
       - name: Report sccache stats
@@ -2334,6 +2394,7 @@ jobs:
       - lashlang-git-consumer
       - package-feature-checks
       - runtime-feature-boundary
+      - nextest-archive
       - test-shard
       - heavy-tests
       - lint
