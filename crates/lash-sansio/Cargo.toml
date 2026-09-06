@@ -19,9 +19,14 @@ name = "lash_sansio"
 [lints]
 workspace = true
 
+[features]
+default = []
+# Compile JSON Schema validators for tool inputs and process payloads.
+schema-validation = ["dep:jsonschema"]
+
 [dependencies]
 blake3 = { workspace = true }
-jsonschema = { workspace = true, default-features = false }
+jsonschema = { workspace = true, default-features = false, optional = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 schemars = { workspace = true }
