@@ -9920,15 +9920,10 @@ lash::tracing::TraceEvent::RollingHistoryPromptPruned::max_context_tokens
 lash::tracing::TraceEvent::RollingHistoryPromptPruned::retained_messages
 lash::tracing::TraceEvent::RuntimeStreamEvent
 lash::tracing::TraceEvent::RuntimeStreamEvent::event
-lash::tracing::TraceEvent::SessionStarted
-lash::tracing::TraceEvent::SessionStarted::metadata
 lash::tracing::TraceEvent::StoreErrorObserved
 lash::tracing::TraceEvent::StoreErrorObserved::error_class
 lash::tracing::TraceEvent::StoreErrorObserved::message
 lash::tracing::TraceEvent::StoreErrorObserved::operation
-lash::tracing::TraceEvent::TokenUsage
-lash::tracing::TraceEvent::TokenUsage::cumulative
-lash::tracing::TraceEvent::TokenUsage::usage
 lash::tracing::TraceEvent::ToolCallCompleted
 lash::tracing::TraceEvent::ToolCallCompleted::args
 lash::tracing::TraceEvent::ToolCallCompleted::attempts

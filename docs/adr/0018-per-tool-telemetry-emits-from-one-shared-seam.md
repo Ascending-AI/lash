@@ -6,6 +6,8 @@ accepted
 
 > Historical note (2026-08-21): The workspace-only `lash-trace-viewer` crate was removed; tracing remains available through the typed JSONL schema and sinks.
 
+> Amendment (2026-09-06, FIG-2361): Trace schema 16 removes the two never-emitted session-start and standalone token-usage events. The closed `TraceEvent` enum and its exhaustive kind mapping define the complete event vocabulary; `TurnStarted` remains the lifecycle start event, and `LlmCallCompleted` retains per-call usage. Exporters and dispatchers drop the unused arms without adding producers. This intentionally changes the serialized schema, so readers and exhaustive consumers must adopt version 16 together.
+
 ## Decision
 
 Per-tool reporting is emitted once, from the shared tool-execution seam, and

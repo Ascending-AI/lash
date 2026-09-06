@@ -102,7 +102,7 @@ TRACE_EVENT_BASE = """
     reason = "TraceEvent is a public DTO; keeping event payloads inline preserves ergonomic pattern matching"
 )]
 pub enum TraceEvent {
-    SessionStarted,
+    TurnStarted,
     PromptBuilt {
         prompt_hash: String,
         components: Vec<TracePromptComponent>,

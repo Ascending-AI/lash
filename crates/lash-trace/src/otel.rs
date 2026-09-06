@@ -295,7 +295,6 @@ where
             TraceEvent::StoreErrorObserved { .. } => {
                 self.emit_instant(record, "lash.store.error", None)
             }
-            TraceEvent::SessionStarted { .. } => self.emit_instant(record, "lash.session", None),
             TraceEvent::PromptBuilt { .. } => self.emit_instant(record, "lash.prompt", None),
             TraceEvent::AttachmentDegraded { .. } => {
                 self.emit_instant(record, "lash.attachment.degraded", None)
@@ -327,7 +326,6 @@ where
             TraceEvent::ProtocolStep { .. } => {
                 self.emit_instant(record, "lash.protocol_step", None)
             }
-            TraceEvent::TokenUsage { .. } => self.emit_instant(record, "lash.token_usage", None),
             TraceEvent::LanguageExecution { .. } => {
                 self.emit_instant(record, "lash.language_execution", None)
             }
@@ -429,7 +427,7 @@ fn context_attributes(
 fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<KeyValue> {
     let mut attrs = Vec::new();
     match &record.event {
-        TraceEvent::SessionStarted { metadata } | TraceEvent::TurnStarted { metadata } => {
+        TraceEvent::TurnStarted { metadata } => {
             attrs.push(KeyValue::new("lash.metadata.count", metadata.len() as i64));
             push_payload_json(&mut attrs, options, "lash.metadata.json", metadata);
         }
@@ -912,12 +910,6 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 "lash.protocol.payload_json",
                 &typed_diagnostic_protocol_payload(&record.event),
             );
-        }
-        TraceEvent::TokenUsage { usage, cumulative } => {
-            usage_attributes(&mut attrs, "lash.usage", usage);
-            if let Some(cumulative) = cumulative {
-                usage_attributes(&mut attrs, "lash.usage.cumulative", cumulative);
-            }
         }
         TraceEvent::LanguageExecution { language, event } => {
             language_execution_attributes(&mut attrs, language, event);

@@ -199,9 +199,6 @@ fn tool_completion_serializes_typed_failure_output() {
 #[test]
 fn event_kind_matches_serialized_type_tag() {
     let events = [
-        TraceEvent::SessionStarted {
-            metadata: Default::default(),
-        },
         TraceEvent::TurnStarted {
             metadata: Default::default(),
         },
