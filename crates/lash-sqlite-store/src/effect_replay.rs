@@ -581,13 +581,12 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         request: &EffectClaimRequest,
     ) -> Result<EffectClaimObservation, RuntimeEffectControllerError> {
         let request = request.clone();
-        // Read the lease clock before entering the connection thread: the
-        // closure is synchronous and the injected clock is the store's
-        // authoritative instant either way.
-        let now_ms = self.clock.timestamp_ms();
+        let clock = Arc::clone(&self.clock);
         self.conn
             .write(move |tx| {
                 let row = select_effect_row(tx, &request.scope_id, &request.replay_key)?;
+                // Queueing and writer admission must not consume the new lease.
+                let now_ms = clock.timestamp_ms();
                 Ok(match decide_effect_claim(row.as_ref(), &request, now_ms) {
                     EffectClaimDecision::Insert(stamp) => {
                         insert_claimed_row(tx, &request, &stamp)?;
@@ -647,9 +646,10 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         let status = terminal.status().column();
         let outcome_json = terminal.outcome_json().map(str::to_string);
         let error_json = terminal.error_json().map(str::to_string);
-        let now = self.clock.timestamp_ms();
+        let clock = Arc::clone(&self.clock);
         self.conn
             .write(move |tx| {
+                let now = clock.timestamp_ms();
                 let changed = tx.execute(
                     "UPDATE runtime_effect_replay
                      SET status = ?6,
@@ -887,10 +887,11 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         lease_ttl_ms: u64,
     ) -> Result<bool, RuntimeEffectControllerError> {
         let fence = fence.clone();
-        let now = self.clock.timestamp_ms();
-        let renewed_expires_at = now.saturating_add(lease_ttl_ms);
+        let clock = Arc::clone(&self.clock);
         self.conn
             .write(move |tx| {
+                let now = clock.timestamp_ms();
+                let renewed_expires_at = now.saturating_add(lease_ttl_ms);
                 let changed = tx.execute(
                     "UPDATE runtime_effect_replay
                      SET lease_expires_at_ms = ?6,
