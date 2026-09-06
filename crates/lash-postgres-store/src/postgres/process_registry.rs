@@ -445,24 +445,6 @@ impl ProcessRegistry for PostgresProcessRegistry {
         })
     }
 
-    async fn wake_allocation_floor_for_testing(
-        &self,
-        target_session_id: &str,
-        process_id: &str,
-    ) -> Result<Option<u64>, PluginError> {
-        sqlx::query_scalar::<_, i64>(
-            "SELECT allocation_floor FROM lash_wake_allocation_floors
-             WHERE target_session_id = $1 AND process_id = $2",
-        )
-        .bind(target_session_id)
-        .bind(process_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .map(|value| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
-        .transpose()
-    }
-
     async fn append_event(
         &self,
         process_id: &str,
@@ -1587,5 +1569,27 @@ impl ProcessRegistry for PostgresProcessRegistry {
         watermark: lash_core::ProjectionWatermark,
     ) -> Result<ProcessPruneReport, PluginError> {
         prune_api::prune_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+#[async_trait::async_trait]
+impl lash_core::ProcessRegistryTestSupport for PostgresProcessRegistry {
+    async fn wake_allocation_floor_for_testing(
+        &self,
+        target_session_id: &str,
+        process_id: &str,
+    ) -> Result<Option<u64>, PluginError> {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT allocation_floor FROM lash_wake_allocation_floors
+             WHERE target_session_id = $1 AND process_id = $2",
+        )
+        .bind(target_session_id)
+        .bind(process_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?
+        .map(|value| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
+        .transpose()
     }
 }

@@ -1,3 +1,4 @@
+use crate::ProcessRegistryTestSupport;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

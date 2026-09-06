@@ -872,22 +872,10 @@ impl lash_core::TurnInputStore for SnapshotStore {
     }
 }
 
+lash_core::impl_noop_store_test_support!(SnapshotStore);
+
 #[async_trait]
 impl lash_core::StoreMaintenance for SnapshotStore {
-    async fn seed_session_trigger_manifest_ref_for_testing(
-        &self,
-        _session_id: &str,
-    ) -> std::result::Result<bool, lash_core::store::StoreError> {
-        Ok(false)
-    }
-
-    async fn raw_session_owned_artifact_refs_for_testing(
-        &self,
-        _session_id: &str,
-    ) -> std::result::Result<Vec<(String, String)>, lash_core::store::StoreError> {
-        Ok(Vec::new())
-    }
-
     async fn vacuum(&self) -> lash_core::MaintenanceResult<lash_core::VacuumReport> {
         Ok(lash_core::VacuumReport::default())
     }
@@ -1284,22 +1272,10 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
     }
 }
 
+lash_core::impl_noop_store_test_support!(BoundSessionStore);
+
 #[async_trait]
 impl lash_core::StoreMaintenance for BoundSessionStore {
-    async fn seed_session_trigger_manifest_ref_for_testing(
-        &self,
-        _session_id: &str,
-    ) -> std::result::Result<bool, lash_core::store::StoreError> {
-        Ok(false)
-    }
-
-    async fn raw_session_owned_artifact_refs_for_testing(
-        &self,
-        _session_id: &str,
-    ) -> std::result::Result<Vec<(String, String)>, lash_core::store::StoreError> {
-        Ok(Vec::new())
-    }
-
     async fn vacuum(&self) -> lash_core::MaintenanceResult<lash_core::VacuumReport> {
         Ok(lash_core::VacuumReport::default())
     }

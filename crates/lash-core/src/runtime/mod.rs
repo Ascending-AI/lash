@@ -249,7 +249,9 @@ pub use process::{
     watch_process_registry, watch_process_registry_with_sink,
 };
 #[cfg(any(test, feature = "testing"))]
-pub use process::{TestLocalProcessRegistry, TestProcessRegistryWriteExt};
+pub use process::{
+    ProcessRegistryTestSupport, TestLocalProcessRegistry, TestProcessRegistryWriteExt,
+};
 pub use process_worker::{
     DEFAULT_PROCESS_EXECUTION_CONCURRENCY, DurableProcessWorker, DurableProcessWorkerConfig,
     ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,

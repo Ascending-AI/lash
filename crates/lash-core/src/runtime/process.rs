@@ -61,6 +61,8 @@ pub use observer_intent::{
 pub use op_scope::ProcessOpScope;
 pub use references::ProcessLiveReferenceView;
 #[cfg(any(test, feature = "testing"))]
+pub use registry::ProcessRegistryTestSupport;
+#[cfg(any(test, feature = "testing"))]
 pub(crate) use registry::reconcile_pruned_trigger_deliveries_interleaved;
 pub use registry::{
     DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ProcessContinuationStore, ProcessParentEndPlan,

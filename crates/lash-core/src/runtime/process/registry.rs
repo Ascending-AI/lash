@@ -527,6 +527,37 @@ pub trait ProcessContinuationStore: Send + Sync {
     async fn delete_segment_handovers(&self, process_id: &str) -> Result<(), PluginError>;
 }
 
+/// Test-only probes on a process registry.
+///
+/// Compiled only under `cfg(any(test, feature = "testing"))`, where it is a
+/// supertrait of [`ProcessRegistry`] so conformance suites reach the probes
+/// through a `dyn ProcessRegistry` handle. Backends implement it under the
+/// same gate they forward to `lash-core/testing`; the production trait never
+/// requires a testing method.
+#[cfg(any(test, feature = "testing"))]
+#[async_trait::async_trait]
+pub trait ProcessRegistryTestSupport: Send + Sync {
+    /// Raw sender-floor probe for cross-backend conformance tests.
+    async fn wake_allocation_floor_for_testing(
+        &self,
+        target_session_id: &str,
+        process_id: &str,
+    ) -> Result<Option<u64>, PluginError> {
+        let _ = (target_session_id, process_id);
+        Ok(None)
+    }
+}
+
+/// Production stand-in for the test-support supertrait: empty and blanket
+/// implemented, so no backend writes anything for it. The real trait with the
+/// `*_for_testing` probes exists only under `cfg(any(test, feature = "testing"))`.
+#[cfg(not(any(test, feature = "testing")))]
+#[doc(hidden)]
+pub trait ProcessRegistryTestSupport: Send + Sync {}
+
+#[cfg(not(any(test, feature = "testing")))]
+impl<T: Send + Sync + ?Sized> ProcessRegistryTestSupport for T {}
+
 /// Durability-neutral process registry.
 ///
 /// Process waits are coordination behavior and live on
@@ -534,8 +565,14 @@ pub trait ProcessContinuationStore: Send + Sync {
 /// not on persistence
 /// implementations. Registry methods are point reads and writes only. See
 /// `docs/adr/0016-process-waits-live-on-the-work-driver-seam.md`.
+///
+/// No production registry method is a `*_for_testing` hook: those live on
+/// [`ProcessRegistryTestSupport`], which joins this trait only under
+/// `cfg(any(test, feature = "testing"))` (see
+/// [`StoreMaintenance`](crate::store::StoreMaintenance) for the store-side
+/// norm).
 #[async_trait::async_trait]
-pub trait ProcessRegistry: Send + Sync {
+pub trait ProcessRegistry: Send + Sync + ProcessRegistryTestSupport {
     fn wake_delivery_config(&self) -> WakeDeliveryConfig;
 
     /// Return the same registry backend bound to the runtime's clock.
@@ -695,17 +732,6 @@ pub trait ProcessRegistry: Send + Sync {
         &self,
         session_id: &str,
     ) -> Result<ProcessSessionDeleteReport, PluginError>;
-
-    /// Raw sender-floor probe for cross-backend conformance tests.
-    #[doc(hidden)]
-    async fn wake_allocation_floor_for_testing(
-        &self,
-        target_session_id: &str,
-        process_id: &str,
-    ) -> Result<Option<u64>, PluginError> {
-        let _ = (target_session_id, process_id);
-        Ok(None)
-    }
 
     /// Append a host-owned event that is not emitted by the process execution.
     ///

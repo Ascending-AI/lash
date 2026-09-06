@@ -74,6 +74,7 @@ pub(super) fn process_status_label(record: &ProcessRecord) -> &'static str {
     record.status.label()
 }
 
+#[cfg(any(test, feature = "testing"))]
 pub(super) async fn wake_allocation_floor_for_testing(
     registry: &SqliteProcessRegistry,
     target_session_id: &str,

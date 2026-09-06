@@ -23,6 +23,7 @@ use lash_core::runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
     QueuedWorkPayload,
 };
+use lash_core::store::StoreTestSupport;
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy,
@@ -31,10 +32,9 @@ use lash_core::{
     PluginSnapshotMeta, ProtocolEvent, QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit,
     RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionHistoryRecord,
     SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState,
-    TriggerOwnerScope, TurnInput, TurnInputApplication, TurnInputClaim, TurnInputIngress,
-    TurnInputState, facade_support::InMemorySessionStore,
-    facade_support::InMemorySessionStoreFactory,
+    SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage, ToolState, TriggerOwnerScope,
+    TurnInput, TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
+    facade_support::InMemorySessionStore, facade_support::InMemorySessionStoreFactory,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;

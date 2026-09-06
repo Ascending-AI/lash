@@ -78,7 +78,7 @@ pub use state_version::{
     resolve_session_state_version,
 };
 #[cfg(any(test, feature = "testing"))]
-pub use testing::append_request_commit_with_clock_for_testing;
+pub use testing::{StoreTestSupport, append_request_commit_with_clock_for_testing};
 pub use turn_id::TurnId;
 pub use usage::{merge_token_ledger_entries_checked, merge_token_ledger_entry_checked};
 pub use work_claim::{WorkClaim, WorkCompletion};
@@ -924,17 +924,6 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
         })
     }
 
-    /// Conformance seam for a marker guarding bytes the current codec cannot read.
-    #[doc(hidden)]
-    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
-        &self,
-        _version: u32,
-    ) -> Result<(), StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "stamp_session_state_version_and_corrupt_payload_for_testing",
-        })
-    }
-
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError>;
 
     /// Read the current session head without hydrating graph, checkpoint, or
@@ -1525,6 +1514,17 @@ pub trait QueuedWorkStore: Send + Sync {
 
 /// Host-scheduled retention and garbage-collection capability over settled
 /// state.
+///
+/// # Test-only hooks
+///
+/// No production store trait carries a `*_for_testing` member. Conformance and
+/// differential-test probes (raw-row reads, fault injection, fixture seeding)
+/// live on [`StoreTestSupport`], which exists only under
+/// `cfg(any(test, feature = "testing"))` and is a supertrait of
+/// [`RuntimePersistence`] only in that configuration. A backend implements
+/// `StoreTestSupport` under the same gate it forwards to `lash-core/testing`
+/// (the pattern `lash-s3-store` uses for `raw_blobs_for_testing`), so a
+/// production build never has to write, name, or ship a testing method.
 #[async_trait::async_trait]
 pub trait StoreMaintenance: Send + Sync {
     /// Physically delete tombstoned graph-node rows and prune terminal
@@ -1558,26 +1558,6 @@ pub trait StoreMaintenance: Send + Sync {
     /// empty sweep, and a backend that does not implement the lever at all
     /// fails with [`StoreError::UnsupportedStoreOperation`].
     async fn gc_unreachable(&self) -> MaintenanceResult<GcReport>;
-
-    /// Seed the exact session-owned trigger-manifest artifact-ref namespace for
-    /// deletion conformance and differential tests.
-    ///
-    /// Returns `false` when the backend has no artifact-ref namespace on this
-    /// store surface (the in-memory runtime store is such a backend).
-    #[doc(hidden)]
-    async fn seed_session_trigger_manifest_ref_for_testing(
-        &self,
-        session_id: &str,
-    ) -> Result<bool, StoreError>;
-
-    /// Return session-owned artifact-ref identities through this retained store
-    /// handle. Values are `(namespace, artifact_ref)` pairs; physical pointer
-    /// and body representations are deliberately excluded.
-    #[doc(hidden)]
-    async fn raw_session_owned_artifact_refs_for_testing(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<(String, String)>, StoreError>;
 }
 
 /// Exact settled-session persistence protocol required by the runtime.
@@ -1596,6 +1576,12 @@ pub trait StoreMaintenance: Send + Sync {
 ///
 /// Blanket-implemented for every type that implements all five segments;
 /// backends implement the segment traits and never this trait directly.
+///
+/// Under `cfg(any(test, feature = "testing"))` the alias additionally requires
+/// [`StoreTestSupport`], so conformance suites reach the test-only hooks
+/// through the same `dyn RuntimePersistence` handle. Production builds have no
+/// such requirement (see [`StoreMaintenance`]).
+#[cfg(not(any(test, feature = "testing")))]
 pub trait RuntimePersistence:
     SessionCommitStore
     + TurnInputStore
@@ -1605,12 +1591,38 @@ pub trait RuntimePersistence:
 {
 }
 
+#[cfg(not(any(test, feature = "testing")))]
 impl<T> RuntimePersistence for T where
     T: SessionCommitStore
         + TurnInputStore
         + SessionExecutionLeaseStore
         + QueuedWorkStore
         + StoreMaintenance
+        + ?Sized
+{
+}
+
+/// Test-support variant of the [`RuntimePersistence`] alias: identical to the
+/// production alias plus the [`StoreTestSupport`] hooks.
+#[cfg(any(test, feature = "testing"))]
+pub trait RuntimePersistence:
+    SessionCommitStore
+    + TurnInputStore
+    + SessionExecutionLeaseStore
+    + QueuedWorkStore
+    + StoreMaintenance
+    + StoreTestSupport
+{
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl<T> RuntimePersistence for T where
+    T: SessionCommitStore
+        + TurnInputStore
+        + SessionExecutionLeaseStore
+        + QueuedWorkStore
+        + StoreMaintenance
+        + StoreTestSupport
         + ?Sized
 {
 }

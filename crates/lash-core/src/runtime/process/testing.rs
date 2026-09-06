@@ -486,19 +486,6 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         })
     }
 
-    async fn wake_allocation_floor_for_testing(
-        &self,
-        target_session_id: &str,
-        process_id: &str,
-    ) -> Result<Option<u64>, PluginError> {
-        Ok(self
-            .wake_allocation_floors
-            .lock()
-            .await
-            .get(&(target_session_id.to_string(), process_id.to_string()))
-            .copied())
-    }
-
     async fn append_event(
         &self,
         process_id: &str,
@@ -1576,3 +1563,19 @@ impl ProcessRegistry for TestLocalProcessRegistry {
 
 #[cfg(test)]
 mod atomic_execution_write_tests;
+
+#[async_trait::async_trait]
+impl super::registry::ProcessRegistryTestSupport for TestLocalProcessRegistry {
+    async fn wake_allocation_floor_for_testing(
+        &self,
+        target_session_id: &str,
+        process_id: &str,
+    ) -> Result<Option<u64>, PluginError> {
+        Ok(self
+            .wake_allocation_floors
+            .lock()
+            .await
+            .get(&(target_session_id.to_string(), process_id.to_string()))
+            .copied())
+    }
+}

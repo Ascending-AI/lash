@@ -632,3 +632,17 @@ impl ProcessRegistry for WatchedProcessRegistry {
             .await
     }
 }
+
+#[cfg(any(test, feature = "testing"))]
+#[async_trait::async_trait]
+impl super::registry::ProcessRegistryTestSupport for WatchedProcessRegistry {
+    async fn wake_allocation_floor_for_testing(
+        &self,
+        target_session_id: &str,
+        process_id: &str,
+    ) -> Result<Option<u64>, PluginError> {
+        self.inner
+            .wake_allocation_floor_for_testing(target_session_id, process_id)
+            .await
+    }
+}

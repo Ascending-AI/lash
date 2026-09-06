@@ -22,6 +22,7 @@ impl InMemorySessionStore {
         })
     }
 
+    #[cfg(any(test, feature = "testing"))]
     pub(super) fn stamp_session_state_version_and_corrupt_payload_in_memory(&self, version: u32) {
         *self.session_state_version.lock_recover() = Some(version);
         self.corrupt_session_payload_for_testing

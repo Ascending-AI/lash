@@ -113,6 +113,8 @@ mod process_registry_completion;
 mod queued_work;
 mod schema;
 mod session_meta;
+#[cfg(any(test, feature = "testing"))]
+mod test_support;
 #[cfg(feature = "testing")]
 pub mod testing;
 mod triggers;

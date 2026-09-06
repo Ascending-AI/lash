@@ -302,6 +302,10 @@ pub mod persistence {
             select_turn_work_claim_prefix,
         };
     }
+    /// Test-only store hooks; joins [`RuntimePersistence`] only under the
+    /// `testing` feature.
+    #[cfg(any(test, feature = "testing"))]
+    pub use lash_core::store::StoreTestSupport;
     pub use lash_core::store::{
         AppendRequestIdentity, CheckpointComponentDescriptor, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId,
@@ -654,6 +658,10 @@ pub mod remote {
 pub mod process {
     pub use crate::admin::SessionProcessAdmin;
     pub use crate::process_admin::Processes;
+    /// Test-only registry probes; joins [`ProcessRegistry`] only under the
+    /// `testing` feature.
+    #[cfg(any(test, feature = "testing"))]
+    pub use lash_core::ProcessRegistryTestSupport;
     /// Materialized event semantics returned to custom process registries.
     pub use lash_core::runtime::ProcessEventSemantics;
     /// Process-registry and event types that complete the store and engine signature closure.

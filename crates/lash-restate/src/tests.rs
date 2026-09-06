@@ -6389,7 +6389,16 @@ impl lash_core::TurnInputStore for CommitRetryStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core::StoreMaintenance for CommitRetryStore {
+impl lash_core::store::StoreTestSupport for CommitRetryStore {
+    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
+        &self,
+        version: u32,
+    ) -> Result<(), lash_core::StoreError> {
+        self.inner
+            .stamp_session_state_version_and_corrupt_payload_for_testing(version)
+            .await
+    }
+
     async fn seed_session_trigger_manifest_ref_for_testing(
         &self,
         session_id: &str,
@@ -6407,7 +6416,10 @@ impl lash_core::StoreMaintenance for CommitRetryStore {
             .raw_session_owned_artifact_refs_for_testing(session_id)
             .await
     }
+}
 
+#[async_trait::async_trait]
+impl lash_core::StoreMaintenance for CommitRetryStore {
     async fn vacuum(&self) -> lash_core::MaintenanceResult<lash_core::VacuumReport> {
         self.inner.vacuum().await
     }

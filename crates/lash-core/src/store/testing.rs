@@ -1,5 +1,45 @@
 use super::{RuntimeCommit, RuntimeTurnCommitStamp, StoreError};
 
+/// Test-only probes and fault-injection seams on a runtime store handle.
+///
+/// This trait is the home for every `*_for_testing` hook the conformance and
+/// differential suites need from a backend. It is compiled only under
+/// `cfg(any(test, feature = "testing"))` and joins the
+/// [`RuntimePersistence`](super::RuntimePersistence) alias only in that
+/// configuration; production store traits never require a testing method.
+/// Backends implement it under the same gate (`lash-s3-store` sets the
+/// pattern with its `cfg`-gated `raw_blobs_for_testing`).
+#[async_trait::async_trait]
+pub trait StoreTestSupport: Send + Sync {
+    /// Conformance seam for a marker guarding bytes the current codec cannot read.
+    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
+        &self,
+        _version: u32,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "stamp_session_state_version_and_corrupt_payload_for_testing",
+        })
+    }
+
+    /// Seed the exact session-owned trigger-manifest artifact-ref namespace for
+    /// deletion conformance and differential tests.
+    ///
+    /// Returns `false` when the backend has no artifact-ref namespace on this
+    /// store surface (the in-memory runtime store is such a backend).
+    async fn seed_session_trigger_manifest_ref_for_testing(
+        &self,
+        session_id: &str,
+    ) -> Result<bool, StoreError>;
+
+    /// Return session-owned artifact-ref identities through this retained store
+    /// handle. Values are `(namespace, artifact_ref)` pairs; physical pointer
+    /// and body representations are deliberately excluded.
+    async fn raw_session_owned_artifact_refs_for_testing(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<(String, String)>, StoreError>;
+}
+
 /// Build an identity-bearing append commit with a caller-owned clock.
 #[doc(hidden)]
 pub fn append_request_commit_with_clock_for_testing(
@@ -37,4 +77,30 @@ pub fn append_request_commit_with_clock_for_testing(
     commit.turn_commit = stamp;
     commit.debug_assert_append_envelope_scope();
     Ok(commit)
+}
+
+/// Implement [`StoreTestSupport`] for a fixture store that has no
+/// session-owned artifact-ref namespace and no guarded-payload marker:
+/// seeding answers `false`, the ref read is empty, and the marker stamp keeps
+/// the trait default (`UnsupportedStoreOperation`).
+#[macro_export]
+macro_rules! impl_noop_store_test_support {
+    ($ty:ty) => {
+        #[::async_trait::async_trait]
+        impl $crate::store::StoreTestSupport for $ty {
+            async fn seed_session_trigger_manifest_ref_for_testing(
+                &self,
+                _session_id: &str,
+            ) -> ::std::result::Result<bool, $crate::StoreError> {
+                Ok(false)
+            }
+
+            async fn raw_session_owned_artifact_refs_for_testing(
+                &self,
+                _session_id: &str,
+            ) -> ::std::result::Result<Vec<(String, String)>, $crate::StoreError> {
+                Ok(Vec::new())
+            }
+        }
+    };
 }

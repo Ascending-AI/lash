@@ -336,6 +336,31 @@ impl super::InMemorySessionStoreFactory {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::store::StoreTestSupport for InMemorySessionStore {
+    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
+        &self,
+        version: u32,
+    ) -> Result<(), crate::StoreError> {
+        self.stamp_session_state_version_and_corrupt_payload_in_memory(version);
+        Ok(())
+    }
+
+    async fn seed_session_trigger_manifest_ref_for_testing(
+        &self,
+        _session_id: &str,
+    ) -> Result<bool, crate::store::StoreError> {
+        Ok(false)
+    }
+
+    async fn raw_session_owned_artifact_refs_for_testing(
+        &self,
+        _session_id: &str,
+    ) -> Result<Vec<(String, String)>, crate::store::StoreError> {
+        Ok(Vec::new())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::store::StoreMaintenance;
