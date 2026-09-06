@@ -21,7 +21,8 @@ name = "lash_postgres_store"
 workspace = true
 
 [features]
-default = []
+default = ["lashlang"]
+lashlang = ["dep:lashlang"]
 perf-witness = ["lash-core/perf-witness"]
 # Test/performance-only seams. Production builds cannot bypass the schema gate.
 testing = ["lash-core/testing"]
@@ -30,7 +31,7 @@ testing = ["lash-core/testing"]
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 lash-core = { workspace = true }
-lashlang = { workspace = true }
+lashlang = { workspace = true, optional = true }
 rmp-serde = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

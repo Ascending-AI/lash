@@ -52,6 +52,8 @@ rlm = [
     "dep:lash-rlm-types",
     "dep:lashlang",
     "lash-protocol-standard/lashlang",
+    "lash-sqlite-store/lashlang",
+    "lash-postgres-store/lashlang",
 ]
 # Exposes `lash::testing` (e.g. `TestProvider`) for embedder integration tests.
 testing = ["lash-core/testing", "lash-protocol-rlm?/testing"]

@@ -21,7 +21,7 @@ workspace = true
 e2e = ["lash/testing"]
 # Keeps the reference bot standard-only while allowing the manual live-model
 # acceptance binary to exercise the RLM protocol in the same package.
-live-e2e = ["lash/rlm"]
+live-e2e = ["lash/rlm", "lash-sqlite-store/lashlang"]
 
 # Two binaries, one crate. The split is the point of the example: the platform
 # binary is a plain product with no Lash dependency, and the bot binary is the
@@ -61,7 +61,7 @@ futures-util = { workspace = true }
 lash = { workspace = true }
 lash-plugin-mcp = { workspace = true }
 lash-provider-openai = { workspace = true }
-lash-sqlite-store = { workspace = true }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../../crates/lash-sqlite-store", version = "=0.0.0-dev", default-features = false }
 # `form` is not optional here: Slack accepts form-encoded bodies for every Web
 # API method and JSON for only some, so the client's default encoding is form.
 reqwest = { workspace = true, features = ["json", "rustls", "http2", "form"] }

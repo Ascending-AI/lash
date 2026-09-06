@@ -158,6 +158,7 @@ pub struct Store {
     conn: SqliteConnection,
     session_id: OnceLock<String>,
     clock: Arc<dyn lash_core::Clock>,
+    #[cfg(feature = "lashlang")]
     artifact_cache: Mutex<BTreeMap<lashlang::ModuleRef, Arc<lashlang::ModuleArtifact>>>,
     options: StoreOptions,
     commit_count: AtomicU64,

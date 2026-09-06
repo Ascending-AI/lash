@@ -13,6 +13,7 @@
 //! (reads) or `conn.write` (read-then-write); only the wrapper call is awaited.
 
 use super::*;
+#[cfg(feature = "lashlang")]
 use lash_sansio::sync::MutexExt;
 
 /// Logical keyspaces multiplexed onto the `artifact_refs` pointer table. Each
@@ -23,6 +24,7 @@ use lash_sansio::sync::MutexExt;
 /// `INSERT OR REPLACE`, so content-addressing alone does not keep the namespaces
 /// disjoint. The composite key does.
 pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
+#[cfg(any(feature = "lashlang", test))]
 pub(crate) const RAW_ARTIFACT_NAMESPACE: &str = "lashlang_artifact";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 pub(crate) const CURRENT_TRIGGER_MANIFEST_NAMESPACE: &str = "lashlang_trigger_manifest";
@@ -91,6 +93,7 @@ impl Store {
     }
 }
 
+#[cfg(feature = "lashlang")]
 #[async_trait::async_trait]
 impl lashlang::LashlangArtifactStore for Store {
     fn durability_tier(&self) -> lashlang::DurabilityTier {
