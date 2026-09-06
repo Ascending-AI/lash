@@ -6995,7 +6995,6 @@ lash::remote::turn_result::RemoteTurnOutcome::Stopped::stop
 lash::remote::turn_result::RemoteTurnReport
 lash::remote::turn_result::RemoteTurnReport::activities
 lash::remote::turn_result::RemoteTurnReport::assistant_output
-lash::remote::turn_result::RemoteTurnReport::cancellation
 lash::remote::turn_result::RemoteTurnReport::decode_json
 lash::remote::turn_result::RemoteTurnReport::encode_json
 lash::remote::turn_result::RemoteTurnReport::execution
@@ -7016,6 +7015,7 @@ lash::remote::turn_result::RemoteTurnStatus::Completed
 lash::remote::turn_result::RemoteTurnStatus::Failed
 lash::remote::turn_result::RemoteTurnStop
 lash::remote::turn_result::RemoteTurnStop::Cancelled
+lash::remote::turn_result::RemoteTurnStop::Cancelled::evidence
 lash::remote::turn_result::RemoteTurnStop::Incomplete
 lash::remote::turn_result::RemoteTurnStop::InvalidInput
 lash::remote::turn_result::RemoteTurnStop::MaxTurns

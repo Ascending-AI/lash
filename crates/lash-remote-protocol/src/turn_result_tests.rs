@@ -47,7 +47,6 @@ fn in_progress_turn_report_is_refused_by_version_negotiation_before_body_decode(
                 text: "done".to_string(),
             },
         },
-        cancellation: None,
         assistant_output: RemoteAssistantOutput::default(),
         usage: RemoteTurnUsageReport::default(),
         execution: RemoteTurnExecutionMetrics::default(),

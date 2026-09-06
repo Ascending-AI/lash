@@ -70,12 +70,6 @@ impl RemoteTurnReport {
         for child in &children {
             total.add(&child.usage);
         }
-        // `status` and the top-level `cancellation` field are projections of
-        // the outcome; the outcome is the only place either fact is stated.
-        let cancellation = outcome
-            .cancellation()
-            .cloned()
-            .map(RemoteTurnCancellationEvidence::from);
         let outcome = RemoteTurnOutcome::from(outcome);
         let status = RemoteTurnStatus::from(&outcome);
         Self {
@@ -83,7 +77,6 @@ impl RemoteTurnReport {
             turn_id: turn_id.into(),
             status,
             outcome,
-            cancellation,
             assistant_output: assistant_output.into(),
             usage: RemoteTurnUsageReport {
                 parent,
@@ -144,7 +137,9 @@ impl From<lash_core::facade_support::TurnFinish> for RemoteTurnFinish {
 impl From<lash_core::facade_support::TurnStop> for RemoteTurnStop {
     fn from(value: lash_core::facade_support::TurnStop) -> Self {
         match value {
-            lash_core::facade_support::TurnStop::Cancelled { .. } => Self::Cancelled,
+            lash_core::facade_support::TurnStop::Cancelled { evidence } => Self::Cancelled {
+                evidence: evidence.into(),
+            },
             lash_core::facade_support::TurnStop::Incomplete => Self::Incomplete,
             lash_core::facade_support::TurnStop::InvalidInput => Self::InvalidInput,
             lash_core::facade_support::TurnStop::MaxTurns => Self::MaxTurns,

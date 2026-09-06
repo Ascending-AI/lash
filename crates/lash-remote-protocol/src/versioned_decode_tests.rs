@@ -90,7 +90,6 @@ fn streamed_turn_report() -> RemoteTurnReport {
                 text: "done".to_string(),
             },
         },
-        cancellation: None,
         assistant_output: RemoteAssistantOutput::default(),
         usage: RemoteTurnUsageReport::default(),
         execution: RemoteTurnExecutionMetrics::default(),
