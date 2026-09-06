@@ -263,6 +263,7 @@ pub(super) fn post_commit_delivery_issue(
     message: impl Into<String>,
 ) -> TurnIssue {
     TurnIssue {
+        severity: crate::runtime::TurnIssueSeverity::Blocking,
         kind: "runtime".to_string(),
         code: Some(code.into()),
         terminal_reason: None,

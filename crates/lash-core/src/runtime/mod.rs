@@ -827,9 +827,20 @@ pub struct TurnExecutionMetrics {
     pub duration_ms: u64,
 }
 
+/// Producer-selected effect of an issue on turn completion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnIssueSeverity {
+    /// Evidence that does not prevent completion.
+    Advisory,
+    /// A failure that prevents completion.
+    Blocking,
+}
+
 /// Structured issue surfaced during turn execution.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TurnIssue {
+    pub severity: TurnIssueSeverity,
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,

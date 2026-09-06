@@ -6988,7 +6988,11 @@ lash::remote::turn_result::RemoteTurnIssue::message
 lash::remote::turn_result::RemoteTurnIssue::provider_failure_kind
 lash::remote::turn_result::RemoteTurnIssue::raw
 lash::remote::turn_result::RemoteTurnIssue::retryable
+lash::remote::turn_result::RemoteTurnIssue::severity
 lash::remote::turn_result::RemoteTurnIssue::terminal_reason
+lash::remote::turn_result::RemoteTurnIssueSeverity
+lash::remote::turn_result::RemoteTurnIssueSeverity::Advisory
+lash::remote::turn_result::RemoteTurnIssueSeverity::Blocking
 lash::remote::turn_result::RemoteTurnOutcome
 lash::remote::turn_result::RemoteTurnOutcome::AgentFrameSwitch
 lash::remote::turn_result::RemoteTurnOutcome::AgentFrameSwitch::frame_key
@@ -10588,7 +10592,11 @@ lash::turn::TurnIssue::message
 lash::turn::TurnIssue::provider_failure_kind
 lash::turn::TurnIssue::raw
 lash::turn::TurnIssue::retryable
+lash::turn::TurnIssue::severity
 lash::turn::TurnIssue::terminal_reason
+lash::turn::TurnIssueSeverity
+lash::turn::TurnIssueSeverity::Advisory
+lash::turn::TurnIssueSeverity::Blocking
 lash::turn::TurnOutput
 lash::turn::TurnOutput::activities
 lash::turn::TurnOutput::assistant_message

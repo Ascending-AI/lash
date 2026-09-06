@@ -455,6 +455,7 @@ pub mod facade_support {
     pub use crate::runtime::TurnExecutionMetrics;
     pub use crate::runtime::TurnInputAcceptanceReceipt;
     pub use crate::runtime::TurnIssue;
+    pub use crate::runtime::TurnIssueSeverity;
     pub use crate::runtime::TurnOptions;
     pub use crate::runtime::TurnTerminal;
     pub use crate::runtime::TurnWorkDriver;

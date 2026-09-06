@@ -637,8 +637,8 @@ pub mod remote {
         pub use lash_remote_protocol::turn_result::{
             RemoteAssistantOutput, RemoteAssistantOutputState, RemoteCausalRef,
             RemoteToolCallOutcome, RemoteToolCallRecord, RemoteTurnExecutionMetrics,
-            RemoteTurnFinish, RemoteTurnIssue, RemoteTurnOutcome, RemoteTurnReport,
-            RemoteTurnStatus, RemoteTurnStop, RemoteTurnUsageReport,
+            RemoteTurnFinish, RemoteTurnIssue, RemoteTurnIssueSeverity, RemoteTurnOutcome,
+            RemoteTurnReport, RemoteTurnStatus, RemoteTurnStop, RemoteTurnUsageReport,
         };
     }
 
