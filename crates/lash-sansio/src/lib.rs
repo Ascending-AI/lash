@@ -74,10 +74,12 @@ pub use tool_catalog::{
     ToolCatalog, ToolCatalogBuildInput, ToolCatalogContribution, ToolCatalogEntry,
     ToolContractResolver, build_tool_catalog,
 };
+#[cfg(feature = "schema-validation")]
+pub use tool_contract::validate_tool_input;
 pub use tool_contract::{
     CompactToolContract, LashSchema, ModelTool, ToolActivation, ToolArgumentProjectionPolicy,
     ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutputContract, ToolRetryPolicy,
-    schema_for, validate_tool_input,
+    schema_for,
 };
 pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason,

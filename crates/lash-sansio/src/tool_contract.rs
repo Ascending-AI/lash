@@ -769,7 +769,61 @@ use schema_docs::{
     schema_parameter_docs,
 };
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct LashSchema {
+    pub schema: serde_json::Value,
+}
+
+impl LashSchema {
+    pub fn new(schema: serde_json::Value) -> Self {
+        Self { schema }
+    }
+
+    pub fn any() -> Self {
+        Self::new(serde_json::json!({}))
+    }
+
+    pub fn object(
+        properties: serde_json::Map<String, serde_json::Value>,
+        required: Vec<String>,
+    ) -> Self {
+        let mut schema = serde_json::Map::new();
+        schema.insert(
+            "type".to_string(),
+            serde_json::Value::String("object".to_string()),
+        );
+        schema.insert(
+            "properties".to_string(),
+            serde_json::Value::Object(properties),
+        );
+        if !required.is_empty() {
+            schema.insert(
+                "required".to_string(),
+                serde_json::Value::Array(
+                    required
+                        .into_iter()
+                        .map(serde_json::Value::String)
+                        .collect(),
+                ),
+            );
+        }
+        schema.insert(
+            "additionalProperties".to_string(),
+            serde_json::Value::Bool(true),
+        );
+        Self::new(serde_json::Value::Object(schema))
+    }
+
+    /// Validate a value against this schema.
+    #[cfg(feature = "schema-validation")]
+    pub fn validate(&self, value: &serde_json::Value) -> Result<(), String> {
+        schema_validation::validate_schema(&self.schema, value)
+    }
+}
+
+#[cfg(feature = "schema-validation")]
 mod schema_validation;
-pub use schema_validation::{LashSchema, validate_tool_input};
+#[cfg(feature = "schema-validation")]
+pub use schema_validation::validate_tool_input;
 
 include!("tool_contract/tests.rs");

@@ -8,39 +8,6 @@ use serde_json::Value;
 
 use crate::tool_contract::ToolContract;
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct LashSchema {
-    pub schema: Value,
-}
-
-impl LashSchema {
-    pub fn new(schema: Value) -> Self {
-        Self { schema }
-    }
-
-    pub fn any() -> Self {
-        Self::new(serde_json::json!({}))
-    }
-
-    pub fn object(properties: serde_json::Map<String, Value>, required: Vec<String>) -> Self {
-        let mut schema = serde_json::Map::new();
-        schema.insert("type".to_string(), Value::String("object".to_string()));
-        schema.insert("properties".to_string(), Value::Object(properties));
-        if !required.is_empty() {
-            schema.insert(
-                "required".to_string(),
-                Value::Array(required.into_iter().map(Value::String).collect()),
-            );
-        }
-        schema.insert("additionalProperties".to_string(), Value::Bool(true));
-        Self::new(Value::Object(schema))
-    }
-
-    pub fn validate(&self, value: &Value) -> Result<(), String> {
-        validate_schema(&self.schema, value)
-    }
-}
-
 const COMPILED_SCHEMA_CACHE_CAPACITY: usize = 1_024;
 const COMPILED_SCHEMA_CACHE_SCHEMA_BYTES: usize = 16 * 1024 * 1024;
 
@@ -150,7 +117,7 @@ fn compiled_schema(schema: &Value) -> Result<Arc<jsonschema::JSONSchema>, String
     compiled
 }
 
-fn validate_schema(schema: &Value, value: &Value) -> Result<(), String> {
+pub(super) fn validate_schema(schema: &Value, value: &Value) -> Result<(), String> {
     let compiled = compiled_schema(schema)?;
     if compiled.is_valid(value) {
         return Ok(());
@@ -203,7 +170,7 @@ fn format_validation_error(error: jsonschema::ValidationError<'_>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ToolDefinition;
+    use crate::{LashSchema, ToolDefinition};
     use std::time::{Duration, Instant};
 
     #[test]
