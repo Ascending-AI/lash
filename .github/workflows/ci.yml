@@ -2034,9 +2034,33 @@ jobs:
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
           git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git fetch origin +refs/heads/main:refs/remotes/origin/main
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force "${GITHUB_SHA}"
+          if [[ -n "${BASE_SHA}" ]]; then
+            git fetch --no-tags --depth=1 origin "${BASE_SHA}"
+            depth=50
+            until git merge-base --is-ancestor "${BASE_SHA}" HEAD 2>/dev/null; do
+              if [[ ${depth} -gt 1600 ]]; then
+                git fetch --no-tags --unshallow origin
+                break
+              fi
+              git fetch --no-tags --deepen="${depth}" origin "${GITHUB_SHA}"
+              depth=$((depth * 2))
+            done
+            git merge-base --is-ancestor "${BASE_SHA}" HEAD
+          else
+            git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+            depth=50
+            until git merge-base origin/main HEAD >/dev/null 2>&1; do
+              if [[ ${depth} -gt 1600 ]]; then
+                git fetch --no-tags --unshallow origin
+                break
+              fi
+              git fetch --no-tags --deepen="${depth}" origin "${GITHUB_SHA}"
+              depth=$((depth * 2))
+            done
+            git merge-base origin/main HEAD >/dev/null
+          fi
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
 
       - name: Check diff hygiene
         run: bash scripts/ci/check-diff-hygiene.sh
@@ -2064,9 +2088,33 @@ jobs:
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
           git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git fetch origin +refs/heads/main:refs/remotes/origin/main
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force "${GITHUB_SHA}"
+          if [[ -n "${BASE_SHA}" ]]; then
+            git fetch --no-tags --depth=1 origin "${BASE_SHA}"
+            depth=50
+            until git merge-base --is-ancestor "${BASE_SHA}" HEAD 2>/dev/null; do
+              if [[ ${depth} -gt 1600 ]]; then
+                git fetch --no-tags --unshallow origin
+                break
+              fi
+              git fetch --no-tags --deepen="${depth}" origin "${GITHUB_SHA}"
+              depth=$((depth * 2))
+            done
+            git merge-base --is-ancestor "${BASE_SHA}" HEAD
+          else
+            git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+            depth=50
+            until git merge-base origin/main HEAD >/dev/null 2>&1; do
+              if [[ ${depth} -gt 1600 ]]; then
+                git fetch --no-tags --unshallow origin
+                break
+              fi
+              git fetch --no-tags --deepen="${depth}" origin "${GITHUB_SHA}"
+              depth=$((depth * 2))
+            done
+            git merge-base origin/main HEAD >/dev/null
+          fi
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
 
       - name: Resolve secret scan range and override
         id: secret-scan

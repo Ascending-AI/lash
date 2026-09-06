@@ -57,6 +57,61 @@ class HygieneTests(unittest.TestCase):
         )
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
+    def test_shallow_checkout_preserves_gate_ranges(self):
+        self.git("branch", "-M", "main")
+        self.git("checkout", "-qb", "pr")
+        commits = []
+        for name in ("first.txt", "second.txt"):
+            (self.repo / name).write_text("PR addition\n")
+            self.commit()
+            commits.append(self.git("rev-parse", "HEAD").stdout.strip())
+        pr_head = commits[-1]
+        self.git("checkout", "-q", "main")
+        (self.repo / "main.txt").write_text("base-only addition\n")
+        self.commit()
+        main_head = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("checkout", "-qb", "merge-group")
+        self.git("merge", "--no-ff", "-qm", "Merge PR", "pr")
+        merge_head = self.git("rev-parse", "HEAD").stdout.strip()
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        for job in ("diff-hygiene", "secret-scan"):
+            section = workflow.split(f"  {job}:\n", 1)[1]
+            checkout = section.split("        run: |\n", 1)[1].split("\n      - name:", 1)[0]
+            # Execute the workflow's actual fetch/checkout code against a local remote.
+            checkout = "\n".join(line[10:] for line in checkout.splitlines())
+            checkout = checkout[checkout.index("git fetch"):]
+            for event, branch, base, expected in (
+                ("pull_request", "pr", self.base, commits),
+                ("merge_group", "merge-group", main_head, [*commits, merge_head]),
+                ("push", "pr", "", commits),
+            ):
+                with self.subTest(job=job, event=event), tempfile.TemporaryDirectory() as temp:
+                    clone = Path(temp) / "checkout"
+                    subprocess.run(
+                        ["git", "clone", "-q", "--depth=1", "--branch", branch,
+                         self.repo.as_uri(), str(clone)], check=True, capture_output=True,
+                    )
+                    def git(*args):
+                        return subprocess.run(["git", *args], cwd=clone, text=True,
+                                              capture_output=True, check=True).stdout.strip()
+                    head = merge_head if event == "merge_group" else pr_head
+                    self.assertEqual("true", git("rev-parse", "--is-shallow-repository"))
+                    self.assertEqual(head, git("rev-list", "HEAD"))
+                    result = subprocess.run(
+                        ["bash", "-euo", "pipefail", "-c", checkout], cwd=clone,
+                        env={**os.environ, "BASE_SHA": base, "GITHUB_SHA": head},
+                        text=True, capture_output=True,
+                    )
+                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                    resolved_base = base or git("merge-base", "origin/main", "HEAD")
+                    self.assertEqual(head, git("rev-parse", "HEAD"))
+                    self.assertEqual(
+                        ["first.txt", "second.txt"],
+                        git("diff", "--diff-filter=A", "--name-only",
+                            f"{resolved_base}...HEAD").splitlines(),
+                    )
+                    self.assertCountEqual(expected, git("rev-list", f"{resolved_base}..HEAD").splitlines())
+
     @unittest.skipUnless(GITLEAKS, "pinned Gitleaks is supplied by the secret-scan job")
     def test_added_secret_is_refused(self):
         # Construct a fake token at runtime so the regression fixture is not a leak.
