@@ -17,10 +17,6 @@ use crate::usage_activity::{RemoteTokenLedgerEntry, RemoteTurnActivity, RemoteUs
 pub struct RemoteTurnReport {
     pub session_id: String,
     pub turn_id: String,
-    /// Derived from `outcome` on encode and checked against it on decode.
-    /// Its removal awaits the next coordinated `REMOTE_PROTOCOL_VERSION`
-    /// window (FIG-2406).
-    pub status: RemoteTurnStatus,
     pub outcome: RemoteTurnOutcome,
     pub assistant_output: RemoteAssistantOutput,
     #[serde(default)]
@@ -40,6 +36,11 @@ pub struct RemoteTurnReport {
 }
 
 impl RemoteTurnReport {
+    /// Computes the terminal status from the outcome's single source of truth.
+    pub fn status(&self) -> RemoteTurnStatus {
+        RemoteTurnStatus::from(&self.outcome)
+    }
+
     /// Encodes one report inside the shared remote-protocol envelope.
     pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         crate::Envelope::new(self).encode_json()
@@ -67,13 +68,6 @@ impl RemoteTurnReport {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty("RemoteTurnReport", "session_id", &self.session_id)?;
         require_non_empty("RemoteTurnReport", "turn_id", &self.turn_id)?;
-        let expected_status = RemoteTurnStatus::from(&self.outcome);
-        if self.status != expected_status {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name: "RemoteTurnReport",
-                message: format!("turn status `{:?}` contradicts its outcome", self.status),
-            });
-        }
         if let RemoteTurnOutcome::Stopped {
             stop: RemoteTurnStop::Cancelled { evidence },
         } = &self.outcome
@@ -168,11 +162,7 @@ pub enum RemoteCausalRef {
     },
 }
 
-/// Derived projection of [`RemoteTurnOutcome`]. Producers compute it with
-/// `RemoteTurnStatus::from(&outcome)`; consumers get it checked against the
-/// outcome by [`RemoteTurnReport::validate`]. It never states a fact the
-/// outcome does not already carry, so there is no in-progress status: a turn
-/// report exists only once the turn has a terminal outcome.
+/// Terminal status derived from [`RemoteTurnOutcome`] by [`RemoteTurnReport::status`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteTurnStatus {

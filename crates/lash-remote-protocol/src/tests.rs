@@ -381,7 +381,6 @@ fn remote_turn_result_json_round_trips() {
     let result = RemoteTurnReport {
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
-        status: RemoteTurnStatus::Completed,
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
                 text: "done".to_string(),
@@ -502,7 +501,6 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
     let mut result = RemoteTurnReport {
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
-        status: RemoteTurnStatus::Completed,
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
                 text: "done".to_string(),
@@ -590,7 +588,6 @@ fn turn_result_rejects_conflicting_summary_and_activity_for_the_same_model_call(
     let result = RemoteTurnReport {
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
-        status: RemoteTurnStatus::Completed,
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
                 text: "done".to_string(),
@@ -644,7 +641,6 @@ fn turn_result_requires_one_summary_and_one_activity_per_model_call() {
         RemoteTurnReport {
             session_id: "session".to_string(),
             turn_id: "turn".to_string(),
-            status: RemoteTurnStatus::Completed,
             outcome: RemoteTurnOutcome::Finished {
                 finish: RemoteTurnFinish::AssistantMessage {
                     text: "done".to_string(),
@@ -737,7 +733,6 @@ fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
         let result = RemoteTurnReport {
             session_id: "session".to_string(),
             turn_id: "turn".to_string(),
-            status: RemoteTurnStatus::Completed,
             outcome: RemoteTurnOutcome::Finished {
                 finish: RemoteTurnFinish::AssistantMessage {
                     text: "done".to_string(),
@@ -817,7 +812,6 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
         RemoteTurnReport {
             session_id: "session".to_string(),
             turn_id: "turn".to_string(),
-            status: RemoteTurnStatus::Completed,
             outcome: RemoteTurnOutcome::Finished {
                 finish: RemoteTurnFinish::AssistantMessage {
                     text: "done".to_string(),
@@ -963,11 +957,10 @@ fn model_attempt_reset_has_pinned_wire_shape() {
 }
 
 #[test]
-fn remote_turn_result_rejects_contradictory_status_and_outcome() {
+fn remote_turn_result_derives_status_from_its_outcome() {
     let mut result = RemoteTurnReport {
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
-        status: RemoteTurnStatus::Cancelled,
         outcome: RemoteTurnOutcome::Stopped {
             stop: RemoteTurnStop::Cancelled {
                 evidence: RemoteTurnCancellationEvidence {
@@ -989,12 +982,22 @@ fn remote_turn_result_rejects_contradictory_status_and_outcome() {
     };
     result.validate().expect("cancelled result with evidence");
 
-    result.status = RemoteTurnStatus::Completed;
-    assert!(matches!(
-        result.validate(),
-        Err(RemoteProtocolError::InvalidEnvelope { type_name, message })
-            if type_name == "RemoteTurnReport" && message.contains("contradicts its outcome")
-    ));
+    assert_eq!(result.status(), RemoteTurnStatus::Cancelled);
+    let wire = serde_json::to_value(&result).unwrap();
+    assert!(wire.get("status").is_none());
+    assert!(wire.get("cancellation").is_none());
+    result.outcome = RemoteTurnOutcome::Stopped {
+        stop: RemoteTurnStop::RuntimeError,
+    };
+    assert_eq!(result.status(), RemoteTurnStatus::Failed);
+    result.outcome = RemoteTurnOutcome::Finished {
+        finish: RemoteTurnFinish::AssistantMessage {
+            text: "done".into(),
+        },
+    };
+    assert_eq!(result.status(), RemoteTurnStatus::Completed);
+    let wire = result.encode_json().unwrap();
+    assert_eq!(RemoteTurnReport::decode_json(&wire).unwrap(), result);
 }
 
 #[test]

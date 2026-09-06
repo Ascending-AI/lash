@@ -84,7 +84,6 @@ fn streamed_turn_report() -> RemoteTurnReport {
     RemoteTurnReport {
         session_id: "session-stream".to_string(),
         turn_id: "turn-stream".to_string(),
-        status: RemoteTurnStatus::Completed,
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
                 text: "done".to_string(),
