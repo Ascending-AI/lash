@@ -220,12 +220,14 @@ pub(crate) fn benchmark_provider_with_control(
 pub(crate) struct BenchmarkEchoTool {
     completion_resolver: Arc<dyn lash_core::EffectHost>,
     settlement_control: Option<Arc<BenchmarkSettlementControl>>,
+    completion_witness: Option<Arc<super::smoke::CompletionWitness>>,
 }
 
 impl BenchmarkEchoTool {
     pub(crate) fn new(completion_resolver: Arc<dyn lash_core::EffectHost>) -> Self {
         Self {
             completion_resolver,
+            completion_witness: super::smoke::completion_witness(),
             settlement_control: None,
         }
     }
@@ -236,6 +238,7 @@ impl BenchmarkEchoTool {
     ) -> Self {
         Self {
             completion_resolver,
+            completion_witness: super::smoke::completion_witness(),
             settlement_control: Some(settlement_control),
         }
     }
@@ -438,6 +441,7 @@ impl ToolProvider for BenchmarkEchoTool {
                 execute_benchmark_async(
                     Arc::clone(&self.completion_resolver),
                     self.settlement_control.clone(),
+                    self.completion_witness.clone(),
                     call,
                 )
                 .await
@@ -704,6 +708,7 @@ async fn execute_benchmark_slow(call: lash_core::ToolCall<'_>) -> ToolOutcome {
 async fn execute_benchmark_async(
     completion_resolver: Arc<dyn lash_core::EffectHost>,
     settlement_control: Option<Arc<BenchmarkSettlementControl>>,
+    completion_witness: Option<Arc<super::smoke::CompletionWitness>>,
     call: lash_core::ToolCall<'_>,
 ) -> ToolOutcome {
     let key = match call.context.completion_key() {
@@ -723,14 +728,14 @@ async fn execute_benchmark_async(
     let pending_phase = settlement_control
         .as_ref()
         .map(|_| call.context.named_phase("async_settlement.child_pending"));
-    tokio::spawn(async move {
+    let completion = async move {
         if let Some(control) = settlement_control {
             let _ = control.hold_completion().await;
         } else if delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
         drop(pending_phase);
-        let _ = completion_resolver
+        let outcome = completion_resolver
             .resolve_await_event(
                 &key,
                 Resolution::Ok(serde_json::json!({
@@ -739,8 +744,18 @@ async fn execute_benchmark_async(
                     "delay_ms": delay_ms
                 })),
             )
-            .await;
-    });
+            .await?;
+        anyhow::ensure!(
+            matches!(outcome, lash_core::ResolveOutcome::Accepted),
+            "benchmark completion was not accepted: {outcome:?}"
+        );
+        Ok(())
+    };
+    if let Some(witness) = completion_witness {
+        witness.spawn(completion);
+    } else {
+        tokio::spawn(completion);
+    }
     ToolOutcome::pending(lash_core::PendingCompletion::new())
 }
 

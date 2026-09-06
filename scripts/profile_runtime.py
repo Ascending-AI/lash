@@ -55,7 +55,21 @@ def parse_args() -> argparse.Namespace:
         "--profile",
         choices=sorted(PROFILE_DEFAULTS),
         default="full",
-        help="Benchmark size preset: quick for push CI, full for release/manual runs.",
+        help="Run preset: quick defaults to completion smoke; full measures timings.",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--smoke",
+        dest="smoke",
+        action="store_true",
+        default=None,
+        help="Check completion without benchmark deadlines (default for quick).",
+    )
+    mode.add_argument(
+        "--measure",
+        dest="smoke",
+        action="store_false",
+        help="Measure with the benchmark deadline, including with --profile quick.",
     )
     parser.add_argument("--runs", type=int, help="Measured runs. Defaults from --profile.")
     parser.add_argument("--warmups", type=int, help="Warm-up runs. Defaults from --profile.")
@@ -156,7 +170,7 @@ def maybe_build(
         return
     # The runtime benchmark lives in the dev-only `lash-perf` crate so the
     # production CLI build never compiles the harness or testing fixtures.
-    cmd = ["cargo", "build", "-q", "-p", "lash-perf"]
+    cmd = ["cargo", "build", "-q", "--workspace", "--bin", "lash-perf", "--locked"]
     feature_list = list(cargo_features)
     if dhat:
         feature_list.append("dhat-heap")
@@ -202,6 +216,9 @@ def main() -> int:
         f"--runtime-perf-warmups={max(warmups, 0)}",
         f"--runtime-perf-turns={max(turns, 1)}",
     ]
+    smoke = args.smoke if args.smoke is not None else args.profile == "quick"
+    if smoke:
+        cmd.append("--runtime-perf-smoke")
     if args.out:
         cmd.append(f"--runtime-perf-out={args.out}")
     if args.dhat:

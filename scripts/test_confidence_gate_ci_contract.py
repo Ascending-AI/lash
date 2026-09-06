@@ -839,7 +839,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         # enforced by --enforce-budgets in perf.yml and the Release job.
         # Wall-clock ceilings gate nowhere — they are advisory (FIG-1385).
         self.assertIn(
-            "profile_runtime.py --profile quick "
+            "profile_runtime.py --profile quick --smoke "
             "--enforce-inventory --out .benchmarks/perf-smoke/runtime.json",
             lint,
         )

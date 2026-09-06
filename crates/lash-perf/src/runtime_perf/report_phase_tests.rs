@@ -1141,3 +1141,27 @@ fn runtime_perf_runtime_scenario_rationales_explain_lower_layer_ownership() {
         );
     }
 }
+
+#[tokio::test]
+async fn async_completion_smoke_witnesses_match_session_geometry() {
+    for scenario in [
+        RuntimePerfScenario::StandardAsyncToolCompletion,
+        RuntimePerfScenario::RlmAsyncToolCompletion,
+        RuntimePerfScenario::RlmProcessAsyncToolCompletion,
+    ] {
+        crate::runtime_perf::smoke::execute(
+            true,
+            scenario,
+            3,
+            run_once(
+                scenario,
+                3,
+                4,
+                &checkpoint_curve_config(),
+                &high_traffic_config(),
+            ),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{} completion witness: {error:#}", scenario.name()));
+    }
+}

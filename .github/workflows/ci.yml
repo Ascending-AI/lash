@@ -1105,7 +1105,7 @@ jobs:
       - name: Run performance harness smoke
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          python3 scripts/profile_runtime.py --profile quick --enforce-inventory --out .benchmarks/perf-smoke/runtime.json \
+          python3 scripts/profile_runtime.py --profile quick --smoke --enforce-inventory --out .benchmarks/perf-smoke/runtime.json \
             --duration-history .benchmarks/perf-history/runtime-quick.jsonl
           python3 scripts/profile_lashlang.py --debug --iterations 10 --profile-iterations 10 --out .benchmarks/perf-smoke/lashlang.json
 

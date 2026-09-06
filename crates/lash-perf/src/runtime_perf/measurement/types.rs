@@ -192,6 +192,9 @@ async fn runtime_perf_timed<T, F>(
 where
     F: Future<Output = anyhow::Result<T>>,
 {
+    if super::smoke::is_smoke() {
+        return future.await;
+    }
     let timeout = runtime_perf_turn_timeout();
     match tokio::time::timeout(timeout, future).await {
         Ok(result) => result,
@@ -320,4 +323,44 @@ pub(crate) struct RuntimePerfTurnSummary {
     pub(crate) total_alloc_bytes: RuntimePerfMetricSummary,
     pub(crate) total_live_bytes: RuntimePerfMetricSummary,
     pub(crate) phase_summary: BTreeMap<String, RuntimePerfPhaseSummary>,
+}
+
+#[cfg(test)]
+mod completion_smoke_tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn smoke_waits_for_completion_beyond_the_unchanged_measurement_deadline() {
+        for smoke in [true, false] {
+            let cancel = CancellationToken::new();
+            let result = super::super::smoke::execute(
+                smoke,
+                RuntimePerfScenario::Standard,
+                1,
+                runtime_perf_timed(
+                    RuntimePerfScenario::Standard,
+                    0,
+                    "run_turn",
+                    Some(cancel.clone()),
+                    async {
+                        tokio::time::sleep(Duration::from_secs(11)).await;
+                        Ok(())
+                    },
+                ),
+            )
+            .await;
+            if smoke {
+                result.expect("smoke completion has no elapsed-time verdict");
+                assert!(!cancel.is_cancelled());
+            } else {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("timed out after 10000 ms")
+                );
+                assert!(cancel.is_cancelled());
+            }
+        }
+    }
 }

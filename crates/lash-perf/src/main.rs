@@ -123,6 +123,10 @@ struct Args {
     #[arg(long)]
     runtime_perf_enforce_inventory: bool,
 
+    /// Check scenario completion and delivery witnesses without benchmark deadlines.
+    #[arg(long)]
+    runtime_perf_smoke: bool,
+
     /// Append this run's per-scenario wall-clock and whole-window duration
     /// medians to a history and print the trend table. Advisory in every
     /// context: drift is warned about, never enforced (FIG-1385).
@@ -194,6 +198,7 @@ fn main() -> anyhow::Result<()> {
         args.runtime_perf_knee_threshold,
         args.runtime_perf_enforce_budgets,
         args.runtime_perf_enforce_inventory,
+        args.runtime_perf_smoke,
         args.runtime_perf_duration_history,
         args.runtime_perf_duration_profile,
         APP_VERSION,
