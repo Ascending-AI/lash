@@ -953,7 +953,10 @@ jobs:
 
       # Every event compares against the base its own tree actually sits on.
       #
-      # PRs compare with their target branch's merge-base. Main pushes compare
+      # PRs compare with their merge-base against main, not their target
+      # branch: main is the sole long-lived branch, and a stacked PR whose
+      # target is a sibling layer would otherwise be judged against a tree
+      # that already carries the window's one version bump. Main pushes compare
       # with HEAD~1 so the landed tree is independently rechecked; manual
       # workflow dispatches have no meaningful base and intentionally skip it.
       # A merge-queue entry is neither: its head is a queue commit carrying one
@@ -969,7 +972,7 @@ jobs:
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            base="$(git merge-base "origin/${GITHUB_BASE_REF}" HEAD)"
+            base="$(git merge-base origin/main HEAD)"
           elif [[ "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
             base="$MERGE_GROUP_BASE_SHA"
             [ -n "$base" ] || { echo "merge_group event carried no base_sha"; exit 1; }
