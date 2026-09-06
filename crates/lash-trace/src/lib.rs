@@ -1,9 +1,9 @@
 //! Durable diagnostics for the lash runtime: the [`TraceSink`] channel and its
 //! record vocabulary.
 //!
-//! A [`TraceSink`] receives one [`TraceRecord`] per runtime event — session and
-//! turn lifecycle, prompt builds, rolling-history decisions, LLM calls,
-//! per-tool start/completion, token usage, protocol steps, and Lashlang
+//! A [`TraceSink`] receives one [`TraceRecord`] per runtime event — turn
+//! lifecycle, prompt builds, rolling-history decisions, LLM calls,
+//! per-tool start/completion, per-call token usage, protocol steps, and Lashlang
 //! execution-graph updates. Each record
 //! carries a [`TraceContext`] (session / turn / graph-node identity) plus a
 //! tagged [`TraceEvent`] payload; [`TraceEvent::kind`] is the single source of
@@ -86,7 +86,9 @@ pub use lashlang_graph::{
 /// independently developed v13 changes would otherwise collide. Version 15
 /// replaces the exec completion's string error with a structured cell failure
 /// carrying its policy, program, or host kind.
-pub const TRACE_SCHEMA_VERSION: u32 = 15;
+/// Version 16 removes the two unemitted lifecycle and standalone usage events;
+/// turn starts and completed LLM calls retain lifecycle and per-call usage evidence.
+pub const TRACE_SCHEMA_VERSION: u32 = 16;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -278,10 +280,6 @@ impl TraceRecord {
     reason = "TraceEvent is a public DTO; keeping event payloads inline preserves ergonomic pattern matching"
 )]
 pub enum TraceEvent {
-    SessionStarted {
-        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        metadata: BTreeMap<String, Value>,
-    },
     TurnStarted {
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         metadata: BTreeMap<String, Value>,
@@ -447,11 +445,6 @@ pub enum TraceEvent {
     ProtocolStep {
         plugin_id: String,
         payload: Value,
-    },
-    TokenUsage {
-        usage: TraceTokenUsage,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        cumulative: Option<TraceTokenUsage>,
     },
     LanguageExecution {
         language: String,
@@ -624,8 +617,7 @@ impl TraceEvent {
                 | TraceLanguageExecutionPayload::BranchSelected { .. }
                 | TraceLanguageExecutionPayload::ChildStarted { .. } => false,
             },
-            Self::SessionStarted { .. }
-            | Self::TurnStarted { .. }
+            Self::TurnStarted { .. }
             | Self::PromptBuilt { .. }
             | Self::AttachmentDegraded { .. }
             | Self::CompositionChanged { .. }
@@ -649,7 +641,6 @@ impl TraceEvent {
             | Self::DurableTimerStarted { .. }
             | Self::DurableSegmentBoundary { .. }
             | Self::ProtocolStep { .. }
-            | Self::TokenUsage { .. }
             | Self::Custom { .. } => false,
         }
     }
@@ -661,7 +652,6 @@ impl TraceEvent {
     /// fails to compile here until it is given a kind.
     pub fn kind(&self) -> &'static str {
         match self {
-            Self::SessionStarted { .. } => "session_started",
             Self::TurnStarted { .. } => "turn_started",
             Self::PromptBuilt { .. } => "prompt_built",
             Self::AttachmentDegraded { .. } => "attachment_degraded",
@@ -695,7 +685,6 @@ impl TraceEvent {
             Self::DurableSegmentBoundary { .. } => "durable_segment_boundary",
             Self::StoreErrorObserved { .. } => "store_error_observed",
             Self::ProtocolStep { .. } => "protocol_step",
-            Self::TokenUsage { .. } => "token_usage",
             Self::LanguageExecution { .. } => "language_execution",
             Self::TurnCompleted { .. } => "turn_completed",
             Self::Custom { .. } => "custom",

@@ -153,7 +153,6 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
     let turn_node = turn_node_id(context);
 
     match event {
-        TraceEvent::SessionStarted { .. } => set_span(context, session_node, None),
         TraceEvent::TurnStarted { .. } | TraceEvent::TurnCompleted { .. } => {
             let parent = context.parent_graph_node_id.clone().or(session_node);
             set_span(context, turn_node, parent);
@@ -191,7 +190,6 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
         | TraceEvent::ExecCodeCompleted { .. }
         | TraceEvent::ExecCodeFailed { .. }
         | TraceEvent::ObservationProjection { .. }
-        | TraceEvent::TokenUsage { .. }
         | TraceEvent::JournaledEffectStarted { .. }
         | TraceEvent::JournaledEffectSettled { .. }
         | TraceEvent::DurableWaitParked { .. }
