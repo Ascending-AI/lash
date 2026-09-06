@@ -644,6 +644,11 @@ pub mod remote {
 
     /// Token usage accounting and the streaming turn-activity vocabulary.
     pub mod usage {
+        pub use lash_remote_protocol::queued_events::{
+            RemoteMessageOrigin, RemoteMessageRole, RemotePart, RemotePartAttachment,
+            RemotePartKind, RemotePluginMessage, RemotePruneState, RemoteQueuedWorkClaimBoundary,
+            RemoteTurnCause, RemoteTurnOutputSource,
+        };
         pub use lash_remote_protocol::usage_activity::{
             RemoteTokenLedgerEntry, RemoteTurnActivity, RemoteTurnEvent, RemoteUsage,
         };

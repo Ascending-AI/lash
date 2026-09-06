@@ -1356,7 +1356,7 @@ fn remote_tool_grants_convert_explicit_core_ids_without_binding_call_path() {
 }
 
 #[test]
-fn remote_activity_preserves_semantic_fields_and_collapses_runtime_diagnostics() {
+fn remote_activity_preserves_semantic_fields() {
     let output = lash_core::ToolCallOutput::success(serde_json::json!({ "ok": true }));
     let activity = lash_core::TurnActivity::new(
         lash_core::TurnActivityId::new("corr"),
@@ -1467,7 +1467,7 @@ fn remote_activity_exposes_typed_turn_input_application_without_display_text() {
     );
     assert!(
         json.get("kind").is_none() && !json.to_string().contains("queued_input_accepted"),
-        "application evidence must not use RuntimeDiagnostic: {json}"
+        "application evidence must not use an untyped diagnostic: {json}"
     );
     assert!(
         !json.to_string().contains("display") && !json.to_string().contains("text"),

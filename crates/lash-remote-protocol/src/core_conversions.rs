@@ -23,6 +23,7 @@ include!("core_conversions/turn_control.rs");
 include!("core_conversions/llm.rs");
 include!("core_conversions/turn_result.rs");
 include!("core_conversions/observations.rs");
+include!("core_conversions/queued_events.rs");
 include!("core_conversions/prompt.rs");
 include!("core_conversions/tools.rs");
 

@@ -26,12 +26,11 @@ async fn assert_typed_turn_input_application(
         };
         let value = serde_json::to_value(&event).expect("remote event json");
         if value.pointer("/type").and_then(Value::as_str) == Some("turn_activity")
-            && value.pointer("/activity/type").and_then(Value::as_str)
-                == Some("turn_input_applied")
+            && value.pointer("/activity/type").and_then(Value::as_str) == Some("turn_input_applied")
         {
             assert!(
                 value.pointer("/activity/kind").is_none(),
-                "workbench must consume a typed event, not RuntimeDiagnostic: {value}"
+                "workbench must consume a typed event, not an untyped diagnostic: {value}"
             );
             typed_application = value.pointer("/activity/applications/0").cloned();
             break;
