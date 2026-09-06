@@ -900,10 +900,13 @@ jobs:
           name: nextest-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/nextest-download
 
+      # Some tests embed CARGO_BIN_EXE paths at compile time. Keep archived
+      # non-test executables at the producer's workspace/target path too.
       - name: Test workspace shard
         run: |
           cargo nextest run --profile ci --workspace-remap "$GITHUB_WORKSPACE" \
             --archive-file "${RUNNER_TEMP}/nextest-download/lash-nextest.tar.zst" \
+            --extract-to "$GITHUB_WORKSPACE" --extract-overwrite \
             --no-fail-fast --partition count:${{ matrix.shard }}/4
 
       - name: Report sccache stats
