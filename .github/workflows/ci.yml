@@ -2036,7 +2036,7 @@ jobs:
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
           git fetch origin +refs/heads/main:refs/remotes/origin/main
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+          git checkout --detach --force "${GITHUB_SHA}"
 
       - name: Check diff hygiene
         run: bash scripts/ci/check-diff-hygiene.sh
@@ -2066,7 +2066,7 @@ jobs:
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
           git fetch origin +refs/heads/main:refs/remotes/origin/main
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+          git checkout --detach --force "${GITHUB_SHA}"
 
       - name: Resolve secret scan range and override
         id: secret-scan
