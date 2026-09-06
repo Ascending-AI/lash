@@ -336,6 +336,50 @@ impl super::InMemorySessionStoreFactory {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::store::StoreTestSupport for InMemorySessionStore {
+    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
+        &self,
+        version: u32,
+    ) -> Result<(), crate::StoreError> {
+        self.stamp_session_state_version_and_corrupt_payload_in_memory(version);
+        Ok(())
+    }
+
+    async fn seed_session_trigger_manifest_ref_for_testing(
+        &self,
+        _session_id: &str,
+    ) -> Result<bool, crate::store::StoreError> {
+        Ok(false)
+    }
+
+    async fn raw_session_owned_artifact_refs_for_testing(
+        &self,
+        _session_id: &str,
+    ) -> Result<Vec<(String, String)>, crate::store::StoreError> {
+        Ok(Vec::new())
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::store::ConformanceSessionStoreFactory for super::InMemorySessionStoreFactory {
+    async fn create_conformance_store(
+        &self,
+        request: &crate::SessionStoreCreateRequest,
+    ) -> Result<std::sync::Arc<dyn crate::store::ConformancePersistence>, crate::StoreError> {
+        Ok(self.create_in_memory_store(request)?)
+    }
+
+    async fn open_existing_conformance_store(
+        &self,
+        request: &crate::SessionStoreCreateRequest,
+    ) -> Result<Option<std::sync::Arc<dyn crate::store::ConformancePersistence>>, String> {
+        Ok(self
+            .open_existing_in_memory_store(request)
+            .map(|store| store as std::sync::Arc<dyn crate::store::ConformancePersistence>))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::store::StoreMaintenance;

@@ -855,6 +855,9 @@ mod session_meta;
 #[path = "postgres/support.rs"]
 mod support;
 #[cfg(any(test, feature = "testing"))]
+#[path = "postgres/test_support.rs"]
+mod test_support;
+#[cfg(any(test, feature = "testing"))]
 #[path = "postgres/testing.rs"]
 pub mod testing;
 #[path = "postgres/trigger_store.rs"]

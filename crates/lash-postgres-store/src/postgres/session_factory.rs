@@ -14,12 +14,13 @@ impl PostgresSessionStoreFactory {
     }
 }
 
-#[async_trait::async_trait]
-impl SessionStoreFactory for PostgresSessionStoreFactory {
-    async fn create_store(
+impl PostgresSessionStoreFactory {
+    /// Concrete constructor behind [`SessionStoreFactory::create_store`]; the
+    /// gated conformance factory shares it.
+    pub(crate) async fn create_session_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+    ) -> Result<Arc<PostgresSessionStore>, StoreError> {
         lash_core::store::validate_session_id(&request.session_id)?;
         let store = self.store_for(request.session_id.clone());
         let meta = SessionMeta {
@@ -56,10 +57,12 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         Ok(Arc::new(store))
     }
 
-    async fn open_existing_store(
+    /// Concrete reopen behind [`SessionStoreFactory::open_existing_store`];
+    /// the gated conformance factory shares it.
+    pub(crate) async fn open_existing_session_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<PostgresSessionStore>>, String> {
         let store = self.store_for(request.session_id.clone());
         if store
             .load_session_meta()
@@ -71,6 +74,26 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionStoreFactory for PostgresSessionStoreFactory {
+    async fn create_store(
+        &self,
+        request: &SessionStoreCreateRequest,
+    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+        Ok(self.create_session_store(request).await? as Arc<dyn RuntimePersistence>)
+    }
+
+    async fn open_existing_store(
+        &self,
+        request: &SessionStoreCreateRequest,
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+        Ok(self
+            .open_existing_session_store(request)
+            .await?
+            .map(|store| store as Arc<dyn RuntimePersistence>))
     }
 
     async fn open_existing_store_by_id(

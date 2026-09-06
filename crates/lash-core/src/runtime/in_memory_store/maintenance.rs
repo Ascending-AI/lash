@@ -10,20 +10,6 @@ use lash_sansio::sync::MutexExt;
 
 #[async_trait::async_trait]
 impl crate::store::StoreMaintenance for InMemorySessionStore {
-    async fn seed_session_trigger_manifest_ref_for_testing(
-        &self,
-        _session_id: &str,
-    ) -> Result<bool, crate::store::StoreError> {
-        Ok(false)
-    }
-
-    async fn raw_session_owned_artifact_refs_for_testing(
-        &self,
-        _session_id: &str,
-    ) -> Result<Vec<(String, String)>, crate::store::StoreError> {
-        Ok(Vec::new())
-    }
-
     async fn vacuum(&self) -> crate::store::MaintenanceResult<crate::store::VacuumReport> {
         // `deleted_session_ids` is deliberately exempt: it is permanent
         // identity evidence that prevents reuse after all other state is gone.

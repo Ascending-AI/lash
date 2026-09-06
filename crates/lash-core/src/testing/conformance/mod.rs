@@ -474,7 +474,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn in_memory_process_registry_satisfies_conformance() {
         process_registry(|| {
-            Arc::new(crate::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>
+            Arc::new(crate::TestLocalProcessRegistry::default())
+                as Arc<dyn crate::ConformanceProcessRegistry>
         })
         .await;
     }
@@ -614,13 +615,13 @@ mod tests {
                         .with_enqueuing_stale_after_ms(25)
                         .expect("valid short stale-claim age"),
                 ),
-        ) as Arc<dyn ProcessRegistry>;
+        ) as Arc<dyn crate::ConformanceProcessRegistry>;
         let factory = Arc::new(crate::InMemorySessionStoreFactory::with_clock(
             Arc::clone(&clock) as Arc<dyn crate::Clock>,
         )) as Arc<dyn crate::SessionStoreFactory>;
-        let process_work = Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
-            &registry,
-        )));
+        let process_work = Arc::new(crate::NativeProcessWork::for_registry(
+            registry.clone() as Arc<dyn ProcessRegistry>
+        ));
         wake_delivery_crash_matrix(
             factory,
             registry,
@@ -654,7 +655,7 @@ mod tests {
             Some(Arc::new(unbound)),
             || {
                 Arc::new(crate::InMemorySessionStoreFactory::new())
-                    as Arc<dyn crate::SessionStoreFactory>
+                    as Arc<dyn crate::store::ConformanceSessionStoreFactory>
             },
         )
         .await;

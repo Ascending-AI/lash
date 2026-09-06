@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use lash_core::runtime::RuntimeScope;
+use lash_core::store::ConformanceSessionStoreFactory;
 use lash_core::testing::conformance::{
     FenceIntegrityHandles, FenceIntegrityInjector, FenceIntegrityObservation, FenceIntegrityTarget,
     GraphFactObservation, GraphIntegrityCorruption, GraphIntegrityHandles, GraphIntegrityInjector,
@@ -255,14 +256,14 @@ where
     .expect("runtime thread")
 }
 
-fn open_registry(path: &Path) -> Arc<dyn ProcessRegistry> {
+fn open_registry(path: &Path) -> Arc<dyn lash_core::ConformanceProcessRegistry> {
     let path = path.to_path_buf();
     let sessions = path.with_extension("sessions");
     Arc::new(sync_await(async move {
         SqliteProcessRegistry::open(&path, sessions)
             .await
             .expect("file registry")
-    })) as Arc<dyn ProcessRegistry>
+    })) as Arc<dyn lash_core::ConformanceProcessRegistry>
 }
 
 fn open_store(path: &Path) -> Arc<dyn RuntimePersistence> {
@@ -1038,8 +1039,8 @@ async fn sqlite_session_store_factory_satisfies_conformance() {
     let unbound = Some(Arc::new(unbound) as Arc<dyn lash_core::StoreMaintenance>);
     lash_core::testing::conformance::session_store_factory("sqlite", unbound, || {
         let dir = tempfile::tempdir().expect("tempdir");
-        let factory =
-            Arc::new(SqliteSessionStoreFactory::new(dir.path())) as Arc<dyn SessionStoreFactory>;
+        let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
+            as Arc<dyn ConformanceSessionStoreFactory>;
         dirs.lock_recover().push(dir);
         factory
     })

@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lash_core::{
-    EffectHost, ProcessContinuationStore, ProcessExecutionEnvStore, ProcessRegistry,
-    RuntimePersistence, SessionStoreFactory, TriggerStore,
+    EffectHost, ProcessContinuationStore, ProcessExecutionEnvStore, RuntimePersistence,
+    SessionStoreFactory, TriggerStore,
 };
 use lash_sqlite_store::{
     SqliteEffectHost, SqliteProcessRegistry, SqliteSessionStoreFactory, SqliteTriggerStore, Store,
@@ -236,7 +236,7 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
         clock: Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
         runtime: Arc::clone(&runtime) as Arc<dyn RuntimePersistence>,
         session_factory: session_factory as Arc<dyn SessionStoreFactory>,
-        processes: Arc::clone(&processes) as Arc<dyn ProcessRegistry>,
+        processes: Arc::clone(&processes) as Arc<dyn lash_core::ConformanceProcessRegistry>,
         continuations: processes as Arc<dyn ProcessContinuationStore>,
         process_envs: runtime as Arc<dyn ProcessExecutionEnvStore>,
         triggers: triggers as Arc<dyn TriggerStore>,

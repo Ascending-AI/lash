@@ -18,8 +18,8 @@ mod tool_intent_submission;
 mod wake_delivery;
 mod worklist;
 
+use support::process_status_label;
 pub(crate) use support::{ProcessEventAppendArm, ProcessEventWriteAuthorization, tx_outcome};
-use support::{process_status_label, wake_allocation_floor_for_testing};
 use wake_delivery::{load_wake_delivery_conn, update_wake_delivery_state, wake_delivery_report};
 
 const LIST_PROCESSES_SQL: &str = "SELECT record_json FROM processes
@@ -485,14 +485,6 @@ impl ProcessRegistry for SqliteProcessRegistry {
             discarded_wake_delivery_count,
             cleared_subscription_count,
         })
-    }
-
-    async fn wake_allocation_floor_for_testing(
-        &self,
-        target_session_id: &str,
-        process_id: &str,
-    ) -> Result<Option<u64>, lash_core::PluginError> {
-        wake_allocation_floor_for_testing(self, target_session_id, process_id).await
     }
 
     async fn append_event(
@@ -1578,5 +1570,17 @@ fn validate_process_execution_authority_conn(
                 now,
             )
         }
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+#[async_trait::async_trait]
+impl lash_core::ProcessRegistryTestSupport for SqliteProcessRegistry {
+    async fn wake_allocation_floor_for_testing(
+        &self,
+        target_session_id: &str,
+        process_id: &str,
+    ) -> Result<Option<u64>, lash_core::PluginError> {
+        support::wake_allocation_floor_for_testing(self, target_session_id, process_id).await
     }
 }

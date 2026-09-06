@@ -24,15 +24,6 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         self.inner().admit_session_state(lease).await
     }
 
-    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
-        &self,
-        version: u32,
-    ) -> Result<(), StoreError> {
-        self.inner()
-            .stamp_session_state_version_and_corrupt_payload_for_testing(version)
-            .await
-    }
-
     fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError> {
         self.inner().record_intent(intent)
     }
@@ -464,24 +455,6 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
     async fn gc_unreachable(&self) -> MaintenanceResult<GcReport> {
         self.inner().gc_unreachable().await
     }
-
-    async fn seed_session_trigger_manifest_ref_for_testing(
-        &self,
-        session_id: &str,
-    ) -> Result<bool, StoreError> {
-        self.inner()
-            .seed_session_trigger_manifest_ref_for_testing(session_id)
-            .await
-    }
-
-    async fn raw_session_owned_artifact_refs_for_testing(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<(String, String)>, StoreError> {
-        self.inner()
-            .raw_session_owned_artifact_refs_for_testing(session_id)
-            .await
-    }
 }
 
 impl<T> AttachmentManifest for T
@@ -571,16 +544,6 @@ where
         lease: &SessionExecutionLeaseAuthority,
     ) -> Result<SessionStateAdmission, StoreError> {
         RuntimePersistenceDecorator::admit_session_state(self, lease).await
-    }
-
-    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
-        &self,
-        version: u32,
-    ) -> Result<(), StoreError> {
-        RuntimePersistenceDecorator::stamp_session_state_version_and_corrupt_payload_for_testing(
-            self, version,
-        )
-        .await
     }
 
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
@@ -985,21 +948,5 @@ where
 
     async fn gc_unreachable(&self) -> MaintenanceResult<GcReport> {
         RuntimePersistenceDecorator::gc_unreachable(self).await
-    }
-
-    async fn seed_session_trigger_manifest_ref_for_testing(
-        &self,
-        session_id: &str,
-    ) -> Result<bool, StoreError> {
-        RuntimePersistenceDecorator::seed_session_trigger_manifest_ref_for_testing(self, session_id)
-            .await
-    }
-
-    async fn raw_session_owned_artifact_refs_for_testing(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<(String, String)>, StoreError> {
-        RuntimePersistenceDecorator::raw_session_owned_artifact_refs_for_testing(self, session_id)
-            .await
     }
 }

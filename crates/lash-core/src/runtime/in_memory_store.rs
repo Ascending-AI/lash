@@ -896,14 +896,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         self.admit_session_state_in_memory(lease)
     }
 
-    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
-        &self,
-        version: u32,
-    ) -> Result<(), crate::StoreError> {
-        self.stamp_session_state_version_and_corrupt_payload_in_memory(version);
-        Ok(())
-    }
-
     async fn load_session(
         &self,
     ) -> Result<Option<crate::store::PersistedSessionRead>, crate::store::StoreError> {

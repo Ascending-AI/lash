@@ -59,7 +59,7 @@ pub struct FixtureHandles {
     pub clock: Arc<dyn Clock>,
     pub runtime: Arc<dyn RuntimePersistence>,
     pub session_factory: Arc<dyn SessionStoreFactory>,
-    pub processes: Arc<dyn ProcessRegistry>,
+    pub processes: Arc<dyn lash_core::ConformanceProcessRegistry>,
     pub continuations: Arc<dyn ProcessContinuationStore>,
     pub process_envs: Arc<dyn ProcessExecutionEnvStore>,
     pub triggers: Arc<dyn TriggerStore>,

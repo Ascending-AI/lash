@@ -527,6 +527,42 @@ pub trait ProcessContinuationStore: Send + Sync {
     async fn delete_segment_handovers(&self, process_id: &str) -> Result<(), PluginError>;
 }
 
+/// Test-only probes on a process registry.
+///
+/// Compiled only under `cfg(any(test, feature = "testing"))` and never a
+/// supertrait of [`ProcessRegistry`]: the conformance suites take
+/// [`ConformanceProcessRegistry`] (`ProcessRegistry + ProcessRegistryTestSupport`)
+/// and reach the probes through that handle. Backends implement it under the
+/// same gate they forward to `lash-core/testing`; the production trait never
+/// requires a testing method, and a build with `lash-core/testing` on but a
+/// backend's `testing` off still compiles.
+#[cfg(any(test, feature = "testing"))]
+#[async_trait::async_trait]
+pub trait ProcessRegistryTestSupport: Send + Sync {
+    /// Raw sender-floor probe for cross-backend conformance tests.
+    async fn wake_allocation_floor_for_testing(
+        &self,
+        target_session_id: &str,
+        process_id: &str,
+    ) -> Result<Option<u64>, PluginError> {
+        let _ = (target_session_id, process_id);
+        Ok(None)
+    }
+}
+
+/// A process registry together with its test-only probes: the registry type
+/// the conformance suites take. Blanket-implemented under the same gate as
+/// [`ProcessRegistryTestSupport`]; an `Arc<dyn ConformanceProcessRegistry>`
+/// upcasts to `Arc<dyn ProcessRegistry>` wherever production code is exercised.
+#[cfg(any(test, feature = "testing"))]
+pub trait ConformanceProcessRegistry: ProcessRegistry + ProcessRegistryTestSupport {}
+
+#[cfg(any(test, feature = "testing"))]
+impl<T> ConformanceProcessRegistry for T where
+    T: ProcessRegistry + ProcessRegistryTestSupport + ?Sized
+{
+}
+
 /// Durability-neutral process registry.
 ///
 /// Process waits are coordination behavior and live on
@@ -534,6 +570,13 @@ pub trait ProcessContinuationStore: Send + Sync {
 /// not on persistence
 /// implementations. Registry methods are point reads and writes only. See
 /// `docs/adr/0016-process-waits-live-on-the-work-driver-seam.md`.
+///
+/// No production registry method is a `*_for_testing` hook and this trait
+/// carries no test-only obligation: the probes live on the gated
+/// [`ProcessRegistryTestSupport`], reached through
+/// [`ConformanceProcessRegistry`] by the conformance suites (see
+/// [`StoreMaintenance`](crate::store::StoreMaintenance) for the store-side
+/// norm).
 #[async_trait::async_trait]
 pub trait ProcessRegistry: Send + Sync {
     fn wake_delivery_config(&self) -> WakeDeliveryConfig;
@@ -695,17 +738,6 @@ pub trait ProcessRegistry: Send + Sync {
         &self,
         session_id: &str,
     ) -> Result<ProcessSessionDeleteReport, PluginError>;
-
-    /// Raw sender-floor probe for cross-backend conformance tests.
-    #[doc(hidden)]
-    async fn wake_allocation_floor_for_testing(
-        &self,
-        target_session_id: &str,
-        process_id: &str,
-    ) -> Result<Option<u64>, PluginError> {
-        let _ = (target_session_id, process_id);
-        Ok(None)
-    }
 
     /// Append a host-owned event that is not emitted by the process execution.
     ///

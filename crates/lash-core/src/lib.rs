@@ -1082,6 +1082,10 @@ pub(crate) use provider::{
     ProviderResolutionError, RuntimeProviderResolver,
 };
 #[cfg(any(test, feature = "testing"))]
+pub use runtime::ConformanceProcessRegistry;
+#[cfg(any(test, feature = "testing"))]
+pub use runtime::ProcessRegistryTestSupport;
+#[cfg(any(test, feature = "testing"))]
 pub use runtime::TestLocalProcessRegistry;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestProcessRegistryWriteExt;

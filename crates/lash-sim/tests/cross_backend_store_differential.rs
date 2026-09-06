@@ -23,18 +23,18 @@ use lash_core::runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
     QueuedWorkPayload,
 };
+use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport};
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy,
     ForkSessionRequest, HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity,
     PendingTurnInputDraft, PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry,
     PluginSnapshotMeta, ProtocolEvent, QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit,
-    RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionHistoryRecord,
-    SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState,
-    TriggerOwnerScope, TurnInput, TurnInputApplication, TurnInputClaim, TurnInputIngress,
-    TurnInputState, facade_support::InMemorySessionStore,
-    facade_support::InMemorySessionStoreFactory,
+    RuntimeSessionState, RuntimeTurnCommitStamp, SessionHistoryRecord, SessionMeta,
+    SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
+    SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage, ToolState, TriggerOwnerScope,
+    TurnInput, TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
+    facade_support::InMemorySessionStore, facade_support::InMemorySessionStoreFactory,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -868,12 +868,12 @@ enum RawDurableReader {
     Sqlite {
         path: PathBuf,
         session_id: String,
-        store: Option<Arc<dyn RuntimePersistence>>,
+        store: Option<Arc<dyn ConformancePersistence>>,
     },
     Postgres {
         pool: PgPool,
         session_id: String,
-        store: Option<Arc<dyn RuntimePersistence>>,
+        store: Option<Arc<dyn ConformancePersistence>>,
     },
 }
 
@@ -951,7 +951,7 @@ fn normalized_node_json(value: serde_json::Value) -> Vec<u8> {
 async fn read_sqlite_durable_state(
     path: &Path,
     session_id: &str,
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn ConformancePersistence>,
 ) -> RawDurableState {
     let connection = rusqlite::Connection::open(path).expect("open SQLite durable reader");
     connection
@@ -1325,15 +1325,15 @@ enum BackendReopen {
 }
 
 struct NamedHandle {
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn ConformancePersistence>,
     meta: SessionMeta,
 }
 
 struct BackendRunner {
     name: &'static str,
     session_id: String,
-    store: Option<Arc<dyn RuntimePersistence>>,
-    factory: Option<Arc<dyn SessionStoreFactory>>,
+    store: Option<Arc<dyn ConformancePersistence>>,
+    factory: Option<Arc<dyn ConformanceSessionStoreFactory>>,
     raw_reader: RawDurableReader,
     reopen: BackendReopen,
     clock: Arc<dyn Clock>,
@@ -1351,7 +1351,7 @@ struct BackendRunner {
 }
 
 impl BackendRunner {
-    fn store(&self) -> Arc<dyn RuntimePersistence> {
+    fn store(&self) -> Arc<dyn ConformancePersistence> {
         Arc::clone(
             self.store
                 .as_ref()
@@ -1359,7 +1359,7 @@ impl BackendRunner {
         )
     }
 
-    fn factory(&self) -> Arc<dyn SessionStoreFactory> {
+    fn factory(&self) -> Arc<dyn ConformanceSessionStoreFactory> {
         Arc::clone(
             self.factory
                 .as_ref()
@@ -1407,7 +1407,7 @@ impl BackendRunner {
             .process_env_store(Arc::new(
                 lash::persistence::InMemoryProcessExecutionEnvStore::new(),
             ))
-            .store_factory(self.factory())
+            .store_factory(self.factory() as Arc<dyn SessionStoreFactory>)
             .provider(provider)
             .model(model)
             .clock(Arc::clone(&self.clock))
@@ -1742,7 +1742,7 @@ impl BackendRunner {
                     // reconstruction.
                     BackendReopen::InMemory => self
                         .factory()
-                        .open_existing_store(&request)
+                        .open_existing_conformance_store(&request)
                         .await
                         .map_err(StoreError::Backend)?
                         .expect("in-memory retained factory must still expose the live session"),
@@ -1756,12 +1756,13 @@ impl BackendRunner {
                                 .with_clock(Arc::clone(&self.clock)),
                         );
                         let reopened = concrete_factory
-                            .open_existing_store(&request)
+                            .open_existing_conformance_store(&request)
                             .await
                             .map_err(StoreError::Backend)?
                             .expect("SQLite session must survive an independent reopen");
                         let path = concrete_factory.catalog_path();
-                        self.factory = Some(concrete_factory as Arc<dyn SessionStoreFactory>);
+                        self.factory =
+                            Some(concrete_factory as Arc<dyn ConformanceSessionStoreFactory>);
                         self.raw_reader = RawDurableReader::Sqlite {
                             path,
                             session_id: self.session_id.clone(),
@@ -1784,11 +1785,12 @@ impl BackendRunner {
                                 .with_clock(Arc::clone(&self.clock)),
                         );
                         let reopened = concrete_factory
-                            .open_existing_store(&request)
+                            .open_existing_conformance_store(&request)
                             .await
                             .map_err(StoreError::Backend)?
                             .expect("Postgres session must survive an independent reopen");
-                        self.factory = Some(concrete_factory as Arc<dyn SessionStoreFactory>);
+                        self.factory =
+                            Some(concrete_factory as Arc<dyn ConformanceSessionStoreFactory>);
                         self.raw_reader = RawDurableReader::Postgres {
                             pool: pool.clone(),
                             session_id: self.session_id.clone(),
@@ -1905,7 +1907,7 @@ impl BackendRunner {
                 let request = self.create_request();
                 let store = self
                     .factory()
-                    .open_existing_store(&request)
+                    .open_existing_conformance_store(&request)
                     .await
                     .map_err(StoreError::Backend)?
                     .expect("create handle requires a live materialized session");
@@ -1998,7 +2000,7 @@ impl BackendRunner {
                 let request = self.create_request();
                 assert!(
                     self.factory()
-                        .open_existing_store(&request)
+                        .open_existing_conformance_store(&request)
                         .await
                         .map_err(StoreError::Backend)?
                         .is_none(),
@@ -2208,14 +2210,14 @@ async fn runners_for_case_with_clock(
 
     let memory_factory = Arc::new(InMemorySessionStoreFactory::with_clock(Arc::clone(&clock)));
     let memory_store = memory_factory
-        .create_store(&create_request)
+        .create_conformance_store(&create_request)
         .await
         .expect("create in-memory differential store");
     let memory = memory_factory
         .raw_store_for_testing(&session_id)
         .expect("factory retains concrete in-memory store");
     memory.replace_session_meta_for_testing(expected_meta.clone());
-    let memory_factory_dyn = Arc::clone(&memory_factory) as Arc<dyn SessionStoreFactory>;
+    let memory_factory_dyn = Arc::clone(&memory_factory) as Arc<dyn ConformanceSessionStoreFactory>;
 
     let sqlite_case_root = sqlite_root.join(case.as_str());
     let sqlite_factory = Arc::new(
@@ -2224,14 +2226,14 @@ async fn runners_for_case_with_clock(
     );
     let sqlite_path = sqlite_factory.catalog_path();
     let sqlite_store = sqlite_factory
-        .create_store(&create_request)
+        .create_conformance_store(&create_request)
         .await
         .expect("create SQLite differential store");
     sqlite_store
         .save_session_meta(expected_meta.clone())
         .await
         .expect("install deterministic SQLite session metadata");
-    let sqlite_factory_dyn = Arc::clone(&sqlite_factory) as Arc<dyn SessionStoreFactory>;
+    let sqlite_factory_dyn = Arc::clone(&sqlite_factory) as Arc<dyn ConformanceSessionStoreFactory>;
 
     let postgres_factory = Arc::new(
         postgres
@@ -2239,14 +2241,15 @@ async fn runners_for_case_with_clock(
             .with_clock(Arc::clone(&clock)),
     );
     let postgres_store = postgres_factory
-        .create_store(&create_request)
+        .create_conformance_store(&create_request)
         .await
         .expect("create Postgres differential store");
     postgres_store
         .save_session_meta(expected_meta.clone())
         .await
         .expect("install deterministic Postgres session metadata");
-    let postgres_factory_dyn = Arc::clone(&postgres_factory) as Arc<dyn SessionStoreFactory>;
+    let postgres_factory_dyn =
+        Arc::clone(&postgres_factory) as Arc<dyn ConformanceSessionStoreFactory>;
 
     vec![
         BackendRunner {

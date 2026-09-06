@@ -1856,6 +1856,10 @@ lash::persistence::ChronologicalProjection
 lash::persistence::ChronologicalProjection::entries
 lash::persistence::ChronologicalProjection::from_turn_view
 lash::persistence::ChronologicalProjection::into_entries
+lash::persistence::ConformancePersistence
+lash::persistence::ConformanceSessionStoreFactory
+lash::persistence::ConformanceSessionStoreFactory::create_conformance_store
+lash::persistence::ConformanceSessionStoreFactory::open_existing_conformance_store
 lash::persistence::DeliveryPolicy
 lash::persistence::DeliveryPolicy::AfterCurrentTurnCommit
 lash::persistence::DeliveryPolicy::EarliestSafeBoundary
@@ -2319,15 +2323,12 @@ lash::persistence::RuntimePersistenceDecorator::load_session_head_meta
 lash::persistence::RuntimePersistenceDecorator::load_session_meta
 lash::persistence::RuntimePersistenceDecorator::pending_session_work_ordering
 lash::persistence::RuntimePersistenceDecorator::queued_work_batch_completed
-lash::persistence::RuntimePersistenceDecorator::raw_session_owned_artifact_refs_for_testing
 lash::persistence::RuntimePersistenceDecorator::read_session_state_version
 lash::persistence::RuntimePersistenceDecorator::record_intent
 lash::persistence::RuntimePersistenceDecorator::record_turn_cancel_request
 lash::persistence::RuntimePersistenceDecorator::release_session_execution_lease
 lash::persistence::RuntimePersistenceDecorator::renew_session_execution_lease
 lash::persistence::RuntimePersistenceDecorator::save_session_meta
-lash::persistence::RuntimePersistenceDecorator::seed_session_trigger_manifest_ref_for_testing
-lash::persistence::RuntimePersistenceDecorator::stamp_session_state_version_and_corrupt_payload_for_testing
 lash::persistence::RuntimePersistenceDecorator::try_claim_session_execution_lease
 lash::persistence::RuntimePersistenceDecorator::try_claim_session_execution_lease_with_token
 lash::persistence::RuntimePersistenceDecorator::turn_cancel_request
@@ -2447,7 +2448,6 @@ lash::persistence::SessionCommitStore::load_session_head_meta
 lash::persistence::SessionCommitStore::load_session_meta
 lash::persistence::SessionCommitStore::read_session_state_version
 lash::persistence::SessionCommitStore::save_session_meta
-lash::persistence::SessionCommitStore::stamp_session_state_version_and_corrupt_payload_for_testing
 lash::persistence::SessionCursorError
 lash::persistence::SessionCursorError::Malformed
 lash::persistence::SessionCursorError::Malformed::message
@@ -2835,8 +2835,6 @@ lash::persistence::StoreError::checked_monotonic_increment
 lash::persistence::StoreError::variant_name
 lash::persistence::StoreMaintenance
 lash::persistence::StoreMaintenance::gc_unreachable
-lash::persistence::StoreMaintenance::raw_session_owned_artifact_refs_for_testing
-lash::persistence::StoreMaintenance::seed_session_trigger_manifest_ref_for_testing
 lash::persistence::StoreMaintenance::vacuum
 lash::persistence::StorePreflight
 lash::persistence::StorePreflight::backend
@@ -2867,6 +2865,10 @@ lash::persistence::StoreSchemaVerdict::Unreadable
 lash::persistence::StoreSchemaVerdict::Unreadable::reason
 lash::persistence::StoreSchemaVerdict::is_undecided
 lash::persistence::StoreSchemaVerdict::refuses_open
+lash::persistence::StoreTestSupport
+lash::persistence::StoreTestSupport::raw_session_owned_artifact_refs_for_testing
+lash::persistence::StoreTestSupport::seed_session_trigger_manifest_ref_for_testing
+lash::persistence::StoreTestSupport::stamp_session_state_version_and_corrupt_payload_for_testing
 lash::persistence::StoredAttachment
 lash::persistence::StoredAttachment::bytes
 lash::persistence::StoredBlobRef
@@ -4672,6 +4674,7 @@ lash::process::CausalRef::TriggerOccurrence::subscription_revision
 lash::process::CausalRef::Turn
 lash::process::CausalRef::Turn::session_id
 lash::process::CausalRef::Turn::turn_id
+lash::process::ConformanceProcessRegistry
 lash::process::LASHLANG_ENGINE_KIND
 lash::process::LashlangProcessInput
 lash::process::LashlangProcessInput::args
@@ -5103,10 +5106,11 @@ lash::process::ProcessRegistry::retarget_subscription
 lash::process::ProcessRegistry::set_external_ref
 lash::process::ProcessRegistry::set_process_wait_with_authority
 lash::process::ProcessRegistry::transfer_observers
-lash::process::ProcessRegistry::wake_allocation_floor_for_testing
 lash::process::ProcessRegistry::wake_delivery_config
 lash::process::ProcessRegistry::wake_delivery_report
 lash::process::ProcessRegistry::with_runtime_clock
+lash::process::ProcessRegistryTestSupport
+lash::process::ProcessRegistryTestSupport::wake_allocation_floor_for_testing
 lash::process::ProcessRuntimeHost
 lash::process::ProcessRuntimeHost::process_registry
 lash::process::ProcessRuntimeHost::process_work

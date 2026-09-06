@@ -113,6 +113,8 @@ mod process_registry_completion;
 mod queued_work;
 mod schema;
 mod session_meta;
+#[cfg(any(test, feature = "testing"))]
+mod test_support;
 #[cfg(feature = "testing")]
 pub mod testing;
 mod triggers;
@@ -682,12 +684,13 @@ impl SqliteSessionStoreFactory {
     }
 }
 
-#[async_trait::async_trait]
-impl SessionStoreFactory for SqliteSessionStoreFactory {
-    async fn create_store(
+impl SqliteSessionStoreFactory {
+    /// Concrete constructor behind [`SessionStoreFactory::create_store`]; the
+    /// gated conformance factory shares it.
+    pub(crate) async fn create_bound_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+    ) -> Result<Arc<Store>, StoreError> {
         lash_core::store::validate_session_id(&request.session_id)?;
         std::fs::create_dir_all(&self.root).map_err(|err| StoreError::Backend(err.to_string()))?;
         let path = self.catalog_path();
@@ -739,13 +742,15 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             })
             .await
             .map_err(sqlite_error)??;
-        Ok(store as Arc<dyn RuntimePersistence>)
+        Ok(store)
     }
 
-    async fn open_existing_store(
+    /// Concrete reopen behind [`SessionStoreFactory::open_existing_store`];
+    /// the gated conformance factory shares it.
+    pub(crate) async fn open_existing_bound_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<Store>>, String> {
         let path = self.catalog_path();
         if !path.exists() {
             return Ok(None);
@@ -771,7 +776,27 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         {
             return Ok(None);
         }
-        Ok(Some(store as Arc<dyn RuntimePersistence>))
+        Ok(Some(store))
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionStoreFactory for SqliteSessionStoreFactory {
+    async fn create_store(
+        &self,
+        request: &SessionStoreCreateRequest,
+    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+        Ok(self.create_bound_store(request).await? as Arc<dyn RuntimePersistence>)
+    }
+
+    async fn open_existing_store(
+        &self,
+        request: &SessionStoreCreateRequest,
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+        Ok(self
+            .open_existing_bound_store(request)
+            .await?
+            .map(|store| store as Arc<dyn RuntimePersistence>))
     }
 
     async fn read_session(

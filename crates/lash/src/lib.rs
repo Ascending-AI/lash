@@ -310,6 +310,12 @@ pub mod persistence {
         RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionHead, SessionHeadMeta,
         SessionHeadPayload, commit_runtime_state_verified, load_persisted_session_state,
     };
+    /// Test-only store hooks and the conformance-suite handle types that
+    /// carry them (`testing` feature only; no production trait requires them).
+    #[cfg(any(test, feature = "testing"))]
+    pub use lash_core::store::{
+        ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport,
+    };
     pub use lash_core::{
         AttachmentCondemnation, AttachmentDeleteArming, AttachmentReclamationPolicy,
         AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStorePersistence,
@@ -689,6 +695,10 @@ pub mod process {
         facade_support::ProcessWorkerFault, facade_support::SessionScopeId,
         facade_support::watch_process_registry, facade_support::watch_process_registry_with_sink,
     };
+    /// Test-only registry probes and the conformance-suite registry type that
+    /// carries them (`testing` feature only; no production trait requires them).
+    #[cfg(any(test, feature = "testing"))]
+    pub use lash_core::{ConformanceProcessRegistry, ProcessRegistryTestSupport};
     /// Event semantics a registration declares for its extra event types: which
     /// occurrences wake the process ([`ProcessWakeSpec`]) and how a payload is
     /// projected into the wake input ([`ProcessValueSelector`]).
