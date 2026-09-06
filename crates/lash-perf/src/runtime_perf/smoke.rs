@@ -17,6 +17,17 @@ pub(crate) fn is_smoke() -> bool {
         .unwrap_or(false)
 }
 
+pub(crate) fn with_budget<F: Future>(
+    budget: std::time::Duration,
+    future: F,
+) -> impl Future<Output = Result<F::Output, tokio::time::error::Elapsed>> {
+    if is_smoke() {
+        futures_util::future::Either::Left(futures_util::FutureExt::map(future, Ok))
+    } else {
+        futures_util::future::Either::Right(tokio::time::timeout(budget, future))
+    }
+}
+
 pub(crate) async fn execute<T>(
     smoke: bool,
     scenario: super::scenarios::RuntimePerfScenario,

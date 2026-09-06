@@ -192,11 +192,8 @@ async fn runtime_perf_timed<T, F>(
 where
     F: Future<Output = anyhow::Result<T>>,
 {
-    if super::smoke::is_smoke() {
-        return future.await;
-    }
     let timeout = runtime_perf_turn_timeout();
-    match tokio::time::timeout(timeout, future).await {
+    match super::smoke::with_budget(timeout, future).await {
         Ok(result) => result,
         Err(_) => {
             if let Some(cancel) = cancel {
