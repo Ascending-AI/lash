@@ -994,7 +994,11 @@ async fn runtime_core_for_scripts(
             .map_err(|err| SqliteReplayError::Runtime(err.to_string()))?,
     );
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .with_native_queued_work()
+        // Recorded provider boundaries own execution, just as in generation.
+        // A native queued-input wake can acquire an admission lease before the
+        // spawned provider task starts, making replay depend on task scheduling.
+        // Dedicated runtime boundaries exercise queued work separately.
+        .without_queued_work()
         .effect_host(Arc::new(
             lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
