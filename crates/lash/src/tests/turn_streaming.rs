@@ -4634,10 +4634,12 @@ async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues() -> Resul
     let cursor = session.observe().current_observation().cursor;
     let mut stream = session.observe().subscribe_and_recover(cursor);
     assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(10), stream.next())
-            .await
-            .is_err(),
-        "the initial poll must install the live receiver and wait"
+        futures_util::poll!(stream.next()).is_pending(),
+        "the initial poll must wait for a live event"
+    );
+    assert!(
+        stream.live_receiver_installed(),
+        "live receiver installation acknowledged"
     );
 
     for text in ["lag one", "lag two", "lag three"] {
@@ -5059,6 +5061,22 @@ fn hang_on_signal_provider(started_tx: Arc<StdMutex<Vec<oneshot::Sender<()>>>>) 
         .into_handle()
 }
 
+async fn wait_for_stable_build_count(builds: &AtomicUsize) -> usize {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let mut observed = builds.load(Ordering::SeqCst);
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+            let current = builds.load(Ordering::SeqCst);
+            if current == observed {
+                return current;
+            }
+            observed = current;
+        }
+    })
+    .await
+    .expect("unknown-claimability hydration reaches an idle steady state")
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn next_turn_notification_during_a_live_turn_has_bounded_hydrations() -> Result<()> {
     let builds = Arc::new(AtomicUsize::new(0));
@@ -5114,7 +5132,7 @@ async fn next_turn_notification_during_a_live_turn_has_bounded_hydrations() -> R
         Some("queued-during-live-turn".to_string()),
     )
     .await?;
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    wait_for_stable_build_count(&builds).await;
 
     let hydrations = builds
         .load(Ordering::SeqCst)
@@ -5147,22 +5165,6 @@ async fn next_turn_notification_during_a_live_turn_has_bounded_hydrations() -> R
 async fn create_only_factory_returns_to_idle_after_draining_unknown_claimability() -> Result<()> {
     const MAX_TRANSIENT_HYDRATIONS_PER_NOTIFICATION: usize =
         lash_core::runtime::QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS;
-
-    async fn wait_for_stable_build_count(builds: &AtomicUsize) -> usize {
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            let mut observed = builds.load(Ordering::SeqCst);
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
-                let current = builds.load(Ordering::SeqCst);
-                if current == observed {
-                    return current;
-                }
-                observed = current;
-            }
-        })
-        .await
-        .expect("unknown-claimability hydration reaches an idle steady state")
-    }
 
     let builds = Arc::new(AtomicUsize::new(0));
     let provider_calls = Arc::new(AtomicUsize::new(0));

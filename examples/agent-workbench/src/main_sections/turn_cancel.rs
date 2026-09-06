@@ -44,13 +44,24 @@ async fn cancel_turn(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<(StatusCode, Json<TurnCancelResponse>), AppError> {
+    let driver = state.core.turn_work_driver();
+    cancel_turn_with_driver(state, query, &driver).await
+}
+
+async fn cancel_turn_with_driver(
+    state: AppState,
+    query: SessionQuery,
+    driver: &lash::TurnWorkDriver,
+) -> Result<(StatusCode, Json<TurnCancelResponse>), AppError> {
     let session_id = query.resolve(&state)?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::CancelTurn {
             session_id: session_id.clone(),
         })?;
-    let cancellations = state.cancel_turns_for_session(&session_id).await?;
+    let cancellations = state
+        .cancel_turns_for_session_with_driver(&session_id, driver)
+        .await?;
     state.trace_for_session(
         &session_id,
         "api.turn.cancel",

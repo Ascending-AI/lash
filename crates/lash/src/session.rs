@@ -1304,6 +1304,11 @@ pub struct SessionObservationStream {
 }
 
 impl SessionObservationStream {
+    #[cfg(test)]
+    pub(crate) fn live_receiver_installed(&self) -> bool {
+        self.subscription.is_some()
+    }
+
     /// Returns the stream's current replay cursor.
     pub fn cursor(&self) -> &SessionCursor {
         &self.cursor
