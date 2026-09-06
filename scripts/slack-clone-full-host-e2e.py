@@ -596,34 +596,40 @@ class Journey:
         self.kill_started = time.monotonic()
         accepted = self.wait_ledger("FIG1341-KILL-MID-TURN", "accepted")
         self.kill_event = accepted["event_id"]
+        # Accepted is committed before the separate input-id write. Re-read
+        # that identity and its durable claim before killing; the first ledger
+        # snapshot can still have input_id=None even after the provider starts.
+        def claimed_admission() -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
+            ledger = next(
+                (r for r in self.ledger_rows() if r["event_id"] == self.kill_event),
+                None,
+            )
+            if (
+                ledger is None
+                or ledger["stage"] != "accepted"
+                or not ledger["input_id"]
+            ):
+                return None
+            pending = [
+                r
+                for r in self.session_snapshot()["pending"]
+                if r["input_id"] == ledger["input_id"]
+            ]
+            if len(pending) == 1 and pending[0]["claim_owner_incarnation_id"]:
+                return ledger, pending
+            return None
+
+        self.poll("accepted admission claim before kill", claimed_admission, timeout=15)
         self.poll("provider entered kill gate", lambda: (self.args.state_dir / "provider" / "kill-provider-entered").exists())
         self.kill_bot_group()
         for page in self.pages.values():
             expect(page.locator("#stream .msg.is-bot")).to_have_count(before_dom_bot_rows)
         self.gate("05-killed", "dom", "both pages observe the mention and no reply while bot is down", all(any("FIG1341-KILL-MID-TURN" in r["text"] for r in self.dom_rows(p)) and len([r for r in self.dom_rows(p) if r["bot"]]) == before_dom_bot_rows for p in self.pages.values()), "05-killed-*.png")
         self.gate("05-killed", "platform", "platform remains healthy with the triggering message and no bot reply", self.http_json(f"{self.base}/healthz")["service"] == "slack-clone-platform" and sum(r["bot_id"] is not None for r in self.platform_rows()) == before_platform_bot_rows, "05-killed-four-layers.json")
-        def killed_admission() -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
-            killed_ledger = next(
-                (r for r in self.ledger_rows() if r["event_id"] == self.kill_event),
-                None,
-            )
-            pending = [
-                r
-                for r in self.session_snapshot()["pending"]
-                if r["input_id"] == accepted["input_id"]
-            ]
-            if (
-                killed_ledger is not None
-                and killed_ledger["stage"] == "accepted"
-                and len(pending) == 1
-                and pending[0]["claim_owner_incarnation_id"]
-            ):
-                return killed_ledger, pending
-            return None
 
         try:
             killed_ledger, pending = self.poll(
-                "killed admission durability", killed_admission, timeout=15
+                "killed admission durability", claimed_admission, timeout=15
             )
         except AssertionError as error:
             if not str(error).startswith(
