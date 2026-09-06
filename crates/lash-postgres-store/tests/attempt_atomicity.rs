@@ -31,7 +31,7 @@ use lash_core::{
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
     RuntimeScope,
 };
-use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
+use lash_postgres_store::{PostgresEffectHost, PostgresStorage};
 
 // Keep subsequent lines stable for machine-checked public API evidence anchors.
 // Shared test support now lives at the grouped integration-harness root.
@@ -1415,6 +1415,20 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     );
 }
 
+// Call only after aborting and joining the interrupted host: no live executor
+// may still renew these rows. Completed child terminals remain untouched.
+async fn expire_fig1293_abandoned_effect_rows(storage: &PostgresStorage) {
+    sqlx::query(
+        "UPDATE lash_runtime_effect_replay
+         SET lease_expires_at_ms = 0
+         WHERE session_id = $1 AND status = 'in_progress'",
+    )
+    .bind("fig1293-restate-migrated-tools")
+    .execute(storage.pool())
+    .await
+    .expect("expire only the interrupted host's abandoned replay rows");
+}
+
 async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_serial: bool) {
     let Some(database_url) = database_url() else {
         eprintln!("skipping FIG-1293 PostgreSQL crash law: LASH_POSTGRES_DATABASE_URL is not set");
@@ -1438,15 +1452,7 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
     fig1293_seed_control_target(&registry).await;
     let (model, model_calls) = fig1293_model();
-    let base_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::with_options(
-        &storage,
-        PostgresEffectReplayOptions {
-            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(
-                std::time::Duration::from_millis(300),
-            )
-            .expect("valid short FIG-1293 crash lease"),
-        },
-    ));
+    let base_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::new(&storage));
     let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let effect_host: Arc<dyn EffectHost> = Arc::new(CrashingEffectHost {
         inner: base_effect_host,
@@ -1480,17 +1486,9 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     first_run.abort();
     let interrupted = first_run.await.expect_err("aborted host task");
     assert!(interrupted.is_cancelled());
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    expire_fig1293_abandoned_effect_rows(&storage).await;
 
-    let replay_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::with_options(
-        &storage,
-        PostgresEffectReplayOptions {
-            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(
-                std::time::Duration::from_millis(300),
-            )
-            .expect("valid short FIG-1293 replay lease"),
-        },
-    ));
+    let replay_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::new(&storage));
     let mut replay = fig1293_runtime(
         Arc::clone(&replay_effect_host),
         Arc::clone(&registry),
@@ -1575,15 +1573,7 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
     let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
     FIG1293_BLOCKING_CHILD_RUNS.store(0, Ordering::SeqCst);
     let model = fig1293_fault_batch_model();
-    // CI run 33656939416 attempt 2 lost the former 300ms replay lease under load.
-    let replay_lease_ttl = std::time::Duration::from_secs(1);
-    let first_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::with_options(
-        &storage,
-        PostgresEffectReplayOptions {
-            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(replay_lease_ttl)
-                .expect("valid short FIG-1293 batch-cancel lease"),
-        },
-    ));
+    let first_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::new(&storage));
     let policy = fig1293_policy();
     let state = fig1293_state(&policy);
     let store: Arc<dyn lash_core::RuntimePersistence> =
@@ -1663,18 +1653,12 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
         "the host is interrupted after success and failure commit but before child 3 starts",
     );
     assert_eq!(FIG1293_BLOCKING_CHILD_RUNS.load(Ordering::SeqCst), 0);
-    tokio::time::sleep(replay_lease_ttl + std::time::Duration::from_millis(200)).await;
+    expire_fig1293_abandoned_effect_rows(&storage).await;
 
     let replay_storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect redriving batch-cancel host");
-    let replay_host = PostgresEffectHost::with_options(
-        &replay_storage,
-        PostgresEffectReplayOptions {
-            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(replay_lease_ttl)
-                .expect("valid short FIG-1293 batch-cancel replay lease"),
-        },
-    );
+    let replay_host = PostgresEffectHost::new(&replay_storage);
     let replay_effect_host: Arc<dyn EffectHost> = Arc::new(replay_host);
     let mut replay = fig1293_runtime(
         Arc::clone(&replay_effect_host),
