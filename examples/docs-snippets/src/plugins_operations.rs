@@ -204,7 +204,15 @@ async fn review_plan(
     let _graph = Arc::clone(&ctx.session_graph);
     let _processes = Arc::clone(&ctx.processes);
     let _scope = ctx.scoped_effect_controller.clone();
-    Ok(PluginOperationOutcome::new(args.goal.split(' ').count()))
+    Ok(
+        PluginOperationOutcome::new(args.goal.split(' ').count()).with_events(vec![
+            PluginRuntimeEvent::Status {
+                key: "review".into(),
+                label: "completed".into(),
+                detail: Some(args.goal),
+            },
+        ]),
+    )
 }
 
 /// The plugin itself: it registers the three operations and persists the plan
@@ -388,6 +396,27 @@ async fn plugin_operations_round_trip() -> anyhow::Result<()> {
         })
         .await?;
     assert_eq!(review.output, 3);
+    assert_eq!(review.events.len(), 1);
+    assert_eq!(review.events[0].plugin_id, PLUGIN_ID);
+    assert!(matches!(&review.events[0].value,
+        PluginRuntimeEvent::Status { key, label, detail }
+        if key == "review" && label == "completed" && detail.as_deref() == Some("ship the facade")));
+    assert!(review.pending_turn_inputs.is_empty());
+
+    let cancel = lash::CancellationToken::new();
+    cancel.cancel();
+    let error = operations
+        .run_task_with_cancel::<ReviewPlan>(
+            PlanArgs {
+                goal: "cancel amber 739 review".into(),
+            },
+            cancel,
+        )
+        .await
+        .expect_err("cancelled review has no success receipt");
+    assert!(matches!(error,
+        lash::EmbedError::Control(PluginOperationInvokeError::Failed(ref message))
+        if message == "review cancelled"));
 
     let unknown = operations
         .query_raw("docs.no_such_operation", serde_json::json!({}))
