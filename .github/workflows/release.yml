@@ -383,7 +383,7 @@ jobs:
           git push origin "refs/tags/${RELEASE_TAG}"
 
       - name: Publish release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         # Release notes are written manually: the release publishes with the
         # auto-generated commit list only, and a maintainer edits the release
         # body on GitHub afterward.
