@@ -1,42 +1,31 @@
 name: Setup sccache
 description: >-
-  Install sccache with the GitHub Actions cache backend and route rustc through
-  it, so the heavy compile that rust-cache's read-only restorers (the Test
-  shards, cross builds) cannot save is cached across shards and runs. Also
-  installs the linker the calling workflow's RUSTFLAGS names, because sccache
-  caches compilation but never the link step.
+  Install the workflow linker and an optional local compilation cache.
+  Cross-run reuse belongs to bounded rust-cache target-directory writers;
+  sccache never writes one GitHub cache entry per compilation object.
 
 runs:
   using: composite
   steps:
-    - name: Install sccache
-      # v0.0.10+ exports the cache-service-v2 environment that sccache 0.16's
-      # GHA backend requires; older action versions make the server panic on
-      # startup, which fails every rustc invocation through the wrapper.
-      uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
-
-    - name: Route rustc through sccache
+    - name: Configure local compilation caching
       shell: bash
       run: |
-        # GHA cache backend (keyed content-addressed compilation units) shared
-        # across jobs/runs. CARGO_INCREMENTAL must be off for sccache to cache;
-        # CI never reuses an incremental dir anyway.
+        # Configure before installation: the install action's post hook can
+        # start the server too. No remote cache credentials/backend are used.
         {
-          echo "SCCACHE_GHA_ENABLED=true"
-          echo "RUSTC_WRAPPER=sccache"
+          echo "SCCACHE_GHA_ENABLED=false"
+          echo "SCCACHE_DIR=${RUNNER_TEMP}/sccache"
+          echo "SCCACHE_CACHE_SIZE=2G"
+          echo "SCCACHE_LOG=warn"
+          echo "SCCACHE_ERROR_LOG=${RUNNER_TEMP}/sccache-errors.log"
           echo "CARGO_INCREMENTAL=0"
+          echo "RUSTC_WRAPPER=sccache"
         } >> "$GITHUB_ENV"
+        echo "Compilation cache: local disk (2 GiB); cross-run dependencies: rust-cache"
 
-    # This action deliberately does not *set* RUSTFLAGS. RUSTFLAGS is part of
-    # cargo's per-unit fingerprint, so a value that depends on whether a job
-    # happens to list this step splits the cache: readers that restore a cache
-    # written under a different RUSTFLAGS log "cache restored" and then rebuild
-    # everything. The linker choice therefore belongs to the workflow (ci.yml's
-    # top-level `env:`, overridden per job where a cache must stay mold-free),
-    # and this step only provides the binary that value names. It installs
-    # unconditionally: the one caller that overrides RUSTFLAGS to be mold-free
-    # (`linux-release-cache`) pays a couple of seconds for a linker it does not
-    # use, which is cheaper than making the install depend on a context a
-    # composite action does not reliably see.
+    - name: Install sccache
+      uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
+    # RUSTFLAGS remains a workflow property, identical for producers/readers.
     - name: Install mold
       uses: ./.github/actions/setup-mold
