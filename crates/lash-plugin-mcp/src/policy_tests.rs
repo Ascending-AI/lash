@@ -6,13 +6,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use lash_core::{ToolCallOutcome, ToolFailure, ToolFailureClass, ToolOutcome};
-use rmcp::model::{
-    CancelledNotification, CancelledNotificationParam, ClientNotification, RequestId,
-};
+use rmcp::model::{CancelledNotification, CancelledNotificationParam, ClientNotification};
 use rmcp::service::{Peer, RoleClient};
 use serde_json::json;
 
 use super::*;
+
+#[path = "policy_script.rs"]
+mod scripted;
 
 pub(super) struct ActorPauseHook {
     pub(super) reached: tokio::sync::Notify,
@@ -96,22 +97,7 @@ def result(request_id):
 def run_call(message, index):
     request_id = message['id']
     token = message.get('params', {}).get('_meta', {}).get('progressToken')
-    if behavior == 'progress':
-        for step in range(5):
-            time.sleep(0.1)
-            send({'jsonrpc': '2.0', 'method': 'notifications/progress',
-                  'params': {'progressToken': token, 'progress': step + 1}})
-        result(request_id)
-    elif behavior == 'continuous_progress':
-        for step in range(20):
-            time.sleep(0.1)
-            send({'jsonrpc': '2.0', 'method': 'notifications/progress',
-                  'params': {'progressToken': token, 'progress': step + 1}})
-        result(request_id)
-    elif behavior == 'sequence':
-        if index == 2:
-            result(request_id)
-    elif behavior == 'success':
+    if behavior == 'success':
         result(request_id)
 
 call_index = 0
@@ -156,7 +142,7 @@ for line in sys.stdin:
         elif behavior == 'ping_meta':
             send({'jsonrpc': '2.0', 'id': message['id'],
                   'result': {'_meta': {'alive': True}}})
-        elif behavior in ('silent_ping', 'success', 'progress', 'continuous_progress', 'sequence', 'fail_twice_then_success'):
+        elif behavior in ('silent_ping', 'success', 'fail_twice_then_success'):
             send({'jsonrpc': '2.0', 'id': message['id'], 'result': {}})
 if behavior in ('ignore_eof', 'exit_on_eof_after_hang_initialize'):
     with open(eof_path, 'w', encoding='utf-8') as f:
@@ -313,63 +299,85 @@ fn entry(pool: &McpConnectionPool) -> Arc<McpEntry> {
         .clone()
 }
 
-fn request_id_for_method(root: &Path, method: &str) -> Option<RequestId> {
-    received(root).lines().find_map(|line| {
-        let message: serde_json::Value = serde_json::from_str(line).ok()?;
-        (message.get("method")?.as_str()? == method)
-            .then(|| serde_json::from_value(message.get("id")?.clone()).ok())?
-    })
-}
-
 #[tokio::test]
 async fn progress_resets_idle_timeout_and_allows_three_times_the_idle_budget() {
+    let _clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
-            behavior: "progress",
             call_timeout_ms: 150,
             ..MockOptions::default()
         },
     )
     .await;
-
-    let started = Instant::now();
-    let result = call(&pool).await;
+    let mut request = Box::pin(call(&pool));
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    mock.started(&pool).await;
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    let started = tokio::time::Instant::now();
+    for _ in 0..5 {
+        tokio::time::advance(Duration::from_millis(100)).await;
+        mock.command("progress").await;
+        // The ping response follows progress on the same stdout pipe. rmcp
+        // delivers the reset before that response; polling consumes the reset.
+        peer(&pool)
+            .await
+            .send_request(ClientRequest::PingRequest(PingRequest::default()))
+            .await
+            .unwrap();
+        assert!(futures_util::poll!(request.as_mut()).is_pending());
+    }
+    mock.command("reply").await;
+    let result = request.await;
     assert!(result.is_success(), "progressing call failed: {result:?}");
-    assert!(started.elapsed() >= Duration::from_millis(450));
+    assert_eq!(started.elapsed(), Duration::from_millis(500));
+    drop(_clock);
     pool.shutdown_all().await;
 }
 
 #[tokio::test]
 async fn progress_does_not_reset_idle_timeout_when_disabled() {
+    let _clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
-            behavior: "progress",
             reset_on_progress: false,
             ..MockOptions::default()
         },
     )
     .await;
-
-    let started = Instant::now();
-    let result = call(&pool).await;
+    let mut request = Box::pin(call(&pool));
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    mock.started(&pool).await;
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    tokio::time::advance(Duration::from_millis(100)).await;
+    mock.command("progress").await;
+    // The ping response follows progress on the same stdout pipe. rmcp
+    // delivers the reset before that response; polling consumes the reset.
+    peer(&pool)
+        .await
+        .send_request(ClientRequest::PingRequest(PingRequest::default()))
+        .await
+        .unwrap();
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    tokio::time::advance(Duration::from_millis(51)).await;
+    let result = request.await;
     assert_eq!(failure(&result).class, ToolFailureClass::Timeout);
-    assert!(started.elapsed() >= Duration::from_millis(125));
-    assert!(started.elapsed() < Duration::from_millis(350));
+    assert_eq!(failure(&result).code, "mcp_call_timeout");
+    mock.event("cancelled").await;
+    drop(_clock);
     pool.shutdown_all().await;
 }
 
 #[tokio::test]
 async fn wall_clock_cap_fires_despite_continuous_progress() {
+    let _clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
-            behavior: "continuous_progress",
-            call_timeout_ms: 150,
             call_max_total_timeout_ms: 350,
             policy: TimeoutDisconnectPolicy::ConsecutiveTimeouts,
             threshold: 1,
@@ -377,19 +385,34 @@ async fn wall_clock_cap_fires_despite_continuous_progress() {
         },
     )
     .await;
-
-    let started = Instant::now();
-    let result = call(&pool).await;
+    let mut request = Box::pin(call(&pool));
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    mock.started(&pool).await;
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    for _ in 0..3 {
+        tokio::time::advance(Duration::from_millis(100)).await;
+        mock.command("progress").await;
+        // The ping response follows progress on the same stdout pipe. rmcp
+        // delivers the reset before that response; polling consumes the reset.
+        peer(&pool)
+            .await
+            .send_request(ClientRequest::PingRequest(PingRequest::default()))
+            .await
+            .unwrap();
+        assert!(futures_util::poll!(request.as_mut()).is_pending());
+    }
+    tokio::time::advance(Duration::from_millis(51)).await;
+    let result = request.await;
     assert_eq!(failure(&result).class, ToolFailureClass::Timeout);
     assert_eq!(failure(&result).code, "mcp_call_deadline_exceeded");
-    assert!(started.elapsed() >= Duration::from_millis(300));
-    assert!(started.elapsed() < Duration::from_millis(600));
     assert!(pool.server_statuses()[0].connected);
     assert_eq!(
         entry(&pool).consecutive_timeouts.load(Ordering::SeqCst),
         0,
         "wall-cap expiry must not consume the idle-timeout budget"
     );
+    mock.event("cancelled").await;
+    drop(_clock);
     pool.shutdown_all().await;
 }
 
@@ -513,11 +536,11 @@ async fn silent_tool_and_failed_ping_disconnects_and_runs_one_reconnect_cycle() 
 
 #[tokio::test]
 async fn consecutive_timeout_threshold_resets_only_after_success() {
+    let _clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
-            behavior: "sequence",
             call_timeout_ms: 50,
             policy: TimeoutDisconnectPolicy::ConsecutiveTimeouts,
             threshold: 2,
@@ -526,35 +549,64 @@ async fn consecutive_timeout_threshold_resets_only_after_success() {
         },
     )
     .await;
-
-    assert_eq!(failure(&call(&pool).await).class, ToolFailureClass::Timeout);
-    *entry(&pool).last_error.write_recover() = Some("stale error".to_string());
-    assert!(call(&pool).await.is_success());
-    wait_until(
-        || pool.server_statuses()[0].last_error.is_none(),
-        "successful call was not observed by the lifecycle actor",
-    )
-    .await;
-    assert_eq!(failure(&call(&pool).await).class, ToolFailureClass::Timeout);
+    let reconnect_ready = Arc::new(tokio::sync::Notify::new());
+    let ready = Arc::clone(&reconnect_ready);
+    entry(&pool).with_reconnect_jitter(Arc::new(move |delay| {
+        ready.notify_one();
+        delay
+    }));
+    async fn expire(pool: &McpConnectionPool, mock: &mut scripted::Mock) -> ToolOutcome {
+        let mut request = Box::pin(call(pool));
+        assert!(futures_util::poll!(request.as_mut()).is_pending());
+        mock.started(pool).await;
+        assert!(futures_util::poll!(request.as_mut()).is_pending());
+        tokio::time::advance(Duration::from_millis(51)).await;
+        let result = request.await;
+        mock.event("cancelled").await;
+        result
+    }
     assert_eq!(
-        failure(&call(&pool).await).class,
+        failure(&expire(&pool, &mut mock).await).class,
+        ToolFailureClass::Timeout
+    );
+    *entry(&pool).last_error.write_recover() = Some("stale error".to_string());
+    let mut request = Box::pin(call(&pool));
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    mock.started(&pool).await;
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    mock.command("reply").await;
+    assert!(request.await.is_success());
+    entry(&pool)
+        .establish()
+        .await
+        .expect("success observation barrier");
+    assert!(pool.server_statuses()[0].last_error.is_none());
+    assert_eq!(
+        failure(&expire(&pool, &mut mock).await).class,
+        ToolFailureClass::Timeout
+    );
+    assert_eq!(
+        failure(&expire(&pool, &mut mock).await).class,
         ToolFailureClass::Unavailable
     );
-    wait_until(
-        || !pool.server_statuses()[0].connected,
-        "timeout-threshold disconnect was not observed by the lifecycle actor",
-    )
-    .await;
-    wait_until(
-        || pool.server_statuses()[0].connected,
-        "threshold disconnect did not reconnect",
-    )
-    .await;
-    assert_eq!(failure(&call(&pool).await).class, ToolFailureClass::Timeout);
+    tokio::time::resume();
+    reconnect_ready.notified().await;
+    let mut service = entry(&pool).service.clone();
+    service
+        .wait_for(Option::is_some)
+        .await
+        .expect("replacement publication");
+    mock.reconnected().await;
+    tokio::time::pause();
+    assert_eq!(
+        failure(&expire(&pool, &mut mock).await).class,
+        ToolFailureClass::Timeout
+    );
     assert!(
         pool.server_statuses()[0].connected,
         "the first timeout after reconnect must start a fresh budget"
     );
+    drop(_clock);
     pool.shutdown_all().await;
 }
 
@@ -1723,7 +1775,7 @@ fn runtime_drop_does_not_wait_for_in_flight_graceful_child_reap() {
         .enable_all()
         .build()
         .expect("test runtime");
-    let pool = runtime.block_on(connect_mock(
+    let (pool, mut mock) = runtime.block_on(scripted::Mock::connect(
         root.path(),
         MockOptions {
             behavior: "ignore_eof",
@@ -1735,16 +1787,7 @@ fn runtime_drop_does_not_wait_for_in_flight_graceful_child_reap() {
         shutdown_pool.shutdown_all().await;
     });
     drop(pool);
-
-    let eof_path = root.path().join("eof");
-    let marker_deadline = Instant::now() + Duration::from_secs(2);
-    while !eof_path.exists() && Instant::now() < marker_deadline {
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    assert!(
-        eof_path.exists(),
-        "graceful shutdown did not close child stdin"
-    );
+    runtime.block_on(mock.event("eof"));
 
     let started = Instant::now();
     drop(runtime);
@@ -1817,67 +1860,67 @@ async fn protocol_2026_degrades_ping_policy_to_counting_and_warns_once() {
 
 #[tokio::test]
 async fn cancelled_call_is_call_level_and_keeps_connection() {
+    let _clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(root.path(), MockOptions::default()).await;
-    let peer = peer(&pool).await;
-
-    let call = call(&pool);
-    let cancel = async {
-        wait_until(
-            || received(root.path()).contains("\"method\":\"tools/call\""),
-            "tool call was not dispatched",
-        )
-        .await;
-        peer.send_notification(ClientNotification::CancelledNotification(
-            CancelledNotification::new(CancelledNotificationParam {
-                request_id: request_id_for_method(root.path(), "tools/call")
-                    .expect("tools/call request id"),
-                reason: Some("test cancellation".to_string()),
-            }),
-        ))
-        .await
-        .expect("send cancellation");
-    };
-    let (result, ()) = tokio::join!(call, cancel);
-    assert!(matches!(
-        result.as_done_output().expect("cancelled output").outcome,
-        ToolCallOutcome::Cancelled(_)
-    ));
-    assert!(pool.server_statuses()[0].connected);
-    pool.shutdown_all().await;
-}
-
-#[tokio::test]
-async fn dead_transport_short_circuits_before_dispatch_timeout() {
-    let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
-            behavior: "close_streams_when_triggered_after_list",
-            call_timeout_ms: 1_000,
             ..MockOptions::default()
         },
     )
     .await;
     let peer = peer(&pool).await;
-    std::fs::write(root.path().join("close"), "close")
-        .expect("release mock to close its transport streams");
-    wait_until(
-        || peer.is_transport_closed(),
-        "mock transport did not close",
+    let mut request = Box::pin(call(&pool));
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    let event = mock.started(&pool).await;
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    peer.send_notification(ClientNotification::CancelledNotification(
+        CancelledNotification::new(CancelledNotificationParam {
+            request_id: serde_json::from_value(event["id"].clone()).unwrap(),
+            reason: Some("test cancellation".to_string()),
+        }),
+    ))
+    .await
+    .expect("send cancellation");
+    let result = request.await;
+    assert!(matches!(
+        result.as_done_output().expect("cancelled output").outcome,
+        ToolCallOutcome::Cancelled(_)
+    ));
+    assert!(pool.server_statuses()[0].connected);
+    drop(_clock);
+    pool.shutdown_all().await;
+}
+
+#[tokio::test]
+async fn dead_transport_short_circuits_before_dispatch_timeout() {
+    let _clock = scripted::Clock::new().await;
+    let root = tempfile::tempdir().unwrap();
+    let (pool, mut mock) = scripted::Mock::connect(
+        root.path(),
+        MockOptions {
+            call_timeout_ms: 1_000,
+            ..MockOptions::default()
+        },
     )
     .await;
-
-    let started = Instant::now();
+    let mut service = entry(&pool).service.clone();
+    mock.command("close").await;
+    service
+        .wait_for(Option::is_none)
+        .await
+        .expect("lifecycle acknowledges closed transport");
+    let started = tokio::time::Instant::now();
     let result = call(&pool).await;
     assert_eq!(failure(&result).class, ToolFailureClass::Unavailable);
-    assert!(started.elapsed() < Duration::from_millis(200));
+    assert_eq!(started.elapsed(), Duration::ZERO);
     assert!(
         pool.server_statuses()[0]
             .last_error
             .as_deref()
             .is_some_and(|error| error.contains("before tool dispatch"))
     );
+    drop(_clock);
     pool.shutdown_all().await;
 }
 
