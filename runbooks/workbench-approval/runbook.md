@@ -15,6 +15,44 @@ tests in `src/main_sections/tests/approvals.rs`. These use a scripted provider
 and a file-backed `SqliteEffectHost`; this judged run uses the production
 Restate deployment and a real model from `.env`.
 
+## FIG-1346 — deterministic out-of-band completion across reopen and redrive
+
+From the fork root, source `env.sh`, then run:
+
+```sh
+cargo nextest run --locked -p agent-workbench -E 'test(async_completion_)'
+```
+
+Require **4 passed**: `async_completion_{success,failure,timeout,cancel}_crosses_session_reopen_and_redrive`.
+Each row runs the real workbench approval tool with a scripted provider. The tool
+records its correlation key and returns Pending. The test aborts and joins the
+original turn task, drops the core, advances the injected effect clock past the
+interrupted claim's lease, and reopens the ledger, effect host, core, and session.
+The reconstructed host resolves the saved key through `core.completions().resolve`,
+then redrives the original turn id. No provider network call or sleep drives this
+companion.
+
+Gate every row on exactly **one provider invocation**, an accepted callback,
+`AlreadyResolved` retaining the exact typed terminal outcome after redrive, the
+program's success/failure/cancellation result, one user input in history, retained
+program/tool arguments, and identical terminal history after another core/session
+reopen. Timeout is an explicit host-delivered `Resolution::Timeout`, not a wall-clock
+race. Cancellation is a tool completion, not cancellation of the redriven turn.
+
+| Completion | Typed durable terminal | Program result |
+| --- | --- | --- |
+| Success | `Resolution::Ok` | `ok=true`, exact supplied value |
+| Failure | `Resolution::Err` | `ok=false`, `execution` / `approval_denied` |
+| Timeout | `Resolution::Timeout` | `ok=false`, `timeout` / `tool_completion_timeout` |
+| Cancel | `Resolution::Cancelled` | `ok=false`, runtime cancellation message |
+
+This companion is deterministic CI evidence, not a judged browser run. Scenarios
+A–C below remain the live approval/restart scorecard in both dialects. The browser
+currently offers approve and deny only; it has no timeout/cancel-completion route.
+Do not claim the four callback variants were exercised through the browser.
+If the required model key is absent, record a Phase 0 harness gap under RULES.md;
+do not substitute a scripted model for the live rows.
+
 ## Golden rules
 
 1. Use a free port in the 3200 range. Never touch 3056 or 3057. Use fresh
@@ -118,6 +156,7 @@ Reset to a fresh session and submit:
 
 | Item | Objective gate | Result | Evidence |
 |---|---|---|---|
+| FIG-1346 companion | four passing reopen/redrive variants; exactly one provider call each; typed terminal and durable history assertions | | focused nextest log |
 | Fresh slate | DOM idle; both approval APIs empty | | `00-*` |
 | Approve parks | one identical wait across DOM and both APIs; active graph uncommitted | | `01-*` |
 | Approve resumes | typed success result; one tool execution; terminal layers agree | | `02-*` |

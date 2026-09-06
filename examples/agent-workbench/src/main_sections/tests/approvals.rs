@@ -25,7 +25,7 @@ async fn approval_test_core(
             .wall_clock(lash::rlm::WallClockBound::secs(30))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
-        .with_lashlang_abilities(workbench_lashlang_abilities()),
+            .with_lashlang_abilities(workbench_lashlang_abilities()),
         artifact_store,
     );
     let runtime_host_config = lash::durability::RuntimeHostConfig::new(
@@ -39,14 +39,11 @@ async fn approval_test_core(
     );
     LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
-        .session_spec(
-            lash::SessionSpec::new()
-                .turn_budget(lash::TurnBudget::Unbounded),
-        )
+        .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
         .model(test_model())
-        .store_factory(Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-        ))
+        .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+            data_dir.join("lash-sessions"),
+        )))
         .plugin(Arc::new(
             WorkbenchPluginFactory::new("").with_approvals(approvals),
         ))
@@ -274,8 +271,8 @@ fn approval_restart_reopens_the_ledger_and_durable_effect_host() {
         let directory = tempfile::tempdir().expect("approval tempdir");
         let approval_path = directory.path().join("approvals.db");
         let effect_path = directory.path().join("effects.db");
-        let approvals = approvals::WorkbenchApprovals::open(&approval_path)
-            .expect("open approval ledger");
+        let approvals =
+            approvals::WorkbenchApprovals::open(&approval_path).expect("open approval ledger");
         let effect_host = Arc::new(
             lash_sqlite_store::SqliteEffectHost::open(&effect_path)
                 .await
@@ -355,5 +352,238 @@ finish result.status
             .expect("restart approval turn task")
             .expect("restart approval turn succeeds");
         assert_eq!(output.final_value(), Some(&json!("applied")));
+    });
+}
+
+async fn async_completion_reopen_and_redrive(resolution: lash::Resolution) {
+    let directory = tempfile::tempdir().expect("async completion directory");
+    let approval_path = directory.path().join("approvals.db");
+    let effect_path = directory.path().join("effects.db");
+    let clock = Arc::new(lash::testing::TestClock::new(1_000_000));
+    let approvals = approvals::WorkbenchApprovals::open(&approval_path).unwrap();
+    let effect_host = Arc::new(
+        lash_sqlite_store::SqliteEffectHost::open_with_clock(&effect_path, clock.clone())
+            .await
+            .unwrap(),
+    );
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let provider = lash::testing::TestProvider::builder()
+        .kind("async-completion-redrive")
+        .complete({
+            let calls = calls.clone();
+            move |_| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async {
+                    Ok(text_response(
+                        r#"<lashlang>
+result = await ops.apply_change({ target: "async-demo", change: "reopen-redrive" })
+finish result
+</lashlang>"#,
+                    ))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = approval_test_core(
+        directory.path(),
+        provider.clone(),
+        approvals.clone(),
+        effect_host.clone(),
+    )
+    .await;
+    let session = core.session("async-completion").open().await.unwrap();
+    let scope = lash::durability::EffectHost::scoped_static(
+        effect_host.as_ref(),
+        session.turn_scope("async-turn"),
+    )
+    .unwrap()
+    .unwrap();
+    let mut turn = tokio::spawn(async move {
+        session
+            .turn(lash::TurnInput::text("Apply async change"))
+            .turn_id("async-turn")
+            .require_finish()
+            .unwrap()
+            .advanced()
+            .run_with_scope(scope)
+            .await
+    });
+    let pending = wait_for_approval(&approvals, &mut turn).await;
+    turn.abort();
+    assert!(turn.await.unwrap_err().is_cancelled());
+    drop(core);
+    drop(effect_host);
+    drop(approvals);
+    // Worker loss leaves the effect claim leased. Expire it without waiting.
+    clock.advance(60_000);
+    let approvals = approvals::WorkbenchApprovals::open(&approval_path).unwrap();
+    let effect_host = Arc::new(
+        lash_sqlite_store::SqliteEffectHost::open_with_clock(&effect_path, clock.clone())
+            .await
+            .unwrap(),
+    );
+    let core = approval_test_core(
+        directory.path(),
+        provider,
+        approvals.clone(),
+        effect_host.clone(),
+    )
+    .await;
+    let session = core.session("async-completion").open().await.unwrap();
+    let key = approvals.completion_key(&pending.key).unwrap();
+    assert_eq!(
+        core.completions()
+            .resolve(key.clone(), resolution.clone())
+            .await
+            .unwrap(),
+        lash::ResolveOutcome::Accepted
+    );
+    let scope = lash::durability::EffectHost::scoped_static(
+        effect_host.as_ref(),
+        session.turn_scope("async-turn"),
+    )
+    .unwrap()
+    .unwrap();
+    let output = session
+        .turn(lash::TurnInput::text("Apply async change"))
+        .turn_id("async-turn")
+        .require_finish()
+        .unwrap()
+        .advanced()
+        .run_with_scope(scope)
+        .await
+        .unwrap();
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "redrive must reuse the journaled provider response"
+    );
+    assert_eq!(
+        core.completions()
+            .resolve(key, resolution.clone())
+            .await
+            .unwrap(),
+        lash::ResolveOutcome::AlreadyResolved {
+            terminal: resolution.clone()
+        },
+        "redrive retains the exact typed terminal resolution"
+    );
+    let value = output
+        .final_value()
+        .expect("the program handles every tool outcome");
+    match resolution {
+        lash::Resolution::Ok(expected) => {
+            assert_eq!(value, &json!({"ok": true, "value": expected}))
+        }
+        lash::Resolution::Err(error) => {
+            assert_eq!(value["ok"], false);
+            let failure: Value = serde_json::from_str(value["error"].as_str().unwrap()).unwrap();
+            assert_eq!(failure["class"], "execution");
+            assert_eq!(failure["code"], error.code);
+            assert_eq!(failure["message"], error.message);
+        }
+        lash::Resolution::Timeout => {
+            assert_eq!(value["ok"], false);
+            let failure: Value = serde_json::from_str(value["error"].as_str().unwrap()).unwrap();
+            assert_eq!(failure["class"], "timeout");
+            assert_eq!(failure["code"], "tool_completion_timeout");
+        }
+        lash::Resolution::Cancelled => {
+            assert_eq!(value["ok"], false);
+            let cancellation: Value =
+                serde_json::from_str(value["error"].as_str().unwrap()).unwrap();
+            assert_eq!(cancellation["message"], "pending tool completion cancelled");
+            assert_eq!(cancellation["source"], "cancellation");
+        }
+    }
+    let history = session.read_view();
+    let messages = serde_json::to_value(history.messages()).unwrap();
+    let rendered = messages.to_string();
+    assert_eq!(
+        rendered.matches("Apply async change").count(),
+        1,
+        "one user input survives redrive"
+    );
+    let trajectories: Vec<_> = history
+        .active_events()
+        .iter()
+        .filter_map(|record| match record {
+            lash::persistence::SessionHistoryRecord::Protocol(event) => {
+                event.payload.get("RlmTrajectoryEntry")
+            }
+            lash::persistence::SessionHistoryRecord::Conversation(_) => None,
+        })
+        .collect();
+    assert_eq!(
+        trajectories.len(),
+        1,
+        "redrive commits one trajectory entry"
+    );
+    let trajectory = trajectories[0];
+    assert_eq!(trajectory["id"], "lashlang_step_async-turn_0");
+    assert_eq!(
+        &trajectory["final_output"], value,
+        "history retains the actual terminal result"
+    );
+    assert_eq!(trajectory["calls"].as_array().unwrap().len(), 1);
+    assert_eq!(trajectory["calls"][0]["operation"], "ops.apply_change");
+    let code = trajectory["code"].as_str().unwrap();
+    assert!(
+        code.contains("reopen-redrive"),
+        "history retains the provider program"
+    );
+    assert!(
+        code.contains("async-demo"),
+        "history retains the tool arguments"
+    );
+    let before_reopen = serde_json::to_value(history.active_events()).unwrap();
+    drop(session);
+    drop(core);
+    let reopened = approval_test_core(
+        directory.path(),
+        lash::testing::TestProvider::builder()
+            .kind("history-only")
+            .complete(|_| async { panic!("reading history must not invoke the provider") })
+            .build()
+            .into_handle(),
+        approvals,
+        effect_host,
+    )
+    .await;
+    let session = reopened.session("async-completion").open().await.unwrap();
+    assert_eq!(
+        serde_json::to_value(session.read_view().active_events()).unwrap(),
+        before_reopen,
+        "terminal history survives another cold session reopen unchanged"
+    );
+}
+
+#[test]
+fn async_completion_success_crosses_session_reopen_and_redrive() {
+    run_async_test_on_stack_budget("async-completion-success", || async {
+        async_completion_reopen_and_redrive(lash::Resolution::Ok(json!({"status": "applied"})))
+            .await;
+    });
+}
+
+#[test]
+fn async_completion_failure_crosses_session_reopen_and_redrive() {
+    run_async_test_on_stack_budget("async-completion-failure", || async {
+        async_completion_reopen_and_redrive(approvals::denial_resolution()).await;
+    });
+}
+
+#[test]
+fn async_completion_timeout_crosses_session_reopen_and_redrive() {
+    run_async_test_on_stack_budget("async-completion-timeout", || async {
+        async_completion_reopen_and_redrive(lash::Resolution::Timeout).await;
+    });
+}
+
+#[test]
+fn async_completion_cancel_crosses_session_reopen_and_redrive() {
+    run_async_test_on_stack_budget("async-completion-cancel", || async {
+        async_completion_reopen_and_redrive(lash::Resolution::Cancelled).await;
     });
 }
