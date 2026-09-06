@@ -1700,8 +1700,15 @@ jobs:
       github.event_name == 'workflow_dispatch'
       || (github.event_name == 'push' && github.ref == 'refs/heads/main')
       || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers'))
+    env:
+      RUN_WORKER_ARTIFACTS: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.functional_e2e == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
     steps:
+      - name: Explain plan deferral
+        if: env.RUN_WORKER_ARTIFACTS != 'true'
+        run: echo "Worker artifacts are not required by the CI plan."
+
       - name: Check out repository
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
         env:
           CHECKOUT_TOKEN: ${{ github.token }}
         run: |
@@ -1719,26 +1726,32 @@ jobs:
           git checkout --detach --force "${GITHUB_SHA}"
 
       - name: Reclaim runner disk
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
         uses: ./.github/actions/rust-toolchain
 
       - name: Install protoc
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
       - name: Install mold
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
         uses: ./.github/actions/setup-mold
 
       - name: Restore worker release dependencies
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-worker-release
 
       - name: Build worker binaries once
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
         run: |
           cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
           mkdir -p "${RUNNER_TEMP}/worker-artifacts"
@@ -1747,6 +1760,7 @@ jobs:
           tar -C "${RUNNER_TEMP}/worker-artifacts" -cf "${RUNNER_TEMP}/worker-binaries.tar" .
 
       - name: Upload worker binaries
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
