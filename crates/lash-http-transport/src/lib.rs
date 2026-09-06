@@ -1,7 +1,9 @@
 mod error;
 mod http;
 
-pub use error::{HttpTransportError, TransportRetryVerdict, retry_after_from_headers};
+pub use error::{
+    HttpFailureContext, HttpTransportError, TransportRetryVerdict, retry_after_from_headers,
+};
 pub use http::{
     ByteStream, HttpMethod, HttpRequest, HttpResponse, HttpResponseBody, HttpTransport,
     HttpTransportPolicy, ReqwestByteStream, ReqwestHttpTransport, build_http_client,

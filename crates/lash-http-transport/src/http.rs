@@ -322,7 +322,7 @@ impl ReqwestByteStream {
 impl ByteStream for ReqwestByteStream {
     async fn next_chunk(&mut self) -> Result<Option<Bytes>, HttpTransportError> {
         self.response.chunk().await.map_err(|err| {
-            HttpTransportError::new(format!("HTTP response read failed: {err}"))
+            HttpTransportError::response_read(err.to_string())
                 .with_kind(ProviderFailureKind::Transport)
                 .with_retry_verdict(reqwest_error_retry_verdict(&err))
         })

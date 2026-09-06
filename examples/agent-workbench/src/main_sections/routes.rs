@@ -262,7 +262,7 @@ async fn session_events(
             }
         }
     });
-    Ok(ndjson_response(rx))
+    Ok(ndjson_response(ReceiverStream::new(rx)))
 }
 
 async fn session_observations(
@@ -295,7 +295,7 @@ async fn session_observations(
     tokio::spawn(async move {
         forward_session_observations(session, cursor, tx).await;
     });
-    Ok(ndjson_response(rx))
+    Ok(ndjson_response(ReceiverStream::new(rx)))
 }
 
 async fn commit_and_submit_user_turn(
@@ -1173,29 +1173,6 @@ async fn lashlang_graph(
     )
     .await?;
     Ok(Json(graph))
-}
-
-fn ndjson_response<T>(rx: mpsc::Receiver<T>) -> Response
-where
-    T: Serialize + Send + 'static,
-{
-    let stream = ReceiverStream::new(rx).map(|item| {
-        let mut line = serde_json::to_string(&item).unwrap_or_else(|_err| {
-            json!({
-                "type": "unavailable",
-            })
-            .to_string()
-        });
-        line.push('\n');
-        Ok::<Bytes, Infallible>(Bytes::from(line))
-    });
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
-        .header(header::CACHE_CONTROL, "no-store")
-        .body(Body::from_stream(stream))
-        .expect("valid streaming response")
 }
 
 async fn forward_session_observations(
