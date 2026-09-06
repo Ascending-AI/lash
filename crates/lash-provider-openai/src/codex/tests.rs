@@ -48,6 +48,7 @@ fn response_from_state(state: CodexStreamState) -> LlmResponse {
 
 fn reasoning_capability() -> ModelCapability {
     ModelCapability {
+        google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
             default_effort: Some("medium".to_string()),

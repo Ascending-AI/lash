@@ -30,3 +30,7 @@ include!("core_conversions/tools.rs");
 #[cfg(test)]
 #[path = "core_conversions_tests.rs"]
 mod core_conversions_tests;
+
+#[cfg(test)]
+#[path = "google_dialect_tests.rs"]
+mod google_dialect_tests;

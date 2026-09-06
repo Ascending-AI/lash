@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::{AttachmentRef, MediaType, SchemaContract};
 
 pub use crate::llm::capability::{
-    CacheControlDialect, ModelCapability, ModelEffortValidationCategory,
+    CacheControlDialect, GoogleDialect, ModelCapability, ModelEffortValidationCategory,
     ModelEffortValidationError, ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding,
     ReasoningSelection, SamplingCapability, StreamTermination,
 };

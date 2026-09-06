@@ -834,6 +834,7 @@ mod tests {
 
     fn reasoning_capability() -> ModelCapability {
         ModelCapability {
+            google_dialect: Default::default(),
             reasoning: Some(crate::ReasoningCapability {
                 efforts: ["low", "medium", "high", "max"]
                     .into_iter()

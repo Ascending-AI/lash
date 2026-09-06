@@ -549,7 +549,7 @@ impl Provider for GoogleOAuthProvider {
             inline_contents.clone()
         };
 
-        let request = Self::build_request(self, &req, contents, project_id.as_deref());
+        let request = Self::build_request(self, &req, contents, project_id.as_deref())?;
         let generation_disposition = Some(Self::generation_disposition(&req));
 
         match self
@@ -566,7 +566,7 @@ impl Provider for GoogleOAuthProvider {
             Ok(response) => Ok(response),
             Err(err) if used_uploaded_files && Self::should_retry_inline(&err) => {
                 let inline_request =
-                    Self::build_request(self, &req, inline_contents, project_id.as_deref());
+                    Self::build_request(self, &req, inline_contents, project_id.as_deref())?;
                 self.execute_request(
                     &access_token,
                     inline_request,

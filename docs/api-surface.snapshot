@@ -5542,6 +5542,11 @@ lash::provider::GenerationRetryGuarantee
 lash::provider::GenerationRetryGuarantee::Idempotent
 lash::provider::GenerationRetryGuarantee::None
 lash::provider::GenerationRetryGuarantee::Resumable
+lash::provider::GoogleDialect
+lash::provider::GoogleDialect::ClaudeOnVertex
+lash::provider::GoogleDialect::Gemini3
+lash::provider::GoogleDialect::Legacy
+lash::provider::GoogleDialect::is_legacy
 lash::provider::LlmContentBlock
 lash::provider::LlmContentBlock::Attachment
 lash::provider::LlmContentBlock::Attachment::attachment_idx
@@ -5631,6 +5636,7 @@ lash::provider::LlmTransportError
 lash::provider::ModelCapability
 lash::provider::ModelCapability::allows_caller_temperature
 lash::provider::ModelCapability::cache_control
+lash::provider::ModelCapability::google_dialect
 lash::provider::ModelCapability::is_empty
 lash::provider::ModelCapability::reasoning
 lash::provider::ModelCapability::resolve_effort
@@ -5957,6 +5963,11 @@ lash::remote::llm::RemoteGenerationReceipt::output_token_cap
 lash::remote::llm::RemoteGenerationReceipt::seed
 lash::remote::llm::RemoteGenerationReceipt::stop_sequences
 lash::remote::llm::RemoteGenerationReceipt::temperature
+lash::remote::llm::RemoteGoogleDialect
+lash::remote::llm::RemoteGoogleDialect::ClaudeOnVertex
+lash::remote::llm::RemoteGoogleDialect::Gemini3
+lash::remote::llm::RemoteGoogleDialect::Legacy
+lash::remote::llm::RemoteGoogleDialect::is_legacy
 lash::remote::llm::RemoteLlmCallRecord
 lash::remote::llm::RemoteLlmCallRecord::attempts
 lash::remote::llm::RemoteLlmCallRecord::call_id
@@ -6058,6 +6069,7 @@ lash::remote::llm::RemoteLlmToolSpec::name
 lash::remote::llm::RemoteLlmToolSpec::output_schema
 lash::remote::llm::RemoteModelCapability
 lash::remote::llm::RemoteModelCapability::cache_control
+lash::remote::llm::RemoteModelCapability::google_dialect
 lash::remote::llm::RemoteModelCapability::is_empty
 lash::remote::llm::RemoteModelCapability::reasoning
 lash::remote::llm::RemoteModelCapability::sampling

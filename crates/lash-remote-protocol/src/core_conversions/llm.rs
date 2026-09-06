@@ -84,12 +84,14 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
 impl From<core_llm::ModelCapability> for RemoteModelCapability {
     fn from(value: core_llm::ModelCapability) -> Self {
         let core_llm::ModelCapability {
+            google_dialect,
             reasoning,
             cache_control,
             stream_termination,
             sampling,
         } = value;
         Self {
+            google_dialect: google_dialect.into(),
             reasoning: reasoning.map(Into::into),
             cache_control: cache_control.map(Into::into),
             stream_termination: stream_termination.map(Into::into),
@@ -101,12 +103,14 @@ impl From<core_llm::ModelCapability> for RemoteModelCapability {
 impl From<RemoteModelCapability> for core_llm::ModelCapability {
     fn from(value: RemoteModelCapability) -> Self {
         let RemoteModelCapability {
+            google_dialect,
             reasoning,
             cache_control,
             stream_termination,
             sampling,
         } = value;
         Self {
+            google_dialect: google_dialect.into(),
             reasoning: reasoning.map(Into::into),
             cache_control: cache_control.map(Into::into),
             stream_termination: stream_termination.map(Into::into),
@@ -154,9 +158,7 @@ impl From<RemoteCacheControlDialect> for core_llm::CacheControlDialect {
 impl From<core_llm::StreamTermination> for RemoteStreamTermination {
     fn from(value: core_llm::StreamTermination) -> Self {
         match value {
-            core_llm::StreamTermination::RequireTerminalEvidence => {
-                Self::RequireTerminalEvidence
-            }
+            core_llm::StreamTermination::RequireTerminalEvidence => Self::RequireTerminalEvidence,
             core_llm::StreamTermination::EofTolerated => Self::EofTolerated,
         }
     }
@@ -165,9 +167,7 @@ impl From<core_llm::StreamTermination> for RemoteStreamTermination {
 impl From<RemoteStreamTermination> for core_llm::StreamTermination {
     fn from(value: RemoteStreamTermination) -> Self {
         match value {
-            RemoteStreamTermination::RequireTerminalEvidence => {
-                Self::RequireTerminalEvidence
-            }
+            RemoteStreamTermination::RequireTerminalEvidence => Self::RequireTerminalEvidence,
             RemoteStreamTermination::EofTolerated => Self::EofTolerated,
         }
     }
@@ -417,9 +417,7 @@ impl From<core_llm::GenerationOptionOutcome> for RemoteGenerationOptionOutcome {
                 Self::SuppressedProtocolOwned
             }
             core_llm::GenerationOptionOutcome::OmittedUnsupported => Self::OmittedUnsupported,
-            core_llm::GenerationOptionOutcome::OmittedSamplingPinned => {
-                Self::OmittedSamplingPinned
-            }
+            core_llm::GenerationOptionOutcome::OmittedSamplingPinned => Self::OmittedSamplingPinned,
             core_llm::GenerationOptionOutcome::ClampedToCapacity => Self::ClampedToCapacity,
         }
     }
@@ -430,13 +428,9 @@ impl From<RemoteGenerationOptionOutcome> for core_llm::GenerationOptionOutcome {
         match value {
             RemoteGenerationOptionOutcome::NotRequested => Self::NotRequested,
             RemoteGenerationOptionOutcome::Applied => Self::Applied,
-            RemoteGenerationOptionOutcome::SuppressedProtocolOwned => {
-                Self::SuppressedProtocolOwned
-            }
+            RemoteGenerationOptionOutcome::SuppressedProtocolOwned => Self::SuppressedProtocolOwned,
             RemoteGenerationOptionOutcome::OmittedUnsupported => Self::OmittedUnsupported,
-            RemoteGenerationOptionOutcome::OmittedSamplingPinned => {
-                Self::OmittedSamplingPinned
-            }
+            RemoteGenerationOptionOutcome::OmittedSamplingPinned => Self::OmittedSamplingPinned,
             RemoteGenerationOptionOutcome::ClampedToCapacity => Self::ClampedToCapacity,
         }
     }
@@ -489,9 +483,7 @@ impl From<core_llm::ExecutionEvidenceCollectionInterruption>
 {
     fn from(value: core_llm::ExecutionEvidenceCollectionInterruption) -> Self {
         match value {
-            core_llm::ExecutionEvidenceCollectionInterruption::ProtocolAbort => {
-                Self::ProtocolAbort
-            }
+            core_llm::ExecutionEvidenceCollectionInterruption::ProtocolAbort => Self::ProtocolAbort,
         }
     }
 }
@@ -527,13 +519,19 @@ impl From<core_llm::ProviderReplayDrop> for RemoteProviderReplayDrop {
     fn from(value: core_llm::ProviderReplayDrop) -> Self {
         Self {
             kind: match value.kind {
-                core_llm::ProviderReplayKind::ResponseText => RemoteProviderReplayKind::ResponseText,
+                core_llm::ProviderReplayKind::ResponseText => {
+                    RemoteProviderReplayKind::ResponseText
+                }
                 core_llm::ProviderReplayKind::Reasoning => RemoteProviderReplayKind::Reasoning,
                 core_llm::ProviderReplayKind::ToolCall => RemoteProviderReplayKind::ToolCall,
             },
             reason: match value.reason {
-                core_llm::ProviderReplayDropReason::Unstamped => RemoteProviderReplayDropReason::Unstamped,
-                core_llm::ProviderReplayDropReason::ForeignRoute => RemoteProviderReplayDropReason::ForeignRoute,
+                core_llm::ProviderReplayDropReason::Unstamped => {
+                    RemoteProviderReplayDropReason::Unstamped
+                }
+                core_llm::ProviderReplayDropReason::ForeignRoute => {
+                    RemoteProviderReplayDropReason::ForeignRoute
+                }
             },
             minting_route: value.minting_route.map(Into::into),
             serving_route: value.serving_route.into(),
@@ -967,11 +965,11 @@ impl TryFrom<RemoteAttachmentSource> for core_llm::AttachmentSource {
                 data_base64,
             } => {
                 let bytes = base64::engine::general_purpose::STANDARD
-                .decode(data_base64.as_bytes())
-                .map_err(|err| RemoteProtocolError::InvalidAttachmentData {
-                    id: "<inline-attachment>".to_string(),
-                    message: err.to_string(),
-                })?;
+                    .decode(data_base64.as_bytes())
+                    .map_err(|err| RemoteProtocolError::InvalidAttachmentData {
+                        id: "<inline-attachment>".to_string(),
+                        message: err.to_string(),
+                    })?;
                 Ok(Self::inline(parse_media_type(&media_type)?, bytes))
             }
             RemoteAttachmentSource::Stored { attachment_ref } => {
@@ -987,10 +985,7 @@ impl TryFrom<RemoteAttachmentSource> for core_llm::AttachmentSource {
             } => Ok(Self::provider_file(
                 provider_scope.into(),
                 id,
-                media_type
-                    .as_deref()
-                    .map(parse_media_type)
-                    .transpose()?,
+                media_type.as_deref().map(parse_media_type).transpose()?,
             )),
         }
     }
@@ -1086,9 +1081,7 @@ impl From<lash_core::AttachmentTypeMetadata> for RemoteAttachmentTypeMetadata {
 impl From<RemoteAttachmentTypeMetadata> for lash_core::AttachmentTypeMetadata {
     fn from(value: RemoteAttachmentTypeMetadata) -> Self {
         match value {
-            RemoteAttachmentTypeMetadata::Image { width, height } => {
-                Self::Image { width, height }
-            }
+            RemoteAttachmentTypeMetadata::Image { width, height } => Self::Image { width, height },
         }
     }
 }
@@ -1373,6 +1366,24 @@ impl From<RemoteUsage> for lash_core::TokenUsage {
             cache_read_input_tokens,
             cache_write_input_tokens,
             reasoning_output_tokens,
+        }
+    }
+}
+impl From<core_llm::GoogleDialect> for RemoteGoogleDialect {
+    fn from(value: core_llm::GoogleDialect) -> Self {
+        match value {
+            core_llm::GoogleDialect::Legacy => Self::Legacy,
+            core_llm::GoogleDialect::Gemini3 => Self::Gemini3,
+            core_llm::GoogleDialect::ClaudeOnVertex => Self::ClaudeOnVertex,
+        }
+    }
+}
+impl From<RemoteGoogleDialect> for core_llm::GoogleDialect {
+    fn from(value: RemoteGoogleDialect) -> Self {
+        match value {
+            RemoteGoogleDialect::Legacy => Self::Legacy,
+            RemoteGoogleDialect::Gemini3 => Self::Gemini3,
+            RemoteGoogleDialect::ClaudeOnVertex => Self::ClaudeOnVertex,
         }
     }
 }

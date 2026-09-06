@@ -296,6 +296,7 @@ impl ProviderNormalizer for GoogleNormalizer {
         );
         let contents = provider.build_contents_with_attachment_parts(&req, &[]);
         GoogleOAuthProvider::build_request(&provider, &req, contents, None)
+            .expect("conformance schema projection")
     }
 }
 

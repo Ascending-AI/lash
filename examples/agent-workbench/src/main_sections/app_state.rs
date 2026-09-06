@@ -1010,6 +1010,7 @@ fn with_workbench_model_capability(model: lash::ModelSpec) -> lash::ModelSpec {
 
 fn workbench_model_capability() -> lash::provider::ModelCapability {
     lash::provider::ModelCapability {
+        google_dialect: Default::default(),
         reasoning: Some(lash::provider::ReasoningCapability {
             efforts: ["low", "medium", "high"]
                 .into_iter()

@@ -3,13 +3,10 @@
 //! and thinking config), plus the inline-attachment-part helpers.
 
 use crate::support::*;
-
-/// Skip sentinel: Gemini 3 refuses to run when a function_call is
-/// replayed without a thoughtSignature. The server recognises this magic
-/// string and skips signature validation for the item, so lash can round-
-/// trip tool calls captured from non-Gemini models without crashing the
-/// turn.
-const SKIP_THOUGHT_SIGNATURE: &str = "skip_thought_signature_validator";
+use lash_core::GoogleDialect;
+use lash_core::facade_support::{
+    ProviderSchemaCapabilities, SchemaPurpose, SchemaResolutionRequest, resolve_schema,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum GoogleThinkingConfig {
@@ -107,8 +104,10 @@ impl GoogleOAuthProvider {
         let safe_request = req.replay_safe_for(&serving_route);
         let req = safe_request.as_ref();
         let mut out: Vec<Value> = Vec::new();
-        // Wire-protocol dialect fact, not a model-catalog capability fact.
-        let is_gemini_3 = req.model.to_ascii_lowercase().contains("gemini-3");
+        let missing_signature = match req.model_capability.google_dialect {
+            GoogleDialect::Gemini3 => Some("skip_thought_signature_validator"),
+            GoogleDialect::Legacy | GoogleDialect::ClaudeOnVertex => None,
+        };
 
         for msg in &req.messages {
             if matches!(msg.role, LlmRole::System) {
@@ -164,15 +163,12 @@ impl GoogleOAuthProvider {
                                     .unwrap_or_else(|_| json!({"_raw": input_json})),
                             }
                         });
-                        // Gemini 3 rejects turns where a function_call
-                        // from a thinking-enabled run is replayed without
-                        // its original thoughtSignature. When we don't
-                        // have the real signature (cross-model hop, older
-                        // session), drop in the skip sentinel.
+                        // The host's explicit Gemini-3 dialect opts into the wire's
+                        // missing-signature escape value; model names carry no policy.
                         let effective = replay
                             .as_ref()
                             .and_then(|meta| meta.opaque.clone())
-                            .or_else(|| is_gemini_3.then(|| SKIP_THOUGHT_SIGNATURE.to_string()));
+                            .or_else(|| missing_signature.map(str::to_owned));
                         if let Some(sig) = effective {
                             part["thoughtSignature"] = Value::String(sig);
                         }
@@ -230,15 +226,6 @@ impl GoogleOAuthProvider {
             }
         }
         out
-    }
-
-    /// Claude models served through the Google/Vertex gateway take their tool
-    /// schema under the `parameters` field (with JSON-Schema meta keys stripped)
-    /// instead of the Gemini-native `parametersJsonSchema`. This is a live,
-    /// always-on special case for `claude-*` on Vertex, not deprecated behavior.
-    fn uses_claude_on_vertex_tool_parameters(model: &str) -> bool {
-        // Wire-protocol dialect fact, not a model-catalog capability fact.
-        model.starts_with("claude-")
     }
 
     /// Strip the JSON-Schema meta keys the Vertex `parameters` field rejects for
@@ -335,7 +322,7 @@ impl GoogleOAuthProvider {
         req: &LlmRequest,
         contents: Vec<Value>,
         project_id: Option<&str>,
-    ) -> Value {
+    ) -> Result<Value, LlmTransportError> {
         let thinking_config = Self::thinking_config_from_capability(req);
         let policy =
             resolve_generation_policy(&req.generation, &provider.options, 32_768, thinking_config);
@@ -395,27 +382,30 @@ impl GoogleOAuthProvider {
             }
         }
         if !req.tools.is_empty() {
-            let use_claude_on_vertex_parameters =
-                Self::uses_claude_on_vertex_tool_parameters(&req.model);
+            let use_claude_on_vertex_parameters = matches!(
+                req.model_capability.google_dialect,
+                GoogleDialect::ClaudeOnVertex
+            );
             request["request"]["tools"] = json!([{
                 "functionDeclarations": req
                     .tools
                     .iter()
                     .map(|tool| {
+                        let schema = Self::project_schema(&tool.input_schema, SchemaPurpose::ToolInput)?;
                         let mut declaration = json!({
                             "name": tool.name.clone(),
                             "description": tool.description.clone(),
                         });
                         if use_claude_on_vertex_parameters {
                             declaration["parameters"] =
-                                Self::sanitized_claude_on_vertex_schema(tool.input_schema.canonical());
+                                Self::sanitized_claude_on_vertex_schema(&schema);
                         } else {
                             declaration["parametersJsonSchema"] =
-                                tool.input_schema.canonical().clone();
+                                schema;
                         }
-                        declaration
+                        Ok::<_, LlmTransportError>(declaration)
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<Result<Vec<_>, _>>()?
             }]);
             request["request"]["toolConfig"] = json!({
                 "functionCallingConfig": {
@@ -427,12 +417,35 @@ impl GoogleOAuthProvider {
             request["request"]["generationConfig"]["responseMimeType"] = json!("application/json");
             if let LlmOutputSpec::JsonSchema(schema) = output_spec {
                 request["request"]["generationConfig"]["responseSchema"] =
-                    schema.schema.canonical().clone();
+                    Self::project_schema(&schema.schema, SchemaPurpose::StructuredOutput)?;
             }
         }
         if let Some(project) = project_id.filter(|p| !p.trim().is_empty()) {
             request["project"] = json!(project);
         }
-        request
+        Ok(request)
+    }
+
+    fn project_schema(
+        schema: &lash_core::SchemaContract,
+        purpose: SchemaPurpose,
+    ) -> Result<Value, LlmTransportError> {
+        let capabilities = ProviderSchemaCapabilities::google();
+        resolve_schema(
+            schema,
+            SchemaResolutionRequest {
+                provider: "Google",
+                purpose,
+                dialects: capabilities.dialects_for(purpose),
+            },
+        )
+        .map(|resolved| resolved.schema)
+        .map_err(|error| {
+            LlmTransportError::new(format!(
+                "Google schema projection failed: {}",
+                error.first_diagnostic()
+            ))
+            .with_kind(ProviderFailureKind::Validation)
+        })
     }
 }
