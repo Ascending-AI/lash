@@ -1689,11 +1689,75 @@ jobs:
         if: always() && steps.detect.outputs.run == 'true'
         run: sccache --show-stats
 
+  worker-artifacts:
+    name: Build worker release artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    needs: plan
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers'))
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
+
+      - name: Restore worker release dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          shared-key: linux-worker-release
+
+      - name: Build worker binaries once
+        run: |
+          cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
+          mkdir -p "${RUNNER_TEMP}/worker-artifacts"
+          find target/release -maxdepth 1 -type f -name 'lash-e2e-*' -executable \
+            -exec cp '{}' "${RUNNER_TEMP}/worker-artifacts/" \;
+          tar -C "${RUNNER_TEMP}/worker-artifacts" -cf "${RUNNER_TEMP}/worker-binaries.tar" .
+
+      - name: Upload worker binaries
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/worker-binaries.tar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   functional-e2e:
     name: Functional E2E (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
-    needs: plan
+    needs: [plan, worker-artifacts]
     # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
     # ruling; reassess after the FIG-2169 test-prune sweep.
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.functional_e2e == 'true'
@@ -1821,6 +1885,20 @@ jobs:
 
       # Each recipe owns its dependencies and any container lifecycle, so the
       # matrix legs run independently without cross-job coordination.
+      - name: Download worker binaries
+        if: matrix.name == 'process-operations'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/worker-download
+
+      - name: Extract worker binaries
+        if: matrix.name == 'process-operations'
+        run: |
+          mkdir -p "${RUNNER_TEMP}/worker-binaries"
+          tar -xf "${RUNNER_TEMP}/worker-download/worker-binaries.tar" -C "${RUNNER_TEMP}/worker-binaries"
+          echo "LASH_E2E_PREBUILT_BIN_DIR=${RUNNER_TEMP}/worker-binaries" >> "$GITHUB_ENV"
+
       - name: Run functional E2E
         env:
           LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
@@ -1857,7 +1935,7 @@ jobs:
     # The harness has grown to 24 workflows + turn-control gates; 30 minutes
     # was hit on 2026-07-20 (job-timeout shows as 'cancelled').
     timeout-minutes: 75
-    needs: plan
+    needs: [plan, worker-artifacts]
     env:
       RUN_WORKERS_E2E: ${{ needs.plan.outputs.workers_e2e == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
     strategy:
@@ -1925,6 +2003,20 @@ jobs:
       - name: Install mold
         if: env.RUN_WORKERS_E2E == 'true'
         uses: ./.github/actions/setup-mold
+
+      - name: Download worker binaries
+        if: env.RUN_WORKERS_E2E == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/worker-download
+
+      - name: Extract worker binaries
+        if: env.RUN_WORKERS_E2E == 'true'
+        run: |
+          mkdir -p "${RUNNER_TEMP}/worker-binaries"
+          tar -xf "${RUNNER_TEMP}/worker-download/worker-binaries.tar" -C "${RUNNER_TEMP}/worker-binaries"
+          echo "LASH_E2E_PREBUILT_BIN_DIR=${RUNNER_TEMP}/worker-binaries" >> "$GITHUB_ENV"
 
       - name: Run distributed backend E2E
         if: env.RUN_WORKERS_E2E == 'true'
@@ -2237,6 +2329,7 @@ jobs:
       - s3-store
       - stack-budget
       - functional-e2e
+      - worker-artifacts
       - restate-postgres-workers
       - restate-postgres-workers-summary
 
@@ -2260,4 +2353,4 @@ jobs:
         env:
           NEEDS_JSON: ${{ toJson(needs) }}
           WORKERS_E2E_ENABLED: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
-        run: python3 scripts/ci_plan.py conclusion
+        run: python3 scripts/ci/conclusion.py conclusion

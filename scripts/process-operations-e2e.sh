@@ -3,6 +3,19 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
+if [ -n "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
+  LASH_PROCESS_OPERATIONS_BIN_DIR="$(cd "$LASH_E2E_PREBUILT_BIN_DIR" && pwd)"
+  export LASH_PROCESS_OPERATIONS_BIN_DIR
+  for binary in lash-e2e-process-operations-worker; do
+    if [ ! -x "$LASH_PROCESS_OPERATIONS_BIN_DIR/$binary" ]; then
+      echo "Missing executable prebuilt worker: $LASH_PROCESS_OPERATIONS_BIN_DIR/$binary" >&2
+      exit 1
+    fi
+  done
+else
+  export LASH_PROCESS_OPERATIONS_BIN_DIR="${CARGO_TARGET_DIR:-$repo/target}/release"
+fi
+
 # shellcheck source=scripts/worktree-gate-env.sh
 source "$repo/scripts/worktree-gate-env.sh"
 lash_gate_acquire process-operations-e2e
@@ -42,9 +55,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cargo build --locked --release -p lash-restate-postgres-workers-e2e \
-  --bin lash-e2e-process-operations-worker
-export LASH_PROCESS_OPERATIONS_BIN_DIR="${CARGO_TARGET_DIR:-$repo/target}/release"
+if [ -z "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
+  cargo build --locked --release -p lash-restate-postgres-workers-e2e \
+    --bin lash-e2e-process-operations-worker
+fi
 
 bash scripts/docker-pull-with-retry.sh ubuntu:24.04
 "${compose[@]}" up -d postgres minio minio-init restate
