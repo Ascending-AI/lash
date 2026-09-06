@@ -1,3 +1,7 @@
+#[path = "otel/attribute_keys.rs"]
+mod attribute_keys;
+use attribute_keys as attr;
+
 #[cfg(feature = "otel")]
 use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
@@ -93,7 +97,12 @@ where
         &self.options
     }
 
-    fn start_active(&self, key: String, record: &TraceRecord, name: &'static str) {
+    fn start_active(
+        &self,
+        key: String,
+        record: &TraceRecord,
+        name: impl Into<std::borrow::Cow<'static, str>>,
+    ) {
         let parent = if matches!(&record.event, TraceEvent::TurnStarted { .. }) {
             None
         } else {
@@ -124,7 +133,12 @@ where
         true
     }
 
-    fn emit_instant(&self, record: &TraceRecord, name: &'static str, duration_ms: Option<u64>) {
+    fn emit_instant(
+        &self,
+        record: &TraceRecord,
+        name: impl Into<std::borrow::Cow<'static, str>>,
+        duration_ms: Option<u64>,
+    ) {
         let end = record_time(record);
         let start = duration_ms
             .and_then(|ms| end.checked_sub(Duration::from_millis(ms)))
@@ -146,7 +160,7 @@ where
     fn build_span(
         &self,
         record: &TraceRecord,
-        name: &'static str,
+        name: impl Into<std::borrow::Cow<'static, str>>,
         parent: Option<SpanContext>,
         start: SystemTime,
         end: Option<SystemTime>,
@@ -173,7 +187,11 @@ where
         event_attributes(record, &self.options)
     }
 
-    fn add_llm_event(&self, record: &TraceRecord, name: &'static str) -> bool {
+    fn add_llm_event(
+        &self,
+        record: &TraceRecord,
+        name: impl Into<std::borrow::Cow<'static, str>>,
+    ) -> bool {
         let Some(key) = llm_key(&record.context) else {
             return false;
         };
@@ -234,26 +252,26 @@ where
                 }
             }
             TraceEvent::ProviderRequest { .. } => {
-                if !self.add_llm_event(record, "lash.provider_request") {
-                    self.emit_instant(record, "lash.provider_request", None);
+                if !self.add_llm_event(record, format!("lash.{}", record.event.kind())) {
+                    self.emit_instant(record, format!("lash.{}", record.event.kind()), None);
                 }
             }
             TraceEvent::ProviderReplayDropped { .. } => {
-                if !self.add_llm_event(record, "lash.provider_replay_dropped") {
-                    self.emit_instant(record, "lash.provider_replay_dropped", None);
+                if !self.add_llm_event(record, format!("lash.{}", record.event.kind())) {
+                    self.emit_instant(record, format!("lash.{}", record.event.kind()), None);
                 }
             }
             TraceEvent::EffectEnvelopeDiff { .. } => {
-                self.emit_instant(record, "lash.effect_envelope_diff", None)
+                self.emit_instant(record, format!("lash.{}", record.event.kind()), None)
             }
             TraceEvent::ProviderStreamEvent { .. } => {
-                if !self.add_llm_event(record, "lash.provider_stream_event") {
-                    self.emit_instant(record, "lash.provider_stream_event", None);
+                if !self.add_llm_event(record, format!("lash.{}", record.event.kind())) {
+                    self.emit_instant(record, format!("lash.{}", record.event.kind()), None);
                 }
             }
             TraceEvent::RuntimeStreamEvent { .. } => {
-                if !self.add_llm_event(record, "lash.runtime_stream_event") {
-                    self.emit_instant(record, "lash.runtime_stream_event", None);
+                if !self.add_llm_event(record, format!("lash.{}", record.event.kind())) {
+                    self.emit_instant(record, format!("lash.{}", record.event.kind()), None);
                 }
             }
             TraceEvent::ToolCallStarted { .. } => {
@@ -324,12 +342,14 @@ where
                 None,
             ),
             TraceEvent::ProtocolStep { .. } => {
-                self.emit_instant(record, "lash.protocol_step", None)
+                self.emit_instant(record, format!("lash.{}", record.event.kind()), None)
             }
             TraceEvent::LanguageExecution { .. } => {
-                self.emit_instant(record, "lash.language_execution", None)
+                self.emit_instant(record, format!("lash.{}", record.event.kind()), None)
             }
-            TraceEvent::Custom { .. } => self.emit_instant(record, "lash.custom", None),
+            TraceEvent::Custom { .. } => {
+                self.emit_instant(record, format!("lash.{}", record.event.kind()), None)
+            }
         }
         Ok(())
     }
@@ -349,15 +369,18 @@ where
 
 fn common_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<KeyValue> {
     let mut attrs = vec![
-        KeyValue::new("lash.trace.schema_version", record.schema_version as i64),
-        KeyValue::new("lash.trace.record_id", record.id.clone()),
-        KeyValue::new("lash.trace.event_type", event_type(&record.event)),
+        KeyValue::new(
+            attr::LASH_TRACE_SCHEMA_VERSION,
+            record.schema_version as i64,
+        ),
+        KeyValue::new(attr::LASH_TRACE_RECORD_ID, record.id.clone()),
+        KeyValue::new(attr::LASH_TRACE_EVENT_TYPE, event_type(&record.event)),
     ];
     context_attributes(&mut attrs, &record.context, options);
     if options.include_event_json
         && let Ok(json) = serde_json::to_string(record)
     {
-        attrs.push(KeyValue::new("lash.trace.record_json", json));
+        attrs.push(KeyValue::new(attr::LASH_TRACE_RECORD_JSON, json));
     }
     attrs
 }
@@ -365,16 +388,16 @@ fn common_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Ke
 fn lifecycle_end_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<KeyValue> {
     let mut attrs = vec![
         KeyValue::new(
-            "lash.trace.end_schema_version",
+            attr::LASH_TRACE_END_SCHEMA_VERSION,
             record.schema_version as i64,
         ),
-        KeyValue::new("lash.trace.end_record_id", record.id.clone()),
-        KeyValue::new("lash.trace.end_event_type", event_type(&record.event)),
+        KeyValue::new(attr::LASH_TRACE_END_RECORD_ID, record.id.clone()),
+        KeyValue::new(attr::LASH_TRACE_END_EVENT_TYPE, event_type(&record.event)),
     ];
     if options.include_event_json
         && let Ok(json) = serde_json::to_string(record)
     {
-        attrs.push(KeyValue::new("lash.trace.end_record_json", json));
+        attrs.push(KeyValue::new(attr::LASH_TRACE_END_RECORD_JSON, json));
     }
     attrs
 }
@@ -384,35 +407,50 @@ fn context_attributes(
     context: &TraceContext,
     options: &OtelTraceOptions,
 ) {
-    push_opt(attrs, "lash.context.run_id", &context.run_id);
-    push_opt(attrs, "lash.context.experiment_id", &context.experiment_id);
-    push_opt(attrs, "lash.context.candidate_id", &context.candidate_id);
+    push_opt(attrs, attr::LASH_CONTEXT_RUN_ID, &context.run_id);
     push_opt(
         attrs,
-        "lash.context.candidate_parent_id",
+        attr::LASH_CONTEXT_EXPERIMENT_ID,
+        &context.experiment_id,
+    );
+    push_opt(
+        attrs,
+        attr::LASH_CONTEXT_CANDIDATE_ID,
+        &context.candidate_id,
+    );
+    push_opt(
+        attrs,
+        attr::LASH_CONTEXT_CANDIDATE_PARENT_ID,
         &context.candidate_parent_id,
     );
-    push_opt(attrs, "lash.context.example_id", &context.example_id);
-    push_opt(attrs, "lash.context.split", &context.split);
-    push_opt(attrs, "lash.context.session_id", &context.session_id);
-    push_opt(attrs, "lash.context.turn_id", &context.turn_id);
-    push_opt(attrs, "lash.context.graph_node_id", &context.graph_node_id);
+    push_opt(attrs, attr::LASH_CONTEXT_EXAMPLE_ID, &context.example_id);
+    push_opt(attrs, attr::LASH_CONTEXT_SPLIT, &context.split);
+    push_opt(attrs, attr::LASH_CONTEXT_SESSION_ID, &context.session_id);
+    push_opt(attrs, attr::LASH_CONTEXT_TURN_ID, &context.turn_id);
     push_opt(
         attrs,
-        "lash.context.parent_graph_node_id",
+        attr::LASH_CONTEXT_GRAPH_NODE_ID,
+        &context.graph_node_id,
+    );
+    push_opt(
+        attrs,
+        attr::LASH_CONTEXT_PARENT_GRAPH_NODE_ID,
         &context.parent_graph_node_id,
     );
     if let Some(turn_index) = context.turn_index {
-        attrs.push(KeyValue::new("lash.context.turn_index", turn_index as i64));
+        attrs.push(KeyValue::new(
+            attr::LASH_CONTEXT_TURN_INDEX,
+            turn_index as i64,
+        ));
     }
     if let Some(protocol_iteration) = context.protocol_iteration {
         attrs.push(KeyValue::new(
-            "lash.context.protocol_iteration",
+            attr::LASH_CONTEXT_PROTOCOL_ITERATION,
             protocol_iteration as i64,
         ));
     }
-    push_opt(attrs, "lash.context.effect_id", &context.effect_id);
-    push_opt(attrs, "lash.context.llm_call_id", &context.llm_call_id);
+    push_opt(attrs, attr::LASH_CONTEXT_EFFECT_ID, &context.effect_id);
+    push_opt(attrs, attr::LASH_CONTEXT_LLM_CALL_ID, &context.llm_call_id);
 
     if options.include_context_metadata {
         for (key, value) in &context.metadata {
@@ -428,24 +466,27 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
     let mut attrs = Vec::new();
     match &record.event {
         TraceEvent::TurnStarted { metadata } => {
-            attrs.push(KeyValue::new("lash.metadata.count", metadata.len() as i64));
-            push_payload_json(&mut attrs, options, "lash.metadata.json", metadata);
+            attrs.push(KeyValue::new(
+                attr::LASH_METADATA_COUNT,
+                metadata.len() as i64,
+            ));
+            push_payload_json(&mut attrs, options, attr::LASH_METADATA_JSON, metadata);
         }
         TraceEvent::PromptBuilt {
             prompt_hash,
             prompt_chars,
             components,
         } => {
-            attrs.push(KeyValue::new("lash.prompt.hash", prompt_hash.clone()));
-            attrs.push(KeyValue::new("lash.prompt.chars", *prompt_chars as i64));
+            attrs.push(KeyValue::new(attr::LASH_PROMPT_HASH, prompt_hash.clone()));
+            attrs.push(KeyValue::new(attr::LASH_PROMPT_CHARS, *prompt_chars as i64));
             attrs.push(KeyValue::new(
-                "lash.prompt.component_count",
+                attr::LASH_PROMPT_COMPONENT_COUNT,
                 components.len() as i64,
             ));
             push_payload_json(
                 &mut attrs,
                 options,
-                "lash.prompt.components_json",
+                attr::LASH_PROMPT_COMPONENTS_JSON,
                 components,
             );
         }
@@ -456,18 +497,18 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             source,
             reason,
         } => {
-            push_opt(&mut attrs, "lash.attachment.id", attachment_id);
-            push_opt(&mut attrs, "lash.attachment.label", label);
-            push_opt(&mut attrs, "lash.attachment.media_type", media_type);
+            push_opt(&mut attrs, attr::LASH_ATTACHMENT_ID, attachment_id);
+            push_opt(&mut attrs, attr::LASH_ATTACHMENT_LABEL, label);
+            push_opt(&mut attrs, attr::LASH_ATTACHMENT_MEDIA_TYPE, media_type);
             attrs.push(KeyValue::new(
-                "lash.attachment.source",
+                attr::LASH_ATTACHMENT_SOURCE,
                 serde_json::to_value(source)
                     .ok()
                     .and_then(|value| value.as_str().map(ToOwned::to_owned))
                     .unwrap_or_else(|| "unknown".to_string()),
             ));
             attrs.push(KeyValue::new(
-                "lash.attachment.degradation_reason",
+                attr::LASH_ATTACHMENT_DEGRADATION_REASON,
                 serde_json::to_value(reason)
                     .ok()
                     .and_then(|value| value.as_str().map(ToOwned::to_owned))
@@ -480,27 +521,27 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             tool_schemas,
         } => {
             attrs.push(KeyValue::new(
-                "lash.composition.fingerprint",
+                attr::LASH_COMPOSITION_FINGERPRINT,
                 fingerprint.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.composition.prompt_chars",
+                attr::LASH_COMPOSITION_PROMPT_CHARS,
                 rendered_system_prompt.chars().count() as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.composition.tool_count",
+                attr::LASH_COMPOSITION_TOOL_COUNT,
                 tool_schemas.len() as i64,
             ));
             push_payload_json(
                 &mut attrs,
                 options,
-                "lash.composition.rendered_system_prompt_json",
+                attr::LASH_COMPOSITION_RENDERED_SYSTEM_PROMPT_JSON,
                 rendered_system_prompt,
             );
             push_payload_json(
                 &mut attrs,
                 options,
-                "lash.composition.tool_schemas_json",
+                attr::LASH_COMPOSITION_TOOL_SCHEMAS_JSON,
                 tool_schemas,
             );
         }
@@ -510,15 +551,15 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             threshold_tokens,
         } => {
             attrs.push(KeyValue::new(
-                "lash.rolling_history.context_budget_tokens",
+                attr::LASH_ROLLING_HISTORY_CONTEXT_BUDGET_TOKENS,
                 *context_budget_tokens as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.rolling_history.max_context_tokens",
+                attr::LASH_ROLLING_HISTORY_MAX_CONTEXT_TOKENS,
                 *max_context_tokens as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.rolling_history.threshold_tokens",
+                attr::LASH_ROLLING_HISTORY_THRESHOLD_TOKENS,
                 *threshold_tokens as i64,
             ));
         }
@@ -529,19 +570,19 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             retained_messages,
         } => {
             attrs.push(KeyValue::new(
-                "lash.rolling_history.context_budget_tokens",
+                attr::LASH_ROLLING_HISTORY_CONTEXT_BUDGET_TOKENS,
                 *context_budget_tokens as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.rolling_history.max_context_tokens",
+                attr::LASH_ROLLING_HISTORY_MAX_CONTEXT_TOKENS,
                 *max_context_tokens as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.rolling_history.dropped_prefix_messages",
+                attr::LASH_ROLLING_HISTORY_DROPPED_PREFIX_MESSAGES,
                 *dropped_prefix_messages as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.rolling_history.retained_messages",
+                attr::LASH_ROLLING_HISTORY_RETAINED_MESSAGES,
                 *retained_messages as i64,
             ));
         }
@@ -550,45 +591,48 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             instructions_present,
         } => {
             attrs.push(KeyValue::new(
-                "lash.rolling_history.source_messages",
+                attr::LASH_ROLLING_HISTORY_SOURCE_MESSAGES,
                 *source_messages as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.rolling_history.instructions_present",
+                attr::LASH_ROLLING_HISTORY_INSTRUCTIONS_PRESENT,
                 *instructions_present,
             ));
         }
         TraceEvent::RollingHistoryCompactionCompleted { summary_nodes } => {
             attrs.push(KeyValue::new(
-                "lash.rolling_history.summary_nodes",
+                attr::LASH_ROLLING_HISTORY_SUMMARY_NODES,
                 *summary_nodes as i64,
             ));
         }
         TraceEvent::LlmCallStarted { request } => {
-            attrs.push(KeyValue::new("gen_ai.request.model", request.model.clone()));
+            attrs.push(KeyValue::new(
+                attr::GEN_AI_REQUEST_MODEL,
+                request.model.clone(),
+            ));
             push_opt(
                 &mut attrs,
-                "gen_ai.request.model_variant",
+                attr::GEN_AI_REQUEST_MODEL_VARIANT,
                 &request.model_variant,
             );
-            attrs.push(KeyValue::new("lash.llm.stream", request.stream));
+            attrs.push(KeyValue::new(attr::LASH_LLM_STREAM, request.stream));
             attrs.push(KeyValue::new(
-                "lash.llm.tool_choice",
+                attr::LASH_LLM_TOOL_CHOICE,
                 request.tool_choice.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.llm.message_count",
+                attr::LASH_LLM_MESSAGE_COUNT,
                 request.messages.len() as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.llm.tool_count",
+                attr::LASH_LLM_TOOL_COUNT,
                 request.tools.len() as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.llm.attachment_count",
+                attr::LASH_LLM_ATTACHMENT_COUNT,
                 request.attachments.len() as i64,
             ));
-            push_payload_json(&mut attrs, options, "lash.llm.request_json", request);
+            push_payload_json(&mut attrs, options, attr::LASH_LLM_REQUEST_JSON, request);
         }
         TraceEvent::LlmCallCompleted {
             response,
@@ -598,30 +642,35 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             attempts,
         } => {
             attrs.push(KeyValue::new(
-                "lash.llm.duration_ms",
+                attr::LASH_LLM_DURATION_MS,
                 response.duration_ms as i64,
             ));
             attrs.push(KeyValue::new(
-                "gen_ai.response.text_chars",
+                attr::GEN_AI_RESPONSE_TEXT_CHARS,
                 response.text.len() as i64,
             ));
             if let Some(usage) = usage {
-                usage_attributes(&mut attrs, "gen_ai.usage", usage);
+                usage_attributes(&mut attrs, attr::GEN_AI_USAGE, usage);
             }
             push_payload_json(
                 &mut attrs,
                 options,
-                "lash.llm.provider_usage_json",
+                attr::LASH_LLM_PROVIDER_USAGE_JSON,
                 provider_usage,
             );
             push_payload_json(
                 &mut attrs,
                 options,
-                "lash.llm.stream_summary_json",
+                attr::LASH_LLM_STREAM_SUMMARY_JSON,
                 stream_summary,
             );
-            push_payload_json(&mut attrs, options, "lash.llm.response_json", response);
-            push_payload_json(&mut attrs, options, "lash.retry.attempts_json", attempts);
+            push_payload_json(&mut attrs, options, attr::LASH_LLM_RESPONSE_JSON, response);
+            push_payload_json(
+                &mut attrs,
+                options,
+                attr::LASH_RETRY_ATTEMPTS_JSON,
+                attempts,
+            );
         }
         TraceEvent::LlmCallFailed {
             error,
@@ -629,159 +678,193 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             attempts,
         } => {
             attrs.push(KeyValue::new(
-                "error.type",
+                attr::ERROR_TYPE,
                 error.code.clone().unwrap_or_default(),
             ));
-            attrs.push(KeyValue::new("error.message", error.message.clone()));
-            attrs.push(KeyValue::new("lash.error.retryable", error.retryable));
+            attrs.push(KeyValue::new(attr::ERROR_MESSAGE, error.message.clone()));
+            attrs.push(KeyValue::new(attr::LASH_ERROR_RETRYABLE, error.retryable));
             push_payload_json(
                 &mut attrs,
                 options,
-                "lash.llm.stream_summary_json",
+                attr::LASH_LLM_STREAM_SUMMARY_JSON,
                 stream_summary,
             );
-            push_payload_json(&mut attrs, options, "lash.error.raw", &error.raw);
-            push_payload_json(&mut attrs, options, "lash.retry.attempts_json", attempts);
+            push_payload_json(&mut attrs, options, attr::LASH_ERROR_RAW, &error.raw);
+            push_payload_json(
+                &mut attrs,
+                options,
+                attr::LASH_RETRY_ATTEMPTS_JSON,
+                attempts,
+            );
         }
         TraceEvent::ProviderRequest { event } => {
-            attrs.push(KeyValue::new("lash.provider.name", event.provider.clone()));
             attrs.push(KeyValue::new(
-                "lash.provider.endpoint",
+                attr::LASH_PROVIDER_NAME,
+                event.provider.clone(),
+            ));
+            attrs.push(KeyValue::new(
+                attr::LASH_PROVIDER_ENDPOINT,
                 event.endpoint.clone(),
             ));
-            attrs.push(KeyValue::new("lash.stream.sequence", event.sequence as i64));
             attrs.push(KeyValue::new(
-                "lash.stream.elapsed_ms",
+                attr::LASH_STREAM_SEQUENCE,
+                event.sequence as i64,
+            ));
+            attrs.push(KeyValue::new(
+                attr::LASH_STREAM_ELAPSED_MS,
                 event.elapsed_ms as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.request.body_len",
+                attr::LASH_REQUEST_BODY_LEN,
                 event.body_len as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.request.body_sha256",
+                attr::LASH_REQUEST_BODY_SHA256,
                 event.body_sha256.clone(),
             ));
             push_payload_json(
                 &mut attrs,
                 options,
-                "lash.request.body_json",
+                attr::LASH_REQUEST_BODY_JSON,
                 &event.body_json,
             );
             push_opt(
                 &mut attrs,
-                "lash.request.body_json_omitted_reason",
+                attr::LASH_REQUEST_BODY_JSON_OMITTED_REASON,
                 &event.body_json_omitted_reason,
             );
         }
         TraceEvent::ProviderReplayDropped { event } => {
-            attrs.push(KeyValue::new("lash.replay.kind", event.replay_kind.code()));
             attrs.push(KeyValue::new(
-                "lash.replay.drop_reason",
+                attr::LASH_REPLAY_KIND,
+                event.replay_kind.code(),
+            ));
+            attrs.push(KeyValue::new(
+                attr::LASH_REPLAY_DROP_REASON,
                 event.reason.code(),
             ));
             if let Some(route) = &event.minting_route {
                 attrs.push(KeyValue::new(
-                    "lash.replay.minting_provider",
+                    attr::LASH_REPLAY_MINTING_PROVIDER,
                     route.provider.clone(),
                 ));
                 attrs.push(KeyValue::new(
-                    "lash.replay.minting_endpoint",
+                    attr::LASH_REPLAY_MINTING_ENDPOINT,
                     route.endpoint.clone(),
                 ));
                 attrs.push(KeyValue::new(
-                    "lash.replay.minting_model",
+                    attr::LASH_REPLAY_MINTING_MODEL,
                     route.model.clone(),
                 ));
             }
             attrs.push(KeyValue::new(
-                "lash.replay.serving_provider",
+                attr::LASH_REPLAY_SERVING_PROVIDER,
                 event.serving_route.provider.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.replay.serving_endpoint",
+                attr::LASH_REPLAY_SERVING_ENDPOINT,
                 event.serving_route.endpoint.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.replay.serving_model",
+                attr::LASH_REPLAY_SERVING_MODEL,
                 event.serving_route.model.clone(),
             ));
         }
         TraceEvent::EffectEnvelopeDiff { event } => {
             attrs.push(KeyValue::new(
-                "lash.effect_envelope.recorded_hash",
+                attr::LASH_EFFECT_ENVELOPE_RECORDED_HASH,
                 event.recorded_envelope_hash.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.effect_envelope.reconstructed_hash",
+                attr::LASH_EFFECT_ENVELOPE_RECONSTRUCTED_HASH,
                 event.reconstructed_envelope_hash.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.effect_envelope.divergent_path_count",
+                attr::LASH_EFFECT_ENVELOPE_DIVERGENT_PATH_COUNT,
                 event.divergent_paths.len() as i64,
             ));
             push_payload_json(
                 &mut attrs,
                 options,
-                "lash.effect_envelope.divergent_paths_json",
+                attr::LASH_EFFECT_ENVELOPE_DIVERGENT_PATHS_JSON,
                 &event.divergent_paths,
             );
         }
         TraceEvent::ProviderStreamEvent { event } => {
-            attrs.push(KeyValue::new("lash.provider.name", event.provider.clone()));
-            attrs.push(KeyValue::new("lash.stream.sequence", event.sequence as i64));
             attrs.push(KeyValue::new(
-                "lash.stream.elapsed_ms",
+                attr::LASH_PROVIDER_NAME,
+                event.provider.clone(),
+            ));
+            attrs.push(KeyValue::new(
+                attr::LASH_STREAM_SEQUENCE,
+                event.sequence as i64,
+            ));
+            attrs.push(KeyValue::new(
+                attr::LASH_STREAM_ELAPSED_MS,
                 event.elapsed_ms as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.stream.event_name",
+                attr::LASH_STREAM_EVENT_NAME,
                 event.event_name.clone(),
             ));
-            push_opt(&mut attrs, "lash.stream.item_id", &event.item_id);
+            push_opt(&mut attrs, attr::LASH_STREAM_ITEM_ID, &event.item_id);
             if let Some(output_index) = event.output_index {
-                attrs.push(KeyValue::new("lash.stream.output_index", output_index));
+                attrs.push(KeyValue::new(attr::LASH_STREAM_OUTPUT_INDEX, output_index));
             }
-            attrs.push(KeyValue::new("lash.stream.raw_len", event.raw_len as i64));
             attrs.push(KeyValue::new(
-                "lash.stream.raw_sha256",
+                attr::LASH_STREAM_RAW_LEN,
+                event.raw_len as i64,
+            ));
+            attrs.push(KeyValue::new(
+                attr::LASH_STREAM_RAW_SHA256,
                 event.raw_sha256.clone(),
             ));
-            push_payload_json(&mut attrs, options, "lash.stream.raw_json", &event.raw_json);
+            push_payload_json(
+                &mut attrs,
+                options,
+                attr::LASH_STREAM_RAW_JSON,
+                &event.raw_json,
+            );
         }
         TraceEvent::RuntimeStreamEvent { event } => {
-            attrs.push(KeyValue::new("lash.stream.sequence", event.sequence as i64));
             attrs.push(KeyValue::new(
-                "lash.stream.elapsed_ms",
+                attr::LASH_STREAM_SEQUENCE,
+                event.sequence as i64,
+            ));
+            attrs.push(KeyValue::new(
+                attr::LASH_STREAM_ELAPSED_MS,
                 event.elapsed_ms as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.stream.event_name",
+                attr::LASH_STREAM_EVENT_NAME,
                 event.event_name.clone(),
             ));
             if let Some(text) = &event.visible_text {
                 attrs.push(KeyValue::new(
-                    "lash.stream.visible_chars",
+                    attr::LASH_STREAM_VISIBLE_CHARS,
                     text.len() as i64,
                 ));
             }
             if let Some(text) = &event.raw_text {
-                attrs.push(KeyValue::new("lash.stream.raw_chars", text.len() as i64));
+                attrs.push(KeyValue::new(
+                    attr::LASH_STREAM_RAW_CHARS,
+                    text.len() as i64,
+                ));
             }
-            push_opt(&mut attrs, "lash.stream.item_id", &event.item_id);
+            push_opt(&mut attrs, attr::LASH_STREAM_ITEM_ID, &event.item_id);
             if let Some(output_index) = event.output_index {
-                attrs.push(KeyValue::new("lash.stream.output_index", output_index));
+                attrs.push(KeyValue::new(attr::LASH_STREAM_OUTPUT_INDEX, output_index));
             }
-            push_opt(&mut attrs, "lash.tool.call_id", &event.call_id);
-            push_opt(&mut attrs, "lash.tool.name", &event.tool_name);
+            push_opt(&mut attrs, attr::LASH_TOOL_CALL_ID, &event.call_id);
+            push_opt(&mut attrs, attr::LASH_TOOL_NAME, &event.tool_name);
             push_payload_json(
                 &mut attrs,
                 options,
-                "lash.tool.input_json",
+                attr::LASH_TOOL_INPUT_JSON,
                 &event.input_json,
             );
             if let Some(usage) = &event.usage {
-                usage_attributes(&mut attrs, "gen_ai.usage", usage);
+                usage_attributes(&mut attrs, attr::GEN_AI_USAGE, usage);
             }
         }
         TraceEvent::ToolCallStarted {
@@ -789,9 +872,9 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             name,
             args,
         } => {
-            push_opt(&mut attrs, "lash.tool.call_id", call_id);
-            attrs.push(KeyValue::new("lash.tool.name", name.clone()));
-            push_payload_json(&mut attrs, options, "lash.tool.args_json", args);
+            push_opt(&mut attrs, attr::LASH_TOOL_CALL_ID, call_id);
+            attrs.push(KeyValue::new(attr::LASH_TOOL_NAME, name.clone()));
+            push_payload_json(&mut attrs, options, attr::LASH_TOOL_ARGS_JSON, args);
         }
         TraceEvent::ToolCallCompleted {
             call_id,
@@ -801,22 +884,30 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             duration_ms,
             attempts,
         } => {
-            push_opt(&mut attrs, "lash.tool.call_id", call_id);
-            attrs.push(KeyValue::new("lash.tool.name", name.clone()));
-            attrs.push(KeyValue::new("lash.tool.success", output.is_success()));
+            push_opt(&mut attrs, attr::LASH_TOOL_CALL_ID, call_id);
+            attrs.push(KeyValue::new(attr::LASH_TOOL_NAME, name.clone()));
+            attrs.push(KeyValue::new(attr::LASH_TOOL_SUCCESS, output.is_success()));
             attrs.push(KeyValue::new(
-                "lash.tool.status",
+                attr::LASH_TOOL_STATUS,
                 format!("{:?}", output.status()).to_ascii_lowercase(),
             ));
-            attrs.push(KeyValue::new("lash.tool.duration_ms", *duration_ms as i64));
-            push_payload_json(&mut attrs, options, "lash.tool.args_json", args);
+            attrs.push(KeyValue::new(
+                attr::LASH_TOOL_DURATION_MS,
+                *duration_ms as i64,
+            ));
+            push_payload_json(&mut attrs, options, attr::LASH_TOOL_ARGS_JSON, args);
             push_payload_json(
                 &mut attrs,
                 options,
-                "lash.tool.result_json",
+                attr::LASH_TOOL_RESULT_JSON,
                 &output.value_for_projection(),
             );
-            push_payload_json(&mut attrs, options, "lash.retry.attempts_json", attempts);
+            push_payload_json(
+                &mut attrs,
+                options,
+                attr::LASH_RETRY_ATTEMPTS_JSON,
+                attempts,
+            );
         }
         TraceEvent::JournaledEffectStarted {
             effect_name,
@@ -828,38 +919,44 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             ..
         } => {
             attrs.push(KeyValue::new(
-                "lash.durable.effect_name",
+                attr::LASH_DURABLE_EFFECT_NAME,
                 effect_name.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.durable.effect_kind",
+                attr::LASH_DURABLE_EFFECT_KIND,
                 effect_kind.clone(),
             ));
             if let TraceEvent::JournaledEffectSettled { status, .. } = &record.event {
-                attrs.push(KeyValue::new("lash.durable.status", status.wire_tag()));
+                attrs.push(KeyValue::new(attr::LASH_DURABLE_STATUS, status.wire_tag()));
             }
         }
         TraceEvent::DurableWaitParked { wait_kind } => {
-            attrs.push(KeyValue::new("lash.durable.wait_kind", wait_kind.clone()));
+            attrs.push(KeyValue::new(
+                attr::LASH_DURABLE_WAIT_KIND,
+                wait_kind.clone(),
+            ));
         }
         TraceEvent::DurableWaitResolved {
             wait_kind,
             resolution,
         } => {
-            attrs.push(KeyValue::new("lash.durable.wait_kind", wait_kind.clone()));
             attrs.push(KeyValue::new(
-                "lash.durable.resolution",
+                attr::LASH_DURABLE_WAIT_KIND,
+                wait_kind.clone(),
+            ));
+            attrs.push(KeyValue::new(
+                attr::LASH_DURABLE_RESOLUTION,
                 resolution.wire_tag(),
             ));
         }
         TraceEvent::DurableTimerStarted { duration_ms }
         | TraceEvent::DurableTimerResolved { duration_ms, .. } => {
             attrs.push(KeyValue::new(
-                "lash.durable.timer.duration_ms",
+                attr::LASH_DURABLE_TIMER_DURATION_MS,
                 *duration_ms as i64,
             ));
             if let TraceEvent::DurableTimerResolved { status, .. } = &record.event {
-                attrs.push(KeyValue::new("lash.durable.status", status.wire_tag()));
+                attrs.push(KeyValue::new(attr::LASH_DURABLE_STATUS, status.wire_tag()));
             }
         }
         TraceEvent::DurableSegmentBoundary {
@@ -868,16 +965,16 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             journaled_bytes_estimate,
         } => {
             attrs.push(KeyValue::new(
-                "lash.durable.boundary_reason",
+                attr::LASH_DURABLE_BOUNDARY_REASON,
                 reason.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.durable.effects_executed",
+                attr::LASH_DURABLE_EFFECTS_EXECUTED,
                 *effects_executed as i64,
             ));
             if let Some(bytes) = journaled_bytes_estimate {
                 attrs.push(KeyValue::new(
-                    "lash.durable.journaled_bytes_estimate",
+                    attr::LASH_DURABLE_JOURNALED_BYTES_ESTIMATE,
                     *bytes as i64,
                 ));
             }
@@ -887,27 +984,35 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             error_class,
             message,
         } => {
-            attrs.push(KeyValue::new("lash.store.operation", operation.clone()));
-            attrs.push(KeyValue::new("error.type", error_class.clone()));
-            attrs.push(KeyValue::new("error.message", message.clone()));
+            attrs.push(KeyValue::new(attr::LASH_STORE_OPERATION, operation.clone()));
+            attrs.push(KeyValue::new(attr::ERROR_TYPE, error_class.clone()));
+            attrs.push(KeyValue::new(attr::ERROR_MESSAGE, message.clone()));
         }
         TraceEvent::ProtocolStep { plugin_id, payload } => {
-            attrs.push(KeyValue::new("lash.protocol.plugin_id", plugin_id.clone()));
-            push_payload_json(&mut attrs, options, "lash.protocol.payload_json", payload);
+            attrs.push(KeyValue::new(
+                attr::LASH_PROTOCOL_PLUGIN_ID,
+                plugin_id.clone(),
+            ));
+            push_payload_json(
+                &mut attrs,
+                options,
+                attr::LASH_PROTOCOL_PAYLOAD_JSON,
+                payload,
+            );
         }
         TraceEvent::ExecCodeStarted { .. }
         | TraceEvent::ExecCodeCompleted { .. }
         | TraceEvent::ExecCodeFailed { .. }
         | TraceEvent::ObservationProjection { .. } => {
-            attrs.push(KeyValue::new("lash.protocol.plugin_id", "runtime"));
+            attrs.push(KeyValue::new(attr::LASH_PROTOCOL_PLUGIN_ID, "runtime"));
             attrs.push(KeyValue::new(
-                "lash.protocol.diagnostic_phase",
+                attr::LASH_PROTOCOL_DIAGNOSTIC_PHASE,
                 record.event.kind(),
             ));
             push_payload_json(
                 &mut attrs,
                 options,
-                "lash.protocol.payload_json",
+                attr::LASH_PROTOCOL_PAYLOAD_JSON,
                 &typed_diagnostic_protocol_payload(&record.event),
             );
         }
@@ -916,45 +1021,45 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             push_payload_json(
                 &mut attrs,
                 options,
-                "lash.language_execution.event_json",
+                attr::LASH_LANGUAGE_EXECUTION_EVENT_JSON,
                 event,
             );
         }
         TraceEvent::TurnCompleted { outcome } => {
-            attrs.push(KeyValue::new("lash.turn.status", outcome.status_tag()));
+            attrs.push(KeyValue::new(attr::LASH_TURN_STATUS, outcome.status_tag()));
             match outcome {
                 crate::TraceTurnOutcome::Completed { done_reason } => {
                     attrs.push(KeyValue::new(
-                        "lash.turn.done_reason",
+                        attr::LASH_TURN_DONE_REASON,
                         done_reason.wire_tag(),
                     ));
                 }
                 crate::TraceTurnOutcome::Failed { done_reason } => {
                     attrs.push(KeyValue::new(
-                        "lash.turn.done_reason",
+                        attr::LASH_TURN_DONE_REASON,
                         done_reason.wire_tag(),
                     ));
                 }
                 crate::TraceTurnOutcome::AgentFrameSwitch { frame_switch } => {
                     attrs.push(KeyValue::new(
-                        "lash.turn.agent_frame_switch.frame_key",
+                        attr::LASH_TURN_AGENT_FRAME_SWITCH_FRAME_KEY,
                         frame_switch.frame_key.clone(),
                     ));
                 }
                 crate::TraceTurnOutcome::Cancelled { evidence } => {
                     attrs.push(KeyValue::new(
-                        "lash.turn.cancellation.request_id",
+                        attr::LASH_TURN_CANCELLATION_REQUEST_ID,
                         evidence.request_id.clone(),
                     ));
                     if let Some(origin) = &evidence.origin {
                         attrs.push(KeyValue::new(
-                            "lash.turn.cancellation.origin",
+                            attr::LASH_TURN_CANCELLATION_ORIGIN,
                             origin.clone(),
                         ));
                     }
                     if let Some(reason) = &evidence.reason {
                         attrs.push(KeyValue::new(
-                            "lash.turn.cancellation.reason",
+                            attr::LASH_TURN_CANCELLATION_REASON,
                             reason.clone(),
                         ));
                     }
@@ -962,8 +1067,8 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             }
         }
         TraceEvent::Custom { name, payload } => {
-            attrs.push(KeyValue::new("lash.custom.name", name.clone()));
-            push_payload_json(&mut attrs, options, "lash.custom.payload_json", payload);
+            attrs.push(KeyValue::new(attr::LASH_CUSTOM_NAME, name.clone()));
+            push_payload_json(&mut attrs, options, attr::LASH_CUSTOM_PAYLOAD_JSON, payload);
         }
     }
     attrs
@@ -986,68 +1091,68 @@ fn language_execution_attributes(
         Payload::ChildStarted { .. } => "child_started",
     };
     attrs.push(KeyValue::new(
-        "lash.language_execution.language",
+        attr::LASH_LANGUAGE_EXECUTION_LANGUAGE,
         language.to_string(),
     ));
-    attrs.push(KeyValue::new("lash.language_execution.kind", kind));
+    attrs.push(KeyValue::new(attr::LASH_LANGUAGE_EXECUTION_KIND, kind));
 
     attrs.push(KeyValue::new(
-        "lash.language_execution.event_key",
+        attr::LASH_LANGUAGE_EXECUTION_EVENT_KEY,
         event.event_key.clone(),
     ));
     attrs.push(KeyValue::new(
-        "lash.language_execution.graph_key",
+        attr::LASH_LANGUAGE_EXECUTION_GRAPH_KEY,
         event.identity.graph_key(),
     ));
     attrs.push(KeyValue::new(
-        "lash.language_execution.session_id",
+        attr::LASH_LANGUAGE_EXECUTION_SESSION_ID,
         event.identity.scope.session_id.clone(),
     ));
     if let Some(turn_id) = &event.identity.scope.turn_id {
         attrs.push(KeyValue::new(
-            "lash.language_execution.turn_id",
+            attr::LASH_LANGUAGE_EXECUTION_TURN_ID,
             turn_id.clone(),
         ));
     }
     attrs.push(KeyValue::new(
-        "lash.language_execution.module_ref",
+        attr::LASH_LANGUAGE_EXECUTION_MODULE_REF,
         event.identity.module_ref.clone(),
     ));
     attrs.push(KeyValue::new(
-        "lash.language_execution.entry_kind",
+        attr::LASH_LANGUAGE_EXECUTION_ENTRY_KIND,
         event.identity.entry_kind.clone(),
     ));
     push_opt(
         attrs,
-        "lash.language_execution.entry_ref",
+        attr::LASH_LANGUAGE_EXECUTION_ENTRY_REF,
         &event.identity.entry_ref,
     );
     attrs.push(KeyValue::new(
-        "lash.language_execution.entry_name",
+        attr::LASH_LANGUAGE_EXECUTION_ENTRY_NAME,
         event.identity.entry_name.clone(),
     ));
     match &event.identity.subject {
         crate::TraceRuntimeSubject::Effect { effect_id, kind } => {
             attrs.push(KeyValue::new(
-                "lash.language_execution.subject_type",
+                attr::LASH_LANGUAGE_EXECUTION_SUBJECT_TYPE,
                 "effect",
             ));
             attrs.push(KeyValue::new(
-                "lash.language_execution.effect_id",
+                attr::LASH_LANGUAGE_EXECUTION_EFFECT_ID,
                 effect_id.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.language_execution.effect_kind",
+                attr::LASH_LANGUAGE_EXECUTION_EFFECT_KIND,
                 kind.clone(),
             ));
         }
         crate::TraceRuntimeSubject::Process { process_id } => {
             attrs.push(KeyValue::new(
-                "lash.language_execution.subject_type",
+                attr::LASH_LANGUAGE_EXECUTION_SUBJECT_TYPE,
                 "process",
             ));
             attrs.push(KeyValue::new(
-                "lash.language_execution.process_id",
+                attr::LASH_LANGUAGE_EXECUTION_PROCESS_ID,
                 process_id.clone(),
             ));
         }
@@ -1073,15 +1178,15 @@ fn language_execution_attributes(
             ..
         } => {
             attrs.push(KeyValue::new(
-                "lash.language_execution.node_id",
+                attr::LASH_LANGUAGE_EXECUTION_NODE_ID,
                 node_id.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.language_execution.node_kind",
+                attr::LASH_LANGUAGE_EXECUTION_NODE_KIND,
                 node_kind.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.language_execution.occurrence",
+                attr::LASH_LANGUAGE_EXECUTION_OCCURRENCE,
                 *occurrence as i64,
             ));
         }
@@ -1093,19 +1198,19 @@ fn language_execution_attributes(
             ..
         } => {
             attrs.push(KeyValue::new(
-                "lash.language_execution.node_id",
+                attr::LASH_LANGUAGE_EXECUTION_NODE_ID,
                 node_id.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.language_execution.edge_id",
+                attr::LASH_LANGUAGE_EXECUTION_EDGE_ID,
                 edge_id.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.language_execution.branch",
+                attr::LASH_LANGUAGE_EXECUTION_BRANCH,
                 format!("{selected:?}").to_ascii_lowercase(),
             ));
             attrs.push(KeyValue::new(
-                "lash.language_execution.occurrence",
+                attr::LASH_LANGUAGE_EXECUTION_OCCURRENCE,
                 *occurrence as i64,
             ));
         }
@@ -1115,35 +1220,35 @@ fn language_execution_attributes(
             ..
         } => {
             attrs.push(KeyValue::new(
-                "lash.language_execution.parent_node_id",
+                attr::LASH_LANGUAGE_EXECUTION_PARENT_NODE_ID,
                 parent_node_id.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.language_execution.child_graph_key",
+                attr::LASH_LANGUAGE_EXECUTION_CHILD_GRAPH_KEY,
                 child.graph_key(),
             ));
             match &child.subject {
                 crate::TraceRuntimeSubject::Effect { effect_id, kind } => {
                     attrs.push(KeyValue::new(
-                        "lash.language_execution.child_subject_type",
+                        attr::LASH_LANGUAGE_EXECUTION_CHILD_SUBJECT_TYPE,
                         "effect",
                     ));
                     attrs.push(KeyValue::new(
-                        "lash.language_execution.child_effect_id",
+                        attr::LASH_LANGUAGE_EXECUTION_CHILD_EFFECT_ID,
                         effect_id.clone(),
                     ));
                     attrs.push(KeyValue::new(
-                        "lash.language_execution.child_effect_kind",
+                        attr::LASH_LANGUAGE_EXECUTION_CHILD_EFFECT_KIND,
                         kind.clone(),
                     ));
                 }
                 crate::TraceRuntimeSubject::Process { process_id } => {
                     attrs.push(KeyValue::new(
-                        "lash.language_execution.child_subject_type",
+                        attr::LASH_LANGUAGE_EXECUTION_CHILD_SUBJECT_TYPE,
                         "process",
                     ));
                     attrs.push(KeyValue::new(
-                        "lash.language_execution.child_process_id",
+                        attr::LASH_LANGUAGE_EXECUTION_CHILD_PROCESS_ID,
                         process_id.clone(),
                     ));
                 }
@@ -1151,18 +1256,18 @@ fn language_execution_attributes(
         }
         Payload::ExecutionFinished { status, error, .. } => {
             attrs.push(KeyValue::new(
-                "lash.language_execution.status",
+                attr::LASH_LANGUAGE_EXECUTION_STATUS,
                 format!("{status:?}").to_ascii_lowercase(),
             ));
-            push_opt(attrs, "lash.language_execution.error", error);
+            push_opt(attrs, attr::LASH_LANGUAGE_EXECUTION_ERROR, error);
         }
         Payload::ExecutionStarted { execution_map, .. } => {
             attrs.push(KeyValue::new(
-                "lash.language_execution.node_count",
+                attr::LASH_LANGUAGE_EXECUTION_NODE_COUNT,
                 execution_map.nodes.len() as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.language_execution.edge_count",
+                attr::LASH_LANGUAGE_EXECUTION_EDGE_COUNT,
                 execution_map.edges.len() as i64,
             ));
         }
@@ -1289,11 +1394,9 @@ fn typed_diagnostic_protocol_payload(event: &TraceEvent) -> Value {
 }
 
 fn typed_diagnostic_span_name(event: &TraceEvent) -> Option<&'static str> {
-    match event {
-        TraceEvent::ExecCodeStarted { .. }
-        | TraceEvent::ExecCodeCompleted { .. }
-        | TraceEvent::ExecCodeFailed { .. } => Some("lash.exec_code"),
-        TraceEvent::ObservationProjection { .. } => Some("lash.observation_projection"),
+    match event.kind() {
+        "exec_code_started" | "exec_code_completed" | "exec_code_failed" => Some("lash.exec_code"),
+        "observation_projection" => Some("lash.observation_projection"),
         _ => None,
     }
 }

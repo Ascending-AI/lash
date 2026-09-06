@@ -250,8 +250,10 @@ where
                 // propagating, so a final event delivered without a trailing
                 // blank line still reaches the caller.
                 let _ = buffer.finish(&mut capture_then_emit);
-                if let Some(rest) = error.message.strip_prefix("HTTP response read failed: ") {
-                    error.message = format!("Stream read failed: {rest}");
+                if let lash_http_transport::HttpFailureContext::ResponseRead { detail } =
+                    error.context.as_ref()
+                {
+                    error.message = format!("Stream read failed: {detail}");
                 }
                 return Err(error);
             }
@@ -356,6 +358,45 @@ mod tests {
     fn multiline_data_fields_join_with_newline() {
         let events = collect_events(&[b"data: a\ndata: b\n\n"]);
         assert_eq!(events, vec!["a\nb".to_string()]);
+    }
+
+    #[derive(Debug)]
+    struct ReadFailureStream(bool);
+
+    #[async_trait::async_trait]
+    impl crate::http::LlmByteStream for ReadFailureStream {
+        async fn next_chunk(&mut self) -> Result<Option<bytes::Bytes>, LlmTransportError> {
+            let mut error = if self.0 {
+                LlmTransportError::response_read("connection reset")
+            } else {
+                LlmTransportError::new("HTTP response read failed: custom diagnostic")
+            };
+            if self.0 {
+                error.message = "independently changed HTTP display".into();
+            }
+            Err(error)
+        }
+    }
+
+    #[tokio::test]
+    async fn response_read_context_survives_display_changes_without_parsing_custom_errors() {
+        for (typed, expected) in [
+            (true, "Stream read failed: connection reset"),
+            (false, "HTTP response read failed: custom diagnostic"),
+        ] {
+            let error = drive_sse_response(
+                LlmHttpBody::streamed(ReadFailureStream(typed)),
+                Duration::from_secs(1),
+                bounds(1024, 4096),
+                "read timeout",
+                "request timeout",
+                &mut ResponseMetadataCapture::default(),
+                |_| Ok(()),
+            )
+            .await
+            .expect_err("read failed");
+            assert_eq!(error.message, expected);
+        }
     }
 
     #[derive(Debug)]

@@ -34,6 +34,19 @@ impl TransportRetryVerdict {
     }
 }
 
+/// Operation-specific evidence independent of the rendered transport message.
+#[derive(Debug, Clone, Default)]
+pub enum HttpFailureContext {
+    /// No operation-specific evidence was supplied.
+    #[default]
+    Other,
+    /// Reading bytes from an established HTTP response failed.
+    ResponseRead {
+        /// Underlying cause, without presentation-specific prefixes.
+        detail: Box<str>,
+    },
+}
+
 /// Failure crossing the host-configurable HTTP transport boundary.
 ///
 /// The provider-oriented aliases retain the richer diagnostic fields because
@@ -42,6 +55,8 @@ impl TransportRetryVerdict {
 #[error("{message}")]
 pub struct HttpTransportError {
     pub kind: ProviderFailureKind,
+    /// Structured operation evidence used by higher-level adapters.
+    pub context: Box<HttpFailureContext>,
     pub message: String,
     pub retry_verdict: TransportRetryVerdict,
     retry_verdict_classified: bool,
@@ -67,6 +82,7 @@ impl HttpTransportError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             kind: ProviderFailureKind::Unknown,
+            context: Box::new(HttpFailureContext::Other),
             message: message.into(),
             retry_verdict: TransportRetryVerdict::NotRetryable,
             retry_verdict_classified: false,
@@ -79,6 +95,16 @@ impl HttpTransportError {
             output_started: false,
             partial_response: None,
         }
+    }
+
+    /// Construct a response-read failure with separately retained cause text.
+    pub fn response_read(detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        let mut error = Self::new(format!("HTTP response read failed: {detail}"));
+        error.context = Box::new(HttpFailureContext::ResponseRead {
+            detail: detail.into(),
+        });
+        error
     }
 
     pub fn with_kind(mut self, kind: ProviderFailureKind) -> Self {

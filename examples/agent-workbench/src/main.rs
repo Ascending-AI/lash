@@ -1,3 +1,6 @@
+#[path = "../../shared/ndjson.rs"]
+mod ndjson;
+use ndjson::ndjson_response;
 mod approvals;
 mod deferred_tools;
 mod execution_graphs;
@@ -8,7 +11,6 @@ mod restate_ingress;
 mod ui;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -23,7 +25,6 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use base64::Engine as _;
-use bytes::Bytes;
 use chrono::Utc;
 use futures_util::StreamExt;
 use lash::observe::SessionCursor;

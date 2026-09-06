@@ -5,14 +5,13 @@
 //! name picker with no authentication at all — enough for several browser tabs to
 //! be several people, and clearly not enough for anything else.
 
-use std::convert::Infallible;
+#[path = "../../../shared/ndjson.rs"]
+mod ndjson;
 
 use axum::Json;
-use axum::body::Body;
 use axum::extract::{Query, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::HeaderMap;
 use axum::response::Response;
-use bytes::Bytes;
 use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -374,18 +373,7 @@ pub async fn stream(
             }
         }
     });
-    let body = tokio_stream::once(hello).chain(follow).map(|event| {
-        let mut line = serde_json::to_string(&event)
-            .unwrap_or_else(|_| json!({ "type": "unavailable" }).to_string());
-        line.push('\n');
-        Ok::<Bytes, Infallible>(Bytes::from(line))
-    });
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
-        .header(header::CACHE_CONTROL, "no-store")
-        .body(Body::from_stream(body))
-        .expect("valid streaming response")
+    ndjson::ndjson_response(tokio_stream::once(hello).chain(follow))
 }
 
 fn event_matches(event: &LiveEvent, channel: &str) -> bool {
