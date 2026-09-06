@@ -619,4 +619,136 @@ mod tests {
         ))
         .await;
     }
+
+    struct PermitSlots(Arc<tokio::sync::Semaphore>);
+
+    #[async_trait::async_trait]
+    impl crate::runtime::WorkerSlotSupplier for PermitSlots {
+        async fn reserve_slot(
+            &self,
+            _: crate::runtime::WorkerSlotKind,
+        ) -> crate::runtime::WorkerSlotPermit {
+            crate::runtime::WorkerSlotPermit::new(self.0.clone().acquire_owned().await.unwrap())
+        }
+        fn try_reserve_slot(
+            &self,
+            _: crate::runtime::WorkerSlotKind,
+        ) -> Option<crate::runtime::WorkerSlotPermit> {
+            self.0
+                .clone()
+                .try_acquire_owned()
+                .ok()
+                .map(crate::runtime::WorkerSlotPermit::new)
+        }
+        fn available_slots(&self, _: crate::runtime::WorkerSlotKind) -> usize {
+            self.0.available_permits()
+        }
+    }
+
+    struct ParkPermit(tokio::sync::mpsc::Sender<()>);
+
+    #[async_trait::async_trait]
+    impl crate::ToolProvider for ParkPermit {
+        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+            vec![park_forever_definition().manifest()]
+        }
+        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+            (name == "park_forever").then(|| Arc::new(park_forever_definition().contract()))
+        }
+        async fn execute(&self, _: crate::ToolCall<'_>) -> crate::ToolOutcome {
+            crate::runtime::process_worker::release_process_execution_permit_while(async {
+                self.0.send(()).await.unwrap();
+                std::future::pending::<crate::ToolOutcome>().await
+            })
+            .await
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_session_turn_reacquires_budget_one_permit() {
+        use crate::runtime::{WorkerSlotKind, WorkerSlotSupplier};
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+        let supplier = Arc::new(PermitSlots(semaphore.clone()));
+        let permit = supplier.reserve_slot(WorkerSlotKind::Process).await;
+        Box::pin(crate::runtime::process_worker::scope_process_execution_permit(
+            supplier,
+            permit,
+            Arc::new(tokio::sync::Notify::new()),
+            async {
+                let (started_tx, mut started_rx) = tokio::sync::mpsc::channel(1);
+                let transport = mock_provider(vec![MockCall {
+                    stream_events: vec![LlmStreamEvent::Part(crate::LlmOutputPart::ToolCall {
+                        call_id: "park-slot".into(),
+                        tool_name: "park_forever".into(),
+                        input_json: "{}".into(),
+                        replay: None,
+                    })],
+                    response: Ok(crate::LlmResponse::default()),
+                }]);
+                let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+                    crate::CommitBudget::bounded(1024 * 1024, 512),
+                    crate::QueuedWorkBatchingConfig::new(1),
+                ))
+                .with_session_store_factory(Arc::new(crate::InMemorySessionStoreFactory::new()));
+                let runtime = runtime_with_plugins_and_tools_and_host(
+                    Vec::new(),
+                    Arc::new(ParkPermit(started_tx)),
+                    transport,
+                    host,
+                )
+                .await;
+                let services = runtime.runtime_session_services().unwrap();
+                let request = crate::SessionCreateRequest::child_session(
+                    runtime.session_id(),
+                    crate::SessionStartPoint::Empty,
+                    crate::PluginOptions::default(),
+                )
+                .with_session_id("permit-child")
+                .with_plugin_source(crate::SessionPluginSource::CurrentSessionFork);
+                let registration = crate::ProcessRegistration::new(
+                    "permit-process",
+                    crate::ProcessInput::SessionTurn {
+                        definition_key: "lash-subagent-session-turn:v1".into(),
+                        create_request: Box::new(request.clone()),
+                        turn_input: Box::new(crate::TurnInput::text("park")),
+                        output_contract: crate::ToolOutputContract::Static,
+                    },
+                    crate::RecoveryContract::Rerunnable,
+                    crate::ProcessProvenance::host(),
+                );
+                let cancellation = tokio_util::sync::CancellationToken::new();
+                let mut run = Box::pin(services.run_process_session_turn(
+                    registration,
+                    request,
+                    crate::TurnInput::text("park"),
+                    named_turn_scope("permit-child", "permit-process"),
+                    cancellation.clone(),
+                ));
+                tokio::select! {
+                    started = started_rx.recv() => assert_eq!(started, Some(())),
+                    result = run.as_mut() => panic!("child finished before parking: {result:?}"),
+                }
+                assert_eq!(
+                    semaphore.available_permits(),
+                    1,
+                    "child parked the shared slot"
+                );
+                cancellation.cancel();
+                let output = tokio::time::timeout(std::time::Duration::from_secs(5), run)
+                    .await
+                    .expect("cancelled session turn settles")
+                    .unwrap();
+                assert!(matches!(
+                    output.into_tool_output().outcome,
+                    crate::ToolCallOutcome::Cancelled(_)
+                ));
+                assert_eq!(
+                    semaphore.available_permits(),
+                    0,
+                    "cancelled SessionTurn must reacquire its execution slot before returning"
+                );
+            },
+        ))
+        .await;
+    }
 }
