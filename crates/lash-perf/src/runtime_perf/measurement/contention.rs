@@ -68,6 +68,7 @@ async fn run_contention_wave(
     holder_session: lash::LashSession,
     target_sessions: &[lash::LashSession],
     control: Arc<super::providers::BenchmarkProviderControl>,
+    expect_contention: bool,
 ) -> anyhow::Result<ContentionWave> {
     let mut execution_ms = Vec::with_capacity(target_sessions.len());
     for (ordinal, session) in target_sessions.iter().enumerate() {
@@ -89,25 +90,28 @@ async fn run_contention_wave(
     provider_started.await;
     let release_latency_started = Instant::now();
 
-    let (ready_tx, mut ready_rx) = tokio::sync::mpsc::unbounded_channel();
+    let waiter_barrier = Arc::new(tokio::sync::Barrier::new(target_sessions.len() + 1));
+    let completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut waiters = tokio::task::JoinSet::new();
     for (ordinal, session) in target_sessions.iter().cloned().enumerate() {
-        let ready_tx = ready_tx.clone();
+        let waiter_barrier = Arc::clone(&waiter_barrier);
+        let completed = Arc::clone(&completed);
         waiters.spawn(async move {
-            ready_tx
-                .send(())
-                .map_err(|_| anyhow::anyhow!("writer contention ready receiver dropped"))?;
-            measure_writer_operation(session, scenario, operation, ordinal).await
+            waiter_barrier.wait().await;
+            let result = measure_writer_operation(session, scenario, operation, ordinal).await;
+            completed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            result
         });
     }
-    drop(ready_tx);
-    for _ in target_sessions {
-        ready_rx
-            .recv()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("writer contention waiter exited before ready"))?;
-    }
+    waiter_barrier.wait().await;
     tokio::task::yield_now().await;
+    if expect_contention {
+        assert_eq!(
+            completed.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "writer contention witness: a waiter completed before the held writer was released"
+        );
+    }
     let release_latency_ms = elapsed_ms(release_latency_started);
     control.release_provider.notify_one();
 
@@ -118,11 +122,8 @@ async fn run_contention_wave(
     holder.await.map_err(anyhow::Error::from)??;
     contended_ms.sort_by(f64::total_cmp);
     execution_ms.sort_by(f64::total_cmp);
-    // The facade does not expose its writer acquisition instant. Pairing the
-    // ordered contended latencies with ordered uncontended executions leaves
-    // the excess residence as the harness-level writer-wait witness. The
-    // many-session shape runs the same work without a shared writer and is the
-    // control for scheduler/provider overhead in that subtraction.
+    // Latencies are benchmark evidence only. The same-session barrier assertion
+    // above is the correctness witness that the held writer blocked waiters.
     let wait_ms = contended_ms
         .iter()
         .zip(&execution_ms)
@@ -140,15 +141,6 @@ async fn run_contention_wave(
 mod contention_tests {
     use super::*;
 
-    fn median(mut values: Vec<f64>) -> f64 {
-        values.sort_by(f64::total_cmp);
-        if values.len().is_multiple_of(2) {
-            (values[values.len() / 2 - 1] + values[values.len() / 2]) / 2.0
-        } else {
-            values[values.len() / 2]
-        }
-    }
-
     #[tokio::test]
     async fn writer_contention_smoke_reports_wait_release_latency_and_execution() {
         let result = Box::pin(run_once_writer_contention(
@@ -157,17 +149,6 @@ mod contention_tests {
         ))
         .await
         .expect("writer contention smoke");
-        let same_wait = result
-            .metric_samples_ms
-            .get("writer_contention.same_session.wait_ms")
-            .expect("same-session wait metric");
-        let many_wait = result
-            .metric_samples_ms
-            .get("writer_contention.many_sessions.wait_ms")
-            .expect("many-session wait metric");
-
-        assert!(same_wait.iter().any(|sample| *sample > 0.0));
-        assert!(median(many_wait.clone()) < median(same_wait.clone()));
         for scope in ["same_session", "many_sessions"] {
             for phase in ["wait_ms", "release_latency_ms", "execution_ms"] {
                 assert!(
@@ -408,6 +389,7 @@ pub(crate) async fn run_once_writer_contention(
             main_session.clone(),
             &same_session_targets,
             Arc::clone(&control),
+            true,
         )
         .await?;
         push_contention_wave_metrics(&mut metric_samples_ms, "same_session", operation, wave);
@@ -418,6 +400,7 @@ pub(crate) async fn run_once_writer_contention(
             main_session.clone(),
             &peer_sessions,
             Arc::clone(&control),
+            false,
         )
         .await?;
         push_contention_wave_metrics(&mut metric_samples_ms, "many_sessions", operation, wave);
