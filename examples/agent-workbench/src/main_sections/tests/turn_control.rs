@@ -6,6 +6,62 @@ mod turn_control_timeout_tests {
     };
     use super::*;
 
+    struct ExpiringTerminalAttach {
+        started: tokio::sync::mpsc::UnboundedSender<lash::TurnAddress>,
+        release: tokio::sync::Mutex<tokio::sync::oneshot::Receiver<()>>,
+    }
+
+    #[async_trait::async_trait]
+    impl lash::TurnAttach for ExpiringTerminalAttach {
+        async fn await_terminal(
+            &self,
+            address: &lash::TurnAddress,
+        ) -> Result<lash::TurnTerminal, lash::runtime::RuntimeError> {
+            self.started
+                .send(address.clone())
+                .expect("acknowledge attachment installation");
+            (&mut *self.release.lock().await)
+                .await
+                .expect("explicit attachment completion");
+            Err(lash::runtime::RuntimeError::new(
+                lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout,
+                "mock attachment completed without a terminal",
+            ))
+        }
+    }
+
+    fn expiring_terminal_driver(
+        state: &AppState,
+    ) -> (lash::TurnWorkDriver, impl Future<Output = ()> + use<>) {
+        let (started, mut installed) = tokio::sync::mpsc::unbounded_channel();
+        let (complete, release) = tokio::sync::oneshot::channel();
+        let driver = state
+            .core
+            .turn_work_driver()
+            .with_attach(Arc::new(ExpiringTerminalAttach {
+                started,
+                release: tokio::sync::Mutex::new(release),
+            }));
+        let stores = Arc::clone(&state.session_store_factory);
+        (driver, async move {
+            let address = installed.recv().await.expect("attachment started");
+            let store = stores
+                .open_existing_store_by_id(&address.session_id)
+                .await
+                .expect("read durable cancellation store")
+                .expect("cancellation store exists");
+            assert!(
+                store
+                    .turn_cancel_request(&address)
+                    .await
+                    .expect("read durable cancel acknowledgement")
+                    .is_some(),
+                "durable cancellation must precede terminal attachment"
+            );
+            complete.send(()).expect("complete mocked attachment");
+        })
+    }
+
     #[test]
     fn turn_input_route_records_exact_active_and_next_turn_ingress() {
         run_async_test_on_stack_budget("workbench-turn-input-route-test", || {
@@ -348,10 +404,14 @@ mod turn_control_timeout_tests {
         let mut events = state.event_tx.subscribe(&session_id);
         state.track_turn(&session_id, "dangling-turn");
 
-        let receipts = tokio::time::timeout(
-            Duration::from_secs(1),
-            state.cancel_turns_for_session(&session_id),
-        )
+        let (driver, acknowledge) = expiring_terminal_driver(&state);
+        let receipts = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(
+                state.cancel_turns_for_session_with_driver(&session_id, &driver),
+                acknowledge
+            )
+            .0
+        })
         .await
         .expect("Stop must not hang on a dangling routed turn")
         .expect("cancel dangling turn");
@@ -400,15 +460,20 @@ mod turn_control_timeout_tests {
         let mut events = state.event_tx.subscribe(&session_id);
         state.track_turn(&session_id, "live-turn");
 
-        let response = tokio::time::timeout(
-            Duration::from_secs(1),
-            cancel_turn(
-                State(state.clone()),
-                Query(SessionQuery {
-                    session_id: Some(session_id.clone()),
-                }),
-            ),
-        )
+        let (driver, acknowledge) = expiring_terminal_driver(&state);
+        let response = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(
+                cancel_turn_with_driver(
+                    state.clone(),
+                    SessionQuery {
+                        session_id: Some(session_id.clone())
+                    },
+                    &driver,
+                ),
+                acknowledge
+            )
+            .0
+        })
         .await
         .expect("Stop must return after the bounded terminal attachment")
         .expect("cancel live turn")

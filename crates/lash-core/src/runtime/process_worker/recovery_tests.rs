@@ -167,20 +167,20 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
     runtime_host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(provider));
     let policy = test_session_policy();
-    let worker = DurableProcessWorker::new(
-        DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(
-                crate::testing::test_standard_protocol_factories(),
-            )),
-            runtime_host,
-            Arc::new(TestSessionStoreFactory),
-            crate::WorkerProcessWork::External(process_work),
-            Arc::new(crate::NoQueuedWork::new()),
-            local_owner("terminal-fence-worker", "host-a", "terminal-fence-start"),
-        )
-        .with_session_policy(policy),
+    let watcher_ready = Arc::new(tokio::sync::Notify::new());
+    let mut config = DurableProcessWorkerConfig::new(
+        Arc::new(PluginHost::new(
+            crate::testing::test_standard_protocol_factories(),
+        )),
+        runtime_host,
+        Arc::new(TestSessionStoreFactory),
+        crate::WorkerProcessWork::External(process_work),
+        Arc::new(crate::NoQueuedWork::new()),
+        local_owner("terminal-fence-worker", "host-a", "terminal-fence-start"),
     )
-    .expect("valid terminal-fence worker");
+    .with_session_policy(policy);
+    config.cancel_watcher_ready = Some(Arc::clone(&watcher_ready));
+    let worker = DurableProcessWorker::new(config).expect("valid terminal-fence worker");
     run_handle
         .worker
         .set(worker)
@@ -200,13 +200,10 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
         .expect("admit SessionTurn fence fixture");
     assert_eq!(report.admitted, vec![process_id.to_string()]);
     provider_started.notified().await;
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while raw_registry.process_events_read_count_for_testing() < 3 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("cancel watcher reaches its durable wait before runner completion");
+    tokio::time::timeout(Duration::from_secs(5), watcher_ready.notified())
+        .await
+        .expect("cancel watcher reaches its durable wait before runner completion");
+    assert!(raw_registry.process_events_read_count_for_testing() >= 3);
     raw_registry
         .append_event(
             process_id,
@@ -221,25 +218,28 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
     // advances this race after the durable cancellation commit.
     provider_release.add_permits(1);
 
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let record = registry
-                .get_process(process_id)
-                .await
-                .expect("read SessionTurn fence fixture")
-                .expect("SessionTurn fence fixture remains retained");
-            let lease = registry
-                .get_process_lease(process_id)
-                .await
-                .expect("read SessionTurn fence lease");
-            if record.first_started.is_some() && lease.is_none() {
-                break;
-            }
-            tokio::task::yield_now().await;
+    // A runnable yield loop prevents Tokio's paused clock from auto-advancing.
+    // Bound it with wall time so a fence regression fails inside this test.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "fenced recovery attempt releases its lease"
+        );
+        let record = registry
+            .get_process(process_id)
+            .await
+            .expect("read SessionTurn fence fixture")
+            .expect("SessionTurn fence fixture remains retained");
+        let lease = registry
+            .get_process_lease(process_id)
+            .await
+            .expect("read SessionTurn fence lease");
+        if record.first_started.is_some() && lease.is_none() {
+            break;
         }
-    })
-    .await
-    .expect("fenced recovery attempt releases its lease");
+        tokio::task::yield_now().await;
+    }
     let record = registry
         .get_process(process_id)
         .await

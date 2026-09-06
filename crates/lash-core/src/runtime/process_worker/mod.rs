@@ -97,6 +97,8 @@ pub enum WorkerProcessWork {
 /// for the deployment that owns those rows.
 #[derive(Clone)]
 pub struct DurableProcessWorkerConfig {
+    #[cfg(test)]
+    cancel_watcher_ready: Option<Arc<tokio::sync::Notify>>,
     pub plugin_host: Arc<PluginHost>,
     pub runtime_host: RuntimeHostConfig,
     pub session_policy: crate::SessionPolicy,
@@ -151,6 +153,8 @@ impl DurableProcessWorkerConfig {
             session_policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             session_store_factory,
             process_event_sink: None,
+            #[cfg(test)]
+            cancel_watcher_ready: None,
             trigger_store: Arc::new(crate::InMemoryTriggerStore::with_clock(clock)),
             native_substrate: crate::NativeSubstrateConfig::default(),
             process_work,
@@ -1328,12 +1332,24 @@ impl DurableProcessWorker {
             let process_work = self.process_wiring();
             let process_id = process_id.clone();
             let cancellation = cancellation.clone();
+            #[cfg(test)]
+            let ready = self.config.cancel_watcher_ready.clone();
             crate::task::spawn(async move {
-                match process_work
-                    .event_awaiter()
-                    .await_event(&process_id, "process.cancel_requested", 0)
-                    .await
-                {
+                let wait = process_work.event_awaiter().await_event(
+                    &process_id,
+                    "process.cancel_requested",
+                    0,
+                );
+                tokio::pin!(wait);
+                #[cfg(test)]
+                if let Some(ready) = ready {
+                    assert!(
+                        futures_util::poll!(&mut wait).is_pending(),
+                        "cancel watcher parks"
+                    );
+                    ready.notify_one();
+                }
+                match wait.await {
                     Ok(_) => {
                         cancellation.cancel();
                         std::future::pending::<Result<(), PluginError>>().await

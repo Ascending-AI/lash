@@ -351,10 +351,21 @@ mod tests {
 
     #[tokio::test]
     async fn network_failure_is_retryable() {
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let address = listener.local_addr().unwrap();
-        drop(listener);
-        let request_error = reqwest::get(format!("http://{address}")).await.unwrap_err();
+        // Reserve the port without listening: connects are refused, and no other
+        // listener can take the address between reservation and the request.
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let address = socket.local_addr().unwrap();
+        assert!(std::net::TcpListener::bind(address).is_err());
+        let request_error = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(format!("http://{address}"))
+            .send()
+            .await
+            .unwrap_err();
+        drop(socket);
         assert!(request_error.is_connect());
 
         let error = classify_oauth_refresh_error(OAuthError::Http(request_error));

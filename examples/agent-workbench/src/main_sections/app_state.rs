@@ -353,9 +353,19 @@ impl AppState {
 
     /// Fan out exact-address cooperative cancellation to the active turns the
     /// UI submitted for `session_id`.
+    #[cfg(test)]
     async fn cancel_turns_for_session(
         &self,
         session_id: &str,
+    ) -> Result<Vec<TurnCancelReceipt>, AppError> {
+        self.cancel_turns_for_session_with_driver(session_id, &self.core.turn_work_driver())
+            .await
+    }
+
+    async fn cancel_turns_for_session_with_driver(
+        &self,
+        session_id: &str,
+        driver: &lash::TurnWorkDriver,
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
         let active = self.active_turns.for_session(session_id);
         let mut policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
@@ -388,7 +398,6 @@ impl AppState {
         let mut done_events = Vec::with_capacity(active.len());
         for address in active {
             let request_id = format!("workbench-stop-{}", uuid::Uuid::new_v4());
-            let driver = self.core.turn_work_driver();
             let cancel = driver
                 .request_cancel(
                     lash::TurnCancelRequest::new(
@@ -404,7 +413,7 @@ impl AppState {
             let receipt = match cancel.outcome {
                 lash::TurnCancelOutcome::Requested(evidence) => {
                     attach_recorded_cancel_terminal(
-                        &driver,
+                        driver,
                         address.clone(),
                         RecordedTurnCancellation::Requested(evidence),
                     )
@@ -412,7 +421,7 @@ impl AppState {
                 }
                 lash::TurnCancelOutcome::AlreadyRequested(evidence) => {
                     attach_recorded_cancel_terminal(
-                        &driver,
+                        driver,
                         address.clone(),
                         RecordedTurnCancellation::AlreadyRequested(evidence),
                     )
