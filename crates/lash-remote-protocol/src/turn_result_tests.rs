@@ -166,3 +166,29 @@ fn process_status_sets_pin_vocabulary_and_refuse_removed_fields() {
     assert!(!core.matches(lash_core::ProcessStatus::Completed));
     assert!(lash_core::ProcessListFilter::decode(&serde_json::json!({"waiting":false})).is_err());
 }
+
+#[test]
+fn remote_provider_failure_kind_refuses_future_literals() {
+    assert!(
+        serde_json::from_value::<RemoteProviderFailureKind>(serde_json::json!("future_kind"))
+            .is_err()
+    );
+    for (kind, literal) in [
+        (RemoteProviderFailureKind::Transport, "transport"),
+        (RemoteProviderFailureKind::Timeout, "timeout"),
+        (RemoteProviderFailureKind::Http, "http"),
+        (RemoteProviderFailureKind::Stream, "stream"),
+        (RemoteProviderFailureKind::Auth, "auth"),
+        (RemoteProviderFailureKind::Validation, "validation"),
+        (RemoteProviderFailureKind::Quota, "quota"),
+        (RemoteProviderFailureKind::Unsupported, "unsupported"),
+        (RemoteProviderFailureKind::Unknown, "unknown"),
+    ] {
+        assert_eq!(serde_json::to_value(kind).unwrap(), literal);
+        assert_eq!(
+            serde_json::from_value::<RemoteProviderFailureKind>(serde_json::json!(literal))
+                .unwrap(),
+            kind
+        );
+    }
+}
