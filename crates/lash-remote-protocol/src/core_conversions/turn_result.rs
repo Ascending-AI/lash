@@ -68,12 +68,6 @@ impl RemoteTurnReport {
         for child in &children {
             total.add(&child.usage);
         }
-        // `status` and the top-level `cancellation` field are projections of
-        // the outcome; the outcome is the only place either fact is stated.
-        let cancellation = outcome
-            .cancellation()
-            .cloned()
-            .map(RemoteTurnCancellationEvidence::from);
         let outcome = RemoteTurnOutcome::from(outcome);
         let status = RemoteTurnStatus::from(&outcome);
         Self {
@@ -81,7 +75,6 @@ impl RemoteTurnReport {
             turn_id: turn_id.into(),
             status,
             outcome,
-            cancellation,
             assistant_output: assistant_output.into(),
             usage: RemoteTurnUsageReport {
                 parent,
@@ -89,7 +82,10 @@ impl RemoteTurnReport {
                 total,
             },
             execution: execution.into(),
-            tool_calls: tool_calls.into_iter().map(RemoteToolCallRecord::from).collect(),
+            tool_calls: tool_calls
+                .into_iter()
+                .map(RemoteToolCallRecord::from)
+                .collect(),
             llm_calls: llm_calls.into_iter().map(Into::into).collect(),
             issues: errors.into_iter().map(Into::into).collect(),
             activities,
@@ -113,7 +109,9 @@ impl From<lash_core::facade_support::TurnOutcome> for RemoteTurnOutcome {
                     task,
                 }
             }
-            lash_core::facade_support::TurnOutcome::Stopped(stop) => Self::Stopped { stop: stop.into() },
+            lash_core::facade_support::TurnOutcome::Stopped(stop) => {
+                Self::Stopped { stop: stop.into() }
+            }
         }
     }
 }
@@ -121,8 +119,12 @@ impl From<lash_core::facade_support::TurnOutcome> for RemoteTurnOutcome {
 impl From<lash_core::facade_support::TurnFinish> for RemoteTurnFinish {
     fn from(value: lash_core::facade_support::TurnFinish) -> Self {
         match value {
-            lash_core::facade_support::TurnFinish::AssistantMessage { text } => Self::AssistantMessage { text },
-            lash_core::facade_support::TurnFinish::FinalValue { value } => Self::FinalValue { value },
+            lash_core::facade_support::TurnFinish::AssistantMessage { text } => {
+                Self::AssistantMessage { text }
+            }
+            lash_core::facade_support::TurnFinish::FinalValue { value } => {
+                Self::FinalValue { value }
+            }
             lash_core::facade_support::TurnFinish::ToolValue { tool_name, value } => {
                 Self::ToolValue { tool_name, value }
             }
@@ -133,7 +135,9 @@ impl From<lash_core::facade_support::TurnFinish> for RemoteTurnFinish {
 impl From<lash_core::facade_support::TurnStop> for RemoteTurnStop {
     fn from(value: lash_core::facade_support::TurnStop) -> Self {
         match value {
-            lash_core::facade_support::TurnStop::Cancelled { .. } => Self::Cancelled,
+            lash_core::facade_support::TurnStop::Cancelled { evidence } => Self::Cancelled {
+                evidence: evidence.into(),
+            },
             lash_core::facade_support::TurnStop::Incomplete => Self::Incomplete,
             lash_core::facade_support::TurnStop::InvalidInput => Self::InvalidInput,
             lash_core::facade_support::TurnStop::MaxTurns => Self::MaxTurns,
@@ -141,7 +145,9 @@ impl From<lash_core::facade_support::TurnStop> for RemoteTurnStop {
             lash_core::facade_support::TurnStop::ProviderError => Self::ProviderError,
             lash_core::facade_support::TurnStop::PluginAbort => Self::PluginAbort,
             lash_core::facade_support::TurnStop::RuntimeError => Self::RuntimeError,
-            lash_core::facade_support::TurnStop::SubmittedError { value } => Self::SubmittedError { value },
+            lash_core::facade_support::TurnStop::SubmittedError { value } => {
+                Self::SubmittedError { value }
+            }
             lash_core::facade_support::TurnStop::ToolError { tool_name, value } => {
                 Self::ToolError { tool_name, value }
             }

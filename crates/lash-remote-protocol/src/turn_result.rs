@@ -22,10 +22,6 @@ pub struct RemoteTurnReport {
     /// window (FIG-2406).
     pub status: RemoteTurnStatus,
     pub outcome: RemoteTurnOutcome,
-    /// Wire projection of the cancellation evidence carried by
-    /// `outcome`. Present exactly when `status == cancelled`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cancellation: Option<RemoteTurnCancellationEvidence>,
     pub assistant_output: RemoteAssistantOutput,
     #[serde(default)]
     pub usage: RemoteTurnUsageReport,
@@ -71,13 +67,6 @@ impl RemoteTurnReport {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty("RemoteTurnReport", "session_id", &self.session_id)?;
         require_non_empty("RemoteTurnReport", "turn_id", &self.turn_id)?;
-        if (self.status == RemoteTurnStatus::Cancelled) != self.cancellation.is_some() {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name: "RemoteTurnReport",
-                message: "cancellation evidence must be present if and only if status is cancelled"
-                    .to_string(),
-            });
-        }
         let expected_status = RemoteTurnStatus::from(&self.outcome);
         if self.status != expected_status {
             return Err(RemoteProtocolError::InvalidEnvelope {
@@ -85,8 +74,11 @@ impl RemoteTurnReport {
                 message: format!("turn status `{:?}` contradicts its outcome", self.status),
             });
         }
-        if let Some(cancellation) = self.cancellation.as_ref() {
-            cancellation.validate()?;
+        if let RemoteTurnOutcome::Stopped {
+            stop: RemoteTurnStop::Cancelled { evidence },
+        } = &self.outcome
+        {
+            evidence.validate()?;
         }
         let mut summary_records = HashMap::new();
         for record in &self.llm_calls {
@@ -215,7 +207,9 @@ pub enum RemoteTurnFinish {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteTurnStop {
-    Cancelled,
+    Cancelled {
+        evidence: RemoteTurnCancellationEvidence,
+    },
     Incomplete,
     InvalidInput,
     MaxTurns,
@@ -239,7 +233,7 @@ impl From<&RemoteTurnOutcome> for RemoteTurnStatus {
                 Self::Completed
             }
             RemoteTurnOutcome::Stopped {
-                stop: RemoteTurnStop::Cancelled,
+                stop: RemoteTurnStop::Cancelled { .. },
             } => Self::Cancelled,
             RemoteTurnOutcome::Stopped { .. } => Self::Failed,
         }
