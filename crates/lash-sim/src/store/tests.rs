@@ -139,3 +139,59 @@ fn abstract_worker_projection_fabricates_no_fencing() {
     assert!(observed.get("lease_owner_changed").is_none());
     assert!(observed.get("active_fencing_token").is_none());
 }
+
+#[test]
+fn pending_input_cancellation_respects_admission_order_and_terminal_states() {
+    for claim_first in [false, true] {
+        let mut store = ModelStore::default();
+        store.apply_boundary(&BoundaryEvent::new(
+            "input",
+            "session",
+            BoundaryKind::QueuedIngress,
+            0,
+            "queued",
+            json!({"ingress_mode": "next_turn"}),
+        ));
+        let admissions = [json!({"session": "session", "provider_boundary": "provider"})];
+        let cancel = BoundaryEvent::new(
+            "cancel",
+            "session",
+            BoundaryKind::Cancellation,
+            1,
+            "cancel",
+            json!({"target": "input"}),
+        );
+        if claim_first {
+            store.apply_provider_admissions(&admissions);
+        }
+        let first = store.apply_boundary(&cancel);
+        assert_eq!(first["cancelled"], !claim_first);
+        assert_eq!(
+            first["cancel_outcome"],
+            if claim_first {
+                "already_claimed"
+            } else {
+                "cancelled"
+            }
+        );
+        store.apply_provider_admissions(&admissions);
+        store.apply_boundary(&BoundaryEvent::new(
+            "provider",
+            "session",
+            BoundaryKind::Provider,
+            2,
+            "provider",
+            json!({}),
+        ));
+        let repeated = store.apply_boundary(&cancel);
+        assert_eq!(repeated["cancelled"], false);
+        assert_eq!(
+            repeated["cancel_outcome"],
+            if claim_first {
+                "already_completed"
+            } else {
+                "already_cancelled"
+            }
+        );
+    }
+}

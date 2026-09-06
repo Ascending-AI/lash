@@ -101,7 +101,7 @@ pub(super) async fn drive_generated_workload(
         delivered.observed = observed;
         completion_state.observe(&delivered);
         completion_queue.mark_completed(&delivered.boundary_id);
-        register_ready_runtime_completions(
+        let admissions = register_ready_runtime_completions(
             &mut completion_queue,
             &mut completion_state,
             &mut scheduler,
@@ -109,6 +109,10 @@ pub(super) async fn drive_generated_workload(
             world,
         )
         .await?;
+        store.apply_provider_admissions(&admissions);
+        if !admissions.is_empty() {
+            delivered.payload["provider_admissions"] = json!(admissions);
+        }
         world
             .schedule_finished_provider_turns(&mut scheduler)
             .await?;

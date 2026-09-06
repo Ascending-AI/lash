@@ -148,6 +148,21 @@ fn backend_fault_store_error(operation: &str, attempt: usize, retryable: bool) -
     }
 }
 
+#[derive(Clone, Debug)]
+enum ModelPendingInputState {
+    Queued,
+    Claimed(String),
+    Completed,
+    Cancelled,
+}
+
+#[derive(Clone, Debug)]
+struct ModelPendingInput {
+    session: String,
+    next_turn: bool,
+    state: ModelPendingInputState,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ModelStore {
     sessions: BTreeMap<String, ModelSession>,
@@ -160,12 +175,32 @@ pub struct ModelStore {
     exec_executions: BTreeMap<String, usize>,
     rejected_provider_mutations: BTreeSet<String>,
     delivered_process_wake_ids: BTreeSet<String>,
-    queued_input_boundaries: BTreeSet<String>,
+    queued_input_boundaries: BTreeMap<String, ModelPendingInput>,
     pending_turn_input_seq_by_session: BTreeMap<String, u64>,
     total_events: usize,
 }
 
 impl ModelStore {
+    /// Admission occurs at provider start, before its completion is delivered.
+    /// Only queued next-turn inputs are eligible; cancellation remains a local
+    /// lifecycle transition whose outcome is independently projected.
+    pub(crate) fn apply_provider_admissions(&mut self, admissions: &[Value]) {
+        for admission in admissions {
+            let session = admission["session"].as_str().expect("admission session");
+            let provider = admission["provider_boundary"]
+                .as_str()
+                .expect("admission provider");
+            for input in self.queued_input_boundaries.values_mut() {
+                if input.session == session
+                    && input.next_turn
+                    && matches!(input.state, ModelPendingInputState::Queued)
+                {
+                    input.state = ModelPendingInputState::Claimed(provider.to_string());
+                }
+            }
+        }
+    }
+
     pub fn open_session(&mut self, alias: impl Into<String>) {
         let alias = alias.into();
         self.sessions
@@ -202,10 +237,23 @@ impl ModelStore {
             BoundaryKind::QueuedIngress => {
                 let session = self.ensure_session(event.actor_alias.clone());
                 session.queued_ingress_count += 1;
-                self.queued_input_boundaries
-                    .insert(event.boundary_id.clone());
+                self.queued_input_boundaries.insert(
+                    event.boundary_id.clone(),
+                    ModelPendingInput {
+                        session: event.actor_alias.clone(),
+                        next_turn: event.payload.get("ingress_mode").and_then(Value::as_str)
+                            == Some("next_turn"),
+                        state: ModelPendingInputState::Queued,
+                    },
+                );
             }
             BoundaryKind::Provider => {
+                for input in self.queued_input_boundaries.values_mut() {
+                    if matches!(&input.state, ModelPendingInputState::Claimed(provider) if provider == &event.boundary_id)
+                    {
+                        input.state = ModelPendingInputState::Completed;
+                    }
+                }
                 let session = self.ensure_session(event.actor_alias.clone());
                 let provider_kind = event
                     .payload
@@ -323,6 +371,15 @@ impl ModelStore {
             BoundaryKind::Cancellation => {
                 let session = self.ensure_session(event.actor_alias.clone());
                 session.cancellation_count += 1;
+                if let Some(input) = event
+                    .payload
+                    .get("target")
+                    .and_then(Value::as_str)
+                    .and_then(|target| self.queued_input_boundaries.get_mut(target))
+                    && matches!(input.state, ModelPendingInputState::Queued)
+                {
+                    input.state = ModelPendingInputState::Cancelled;
+                }
             }
             BoundaryKind::Trigger => {
                 let session = self.ensure_session(boundary_session_alias(event));
@@ -979,13 +1036,21 @@ impl ModelStore {
             }
             BoundaryKind::Cancellation => {
                 let target = event.payload.get("target").and_then(Value::as_str);
-                let cancelled =
-                    target.is_some_and(|target| self.queued_input_boundaries.contains(target));
+                let outcome =
+                    match target.and_then(|target| self.queued_input_boundaries.get(target)) {
+                        Some(input) => match input.state {
+                            ModelPendingInputState::Queued => "cancelled",
+                            ModelPendingInputState::Claimed(_) => "already_claimed",
+                            ModelPendingInputState::Completed => "already_completed",
+                            ModelPendingInputState::Cancelled => "already_cancelled",
+                        },
+                        None => "not_found",
+                    };
                 json!({
                     "session": event.actor_alias,
                     "target": event.payload.get("target").cloned().unwrap_or(Value::Null),
-                    "cancelled": cancelled,
-                    "cancel_outcome": if cancelled { "cancelled" } else { "not_found" },
+                    "cancelled": outcome == "cancelled",
+                    "cancel_outcome": outcome,
                 })
             }
             BoundaryKind::Trigger => {

@@ -1,5 +1,5 @@
 {
-  "schema": "lash.sim.trace.v1",
+  "schema": "lash.sim.trace.v2",
   "seed": 7313380382653661636,
   "generator_version": "lash-sim.generated-workload.v9",
   "profile": "fast-random",
@@ -70,7 +70,13 @@
           "planned_provider_turns": 2,
           "profile": "fast-random",
           "seed": 7313380382653661636
-        }
+        },
+        "provider_admissions": [
+          {
+            "session": "session-001",
+            "provider_boundary": "session-001:provider:001"
+          }
+        ]
       },
       "observed": {
         "ingress_count": 1,
@@ -122,7 +128,13 @@
           "planned_provider_turns": 2,
           "profile": "fast-random",
           "seed": 7313380382653661636
-        }
+        },
+        "provider_admissions": [
+          {
+            "session": "session-002",
+            "provider_boundary": "session-002:provider:001"
+          }
+        ]
       },
       "observed": {
         "ingress_count": 1,
@@ -174,7 +186,13 @@
           "planned_provider_turns": 2,
           "profile": "fast-random",
           "seed": 7313380382653661636
-        }
+        },
+        "provider_admissions": [
+          {
+            "session": "session-003",
+            "provider_boundary": "session-003:provider:001"
+          }
+        ]
       },
       "observed": {
         "ingress_count": 1,
@@ -233,7 +251,13 @@
           "planned_provider_turns": 3,
           "profile": "fast-random",
           "seed": 7313380382653661636
-        }
+        },
+        "provider_admissions": [
+          {
+            "session": "session-004",
+            "provider_boundary": "session-004:provider:001"
+          }
+        ]
       },
       "observed": {
         "ingress_count": 1,
@@ -1014,7 +1038,13 @@
         },
         "script": "openai-compatible.chat-runtime-text-stream",
         "text": "answer 1 for session-001 seed 7313380382653661636 profile fast-random path ccc3",
-        "turn_index": 1
+        "turn_index": 1,
+        "provider_admissions": [
+          {
+            "session": "session-001",
+            "provider_boundary": "session-001:provider:002"
+          }
+        ]
       },
       "observed": {
         "activity_count_nonzero": true,
@@ -1987,7 +2017,13 @@
         },
         "script": "openai.responses-text-stream",
         "text": "answer 1 for session-002 seed 7313380382653661636 profile fast-random path 91ad",
-        "turn_index": 1
+        "turn_index": 1,
+        "provider_admissions": [
+          {
+            "session": "session-002",
+            "provider_boundary": "session-002:provider:002"
+          }
+        ]
       },
       "observed": {
         "activity_count_nonzero": true,
@@ -2831,7 +2867,13 @@
         },
         "script": "anthropic.messages-text-stream",
         "text": "answer 1 for session-003 seed 7313380382653661636 profile fast-random path eca7",
-        "turn_index": 1
+        "turn_index": 1,
+        "provider_admissions": [
+          {
+            "session": "session-003",
+            "provider_boundary": "session-003:provider:002"
+          }
+        ]
       },
       "observed": {
         "activity_count_nonzero": true,
@@ -3632,7 +3674,13 @@
         },
         "script": "google.stream-generate-content-text-stream",
         "text": "answer 1 for session-004 seed 7313380382653661636 profile fast-random path ac31",
-        "turn_index": 1
+        "turn_index": 1,
+        "provider_admissions": [
+          {
+            "session": "session-004",
+            "provider_boundary": "session-004:provider:002"
+          }
+        ]
       },
       "observed": {
         "activity_count_nonzero": true,
@@ -5424,7 +5472,13 @@
         },
         "script": "google.stream-generate-content-text-stream",
         "text": "answer 2 for session-004 seed 7313380382653661636 profile fast-random path 14ec",
-        "turn_index": 2
+        "turn_index": 2,
+        "provider_admissions": [
+          {
+            "session": "session-004",
+            "provider_boundary": "session-004:provider:003"
+          }
+        ]
       },
       "observed": {
         "activity_count_nonzero": true,
