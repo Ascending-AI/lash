@@ -1079,7 +1079,6 @@ pub enum RemoteProviderFailureKind {
     Quota,
     Unsupported,
     #[default]
-    #[serde(other)]
     Unknown,
 }
 
