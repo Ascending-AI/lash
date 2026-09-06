@@ -80,6 +80,7 @@ pub async fn run_cli(
     high_traffic_knee_threshold: f64,
     enforce_budgets: bool,
     enforce_inventory: bool,
+    smoke: bool,
     duration_history: Option<PathBuf>,
     duration_profile: String,
     version: &str,
@@ -110,13 +111,18 @@ pub async fn run_cli(
 
     for _ in 0..warmups {
         for scenario in &scenarios {
-            let _ = Box::pin(run_once(
+            let _ = super::smoke::execute(
+                smoke,
                 *scenario,
                 chat_turns,
-                contention_workers,
-                &checkpoint_curve,
-                &high_traffic,
-            ))
+                Box::pin(run_once(
+                    *scenario,
+                    chat_turns,
+                    contention_workers,
+                    &checkpoint_curve,
+                    &high_traffic,
+                )),
+            )
             .await?;
         }
     }
@@ -148,13 +154,18 @@ pub async fn run_cli(
     let mut results = Vec::with_capacity(runs * scenarios.len());
     for _ in 0..runs {
         for scenario in &scenarios {
-            let mut result = Box::pin(run_once(
+            let mut result = super::smoke::execute(
+                smoke,
                 *scenario,
                 chat_turns,
-                contention_workers,
-                &checkpoint_curve,
-                &high_traffic,
-            ))
+                Box::pin(run_once(
+                    *scenario,
+                    chat_turns,
+                    contention_workers,
+                    &checkpoint_curve,
+                    &high_traffic,
+                )),
+            )
             .await?;
             result.stack_profile = Some(stack_profile.clone());
             results.push(result);

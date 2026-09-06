@@ -23,6 +23,9 @@ use super::promise_semantics::{
 
 type HmacSha256 = Hmac<sha2::Sha256>;
 
+#[cfg(test)]
+type PendingCheckHook = fn(&AwaitEventRegistry, &AwaitEventKey);
+
 const COMPLETED_TURN_CONTROL_KEY_LIMIT: usize = 4_096;
 const REVOKED_SESSION_LIMIT: usize = 4_096;
 
@@ -80,6 +83,8 @@ pub(super) struct AwaitEventRegistry {
     revoked_session_limit: usize,
     #[cfg(test)]
     verify_uncached_calls: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    after_pending: std::sync::Mutex<Option<PendingCheckHook>>,
 }
 
 impl AwaitEventRegistry {
@@ -97,6 +102,8 @@ impl AwaitEventRegistry {
             revoked_session_limit,
             #[cfg(test)]
             verify_uncached_calls: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            after_pending: std::sync::Mutex::new(None),
         }
     }
 
@@ -362,7 +369,7 @@ impl AwaitEventRegistry {
     ) -> Result<Resolution, RuntimeError> {
         let shard = self.shard_for_scope(&key.scope);
         loop {
-            let notify = {
+            let mut notified = {
                 let mut state = Self::locked_state(&shard);
                 if state.revoked {
                     return Err(Self::unknown_or_revoked());
@@ -393,8 +400,17 @@ impl AwaitEventRegistry {
                 if let Some(terminal) = entry.terminal.clone() {
                     return Ok(terminal);
                 }
-                Arc::clone(&entry.notify)
+                // Register while the state lock still excludes resolvers and
+                // revocation. A notify_waiters between the pending check and
+                // subscription would otherwise leave a completed promise parked.
+                let mut notified = Box::pin(Arc::clone(&entry.notify).notified_owned());
+                notified.as_mut().enable();
+                notified
             };
+            #[cfg(test)]
+            if let Some(after_pending) = self.after_pending.lock_recover().take() {
+                after_pending(self, key);
+            }
             let deadline = async {
                 if let Some(deadline) = deadline {
                     clock.sleep_until(deadline).await;
@@ -421,7 +437,7 @@ impl AwaitEventRegistry {
                     }
                     let _ = self.resolve(key, Resolution::Timeout)?;
                 }
-                _ = notify.notified() => {}
+                _ = &mut notified => {}
             }
         }
     }
@@ -535,6 +551,33 @@ mod tests {
 
     fn turn_scope(session_id: &str, turn_id: &str) -> ExecutionScope {
         ExecutionScope::turn(session_id, turn_id)
+    }
+
+    #[tokio::test]
+    async fn completion_between_pending_check_and_park_is_delivered() {
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+
+        let registry = Arc::new(AwaitEventRegistry::new());
+        let key = registry
+            .key_for(
+                &turn_scope("completion-gap", "turn"),
+                AwaitEventWaitIdentity::tool_completion("tool"),
+            )
+            .expect("completion key");
+        *registry.after_pending.lock_recover() = Some(|registry, key| {
+            registry
+                .resolve(key, Resolution::Ok(serde_json::json!("delivered")))
+                .expect("publish in check-to-park gap");
+        });
+        let wait =
+            registry.await_resolution(&key, CancellationToken::new(), None, &crate::SystemClock);
+        tokio::pin!(wait);
+        let result = wait.as_mut().poll(&mut Context::from_waker(Waker::noop()));
+        assert!(
+            matches!(result, Poll::Ready(Ok(Resolution::Ok(_)))),
+            "stored completion must be observed without another wake: {result:?}"
+        );
     }
 
     #[test]

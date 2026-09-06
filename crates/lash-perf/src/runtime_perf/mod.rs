@@ -6,6 +6,7 @@ mod prompt;
 mod providers;
 mod report;
 mod scenarios;
+mod smoke;
 mod store;
 
 pub use duration_trend::run_duration_trend_cli;
