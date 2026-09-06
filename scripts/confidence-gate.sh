@@ -139,6 +139,26 @@ else
       ;;
   esac
 fi
+# Optional core replay/commit request reuses the weekly area mutation runner.
+if [ "$lane" = "mutation" ]; then
+  if [ "$area" != "all" ]; then
+    echo "The mutation selector has a fixed core replay/commit target set." >&2
+    exit 2
+  fi
+  area="replay-commit"
+  selected_packages=(lash-internal-core)
+  area_mutation_file_args=(
+    --file 'crates/lash-core/src/runtime/observation/replay.rs'
+    --file 'crates/lash-core/src/runtime/effect/effect_replay_driver.rs'
+    --file 'crates/lash-core/src/runtime/effect/effect_replay_driver/*.rs'
+    --file 'crates/lash-core/src/runtime/commit_admission.rs'
+    --file 'crates/lash-core/src/runtime/turn_commit_draft.rs'
+    --file 'crates/lash-core/src/runtime/turn_boundary/accepted_commit.rs'
+    --file 'crates/lash-core/src/runtime/turn_boundary/final_commit_input.rs'
+    --file 'crates/lash-core/src/store/*commit*.rs'
+  )
+fi
+
 # The two micro lanes (deterministic sim unit/oracle suite + perf-guard
 # identity checks) share one shard: sequentially they finish well under the
 # fault-matrix lane, so a separate runner each just burned scheduling overhead.
@@ -153,13 +173,17 @@ SIM_SEARCH_MIN_SEEDS=4
 SIM_SEARCH_MIN_MAX_BOUNDARIES=256
 case "$lane" in
   fast) default_mutation_scope="none" ;;
-  default) default_mutation_scope="targeted" ;;
+  default|mutation) default_mutation_scope="targeted" ;;
   broad) default_mutation_scope="targeted" ;;
   full) default_mutation_scope="full" ;;
   *) default_mutation_scope="none" ;;
 esac
 mutation_scope="${LASH_CONFIDENCE_MUTATION_SCOPE:-$default_mutation_scope}"
 coverage_scope="${LASH_CONFIDENCE_COVERAGE_SCOPE:-run}"
+if [ "$lane" = "mutation" ]; then
+  mutation_scope="targeted"
+  coverage_scope="none"
+fi
 
 derive_mutation_jobs() {
   local cpu_count="${1:-}"
@@ -240,6 +264,7 @@ Usage: scripts/confidence-gate.sh [--dry-run] [<lane-or-shard>[+area:<surface>]]
 
 Selectors:
   Lanes:       fast, default, broad, full
+  On request:  mutation (fixed core replay/commit targets)
   Fast shards: fast:scenario-harnesses, fast:fault-matrix,
                fast:sim-unit-perf-guards, fast:sim-generated,
                fast:minimizer-fixtures, fast:summary
@@ -475,7 +500,7 @@ EOF
 }
 
 case "$lane" in
-  fast|default|broad|full) ;;
+  fast|default|broad|full|mutation) ;;
   -h|--help)
     usage
     exit 0
@@ -579,13 +604,16 @@ bootstrap_tools() {
   if [ "${LASH_CONFIDENCE_BOOTSTRAP:-0}" != "1" ]; then
     return
   fi
-  if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
-    step "Bootstrap cargo-llvm-cov 0.8.7"
-    cargo install cargo-llvm-cov --version 0.8.7 --locked
-  fi
   if ! command -v cargo-mutants >/dev/null 2>&1; then
     step "Bootstrap cargo-mutants 27.1.0"
     cargo install cargo-mutants --version 27.1.0 --locked
+  fi
+  if [ "$lane" = "mutation" ]; then
+    return
+  fi
+  if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
+    step "Bootstrap cargo-llvm-cov 0.8.7"
+    cargo install cargo-llvm-cov --version 0.8.7 --locked
   fi
   if command -v rustup >/dev/null 2>&1 \
     && ! rustup component list --installed | grep -Eq '^llvm-tools-preview($|-)'; then
@@ -2686,6 +2714,10 @@ print_plan() {
   printf 'Mutation scope: %s\n' "$mutation_scope"
   printf 'Coverage scope: %s\n' "$coverage_scope"
   printf 'Artifacts: %s\n' "$out_dir"
+  if [ "$lane" = "mutation" ]; then
+    printf 'Would run core replay/commit mutations: %s\n' "${area_mutation_file_args[*]}"
+    return
+  fi
   printf 'Would run:\n'
 
   local selector row row_selector row_area suite description artifacts
@@ -2727,6 +2759,15 @@ print_plan() {
 
 if [ "$dry_run" -eq 1 ]; then
   print_plan
+  exit 0
+fi
+
+if [ "$lane" = "mutation" ]; then
+  bootstrap_tools
+  # Every mutation in the targeted files, using the same weekly runner.
+  export LASH_AREA_MUTATION_SHARD=1/1
+  run_area_targeted_mutation_evidence
+  finalize_mutation_gate
   exit 0
 fi
 

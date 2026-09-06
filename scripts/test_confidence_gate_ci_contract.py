@@ -2037,5 +2037,113 @@ derive_mutation_jobs() {{
         self.assertNotIn("gh workflow run release.yml", workflow)
 
 
+class ReleaseConfidenceTests(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import patch
+        workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text())
+        script = next(step["run"] for step in workflow["jobs"]["prepare-release"]["steps"]
+                      if step["name"] == "Resolve and validate release commit")
+        source = script.split("python3 - <<'CONFIDENCE_PY'\n", 1)[1].split("\nCONFIDENCE_PY", 1)[0]
+        namespace = {"__name__": "contract_test"}
+        exec(compile(source, str(RELEASE_WORKFLOW), "exec"), namespace)
+        self.check = namespace["check_confidence"]
+        self.now = dt.datetime(2026, 9, 6, tzinfo=dt.timezone.utc)
+        self.run = {"databaseId": 123, "headSha": "abc", "url": "https://example.test/runs/123",
+                    "status": "completed", "conclusion": "success"}
+        self.completed = "2026-09-05T00:00:00Z"
+        self.output = self.enterContext(patch("subprocess.check_output"))
+        self.ancestry = self.enterContext(patch("subprocess.run"))
+        self.ancestry.return_value.returncode = 0
+        self.enterContext(patch("builtins.print"))
+        self.refresh()
+
+    def refresh(self, runs=None):
+        self.output.side_effect = [json.dumps([self.run] if runs is None else runs),
+                                  json.dumps([{"jobs": [{"completed_at": self.completed}]}])]
+
+    def test_fresh_green_ancestor_or_equal_passes(self):
+        for target in ("abc", "descendant"):
+            self.refresh()
+            self.check(target, "", self.now)
+            self.ancestry.assert_called_with(["git", "merge-base", "--is-ancestor", "abc", target], check=False)
+        command = self.output.call_args_list[0].args[0]
+        self.assertIn("schedule", command)
+        self.assertIn("main", command)
+        self.assertEqual("1", command[command.index("--limit") + 1])
+
+    def test_latest_red_refuses_without_falling_back(self):
+        self.run["conclusion"] = "failure"
+        self.refresh()
+        with self.assertRaises(SystemExit) as error:
+            self.check("target", "", self.now)
+        for detail in ("release refused", "https://example.test/runs/123", "abc", "1.000 days", "failure"):
+            self.assertIn(detail, str(error.exception))
+
+    def test_eight_day_boundary_and_stale_future_or_missing_completion(self):
+        self.completed = "2026-08-29T00:00:00Z"
+        self.refresh()
+        self.check("target", "", self.now)
+        for completed in ("2026-08-28T23:59:59Z", "2026-09-07T00:00:00Z", None):
+            with self.subTest(completed=completed):
+                self.completed = completed
+                self.refresh()
+                with self.assertRaisesRegex(SystemExit, "older than 8 days"):
+                    self.check("target", "", self.now)
+
+    def test_missing_weekly_refuses_with_diagnostics(self):
+        self.refresh([])
+        with self.assertRaisesRegex(SystemExit, "run URL=unavailable; head SHA=unavailable; age=unknown; conclusion=missing"):
+            self.check("target", "", self.now)
+
+    def test_nonancestor_refuses(self):
+        self.ancestry.return_value.returncode = 1
+        with self.assertRaisesRegex(SystemExit, "not an ancestor"):
+            self.check("target", "", self.now)
+
+    def test_running_weekly_refuses(self):
+        self.run.update(status="in_progress", conclusion="")
+        self.refresh()
+        with self.assertRaisesRegex(SystemExit, "not green"):
+            self.check("target", "", self.now)
+
+    def test_override_requires_nonblank_reason_and_logs(self):
+        from unittest.mock import patch
+        with patch("builtins.print") as output:
+            self.check("target", "emergency release\nwith review", self.now)
+            self.assertIn("::warning::CONFIDENCE RELEASE OVERRIDE", output.call_args.args[0])
+            self.assertIn("emergency release", output.call_args.args[0])
+            self.assertNotIn("\n", output.call_args.args[0])
+        self.output.assert_not_called()
+        self.refresh([])
+        with self.assertRaises(SystemExit):
+            self.check("target", " \n ", self.now)
+
+    def test_api_failure_is_not_silently_bypassed(self):
+        self.output.side_effect = subprocess.CalledProcessError(1, "gh")
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.check("target", "", self.now)
+
+
+class MutationRequestTests(unittest.TestCase):
+    def test_mutation_request_uses_existing_runner_outside_required_ci(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/mutation.yml").read_text())
+        triggers = workflow.get("on", workflow.get(True))
+        self.assertIn("workflow_dispatch", triggers)
+        self.assertIn("labeled", triggers["pull_request"]["types"])
+        job = workflow["jobs"]["mutation"]
+        self.assertIn("mutation-requested", job["if"])
+        self.assertIn("bash scripts/confidence-gate.sh mutation", [s.get("run") for s in job["steps"]])
+        ci = yaml.safe_load(WORKFLOW.read_text())
+        self.assertNotIn("mutation", ci["jobs"]["ci-conclusion"]["needs"])
+        gate = GATE.read_text()
+        request = gate.split('  # Every mutation in the targeted files, using the same weekly runner.', 1)[1].split('fi', 1)[0]
+        self.assertIn("run_area_targeted_mutation_evidence", request)
+        plan = subprocess.run(["bash", str(GATE), "--dry-run", "mutation"], text=True, capture_output=True)
+        self.assertEqual(0, plan.returncode, plan.stderr)
+        self.assertIn("effect_replay_driver", plan.stdout)
+        self.assertIn("commit_admission", plan.stdout)
+        self.assertIn("Mutation scope: targeted", plan.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

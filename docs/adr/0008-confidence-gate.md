@@ -86,6 +86,18 @@ CI and local development the same language for confidence.
   an explicit override elsewhere.
 - The `Confidence` workflow runs `full` on a weekly schedule and supports
   manual `default`/`broad`/`full` dispatch.
+- Releases require the latest scheduled `Confidence` run on main to succeed,
+  finish within eight days (inclusive), and certify an ancestor of the release
+  SHA or the SHA itself. Age uses the latest job completion timestamp, rather
+  than mutable run metadata. Missing, red, stale, or unrelated evidence refuses
+  release; an older green run cannot substitute. Release dispatch accepts
+  `confidence_override_reason`: a non-blank reason explicitly bypasses only
+  this precondition and is logged as a warning. Full-profile CI for the release
+  SHA remains independently required (FIG-1160).
+- The optional `Mutation` workflow runs the core replay/commit target set on
+  `mutation-requested` PR labels and manual dispatch, reusing the weekly gate's
+  mutation runner. It is outside the required CI lane. Red weeklies do not
+  automatically create tickets.
 - `just confidence`, `just confidence-fast`, `just confidence-broad`, and
   `just confidence-full` are the local entry points.
 - Missing tools are actionable failures with deterministic bootstrap commands.
