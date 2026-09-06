@@ -52,5 +52,5 @@ tokio-util = { workspace = true }
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test-util", "net", "io-util"] }
 tracing-subscriber = { workspace = true }
