@@ -311,7 +311,7 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   # Python-only repository gates. These were serial steps of test-doc, where
   # they sat behind twelve minutes of compilation for no reason: nothing here
@@ -443,7 +443,7 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   # The API surface snapshot is ADVISORY: it must not be able to fail the
   # workflow until the future cutover release. FIG-2095.
@@ -558,7 +558,7 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   # Feature-set coverage the workspace check cannot reach, and the deliberately
   # non-default provider/protocol test features. Split out of test-doc: these
@@ -656,7 +656,7 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   # The default-off boundary lane: `lash-runtime` without its default features
   # compiles, tests, and pulls no RLM/Lashlang dependency. Its feature
@@ -734,7 +734,7 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   # Build the exact event SHA once; all four partitions execute these binaries.
   # Service-backed jobs retain their independent feature graphs and services.
@@ -772,8 +772,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
-          shared-key: linux-debug
-          save-if: false
+          shared-key: linux-tests
 
       - name: Install protoc and nextest
         uses: ./.github/actions/install-tools
@@ -800,7 +799,7 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   test-shard:
     name: Test shard ${{ matrix.shard }}/4
@@ -855,7 +854,7 @@ jobs:
         with:
           tool: protoc,nextest
 
-      - name: Setup sccache
+      - name: Setup compilation environment
         uses: ./.github/actions/setup-sccache
 
       # Workspace-wide: every crate's tests run, not a hand-maintained crate
@@ -876,15 +875,16 @@ jobs:
       # Some tests embed CARGO_BIN_EXE paths at compile time. Keep archived
       # non-test executables at the producer's workspace/target path too.
       - name: Test workspace shard
+        env:
+          # The archive is already compiled; runtime cargo subprocesses use
+          # the restored target cache directly, without a compiler wrapper.
+          RUSTC_WRAPPER: ""
         run: |
           cargo nextest run --profile ci --workspace-remap "$GITHUB_WORKSPACE" \
             --archive-file "${RUNNER_TEMP}/nextest-download/lash-nextest.tar.zst" \
             --extract-to "$GITHUB_WORKSPACE" --extract-overwrite \
             --no-fail-fast --partition count:${{ matrix.shard }}/4
 
-      - name: Report sccache stats
-        if: always()
-        run: sccache --show-stats
 
   # The heavy suites excluded from the per-push shards by `profile.ci`'s
   # default-filter (see .config/nextest.toml): the fault-matrix chunk tests,
@@ -951,7 +951,7 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   lint:
     name: Lint
@@ -1248,7 +1248,7 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   confidence-fast-summary:
     name: Confidence fast summary
@@ -1723,7 +1723,7 @@ jobs:
 
       - name: Report sccache stats
         if: always() && steps.detect.outputs.run == 'true'
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   worker-artifacts:
     name: Build worker release artifacts
