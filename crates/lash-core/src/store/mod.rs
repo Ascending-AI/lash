@@ -78,7 +78,10 @@ pub use state_version::{
     resolve_session_state_version,
 };
 #[cfg(any(test, feature = "testing"))]
-pub use testing::{StoreTestSupport, append_request_commit_with_clock_for_testing};
+pub use testing::{
+    ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport,
+    append_request_commit_with_clock_for_testing,
+};
 pub use turn_id::TurnId;
 pub use usage::{merge_token_ledger_entries_checked, merge_token_ledger_entry_checked};
 pub use work_claim::{WorkClaim, WorkCompletion};
@@ -1517,14 +1520,19 @@ pub trait QueuedWorkStore: Send + Sync {
 ///
 /// # Test-only hooks
 ///
-/// No production store trait carries a `*_for_testing` member. Conformance and
-/// differential-test probes (raw-row reads, fault injection, fixture seeding)
-/// live on [`StoreTestSupport`], which exists only under
-/// `cfg(any(test, feature = "testing"))` and is a supertrait of
-/// [`RuntimePersistence`] only in that configuration. A backend implements
-/// `StoreTestSupport` under the same gate it forwards to `lash-core/testing`
-/// (the pattern `lash-s3-store` uses for `raw_blobs_for_testing`), so a
-/// production build never has to write, name, or ship a testing method.
+/// No production store trait carries a `*_for_testing` member, and none ever
+/// obligates an implementor to write one. Conformance and differential-test
+/// probes (raw-row reads, fault injection, fixture seeding) live on
+/// [`StoreTestSupport`], which exists only under
+/// `cfg(any(test, feature = "testing"))`. The conformance suites take
+/// [`ConformancePersistence`] (`RuntimePersistence + StoreTestSupport`) and
+/// [`ConformanceSessionStoreFactory`] handles, so a backend opts in by
+/// implementing the gated traits under the same gate it forwards to
+/// `lash-core/testing` — the pattern `lash-s3-store` sets with its
+/// `cfg`-gated `raw_blobs_for_testing`. A production build never writes,
+/// names, or ships a testing method, and a build that enables
+/// `lash-core/testing` without a backend's own `testing` feature still
+/// compiles: the obligation lives only on the conformance entry points.
 #[async_trait::async_trait]
 pub trait StoreMaintenance: Send + Sync {
     /// Physically delete tombstoned graph-node rows and prune terminal
@@ -1577,11 +1585,10 @@ pub trait StoreMaintenance: Send + Sync {
 /// Blanket-implemented for every type that implements all five segments;
 /// backends implement the segment traits and never this trait directly.
 ///
-/// Under `cfg(any(test, feature = "testing"))` the alias additionally requires
-/// [`StoreTestSupport`], so conformance suites reach the test-only hooks
-/// through the same `dyn RuntimePersistence` handle. Production builds have no
-/// such requirement (see [`StoreMaintenance`]).
-#[cfg(not(any(test, feature = "testing")))]
+/// This alias carries no test-only obligation in any configuration. The
+/// conformance suites use the gated [`ConformancePersistence`] alias
+/// (`RuntimePersistence + StoreTestSupport`) instead; see
+/// [`StoreMaintenance`] for the norm.
 pub trait RuntimePersistence:
     SessionCommitStore
     + TurnInputStore
@@ -1591,38 +1598,12 @@ pub trait RuntimePersistence:
 {
 }
 
-#[cfg(not(any(test, feature = "testing")))]
 impl<T> RuntimePersistence for T where
     T: SessionCommitStore
         + TurnInputStore
         + SessionExecutionLeaseStore
         + QueuedWorkStore
         + StoreMaintenance
-        + ?Sized
-{
-}
-
-/// Test-support variant of the [`RuntimePersistence`] alias: identical to the
-/// production alias plus the [`StoreTestSupport`] hooks.
-#[cfg(any(test, feature = "testing"))]
-pub trait RuntimePersistence:
-    SessionCommitStore
-    + TurnInputStore
-    + SessionExecutionLeaseStore
-    + QueuedWorkStore
-    + StoreMaintenance
-    + StoreTestSupport
-{
-}
-
-#[cfg(any(test, feature = "testing"))]
-impl<T> RuntimePersistence for T where
-    T: SessionCommitStore
-        + TurnInputStore
-        + SessionExecutionLeaseStore
-        + QueuedWorkStore
-        + StoreMaintenance
-        + StoreTestSupport
         + ?Sized
 {
 }

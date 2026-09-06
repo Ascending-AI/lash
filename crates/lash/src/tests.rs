@@ -872,8 +872,6 @@ impl lash_core::TurnInputStore for SnapshotStore {
     }
 }
 
-lash_core::impl_noop_store_test_support!(SnapshotStore);
-
 #[async_trait]
 impl lash_core::StoreMaintenance for SnapshotStore {
     async fn vacuum(&self) -> lash_core::MaintenanceResult<lash_core::VacuumReport> {
@@ -1271,8 +1269,6 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
         Ok(Vec::new())
     }
 }
-
-lash_core::impl_noop_store_test_support!(BoundSessionStore);
 
 #[async_trait]
 impl lash_core::StoreMaintenance for BoundSessionStore {

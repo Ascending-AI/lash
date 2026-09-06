@@ -479,7 +479,7 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
 #[tokio::test]
 async fn test_local_process_registry_satisfies_conformance() {
     crate::testing::conformance::process_registry(|| {
-        Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>
+        Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn crate::ConformanceProcessRegistry>
     })
     .await;
 }

@@ -336,11 +336,6 @@ impl QueuedWorkStore for FacadeStore {
     }
 }
 
-// This fixture compiles with `lash-core/testing` on (dev-dependency feature
-// unification), where `RuntimePersistence` also requires the test-support
-// hooks. A production embedder never writes this block.
-lash_core::impl_noop_store_test_support!(FacadeStore);
-
 #[async_trait]
 impl StoreMaintenance for FacadeStore {
     async fn vacuum(&self) -> MaintenanceResult<VacuumReport> {

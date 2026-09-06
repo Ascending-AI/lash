@@ -5,7 +5,7 @@ use super::session_store_request;
 /// The ADR 0077 marker is read before guarded payloads, and its admission seam
 /// is unavailable until the caller owns the session execution lease.
 pub(super) async fn session_state_version_admission_contract(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
 ) {
     let request = session_store_request(
         "session-state-version-admission",
@@ -13,7 +13,7 @@ pub(super) async fn session_state_version_admission_contract(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .create_conformance_store(&request)
         .await
         .expect("create session-state marker fixture");
     assert_eq!(

@@ -857,7 +857,8 @@ async fn postgres_session_store_factory_satisfies_conformance_when_configured() 
         let storage = Arc::clone(&storage);
         sync_await(async move {
             reset(&storage).await;
-            Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
+            Arc::new(storage.session_store_factory())
+                as Arc<dyn lash_core::store::ConformanceSessionStoreFactory>
         })
     })
     .await;
@@ -2208,8 +2209,10 @@ async fn postgres_process_registry_satisfies_conformance_when_configured() {
         let storage = Arc::clone(&storage);
         sync_await(async move {
             reset(&storage).await;
-            let open = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-            let reopen = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+            let open = Arc::new(storage.process_registry())
+                as Arc<dyn lash_core::ConformanceProcessRegistry>;
+            let reopen = Arc::new(storage.process_registry())
+                as Arc<dyn lash_core::ConformanceProcessRegistry>;
             ReopenableProcessRegistry { open, reopen }
         })
     })

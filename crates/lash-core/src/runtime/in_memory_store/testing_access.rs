@@ -361,6 +361,25 @@ impl crate::store::StoreTestSupport for InMemorySessionStore {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::store::ConformanceSessionStoreFactory for super::InMemorySessionStoreFactory {
+    async fn create_conformance_store(
+        &self,
+        request: &crate::SessionStoreCreateRequest,
+    ) -> Result<std::sync::Arc<dyn crate::store::ConformancePersistence>, crate::StoreError> {
+        Ok(self.create_in_memory_store(request)?)
+    }
+
+    async fn open_existing_conformance_store(
+        &self,
+        request: &crate::SessionStoreCreateRequest,
+    ) -> Result<Option<std::sync::Arc<dyn crate::store::ConformancePersistence>>, String> {
+        Ok(self
+            .open_existing_in_memory_store(request)
+            .map(|store| store as std::sync::Arc<dyn crate::store::ConformancePersistence>))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::store::StoreMaintenance;

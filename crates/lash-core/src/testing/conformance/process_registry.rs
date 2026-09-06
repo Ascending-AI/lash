@@ -49,7 +49,7 @@ fn settled_cancellation(message: &str) -> ProcessAwaitOutput {
 /// Run the process-registry contract against a fresh backend.
 pub async fn process_registry<F>(make: F)
 where
-    F: Fn() -> Arc<dyn ProcessRegistry>,
+    F: Fn() -> Arc<dyn crate::ConformanceProcessRegistry>,
 {
     let first = make();
     let second = make();
@@ -391,7 +391,9 @@ pub(super) fn plain_event_type(name: &str) -> ProcessEventType {
     }
 }
 
-async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
+async fn process_registry_conformance(registry: Arc<dyn crate::ConformanceProcessRegistry>) {
+    let probe = Arc::clone(&registry);
+    let registry: Arc<dyn ProcessRegistry> = registry;
     live_reference_summary_tracks_non_terminal_reference_counts(Arc::clone(&registry)).await;
     registration_and_observers_are_atomic(Arc::clone(&registry)).await;
     observer_events_are_auditable_and_transfer_is_atomic(Arc::clone(&registry)).await;
@@ -421,7 +423,7 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     tombstones_make_pruned_processes_distinguishable(Arc::clone(&registry)).await;
     reused_process_ids_refuse_superseded_incarnations(Arc::clone(&registry)).await;
     lifecycle_transition_refusals_are_backend_invariant(Arc::clone(&registry)).await;
-    process_event_append_arms_are_ordered(Arc::clone(&registry)).await;
+    process_event_append_arms_are_ordered(probe).await;
     caller_departure_state_machine(Arc::clone(&registry)).await;
     caller_departed_rows_are_reclaimed_by_retention(Arc::clone(&registry)).await;
     terminal_completion_atomically_retains_parent_end_plan(registry).await;
@@ -2239,9 +2241,11 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
 }
 
 async fn reopen_conformance(handles: ReopenableProcessRegistry) {
+    let open: Arc<dyn ProcessRegistry> = handles.open.clone();
+    let reopen: Arc<dyn ProcessRegistry> = handles.reopen.clone();
     refolded_process_record_matches_stored_projection(
-        Arc::clone(&handles.open),
-        Arc::clone(&handles.reopen),
+        Arc::clone(&open),
+        Arc::clone(&reopen),
         "process-refold-cold",
     )
     .await;
@@ -2249,7 +2253,7 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
         REOPEN_BASELINE_SPAWNS,
         REOPEN_BASELINE_PRUNED,
     );
-    assert_process_count_conservation(&handles.open, conservation)
+    assert_process_count_conservation(&open, conservation)
         .await
         .expect("known refold registration conserves before reopen assertion");
     let process_id = "observer-reopen";
@@ -2262,7 +2266,7 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
         .await
         .expect("register before reopen");
     conservation.record_spawn();
-    assert_process_count_conservation(&handles.open, conservation)
+    assert_process_count_conservation(&open, conservation)
         .await
         .expect("process counts conserve before reopen");
     assert!(
@@ -2280,7 +2284,7 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
             .expect("record survives reopen")
             .is_some()
     );
-    assert_process_count_conservation(&handles.reopen, conservation)
+    assert_process_count_conservation(&reopen, conservation)
         .await
         .expect("process counts conserve after reopen");
 }

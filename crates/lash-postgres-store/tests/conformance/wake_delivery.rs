@@ -49,10 +49,10 @@ async fn postgres_wake_delivery_crash_matrix_when_configured() {
                     .expect("valid short stale-claim age"),
             )
             .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
-    ) as Arc<dyn ProcessRegistry>;
-    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
-        &registry,
-    )));
+    ) as Arc<dyn lash_core::ConformanceProcessRegistry>;
+    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
+        Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
+    ));
     Box::pin(lash_core::testing::conformance::wake_delivery_crash_matrix(
         factory,
         registry,

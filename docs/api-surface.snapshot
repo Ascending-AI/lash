@@ -1856,6 +1856,10 @@ lash::persistence::ChronologicalProjection
 lash::persistence::ChronologicalProjection::entries
 lash::persistence::ChronologicalProjection::from_turn_view
 lash::persistence::ChronologicalProjection::into_entries
+lash::persistence::ConformancePersistence
+lash::persistence::ConformanceSessionStoreFactory
+lash::persistence::ConformanceSessionStoreFactory::create_conformance_store
+lash::persistence::ConformanceSessionStoreFactory::open_existing_conformance_store
 lash::persistence::DeliveryPolicy
 lash::persistence::DeliveryPolicy::AfterCurrentTurnCommit
 lash::persistence::DeliveryPolicy::EarliestSafeBoundary
@@ -4670,6 +4674,7 @@ lash::process::CausalRef::TriggerOccurrence::subscription_revision
 lash::process::CausalRef::Turn
 lash::process::CausalRef::Turn::session_id
 lash::process::CausalRef::Turn::turn_id
+lash::process::ConformanceProcessRegistry
 lash::process::LASHLANG_ENGINE_KIND
 lash::process::LashlangProcessInput
 lash::process::LashlangProcessInput::args

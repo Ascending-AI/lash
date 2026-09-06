@@ -250,7 +250,8 @@ pub use process::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{
-    ProcessRegistryTestSupport, TestLocalProcessRegistry, TestProcessRegistryWriteExt,
+    ConformanceProcessRegistry, ProcessRegistryTestSupport, TestLocalProcessRegistry,
+    TestProcessRegistryWriteExt,
 };
 pub use process_worker::{
     DEFAULT_PROCESS_EXECUTION_CONCURRENCY, DurableProcessWorker, DurableProcessWorkerConfig,

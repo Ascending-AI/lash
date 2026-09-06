@@ -43,14 +43,14 @@ async fn sqlite_wake_delivery_crash_matrix() {
                 .with_enqueuing_stale_after_ms(25)
                 .expect("valid short stale-claim age"),
         ),
-    ) as Arc<dyn ProcessRegistry>;
+    ) as Arc<dyn lash_core::ConformanceProcessRegistry>;
     let factory = Arc::new(
         SqliteSessionStoreFactory::new_with_process_registry(dir.path(), process_registry_path)
             .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
     ) as Arc<dyn SessionStoreFactory>;
-    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
-        &registry,
-    )));
+    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
+        Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
+    ));
     Box::pin(lash_core::testing::conformance::wake_delivery_crash_matrix(
         factory,
         registry,

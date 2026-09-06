@@ -34,7 +34,7 @@ pub async fn session_store_factory<F>(
     unbound_store: Option<Arc<dyn crate::store::StoreMaintenance>>,
     make: F,
 ) where
-    F: Fn() -> Arc<dyn crate::SessionStoreFactory>,
+    F: Fn() -> Arc<dyn crate::store::ConformanceSessionStoreFactory>,
 {
     let first = make();
     let second = make();
@@ -534,7 +534,7 @@ async fn session_store_factory_claimable_queued_work_peek(
 /// depends on object lifetime and the delete can be undone after the host
 /// retired the id.
 pub async fn session_store_factory_delete_fences_stale_handles(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
 ) {
     let request = session_store_request(
         "delete-fence-stale-handle",
@@ -542,7 +542,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         crate::SessionRelation::Root,
     );
     let stale = factory
-        .create_store(&request)
+        .create_conformance_store(&request)
         .await
         .expect("create the handle that will go stale");
     let stale_meta = stale
@@ -1126,7 +1126,7 @@ async fn session_admission_contract(factory: Arc<dyn crate::SessionStoreFactory>
 /// sessions exist in the durable catalog.
 async fn session_store_binding_is_catalog_cardinality_independent<F>(make: &F)
 where
-    F: Fn() -> Arc<dyn crate::SessionStoreFactory>,
+    F: Fn() -> Arc<dyn crate::store::ConformanceSessionStoreFactory>,
 {
     let empty_factory = make();
     let missing = session_store_request(

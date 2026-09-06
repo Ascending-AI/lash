@@ -4,11 +4,11 @@ use super::{RuntimeCommit, RuntimeTurnCommitStamp, StoreError};
 ///
 /// This trait is the home for every `*_for_testing` hook the conformance and
 /// differential suites need from a backend. It is compiled only under
-/// `cfg(any(test, feature = "testing"))` and joins the
-/// [`RuntimePersistence`](super::RuntimePersistence) alias only in that
-/// configuration; production store traits never require a testing method.
-/// Backends implement it under the same gate (`lash-s3-store` sets the
-/// pattern with its `cfg`-gated `raw_blobs_for_testing`).
+/// `cfg(any(test, feature = "testing"))`, is never a supertrait of a
+/// production store trait, and is reached only through the
+/// [`ConformancePersistence`] alias the suites take. Backends implement it
+/// under the same gate (`lash-s3-store` sets the pattern with its
+/// `cfg`-gated `raw_blobs_for_testing`).
 #[async_trait::async_trait]
 pub trait StoreTestSupport: Send + Sync {
     /// Conformance seam for a marker guarding bytes the current codec cannot read.
@@ -79,28 +79,38 @@ pub fn append_request_commit_with_clock_for_testing(
     Ok(commit)
 }
 
-/// Implement [`StoreTestSupport`] for a fixture store that has no
-/// session-owned artifact-ref namespace and no guarded-payload marker:
-/// seeding answers `false`, the ref read is empty, and the marker stamp keeps
-/// the trait default (`UnsupportedStoreOperation`).
-#[macro_export]
-macro_rules! impl_noop_store_test_support {
-    ($ty:ty) => {
-        #[::async_trait::async_trait]
-        impl $crate::store::StoreTestSupport for $ty {
-            async fn seed_session_trigger_manifest_ref_for_testing(
-                &self,
-                _session_id: &str,
-            ) -> ::std::result::Result<bool, $crate::StoreError> {
-                Ok(false)
-            }
+/// A runtime store handle together with its test-only hooks: the handle type
+/// the conformance and differential suites take.
+///
+/// Blanket-implemented for every `RuntimePersistence + StoreTestSupport`
+/// type, under the same gate as [`StoreTestSupport`]. An
+/// `Arc<dyn ConformancePersistence>` upcasts to `Arc<dyn RuntimePersistence>`
+/// wherever production code is exercised.
+pub trait ConformancePersistence: super::RuntimePersistence + StoreTestSupport {}
 
-            async fn raw_session_owned_artifact_refs_for_testing(
-                &self,
-                _session_id: &str,
-            ) -> ::std::result::Result<Vec<(String, String)>, $crate::StoreError> {
-                Ok(Vec::new())
-            }
-        }
-    };
+impl<T> ConformancePersistence for T where T: super::RuntimePersistence + StoreTestSupport + ?Sized {}
+
+/// A [`SessionStoreFactory`](crate::SessionStoreFactory) that can also hand
+/// out [`ConformancePersistence`] handles.
+///
+/// The production factory returns `Arc<dyn RuntimePersistence>`, which has no
+/// test hooks; the factory-driven conformance suites take this gated trait and
+/// create the handles they probe through it. Backends implement it under their
+/// own `testing` gate, typically by sharing the concrete constructor behind
+/// their production `create_store`.
+#[async_trait::async_trait]
+pub trait ConformanceSessionStoreFactory: crate::SessionStoreFactory {
+    /// Create a session store exactly as `create_store` would, keeping the
+    /// test-support hooks reachable on the returned handle.
+    async fn create_conformance_store(
+        &self,
+        request: &crate::SessionStoreCreateRequest,
+    ) -> Result<std::sync::Arc<dyn ConformancePersistence>, StoreError>;
+
+    /// Reopen a session store exactly as `open_existing_store` would, keeping
+    /// the test-support hooks reachable on the returned handle.
+    async fn open_existing_conformance_store(
+        &self,
+        request: &crate::SessionStoreCreateRequest,
+    ) -> Result<Option<std::sync::Arc<dyn ConformancePersistence>>, String>;
 }

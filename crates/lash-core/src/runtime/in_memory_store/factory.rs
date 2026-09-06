@@ -97,12 +97,13 @@ impl Default for InMemorySessionStoreFactory {
     }
 }
 
-#[async_trait::async_trait]
-impl SessionStoreFactory for InMemorySessionStoreFactory {
-    async fn create_store(
+impl InMemorySessionStoreFactory {
+    /// Concrete constructor behind [`SessionStoreFactory::create_store`]; the
+    /// gated conformance factory shares it.
+    pub(crate) fn create_in_memory_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, crate::StoreError> {
+    ) -> Result<Arc<InMemorySessionStore>, crate::StoreError> {
         let binding = crate::SessionBinding::from_create_request(request);
         binding.validate()?;
         let created_at_ms = self.clock.timestamp_ms();
@@ -158,7 +159,26 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 parent_session_id: binding.relation.parent_session_id().map(ToOwned::to_owned),
                 deleted: false,
             });
-        Ok(store as Arc<dyn RuntimePersistence>)
+        Ok(store)
+    }
+
+    /// Concrete lookup behind [`SessionStoreFactory::open_existing_store`];
+    /// the gated conformance factory shares it.
+    pub(crate) fn open_existing_in_memory_store(
+        &self,
+        request: &SessionStoreCreateRequest,
+    ) -> Option<Arc<InMemorySessionStore>> {
+        self.stores.lock_recover().get(&request.session_id).cloned()
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionStoreFactory for InMemorySessionStoreFactory {
+    async fn create_store(
+        &self,
+        request: &SessionStoreCreateRequest,
+    ) -> Result<Arc<dyn RuntimePersistence>, crate::StoreError> {
+        Ok(self.create_in_memory_store(request)? as Arc<dyn RuntimePersistence>)
     }
 
     async fn open_existing_store(
@@ -166,10 +186,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
         Ok(self
-            .stores
-            .lock_recover()
-            .get(&request.session_id)
-            .cloned()
+            .open_existing_in_memory_store(request)
             .map(|store| store as Arc<dyn RuntimePersistence>))
     }
 

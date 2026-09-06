@@ -302,10 +302,6 @@ pub mod persistence {
             select_turn_work_claim_prefix,
         };
     }
-    /// Test-only store hooks; joins [`RuntimePersistence`] only under the
-    /// `testing` feature.
-    #[cfg(any(test, feature = "testing"))]
-    pub use lash_core::store::StoreTestSupport;
     pub use lash_core::store::{
         AppendRequestIdentity, CheckpointComponentDescriptor, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId,
@@ -313,6 +309,12 @@ pub mod persistence {
         RuntimePersistenceDecorator, RuntimeTurnCommitStamp, RuntimeUsageDelta,
         RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionHead, SessionHeadMeta,
         SessionHeadPayload, commit_runtime_state_verified, load_persisted_session_state,
+    };
+    /// Test-only store hooks and the conformance-suite handle types that
+    /// carry them (`testing` feature only; no production trait requires them).
+    #[cfg(any(test, feature = "testing"))]
+    pub use lash_core::store::{
+        ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport,
     };
     pub use lash_core::{
         AttachmentCondemnation, AttachmentDeleteArming, AttachmentReclamationPolicy,
@@ -658,10 +660,6 @@ pub mod remote {
 pub mod process {
     pub use crate::admin::SessionProcessAdmin;
     pub use crate::process_admin::Processes;
-    /// Test-only registry probes; joins [`ProcessRegistry`] only under the
-    /// `testing` feature.
-    #[cfg(any(test, feature = "testing"))]
-    pub use lash_core::ProcessRegistryTestSupport;
     /// Materialized event semantics returned to custom process registries.
     pub use lash_core::runtime::ProcessEventSemantics;
     /// Process-registry and event types that complete the store and engine signature closure.
@@ -697,6 +695,10 @@ pub mod process {
         facade_support::ProcessWorkerFault, facade_support::SessionScopeId,
         facade_support::watch_process_registry, facade_support::watch_process_registry_with_sink,
     };
+    /// Test-only registry probes and the conformance-suite registry type that
+    /// carries them (`testing` feature only; no production trait requires them).
+    #[cfg(any(test, feature = "testing"))]
+    pub use lash_core::{ConformanceProcessRegistry, ProcessRegistryTestSupport};
     /// Event semantics a registration declares for its extra event types: which
     /// occurrences wake the process ([`ProcessWakeSpec`]) and how a payload is
     /// projected into the wake input ([`ProcessValueSelector`]).

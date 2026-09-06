@@ -28,8 +28,8 @@ pub(crate) fn durable_turn_address(
 /// A pair of [`ProcessRegistry`] handles opened against the same durable
 /// backing store.
 pub struct ReopenableProcessRegistry {
-    pub open: Arc<dyn ProcessRegistry>,
-    pub reopen: Arc<dyn ProcessRegistry>,
+    pub open: Arc<dyn crate::ConformanceProcessRegistry>,
+    pub reopen: Arc<dyn crate::ConformanceProcessRegistry>,
 }
 
 /// A pair of [`RuntimePersistence`] handles opened against the same durable

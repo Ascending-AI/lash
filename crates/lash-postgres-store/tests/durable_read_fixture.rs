@@ -3,8 +3,8 @@ use std::process::Command;
 use std::sync::Arc;
 
 use lash_core::{
-    EffectHost, ProcessContinuationStore, ProcessExecutionEnvStore, ProcessRegistry,
-    RuntimePersistence, SessionStoreFactory, TriggerStore,
+    EffectHost, ProcessContinuationStore, ProcessExecutionEnvStore, RuntimePersistence,
+    SessionStoreFactory, TriggerStore,
 };
 use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 use serde::{Deserialize, Serialize};
@@ -389,7 +389,7 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
         clock: Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
         runtime: runtime as Arc<dyn RuntimePersistence>,
         session_factory: session_factory as Arc<dyn SessionStoreFactory>,
-        processes: Arc::clone(&processes) as Arc<dyn ProcessRegistry>,
+        processes: Arc::clone(&processes) as Arc<dyn lash_core::ConformanceProcessRegistry>,
         continuations: processes as Arc<dyn ProcessContinuationStore>,
         process_envs: process_envs as Arc<dyn ProcessExecutionEnvStore>,
         triggers: triggers as Arc<dyn TriggerStore>,

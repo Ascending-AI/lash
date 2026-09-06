@@ -47,6 +47,9 @@ fastrand = { workspace = true }
 lash = { package = "lash-runtime", path = "../lash", features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true, features = ["testing"] }
+# Integration tests need this crate's own `testing` seams (the conformance
+# factory and probe impls), the same way lash-sqlite-store wires itself.
+lash-postgres-store = { package = "lash-internal-postgres-store", path = ".", features = ["testing"] }
 lash-protocol-standard = { workspace = true, features = ["lashlang"] }
 lash-plugin-process-controls = { workspace = true }
 lash-subagents = { workspace = true }

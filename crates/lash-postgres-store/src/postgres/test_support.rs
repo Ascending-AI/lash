@@ -5,7 +5,7 @@
 //! production store traits carry none.
 
 use crate::*;
-use lash_core::store::StoreTestSupport;
+use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport};
 
 #[async_trait::async_trait]
 impl StoreTestSupport for PostgresSessionStore {
@@ -72,5 +72,25 @@ impl StoreTestSupport for PostgresSessionStore {
         .fetch_all(&self.pool)
         .await
         .map_err(store_sqlx_error)
+    }
+}
+
+#[async_trait::async_trait]
+impl ConformanceSessionStoreFactory for PostgresSessionStoreFactory {
+    async fn create_conformance_store(
+        &self,
+        request: &SessionStoreCreateRequest,
+    ) -> Result<Arc<dyn ConformancePersistence>, StoreError> {
+        Ok(self.create_session_store(request).await?)
+    }
+
+    async fn open_existing_conformance_store(
+        &self,
+        request: &SessionStoreCreateRequest,
+    ) -> Result<Option<Arc<dyn ConformancePersistence>>, String> {
+        Ok(self
+            .open_existing_session_store(request)
+            .await?
+            .map(|store| store as Arc<dyn ConformancePersistence>))
     }
 }

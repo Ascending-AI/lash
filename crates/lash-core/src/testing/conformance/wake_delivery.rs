@@ -249,11 +249,13 @@ async fn ordering_group_discard_case(
 /// host instance, must be idempotent, and must never mutate the lifecycle fold.
 pub async fn wake_delivery_crash_matrix(
     factory: Arc<dyn crate::SessionStoreFactory>,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
     clock: Arc<TestClock>,
     process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     terminal_wait_witness: ProcessTerminalWaitWitness,
 ) {
+    let probe = Arc::clone(&registry);
+    let registry: Arc<dyn crate::ProcessRegistry> = registry;
     let target_session_id = "wake-crash-target";
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
@@ -995,12 +997,7 @@ pub async fn wake_delivery_crash_matrix(
         "redriving the named head must clear the blocked-group report"
     );
 
-    sender_floor_lifetime(
-        Arc::clone(&factory),
-        Arc::clone(&registry),
-        Arc::clone(&clock),
-    )
-    .await;
+    sender_floor_lifetime(Arc::clone(&factory), probe, Arc::clone(&clock)).await;
 
     target_gone_is_a_typed_discard(
         Arc::clone(&factory),
@@ -1115,7 +1112,7 @@ async fn missing_target_is_deferred_and_rearmed(
 
 async fn sender_floor_lifetime(
     factory: Arc<dyn crate::SessionStoreFactory>,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
     clock: Arc<TestClock>,
 ) {
     let target_session_id = "wake-allocation-floor-lifetime-target";
@@ -1149,8 +1146,9 @@ async fn sender_floor_lifetime(
         .expect("append sender-floor lifetime wake")
         .wake_delivery
         .expect("sender-floor lifetime wake delivery");
+    let production_registry: Arc<dyn crate::ProcessRegistry> = registry.clone();
     let report = crate::WakeDeliveryDriver::drive_pending_once(
-        Arc::clone(&registry),
+        Arc::clone(&production_registry),
         Arc::clone(&factory),
         Arc::new(crate::NoQueuedWork::new()),
         clock as Arc<dyn crate::Clock>,
@@ -1173,7 +1171,7 @@ async fn sender_floor_lifetime(
         })
         .expect("sender-floor lifetime wake reached receiver");
     settle_queued_batch(&target, target_session_id, &batch.batch_id).await;
-    complete_and_prune(&registry, process_id).await;
+    complete_and_prune(&production_registry, process_id).await;
     let retained_floor = registry
         .wake_allocation_floor_for_testing(target_session_id, process_id)
         .await

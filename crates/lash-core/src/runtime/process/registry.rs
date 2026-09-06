@@ -529,11 +529,13 @@ pub trait ProcessContinuationStore: Send + Sync {
 
 /// Test-only probes on a process registry.
 ///
-/// Compiled only under `cfg(any(test, feature = "testing"))`, where it is a
-/// supertrait of [`ProcessRegistry`] so conformance suites reach the probes
-/// through a `dyn ProcessRegistry` handle. Backends implement it under the
+/// Compiled only under `cfg(any(test, feature = "testing"))` and never a
+/// supertrait of [`ProcessRegistry`]: the conformance suites take
+/// [`ConformanceProcessRegistry`] (`ProcessRegistry + ProcessRegistryTestSupport`)
+/// and reach the probes through that handle. Backends implement it under the
 /// same gate they forward to `lash-core/testing`; the production trait never
-/// requires a testing method.
+/// requires a testing method, and a build with `lash-core/testing` on but a
+/// backend's `testing` off still compiles.
 #[cfg(any(test, feature = "testing"))]
 #[async_trait::async_trait]
 pub trait ProcessRegistryTestSupport: Send + Sync {
@@ -548,15 +550,18 @@ pub trait ProcessRegistryTestSupport: Send + Sync {
     }
 }
 
-/// Production stand-in for the test-support supertrait: empty and blanket
-/// implemented, so no backend writes anything for it. The real trait with the
-/// `*_for_testing` probes exists only under `cfg(any(test, feature = "testing"))`.
-#[cfg(not(any(test, feature = "testing")))]
-#[doc(hidden)]
-pub trait ProcessRegistryTestSupport: Send + Sync {}
+/// A process registry together with its test-only probes: the registry type
+/// the conformance suites take. Blanket-implemented under the same gate as
+/// [`ProcessRegistryTestSupport`]; an `Arc<dyn ConformanceProcessRegistry>`
+/// upcasts to `Arc<dyn ProcessRegistry>` wherever production code is exercised.
+#[cfg(any(test, feature = "testing"))]
+pub trait ConformanceProcessRegistry: ProcessRegistry + ProcessRegistryTestSupport {}
 
-#[cfg(not(any(test, feature = "testing")))]
-impl<T: Send + Sync + ?Sized> ProcessRegistryTestSupport for T {}
+#[cfg(any(test, feature = "testing"))]
+impl<T> ConformanceProcessRegistry for T where
+    T: ProcessRegistry + ProcessRegistryTestSupport + ?Sized
+{
+}
 
 /// Durability-neutral process registry.
 ///
@@ -566,13 +571,14 @@ impl<T: Send + Sync + ?Sized> ProcessRegistryTestSupport for T {}
 /// implementations. Registry methods are point reads and writes only. See
 /// `docs/adr/0016-process-waits-live-on-the-work-driver-seam.md`.
 ///
-/// No production registry method is a `*_for_testing` hook: those live on
-/// [`ProcessRegistryTestSupport`], which joins this trait only under
-/// `cfg(any(test, feature = "testing"))` (see
+/// No production registry method is a `*_for_testing` hook and this trait
+/// carries no test-only obligation: the probes live on the gated
+/// [`ProcessRegistryTestSupport`], reached through
+/// [`ConformanceProcessRegistry`] by the conformance suites (see
 /// [`StoreMaintenance`](crate::store::StoreMaintenance) for the store-side
 /// norm).
 #[async_trait::async_trait]
-pub trait ProcessRegistry: Send + Sync + ProcessRegistryTestSupport {
+pub trait ProcessRegistry: Send + Sync {
     fn wake_delivery_config(&self) -> WakeDeliveryConfig;
 
     /// Return the same registry backend bound to the runtime's clock.

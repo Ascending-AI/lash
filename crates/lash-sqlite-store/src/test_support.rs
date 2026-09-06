@@ -5,7 +5,7 @@
 //! production store traits carry none.
 
 use super::*;
-use lash_core::store::StoreTestSupport;
+use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport};
 
 #[async_trait::async_trait]
 impl StoreTestSupport for Store {
@@ -83,5 +83,25 @@ impl StoreTestSupport for Store {
             })
             .await
             .map_err(sqlite_error)
+    }
+}
+
+#[async_trait::async_trait]
+impl ConformanceSessionStoreFactory for SqliteSessionStoreFactory {
+    async fn create_conformance_store(
+        &self,
+        request: &SessionStoreCreateRequest,
+    ) -> Result<Arc<dyn ConformancePersistence>, StoreError> {
+        Ok(self.create_bound_store(request).await?)
+    }
+
+    async fn open_existing_conformance_store(
+        &self,
+        request: &SessionStoreCreateRequest,
+    ) -> Result<Option<Arc<dyn ConformancePersistence>>, String> {
+        Ok(self
+            .open_existing_bound_store(request)
+            .await?
+            .map(|store| store as Arc<dyn ConformancePersistence>))
     }
 }

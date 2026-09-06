@@ -950,39 +950,3 @@ where
         RuntimePersistenceDecorator::gc_unreachable(self).await
     }
 }
-
-/// Decorators forward every test-only hook to the inner handle; the hooks are
-/// probes, not behavior a decorator intercepts.
-#[cfg(any(test, feature = "testing"))]
-#[async_trait::async_trait]
-impl<T> StoreTestSupport for T
-where
-    T: RuntimePersistenceDecorator + ?Sized,
-{
-    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
-        &self,
-        version: u32,
-    ) -> Result<(), StoreError> {
-        self.inner()
-            .stamp_session_state_version_and_corrupt_payload_for_testing(version)
-            .await
-    }
-
-    async fn seed_session_trigger_manifest_ref_for_testing(
-        &self,
-        session_id: &str,
-    ) -> Result<bool, StoreError> {
-        self.inner()
-            .seed_session_trigger_manifest_ref_for_testing(session_id)
-            .await
-    }
-
-    async fn raw_session_owned_artifact_refs_for_testing(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<(String, String)>, StoreError> {
-        self.inner()
-            .raw_session_owned_artifact_refs_for_testing(session_id)
-            .await
-    }
-}
