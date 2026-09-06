@@ -6,9 +6,18 @@
 
 **Purpose.** Prove that a replacement Workbench process rehydrates the session's **RLM
 execution state** — the Lashlang variables bound by earlier code — from the durable
-checkpoint, and that it does so identically on SQLite and PostgreSQL. A checkpoint
-component body is stored once and later commits carry only its reference; the reference
-must still resolve to a body when a cold process hydrates the session.
+checkpoint, and that it does so identically on SQLite and PostgreSQL. The checkpoint is a keyed component set: the execution-state root holds logical
+binding names and inline small values or content-addressed leaf references. Large values
+live in separate typed MessagePack leaves. A changed root and changed leaves commit in
+one transaction; unchanged leaves carry references without bodies. Cold open must resolve
+the complete root-plus-leaves set, not merely recover the transcript.
+
+**Current format boundary.** [ADR 0056](../../docs/adr/0056-checkpoint-components-generalize-to-a-keyed-set.md)
+was amended by FIG-1728: snapshot v14 removed guest scratch files and file-body leaves.
+The current root retains globals and deferred resolutions. Do not interpret the ADR's
+historical file paragraphs as a supported file checkpoint API. The ticket's binary-file
+gate is obsolete since the ADR 0056 amendment (FIG-1728) dropped the files section at
+snapshot v14; `RLM_SNAPSHOT_VERSION` is 17 at HEAD (`crates/lash-protocol-rlm/src/executor/snapshot.rs:31`).
 
 **Why this is not the session-resume scenario.** `workbench-session-resume` proves
 committed *transcript* nodes return after a process replacement. Transcript survival is
@@ -55,9 +64,41 @@ the post-restart code ran — never on the assistant's ability to recall.
    in full only while they are small; large values render as a truncated preview and the
    provider-request gate below would then match nothing.
 
+## Root-plus-leaves gates
+
+- **Do:** in Phase 1, also ask the agent to bind `fig1196_payload` to a string built from
+  512 repetitions of the run's unique marker, and `fig1196_counter` to 137. Ask for only
+  `stored` as the answer. **Expect:** executed source creates all three bindings; the
+  payload exceeds the 512-byte leaf threshold. Record its expected length and SHA-256
+  independently from the operator's marker; save those as `01-payload-oracle.json`.
+  Keep `fig636_marker` small for the pre-execution prompt gate.
+- **Do:** after Phase 1, submit a turn that increments only `fig1196_counter` by 29 and
+  finishes with that counter. **Expect:** rendered answer contains 166; API and trace
+  agree on one additional completed pair, and source does not rebind the payload. Save
+  `01-dirty-root.png` and `01-dirty-root-exec.json`. Take the Phase-2 trace boundary after
+  this turn. The later reconstruction gate now expects six pre-restart message rows.
+- **Do:** preserve Phase 2's no-new-binding turn and Phase 3's cold process replacement.
+  **Expect:** both the changed root and retained payload leaf resolve after reopen.
+- **Do:** in Phase 4, also ask the agent to read the existing payload and counter, returning
+  the payload length, SHA-256, and counter without creating or assigning any binding.
+  **Expect:** rendered values match `01-payload-oracle.json` and 166, the executed source
+  reads those variables, and the API agrees. The prompt may truncate the payload; do not
+  require its full contents in the provider request. Capture `04-leaf-recall.png`.
+The deterministic `session_lifecycle_growth::flat_commit_growth_after_large_bindings_stabilize`
+test separately observes accepted commit inputs with production budget accounting. It
+checks forty dirty turns retain sixteen large leaf identities, excludes unchanged bodies,
+and requires exactly one submitted leaf body after rebinding one large value. Browser
+traces establish executed operations; they do not expose exact submitted component bodies.
+
 ## Working material
 
-- Require `OPENROUTER_API_KEY`; a missing key is a harness gap → Abort.
+- Require `OPENROUTER_API_KEY`; a missing key is a harness gap → Abort before boot.
+- Execute both `lashlang` and `typescript` rows, each on SQLite and PostgreSQL with
+  independent fresh data directories, ports, markers, and artifacts. Set
+  `LASH_RUNBOOK_DIALECT` and `OPENROUTER_MODEL=deepseek/deepseek-v4-pro` on boot and restart;
+  verify served dialect and model from the request/execution trace. Outcome prompts and
+  gates apply to the active dialect; never feed Lashlang source to the TypeScript row.
+- Source the fork's `env.sh` before `just` recipes that invoke Cargo.
 - SQLite pass:
   `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
   Gate `GET /healthz` → 200. Teardown: `just agent-workbench-down <port>`. The dev helper
@@ -81,10 +122,9 @@ the post-restart code ran — never on the assistant's ability to recall.
 The browser/API surface does not expose whether the hydrated execution-state body was
 present in a commit or only its component reference. This runbook uses the no-new-binding
 trace as the public observable that should produce a reference-only commit, then tests the
-result by cold hydration. A deterministic store conformance test should separately assert
-the exact commit shape (`execution_state == None` with an unchanged
-`execution_state_ref`) so that implementation property is gated without backend-specific
-blob decoding in a browser run.
+result by cold hydration. The deterministic growth test separately asserts the submitted keyed component shape:
+unchanged execution leaves have references and no bodies; rebinding one large value
+submits exactly one new leaf body. No legacy fixed execution-state slot is assumed.
 
 ## Phase 0 — Boot and identify the durable session
 
@@ -135,7 +175,7 @@ Run
 `AGENT_WORKBENCH_DATA_DIR=<same-tmp> [AGENT_WORKBENCH_POSTGRES=1] just agent-workbench-restart <port>`
 and poll `/healthz` until ready. Omit the bracketed PostgreSQL setting only for the SQLite
 pass. Require a new PID and an unchanged session id across the rendered page,
-`/api/state`, and `<data-dir>/session-id`. Reload the browser and require all four
+`/api/state`, and `<data-dir>/session-id`. Reload the browser and require all six
 pre-restart rows to render in their original order. Screenshot `03-reconstructed.png`.
 
 ## Phase 4 — Prove the variable returned before the model spoke
@@ -183,9 +223,11 @@ its Restate container, and (PostgreSQL pass) its Postgres container are gone.
 | Boot identity | rendered/API/disk session ids agree; Postgres pass reports its backend | | `00-ready.png` |
 | Variable bound | `exec_code_started.code` binds the name to the marker | | `01-bound-exec.json`, `01-bound-state.json` |
 | No-new-binding turn | one further committed pair; traced code mutates no binding and finishes | | `02-reference-only-exec.json`, `02-no-new-binding-turn.png` |
-| Cold reconstruction | PID changed; session id and all four rows survived | | `03-reconstructed.png` |
+| Cold reconstruction | PID changed; session id and all six rows survived | | `03-reconstructed.png` |
 | Hydration before execution | post-restart provider request carries the bound variable and marker | | `04-provider-request.json` |
 | Recall by reading | traced code references the variable without assigning it | | `04-recall-exec.json`, `04-recall.png` |
+| Retained large leaf | payload length/digest and counter 166 survive dirty-root and cold reopen | | `01-payload-oracle.json`, `04-leaf-recall.png` |
+| Dialect agreement | served Lashlang and TypeScript rows pass independently | | four independent artifact sets |
 | Cross-backend agreement | SQLite and PostgreSQL passes reach identical per-gate verdicts | | both artifact sets |
 
 **Aggregate:** did a cold process recover the session's bound Lashlang state — not merely

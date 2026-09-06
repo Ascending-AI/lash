@@ -6,3 +6,7 @@ include!("core_session_builder/session_delete_failure.rs");
 include!("core_session_builder/prompt_reopen_authority.rs");
 include!("core_session_builder/rlm_dialect.rs");
 include!("core_session_builder/runtime_dependencies.rs");
+
+#[cfg(feature = "rlm")]
+#[path = "core_session_builder/session_lifecycle_growth.rs"]
+mod session_lifecycle_growth;
