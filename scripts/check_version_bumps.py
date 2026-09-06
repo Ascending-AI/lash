@@ -88,6 +88,12 @@ REGISTRATION_BASELINES = {
 # and burns the answer here. Entries stay after the change lands as
 # dead-but-honest history.
 IDENTIFIER_RENAME_BASELINES = {
+    # FIG-1102: the workbench include! splice became real modules, so every
+    # item in state.rs gained pub(crate) and one line was rewrapped. Serde
+    # attributes, field and variant names, and constant values are unchanged;
+    # an independent reviewer confirmed the serialized bytes are identical, so
+    # PRODUCT_EVENT_LOG_FORMAT_VERSION stays 2.
+    'examples/agent-workbench/src/main_sections/state.rs:PRODUCT_EVENT_LOG_FORMAT_VERSION': 'sha256:b15515d2841c53a1345f62695bee1e754abae189aec7e44ca1dd9445f174726f',
     # FIG-1036, one time only: the outcome-suffix vocabulary rename retyped
     # Rust identifiers across these three surfaces while leaving every serde
     # field name, variant name, and emitted fingerprint tag byte-identical, so
