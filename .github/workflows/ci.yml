@@ -2030,6 +2030,9 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          # Background auto-gc rewrites .git/shallow between the deepen fetch and
+          # the ancestry check ("shallow file has changed since we read it").
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
@@ -2084,6 +2087,9 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          # Background auto-gc rewrites .git/shallow between the deepen fetch and
+          # the ancestry check ("shallow file has changed since we read it").
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
