@@ -9,7 +9,10 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("parked-config").open().await?;
-    session.turn(TurnInput::text("establish head")).run().await?;
+    session
+        .turn(TurnInput::text("establish head"))
+        .run()
+        .await?;
     let expected_model = model_spec("settled-model", Some("settled-variant".to_string()), 64_000);
     let expected_generation = lash_core::GenerationOptions {
         temperature: Some(lash_core::NonNegativeFiniteF64::new(0.35).expect("temperature")),
@@ -17,7 +20,9 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
         ..lash_core::GenerationOptions::default()
     };
     session
-        .configure(SessionConfigPatch {
+        .admin()
+        .config()
+        .update(SessionConfigPatch {
             model: Some(expected_model.clone()),
             generation: Some(lash_core::facade_support::GenerationOverlay::Replace(
                 expected_generation.clone(),

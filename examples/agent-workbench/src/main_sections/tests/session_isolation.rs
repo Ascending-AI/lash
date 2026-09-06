@@ -134,11 +134,13 @@ async fn concurrent_sessions_isolate_transcripts_triggers_and_processes_inner() 
             .expect("isolated trigger process terminal");
     }
     let processes_a = session_a
+        .admin()
         .processes()
         .list_all()
         .await
         .expect("session A work");
     let processes_b = session_b
+        .admin()
         .processes()
         .list_all()
         .await

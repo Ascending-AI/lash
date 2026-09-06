@@ -32,7 +32,9 @@ async fn run_writer_operation(
     match operation {
         WriterContentionOperation::Configure => {
             session
-                .configure(lash::SessionConfigPatch::default())
+                .admin()
+                .config()
+                .update(lash::SessionConfigPatch::default())
                 .await?;
         }
         WriterContentionOperation::ProcessRefresh => {
@@ -536,7 +538,7 @@ pub(crate) async fn run_once_async_process_settlement(
     }
 
     let session = runtime.session();
-    let processes = session.processes().list_all().await?;
+    let processes = session.admin().processes().list_all().await?;
     if processes.len() != children {
         anyhow::bail!(
             "async settlement expected {children} child processes, found {}",
@@ -549,6 +551,7 @@ pub(crate) async fn run_once_async_process_settlement(
         terminals.spawn(async move {
             let started = Instant::now();
             session
+                .admin()
                 .processes()
                 .await_output(&process.process_id)
                 .await?;

@@ -138,7 +138,11 @@ async fn typescript_dialect_is_selected_on_the_production_session_path_and_survi
 
     let prompts = seen.lock_recover();
     assert_eq!(prompts.len(), 2);
-    assert!(prompts.iter().all(|prompt| prompt.contains("## TypeScript execution")));
+    assert!(
+        prompts
+            .iter()
+            .all(|prompt| prompt.contains("## TypeScript execution"))
+    );
     assert!(prompts.iter().all(|prompt| prompt.contains("<typescript>")));
     assert!(prompts.iter().all(|prompt| !prompt.contains("<lashlang>")));
     Ok(())
@@ -150,11 +154,7 @@ async fn queued_session_command_restores_the_recorded_typescript_dialect() -> Re
     let tools = Arc::new(RefreshableDialectTool::new("before_refresh"));
     let provider = lash_core::testing::TestProvider::builder()
         .kind("rlm-typescript-queued-session-command")
-        .complete(|_| async {
-            Ok(text_response(
-                "<typescript>\nfinish(42);\n</typescript>",
-            ))
-        })
+        .complete(|_| async { Ok(text_response("<typescript>\nfinish(42);\n</typescript>")) })
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(rlm_core_builder())
@@ -189,6 +189,7 @@ async fn queued_session_command_restores_the_recorded_typescript_dialect() -> Re
     tools.replace("after_refresh");
 
     let receipt = session
+        .admin()
         .commands()
         .refresh_tool_catalog(
             "restore the recorded typescript dialect",
@@ -369,7 +370,8 @@ async fn projected_bindings_reach_a_served_prompt_once_in_the_sessions_dialect()
             "<lashlang>",
         ),
     ] {
-        let served: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let served: Arc<std::sync::Mutex<Vec<String>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
         let provider = {
             let served = Arc::clone(&served);
             crate::testing::TestProvider::builder()
@@ -411,7 +413,10 @@ async fn projected_bindings_reach_a_served_prompt_once_in_the_sessions_dialect()
         session.turn(input).run().await?;
 
         let prompts = served.lock_recover().clone();
-        let prompt = prompts.first().expect("the turn reached the provider").clone();
+        let prompt = prompts
+            .first()
+            .expect("the turn reached the provider")
+            .clone();
         assert_eq!(
             prompt
                 .matches("These read-only values are already in scope")
@@ -438,8 +443,8 @@ async fn projected_bindings_reach_a_served_prompt_once_in_the_sessions_dialect()
 /// idempotent on a fact the session already carries (ADR 0066).
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn the_typed_read_reports_what_the_session_recorded_and_restating_it_is_a_no_op()
--> Result<()> {
+async fn the_typed_read_reports_what_the_session_recorded_and_restating_it_is_a_no_op() -> Result<()>
+{
     use crate::rlm::RlmSessionExt as _;
 
     let core = explicit_ephemeral_facets(rlm_core_builder())
@@ -462,7 +467,9 @@ async fn the_typed_read_reports_what_the_session_recorded_and_restating_it_is_a_
     );
 
     let unchanged = session
-        .set_rlm_config_if_unset(crate::rlm::RlmSessionConfig::new().dialect(RlmDialect::Typescript))
+        .set_rlm_config_if_unset(
+            crate::rlm::RlmSessionConfig::new().dialect(RlmDialect::Typescript),
+        )
         .await
         .expect("restating the recorded dialect is a no-op");
     assert_eq!(unchanged, recorded);
@@ -515,9 +522,12 @@ async fn staged_rlm_fact_set_emits_resident_changed_at_the_same_revision() -> Re
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = stating_dialect(core.session("rlm-resident-publication"), RlmDialect::Typescript)
-        .open()
-        .await?;
+    let session = stating_dialect(
+        core.session("rlm-resident-publication"),
+        RlmDialect::Typescript,
+    )
+    .open()
+    .await?;
     let before = session.observe().current_observation();
 
     session
@@ -581,7 +591,10 @@ async fn a_guarded_write_that_disagrees_is_refused_with_a_typed_conflict() -> Re
     assert_eq!(recorded, RlmDialect::Typescript);
     assert_eq!(requested, RlmDialect::Lashlang);
     assert_eq!(
-        session.rlm_config().expect("recorded config decodes").dialect,
+        session
+            .rlm_config()
+            .expect("recorded config decodes")
+            .dialect,
         Some(RlmDialect::Typescript),
         "a refused write leaves the recorded fact exactly as it was"
     );
@@ -603,7 +616,10 @@ async fn a_post_open_dialect_is_compared_against_the_running_default_never_writt
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-unrecorded-dialect").open().await?;
     assert_eq!(
-        session.rlm_config().expect("recorded config decodes").dialect,
+        session
+            .rlm_config()
+            .expect("recorded config decodes")
+            .dialect,
         Some(RlmDialect::Lashlang),
         "a host that states no dialect gets the default recorded at its first open"
     );
@@ -612,10 +628,15 @@ async fn a_post_open_dialect_is_compared_against_the_running_default_never_writt
         .set_rlm_config_if_unset(crate::rlm::RlmSessionConfig::new().dialect(RlmDialect::Lashlang))
         .await
         .expect("stating the dialect the session is running is a no-op");
-    assert_eq!(agreed, session.rlm_config().expect("recorded config decodes"));
+    assert_eq!(
+        agreed,
+        session.rlm_config().expect("recorded config decodes")
+    );
 
     let error = session
-        .set_rlm_config_if_unset(crate::rlm::RlmSessionConfig::new().dialect(RlmDialect::Typescript))
+        .set_rlm_config_if_unset(
+            crate::rlm::RlmSessionConfig::new().dialect(RlmDialect::Typescript),
+        )
         .await
         .expect_err("an open session cannot be moved onto another dialect");
     let crate::rlm::RlmSessionConfigError::Conflict(

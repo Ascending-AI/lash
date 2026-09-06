@@ -1,4 +1,4 @@
-use crate::support::*;
+use crate::support::{Arc, PluginFactory};
 
 /// Typed app-facing activation for an ordinary Lash plugin.
 ///

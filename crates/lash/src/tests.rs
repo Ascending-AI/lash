@@ -1,4 +1,17 @@
-use crate::support::*;
+use crate::admin::SessionConfigPatch;
+use crate::support::QueuedWorkSubstrate;
+use crate::support::{
+    Arc, BTreeMap, CancellationToken, EffectHost, EmbedError, LashCore, PluginFactory,
+    ProcessExecutionEnvStore, ProcessRegistry, PromptContribution, PromptLayerSink, PromptSlot,
+    PromptTemplate, ProviderHandle, Result, RunActivityCollector, RuntimeHostConfig,
+    RuntimeSessionState, ScopedEffectController, SelectedQueuedWorkDrainRefusalCause,
+    SessionCreateRequest, SessionError, SessionObservationSubscription, SessionProcessEventKind,
+    SessionResume, SessionSpec, SessionStoreFactory, StaticPluginFactory, StdMutex,
+    TestLocalProcessRegistry, TokenLedgerEntry, TokenUsage, ToolProvider, TurnActivity,
+    TurnActivityId, TurnActivitySink, TurnEvent, TurnInput, TurnOutcome, TurnReport, async_trait,
+    message_text,
+};
+use crate::turn::AssistantOutput;
 use lash_core::facade_support::{
     AgentFrameReasonFacadeOps, RuntimeSessionStateFacadeOps, SessionGraphFacadeOps,
     SessionNodeProjection, ToolStateFacadeOps,

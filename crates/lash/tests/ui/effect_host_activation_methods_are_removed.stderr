@@ -3,7 +3,7 @@ error[E0599]: no method named `emit_with_effect_host` found for struct `SessionT
   |
 5 |       let _ = session
   |  _____________-
-6 | |         .triggers()
+6 | |         .admin().triggers()
 7 | |         .emit_with_effect_host("Button", "ui.button", "pressed", serde_json::json!({}), scope.controller())
   | |         -^^^^^^^^^^^^^^^^^^^^^ method not found in `SessionTriggerAdmin`
   | |_________|
@@ -14,7 +14,7 @@ error[E0599]: no method named `activate_with_effect_host` found for struct `Sess
    |
  9 |       let _ = session
    |  _____________-
-10 | |         .triggers()
+10 | |         .admin().triggers()
 11 | |         .activate_with_effect_host("trigger:1", serde_json::json!({}), scope.controller())
    | |         -^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `SessionTriggerAdmin`
    | |_________|
@@ -25,7 +25,7 @@ error[E0599]: no method named `activate_source_type_with_effect_host` found for 
    |
 13 |       let _ = session
    |  _____________-
-14 | |         .triggers()
+14 | |         .admin().triggers()
 15 | |         .activate_source_type_with_effect_host("ui.button.pressed", serde_json::json!({}), scope.controller())
    | |         -^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `SessionTriggerAdmin`
    | |_________|

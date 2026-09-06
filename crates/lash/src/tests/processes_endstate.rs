@@ -690,7 +690,7 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
     let events = registry.events_after(process_id, 0).await?;
 
     let session = core.session(session_id).open().await?;
-    let observed = session.processes().list_all().await?;
+    let observed = session.admin().processes().list_all().await?;
     let process = observed
         .iter()
         .find(|process| process.process_id == *process_id)
@@ -1027,6 +1027,7 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
     .await;
     let session = core.session(session_id).open().await?;
     session
+        .admin()
         .processes()
         .start(
             {
@@ -1116,6 +1117,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     .await;
     let session = core.session(session_id).open().await?;
     session
+        .admin()
         .processes()
         .start(
             process

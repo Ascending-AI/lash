@@ -2,7 +2,15 @@ use lash_sansio::sync::MutexExt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use crate::support::*;
+use crate::support::{
+    ActivePluginBinding, Arc, CancellationToken, EffectHost, EmbedError, LashCore, LashRuntime,
+    PluginBinding, PluginFactory, PluginOperations, PluginOptions, ProcessHandleView, PromptLayer,
+    PromptLayerSink, ProviderHandle, QueuedTurnBuilder, Result, RuntimeErrorCode, RuntimeHandle,
+    RuntimeObservation, RuntimePersistence, RuntimeSessionState, SessionAdmin, SessionCursor,
+    SessionError, SessionObservation, SessionObservationSubscription, SessionPolicy,
+    SessionReadView, SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest,
+    SessionUsageReport, ToolManifest, ToolState, TurnBuilder, TurnInput, build_plugin_host,
+};
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::runtime::{
@@ -712,31 +720,6 @@ impl LashSession {
         }
     }
 
-    /// Applies a configuration patch to the active session.
-    pub async fn configure(&self, patch: SessionConfigPatch) -> Result<()> {
-        self.admin().config().update(patch).await
-    }
-
-    /// Returns the tool administration facade.
-    pub fn tools(&self) -> ToolAdmin {
-        ToolAdmin::new(self.admin())
-    }
-
-    /// Returns the session-command administration facade.
-    pub fn commands(&self) -> SessionCommandAdmin {
-        self.admin().commands()
-    }
-
-    /// Returns the trigger administration facade.
-    pub fn triggers(&self) -> SessionTriggerAdmin {
-        self.admin().triggers()
-    }
-
-    /// Returns the process administration facade.
-    pub fn processes(&self) -> SessionProcessAdmin {
-        SessionProcessAdmin::new(self.admin())
-    }
-
     /// Refresh the session graph from any background process that signalled it
     /// changed. This is the honest name for the former
     /// `processes().await_all()` misnomer (ADR 0019 grill): a session-graph
@@ -1428,7 +1411,7 @@ mod reconcile_tests {
 
     struct CountingProcessWork(std::sync::atomic::AtomicUsize);
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl lash_core::ProcessWorkSubstrate for CountingProcessWork {
         async fn admit_pending_processes(
             &self,

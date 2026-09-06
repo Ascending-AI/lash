@@ -133,7 +133,8 @@ pub mod observe {
 
 /// Triggers and subscriptions: declaring event sources, emitting occurrences,
 /// and inspecting trigger subscriptions. Entry points:
-/// [`LashCore::triggers`] and [`LashSession::triggers`].
+/// [`LashCore::triggers`] and [`SessionAdmin::triggers`](admin::SessionAdmin::triggers)
+/// through [`LashSession::admin`].
 ///
 /// Reads have a facade: [`CoreTriggerAdmin::subscriptions`](crate::admin::CoreTriggerAdmin::subscriptions)
 /// and [`SessionTriggerAdmin`] project registrations for host and session

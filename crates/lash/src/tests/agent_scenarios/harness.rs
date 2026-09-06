@@ -674,6 +674,7 @@ impl AgentSessionTurnProcessScenario {
         let runtime = self.runtime()?;
         let session = runtime.core.session(self.session_id).open().await?;
         let handle = session
+            .admin()
             .processes()
             .start(
                 self.start_request(),

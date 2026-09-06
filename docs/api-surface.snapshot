@@ -255,8 +255,6 @@ lash::LashSession::cancel_queued_work_batch
 lash::LashSession::cancel_running_turns
 lash::LashSession::cancel_running_turns_with_origin
 lash::LashSession::close
-lash::LashSession::commands
-lash::LashSession::configure
 lash::LashSession::effect_host
 lash::LashSession::enqueue
 lash::LashSession::observe
@@ -265,7 +263,6 @@ lash::LashSession::park
 lash::LashSession::pending_turn_inputs
 lash::LashSession::plugin_operations
 lash::LashSession::policy_snapshot
-lash::LashSession::processes
 lash::LashSession::queued_turn
 lash::LashSession::queued_work
 lash::LashSession::read_view
@@ -276,8 +273,6 @@ lash::LashSession::request_turn_cancel_with_disposition
 lash::LashSession::revoke_durable_waits
 lash::LashSession::session_id
 lash::LashSession::set_turn_phase_probe
-lash::LashSession::tools
-lash::LashSession::triggers
 lash::LashSession::turn
 lash::LashSession::turn_address
 lash::LashSession::turn_input_applications
@@ -4180,8 +4175,6 @@ lash::prelude::LashSession::cancel_queued_work_batch
 lash::prelude::LashSession::cancel_running_turns
 lash::prelude::LashSession::cancel_running_turns_with_origin
 lash::prelude::LashSession::close
-lash::prelude::LashSession::commands
-lash::prelude::LashSession::configure
 lash::prelude::LashSession::effect_host
 lash::prelude::LashSession::enqueue
 lash::prelude::LashSession::observe
@@ -4190,7 +4183,6 @@ lash::prelude::LashSession::park
 lash::prelude::LashSession::pending_turn_inputs
 lash::prelude::LashSession::plugin_operations
 lash::prelude::LashSession::policy_snapshot
-lash::prelude::LashSession::processes
 lash::prelude::LashSession::queued_turn
 lash::prelude::LashSession::queued_work
 lash::prelude::LashSession::read_view
@@ -4201,8 +4193,6 @@ lash::prelude::LashSession::request_turn_cancel_with_disposition
 lash::prelude::LashSession::revoke_durable_waits
 lash::prelude::LashSession::session_id
 lash::prelude::LashSession::set_turn_phase_probe
-lash::prelude::LashSession::tools
-lash::prelude::LashSession::triggers
 lash::prelude::LashSession::turn
 lash::prelude::LashSession::turn_address
 lash::prelude::LashSession::turn_input_applications

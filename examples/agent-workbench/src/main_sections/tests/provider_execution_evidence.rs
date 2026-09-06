@@ -206,7 +206,9 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
             .await
             .expect("open provider evidence session");
         session
-            .configure(lash::SessionConfigPatch {
+            .admin()
+            .config()
+            .update(lash::SessionConfigPatch {
                 model: Some(model),
                 ..Default::default()
             })

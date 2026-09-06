@@ -734,6 +734,7 @@ pub(crate) async fn enqueue_tool_catalog_refresh(
         state.session_admission_error(&session_id, "mail.tool_catalog.refresh", error)
     })?;
     let receipt = session
+        .admin()
         .commands()
         .refresh_tool_catalog(
             reason,
@@ -842,7 +843,9 @@ pub(crate) async fn reset_chat(
         .map_err(AppError::session_open)?;
     let selected_model = model_spec_from_selection(state.selected_model());
     session
-        .configure(lash::SessionConfigPatch {
+        .admin()
+        .config()
+        .update(lash::SessionConfigPatch {
             model: Some(selected_model),
             ..lash::SessionConfigPatch::default()
         })

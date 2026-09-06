@@ -233,7 +233,9 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             .build()
             .expect("patched config change model");
         session
-            .configure(lash::SessionConfigPatch {
+            .admin()
+            .config()
+            .update(lash::SessionConfigPatch {
                 model: Some(patched_model),
                 ..Default::default()
             })

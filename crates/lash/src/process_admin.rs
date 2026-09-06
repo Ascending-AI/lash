@@ -10,7 +10,7 @@
 //! this surface pre-filtered by a session's observer edge; it lives in `admin` because it
 //! wraps a [`SessionAdmin`](crate::admin::SessionAdmin).
 
-use crate::support::*;
+use crate::support::{Arc, EmbedError, LashCore, Result, ScopedEffectController};
 use lash_core::facade_support::ScopedEffectControllerFacadeOps;
 use lash_sansio::sync::MutexExt;
 
@@ -372,7 +372,7 @@ impl Processes {
 
     /// List processes a session may address — the **observer** filter.
     /// This is the visibility lens (what a session may see), distinct
-    /// from [`list_originated_by`](Self::list_originated_by). `session.processes()`
+    /// from [`list_originated_by`](Self::list_originated_by). `session.admin().processes()`
     /// is thin sugar over this method pre-scoped to the session's observer edge.
     pub async fn list_observed_by(
         &self,
@@ -853,7 +853,7 @@ mod terminal_wait_tests {
         terminal: lash_core::ProcessAwaitOutput,
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl lash_core::ProcessWorkSubstrate for ReattachOnce {
         async fn admit_pending_processes(
             &self,

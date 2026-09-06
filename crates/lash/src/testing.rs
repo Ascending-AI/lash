@@ -479,6 +479,7 @@ finish "registered"
             payload: serde_json::Value,
         ) -> lash_core::facade_support::TriggerEmitReport {
             let registrations = session
+                .admin()
                 .triggers()
                 .by_source_type("clock.Alarm")
                 .await

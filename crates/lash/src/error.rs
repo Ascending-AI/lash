@@ -1,4 +1,4 @@
-use crate::support::*;
+use crate::support::SessionError;
 
 /// Why a host-selected queued-work drain was refused before executing a turn.
 ///
