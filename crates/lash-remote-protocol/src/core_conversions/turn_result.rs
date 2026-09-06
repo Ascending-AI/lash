@@ -71,11 +71,9 @@ impl RemoteTurnReport {
             total.add(&child.usage);
         }
         let outcome = RemoteTurnOutcome::from(outcome);
-        let status = RemoteTurnStatus::from(&outcome);
         Self {
             session_id: session_id.into(),
             turn_id: turn_id.into(),
-            status,
             outcome,
             assistant_output: assistant_output.into(),
             usage: RemoteTurnUsageReport {

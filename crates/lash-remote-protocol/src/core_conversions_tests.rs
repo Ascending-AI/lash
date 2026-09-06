@@ -1070,7 +1070,7 @@ fn remote_turn_result_maps_core_semantics() {
         ],
     );
     remote.validate().expect("valid turn result");
-    assert_eq!(remote.status, RemoteTurnStatus::Completed);
+    assert_eq!(remote.status(), RemoteTurnStatus::Completed);
     assert_eq!(remote.usage.total.input_tokens, 4);
     assert_eq!(remote.usage.total.output_tokens, 6);
     assert_eq!(remote.execution.started_at_ms, 1_700_000_000_000);
