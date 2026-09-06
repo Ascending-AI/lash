@@ -184,6 +184,7 @@ pub(super) async fn register_ready_runtime_completions(
     scheduler: &mut BoundaryScheduler,
     registered_after: &crate::scheduler::DeliveredBoundary,
     world: &mut GeneratedRuntimeWorld,
+    store: &ModelStore,
 ) -> Result<Vec<Value>, FixedScriptRunnerError> {
     let mut admissions = Vec::new();
     let ready = queue.take_ready(|event| runtime_completion_ready(event, state));
@@ -201,7 +202,12 @@ pub(super) async fn register_ready_runtime_completions(
             let (_pending, completion_event) =
                 queue.register_pending_event(event, registered_after, family, units);
             world
-                .start_provider_turn(turn_event, completion_event, scheduler)
+                .start_provider_turn(
+                    turn_event,
+                    completion_event,
+                    scheduler,
+                    &store.queued_next_turn_boundaries(&actor_alias),
+                )
                 .await?;
             state.provider_started(&actor_alias);
             admissions

@@ -348,7 +348,18 @@ impl GeneratedRuntimeWorld {
         event: BoundaryEvent,
         completion_event: BoundaryEvent,
         scheduler: &mut BoundaryScheduler,
+        queued_next_turn_boundaries: &[String],
     ) -> Result<(), FixedScriptRunnerError> {
+        let expected_claims = queued_next_turn_boundaries
+            .iter()
+            .map(|boundary| {
+                self.queued_inputs.get(boundary).cloned().ok_or_else(|| {
+                    FixedScriptRunnerError::Assertion(format!(
+                        "queued input boundary `{boundary}` has no runtime input id"
+                    ))
+                })
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
         let runtime_session = self.sessions.get_mut(&event.actor_alias).ok_or_else(|| {
             FixedScriptRunnerError::Assertion(format!(
                 "provider boundary `{}` ran before ingress for `{}`",
@@ -408,7 +419,23 @@ impl GeneratedRuntimeWorld {
             run_provider_turn_task(session, transport, provider_kind, task_event).await
         });
         tokio::select! {
-            _ = runtime_session.provider_schedule.wait_until_blocked(exchange_index, 0) => {}
+            ready = async {
+                runtime_session.provider_schedule.wait_until_blocked(exchange_index, 0).await;
+                // The same model rows that admission will claim must now be
+                // absent from the runtime's pending-input view, which excludes
+                // live claims. No boundary is delivered during this wait and the
+                // first wire gate is closed, so these rows cannot have been
+                // cancelled or completed. An empty admission needs no store read.
+                while !expected_claims.is_empty() {
+                    let pending = runtime_session.session.pending_turn_inputs().await
+                        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+                    if pending.iter().all(|input| !expected_claims.contains(&input.input_id)) {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+                Ok::<(), FixedScriptRunnerError>(())
+            } => { ready?; }
             result = &mut handle => {
                 let result = result.map_err(|err| {
                     FixedScriptRunnerError::Runtime(format!(
@@ -608,7 +635,7 @@ impl GeneratedRuntimeWorld {
     }
 
     /// The earliest completion time (`final_ready_at`) across all live provider
-    /// turns, or `None` when none is live. In serialize mode this is the delivery
+    /// turns, or `None` when none is live. This is the delivery
     /// barrier: the driver holds back any boundary scheduled at or after this time
     /// until the turn finishes and its completion lands in the scheduler, so the
     /// completion is always delivered at its own `at` ahead of later boundaries —

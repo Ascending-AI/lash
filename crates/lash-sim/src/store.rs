@@ -181,6 +181,18 @@ pub struct ModelStore {
 }
 
 impl ModelStore {
+    pub(crate) fn queued_next_turn_boundaries(&self, session: &str) -> Vec<String> {
+        self.queued_input_boundaries
+            .iter()
+            .filter(|(_, input)| {
+                input.session == session
+                    && input.next_turn
+                    && matches!(input.state, ModelPendingInputState::Queued)
+            })
+            .map(|(boundary, _)| boundary.clone())
+            .collect()
+    }
+
     /// Admission occurs at provider start, before its completion is delivered.
     /// Only queued next-turn inputs are eligible; cancellation remains a local
     /// lifecycle transition whose outcome is independently projected.

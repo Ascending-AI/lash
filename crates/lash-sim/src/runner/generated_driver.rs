@@ -43,18 +43,12 @@ pub(super) async fn drive_generated_workload(
     let mut log = BoundaryDeliveryLog::default();
     let mut suspend_ready_at = 1_000_000u64;
     loop {
-        // Serialized cross-backend barrier: while a provider turn is live, never
-        // deliver a boundary scheduled at or after that turn's completion time
-        // until the completion itself has been scheduled. The turn's own provider
-        // releases all fall strictly before `final_ready_at`, so they still flow
-        // through and drive the turn forward; only boundaries that would otherwise
-        // jump ahead of the not-yet-scheduled completion are held. This removes
-        // the sole source of backend-dependent delivery drift (a slow async store
-        // letting a later boundary overtake the completion), so the in-memory and
-        // durable serialized runs produce a byte-identical delivery order. The
-        // SEARCH lane keeps full concurrency and is unaffected.
-        if world.serialize_provider_turns
-            && let Some(barrier) = world.min_active_final_ready_at()
+        // A due provider completion must enter the scheduler before a later
+        // boundary can overtake it. Task polling speed must not decide whether
+        // that completion admits the next turn before queued-input cancellation.
+        // This still permits concurrent turns: every turn's wire releases precede
+        // its completion time and continue through the shared scheduler.
+        if let Some(barrier) = world.min_active_final_ready_at()
             && scheduler
                 .min_pending_at()
                 .is_none_or(|next_at| next_at >= barrier)
@@ -107,6 +101,7 @@ pub(super) async fn drive_generated_workload(
             &mut scheduler,
             &delivered,
             world,
+            &store,
         )
         .await?;
         store.apply_provider_admissions(&admissions);

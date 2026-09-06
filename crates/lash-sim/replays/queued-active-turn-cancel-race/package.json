@@ -4,8 +4,8 @@
   "status": "promoted_deterministic_regression_guard",
   "trace": "trace.json",
   "generator_version": "lash-sim.generated-workload.v9",
-  "source": "generated fast-random (seed 7313380382653661636, seed_index 0) DST trace, refreshed with canonical occurrence identity and structural process/event wake identity against generator lash-sim.generated-workload.v9 on 2026-08-05; refreshed with recorded non-empty tool-intent outcomes on 2026-08-12; regenerated on 2026-08-24 against rebased main with trace schema 9, typed exec diagnostics, and ordered provider-turn summaries; regenerated on 2026-08-27 for BLAKE3 identity formats; regenerated on 2026-09-01 for checked durable frame keys; regenerated on 2026-09-02 for incarnation-pinned process wake format v2; upgraded to sim trace v2 with provider admissions reconstructed from recorded runtime-completion registration boundaries",
-  "source_trace_sha256": "4d3d506bdc5892437db47bd13de94af32f33a4c20e398907515c30aa9b2a16da",
+  "source": "Generated live through lash-sim run and write_trace on 2026-09-06 with lash-sim.generated-workload.v9; provider admissions are observed at runtime after the first gate and committed queued-input claims.",
+  "source_trace_sha256": "53719867af32dab5ad26eac4bcfd73a989108ae0c8bc2b36cba5348753981521",
   "historical_production_regression": false,
   "regression_contract": "active-turn queued input stays hidden, then cancellation terminalizes the pending row before any later idle claim can surface it",
   "required_boundary_kinds": [
@@ -25,5 +25,6 @@
   ],
   "replay_command": "cargo run -p lash-sim --locked -- replay crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json",
   "sqlite_replay_command": "cargo run -p lash-sim --locked -- replay-sqlite crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json --out /tmp/lash-sim-queued-cancel-replay",
-  "postgres_replay_command": "LASH_POSTGRES_DATABASE_URL=postgres://... cargo run -p lash-sim --locked -- replay-postgres crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json --out /tmp/lash-sim-queued-cancel-replay"
+  "postgres_replay_command": "LASH_POSTGRES_DATABASE_URL=postgres://... cargo run -p lash-sim --locked -- replay-postgres crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json --out /tmp/lash-sim-queued-cancel-replay",
+  "regeneration_command": "cargo run -p lash-sim --locked -- run --out /tmp/conf-fix2-queued-active-turn-cancel-race --profile fast-random --seed 7313380382653661636"
 }
