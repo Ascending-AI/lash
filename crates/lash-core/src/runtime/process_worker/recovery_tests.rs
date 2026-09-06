@@ -130,7 +130,7 @@ async fn crash_replay_observes_durable_cancellation_before_rerunning_process() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal() {
     let provider_started = Arc::new(tokio::sync::Notify::new());
     let provider_release = Arc::new(tokio::sync::Semaphore::new(0));
@@ -217,6 +217,8 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
         )
         .await
         .expect("append cancellation without notifying the parked watcher");
+    // Freeze the watcher's polling timer so only the explicit provider release
+    // advances this race after the durable cancellation commit.
     provider_release.add_permits(1);
 
     tokio::time::timeout(Duration::from_secs(5), async {
