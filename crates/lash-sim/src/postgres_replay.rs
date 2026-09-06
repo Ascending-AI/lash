@@ -1026,7 +1026,10 @@ fn runtime_core_for_scripts(
     let process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore> =
         Arc::new(storage.process_env_store());
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .with_native_queued_work()
+        // Recorded provider boundaries own execution, just as in generation
+        // and SQLite replay; a native queued-input wake must not race the
+        // spawned provider task for the admission lease.
+        .without_queued_work()
         .effect_host(Arc::new(
             lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
