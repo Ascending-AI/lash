@@ -84,6 +84,7 @@ mod tests {
     // any variant absent from the map (e.g. "none").
     fn effort_capability(efforts: &[&str]) -> ModelCapability {
         ModelCapability {
+            google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: efforts.iter().map(|e| e.to_string()).collect(),
                 default_effort: None,
@@ -105,6 +106,7 @@ mod tests {
             ("high".to_string(), 12_288u32),
         ]);
         ModelCapability {
+            google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: ["low", "medium", "high"]
                     .into_iter()

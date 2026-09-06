@@ -33,3 +33,7 @@ pub(crate) use triggers::{decode_remote_json, encode_remote_json};
 #[cfg(test)]
 #[path = "core_conversions_tests.rs"]
 mod core_conversions_tests;
+
+#[cfg(test)]
+#[path = "google_dialect_tests.rs"]
+mod google_dialect_tests;

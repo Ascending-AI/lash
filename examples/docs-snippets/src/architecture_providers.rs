@@ -129,6 +129,7 @@ mod asserted_examples {
         assert!(reasoning.mandatory);
 
         let capability = ModelCapability {
+            google_dialect: Default::default(),
             reasoning: Some(reasoning),
             cache_control: Some(CacheControlDialect::Anthropic),
             stream_termination: Some(StreamTermination::RequireTerminalEvidence),

@@ -86,12 +86,14 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
 impl From<core_llm::ModelCapability> for RemoteModelCapability {
     fn from(value: core_llm::ModelCapability) -> Self {
         let core_llm::ModelCapability {
+            google_dialect,
             reasoning,
             cache_control,
             stream_termination,
             sampling,
         } = value;
         Self {
+            google_dialect: google_dialect.into(),
             reasoning: reasoning.map(Into::into),
             cache_control: cache_control.map(Into::into),
             stream_termination: stream_termination.map(Into::into),
@@ -103,12 +105,14 @@ impl From<core_llm::ModelCapability> for RemoteModelCapability {
 impl From<RemoteModelCapability> for core_llm::ModelCapability {
     fn from(value: RemoteModelCapability) -> Self {
         let RemoteModelCapability {
+            google_dialect,
             reasoning,
             cache_control,
             stream_termination,
             sampling,
         } = value;
         Self {
+            google_dialect: google_dialect.into(),
             reasoning: reasoning.map(Into::into),
             cache_control: cache_control.map(Into::into),
             stream_termination: stream_termination.map(Into::into),
@@ -1364,6 +1368,24 @@ impl From<RemoteUsage> for lash_core::TokenUsage {
             cache_read_input_tokens,
             cache_write_input_tokens,
             reasoning_output_tokens,
+        }
+    }
+}
+impl From<core_llm::GoogleDialect> for RemoteGoogleDialect {
+    fn from(value: core_llm::GoogleDialect) -> Self {
+        match value {
+            core_llm::GoogleDialect::Legacy => Self::Legacy,
+            core_llm::GoogleDialect::Gemini3 => Self::Gemini3,
+            core_llm::GoogleDialect::ClaudeOnVertex => Self::ClaudeOnVertex,
+        }
+    }
+}
+impl From<RemoteGoogleDialect> for core_llm::GoogleDialect {
+    fn from(value: RemoteGoogleDialect) -> Self {
+        match value {
+            RemoteGoogleDialect::Legacy => Self::Legacy,
+            RemoteGoogleDialect::Gemini3 => Self::Gemini3,
+            RemoteGoogleDialect::ClaudeOnVertex => Self::ClaudeOnVertex,
         }
     }
 }

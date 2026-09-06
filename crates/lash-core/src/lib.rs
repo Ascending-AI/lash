@@ -1076,8 +1076,9 @@ pub(crate) use plugin::{
 };
 
 pub use provider::{
-    CacheControlDialect, ModelCapability, ReasoningCapability, ReasoningDisableEncoding,
-    ReasoningEncoding, ReasoningSelection, SamplingCapability, StreamTermination,
+    CacheControlDialect, GoogleDialect, ModelCapability, ReasoningCapability,
+    ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
+    StreamTermination,
 };
 pub(crate) use provider::{
     EmptyProviderResolver, ProviderBinding, ProviderCompletion, ProviderCompletionError,

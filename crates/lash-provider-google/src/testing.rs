@@ -6,7 +6,10 @@ use serde_json::Value;
 
 use crate::GoogleOAuthProvider;
 
-pub fn serialize_request(request: &LlmRequest, retention: CacheRetention) -> Value {
+pub fn serialize_request(
+    request: &LlmRequest,
+    retention: CacheRetention,
+) -> Result<Value, lash_core::facade_support::LlmTransportError> {
     let provider = GoogleOAuthProvider::new(
         "access",
         "refresh",

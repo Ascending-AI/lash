@@ -299,13 +299,15 @@ fn serialize_prefix(
         }
         ProviderSerializer::GoogleDirect => {
             let body =
-                lash_provider_google::testing::serialize_request(request, CacheRetention::Short);
+                lash_provider_google::testing::serialize_request(request, CacheRetention::Short)
+                    .expect("Google schema projection");
             let mut prefix_request = request.clone();
             prefix_request.messages.truncate(stable_messages);
             let prefix_body = lash_provider_google::testing::serialize_request(
                 &prefix_request,
                 CacheRetention::Short,
-            );
+            )
+            .expect("Google schema projection");
             prefix_for_google(request, body, &prefix_body, stable_messages)
         }
     }
@@ -466,7 +468,8 @@ fn serialize_coverage_case(case: CoverageCase) -> Value {
         CoveragePath::GoogleDirect => lash_provider_google::testing::serialize_request(
             &cache_request("gemini-3.1-pro-preview"),
             case.retention,
-        ),
+        )
+        .expect("Google schema projection"),
         CoveragePath::OpenAiResponses => {
             lash_provider_openai::testing::serialize_responses_request(
                 &cache_request("gpt-5.4"),

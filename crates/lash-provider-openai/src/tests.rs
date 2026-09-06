@@ -165,6 +165,7 @@ impl LlmHttpTransport for RecordingHttpTransport {
 
 fn reasoning_capability() -> ModelCapability {
     ModelCapability {
+        google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
             default_effort: Some("medium".to_string()),
@@ -181,6 +182,7 @@ fn reasoning_capability() -> ModelCapability {
 
 fn budget_reasoning_capability() -> ModelCapability {
     ModelCapability {
+        google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
             default_effort: Some("medium".to_string()),
@@ -198,6 +200,7 @@ fn budget_reasoning_capability() -> ModelCapability {
 
 fn toggle_false_reasoning_capability() -> ModelCapability {
     ModelCapability {
+        google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string()],
             default_effort: Some("medium".to_string()),

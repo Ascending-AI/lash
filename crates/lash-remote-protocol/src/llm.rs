@@ -449,6 +449,8 @@ pub struct RemoteModelIntent {
 /// encode effort exactly like a local runtime.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteModelCapability {
+    #[serde(default, skip_serializing_if = "RemoteGoogleDialect::is_legacy")]
+    pub google_dialect: RemoteGoogleDialect,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<RemoteReasoningCapability>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -462,10 +464,26 @@ pub struct RemoteModelCapability {
 
 impl RemoteModelCapability {
     pub fn is_empty(&self) -> bool {
-        self.reasoning.is_none()
+        self.google_dialect.is_legacy()
+            && self.reasoning.is_none()
             && self.cache_control.is_none()
             && self.stream_termination.is_none()
             && self.sampling.is_default()
+    }
+}
+
+/// Wire mirror of the host-supplied Google dialect.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteGoogleDialect {
+    #[default]
+    Legacy,
+    Gemini3,
+    ClaudeOnVertex,
+}
+impl RemoteGoogleDialect {
+    pub fn is_legacy(&self) -> bool {
+        *self == Self::Legacy
     }
 }
 

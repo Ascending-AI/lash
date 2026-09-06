@@ -258,6 +258,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
         tool_choice: core_llm::LlmToolChoice::Auto,
         model_variant: core_llm::ReasoningSelection::Effort("fast".to_string()),
         model_capability: core_llm::ModelCapability {
+            google_dialect: Default::default(),
             reasoning: Some(core_llm::ReasoningCapability {
                 efforts: vec!["fast".to_string(), "slow".to_string()],
                 default_effort: Some("fast".to_string()),
