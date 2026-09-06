@@ -8616,7 +8616,10 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
     const SESSION_ID: &str = "cancellation-sealed-renewal";
 
     let lease_ttl = std::time::Duration::from_millis(120);
-    let store = Arc::new(RecordingStore::default());
+    // Renewal scheduling must not consume the cancellation fixture's lease.
+    // The phase probe below orders the injected renewal rejection after sealing.
+    let clock = Arc::new(ManualClock::new(1_000));
+    let store = Arc::new(RecordingStore::with_clock(clock));
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
     let (provider_started_tx, provider_started_rx) = tokio::sync::oneshot::channel::<()>();
     let provider_started_tx = Arc::new(Mutex::new(Some(provider_started_tx)));
