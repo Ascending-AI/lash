@@ -493,3 +493,157 @@ async fn reopening_a_group_reports_the_recorded_row_rather_than_the_one_offered(
          its declared disposition, and the store is what says so"
     );
 }
+
+#[tokio::test]
+async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
+    use crate::testing::{SqliteFaultInjector, SqliteFaultPoint};
+
+    let dir = tempfile::tempdir().expect("effect journal directory");
+    let path = dir.path().join("effects.db");
+    let clock = Arc::new(lash_core::testing::TestClock::new(1_000));
+    let scope = ExecutionScope::turn("cold-session", "cold-turn");
+    let envelope = RuntimeEffectEnvelope::new(
+        lash_core::RuntimeInvocation::effect(
+            lash_core::RuntimeScope::for_turn("cold-session", "cold-turn", 1, 0),
+            "cold-effect",
+            lash_core::RuntimeEffectKind::ExecCode,
+            "cold-effect",
+        ),
+        lash_core::RuntimeEffectCommand::ExecCode {
+            language: "conformance".to_string(),
+            code: "external-effect".to_string(),
+        },
+    );
+    let options = SqliteEffectReplayOptions {
+        lease_timings: LeaseTimings::from_ttl(std::time::Duration::from_millis(300))
+            .expect("lease timings"),
+    };
+    let predecessor = SqliteRuntimeEffectController::open_with_options_and_clock(
+        &path,
+        scope.clone(),
+        options.clone(),
+        clock.clone(),
+    )
+    .await
+    .expect("open predecessor");
+    let (executed_tx, executed_rx) = tokio::sync::oneshot::channel();
+    let predecessor_envelope = envelope.clone();
+    let abandoned = tokio::spawn(async move {
+        predecessor
+            .execute_effect(
+                predecessor_envelope,
+                RuntimeEffectLocalExecutor::testing(move |_| async move {
+                    executed_tx.send(()).expect("signal external effect");
+                    std::future::pending().await
+                }),
+            )
+            .await
+    });
+    executed_rx.await.expect("predecessor acquired its lease");
+    abandoned.abort();
+    assert!(
+        abandoned
+            .await
+            .expect_err("abandon without finalizing")
+            .is_cancelled()
+    );
+    clock.advance(300);
+
+    // A fresh driver/connection sees precisely the in-progress row a killed
+    // process leaves. Pause admission before the claim reads or writes it.
+    let injector = SqliteFaultInjector::default();
+    let conn = SqliteConnection::open_with_fault_injector(
+        &path,
+        crate::conn::SqliteConnectionPolicy::default(),
+        Some(injector.clone()),
+    )
+    .await
+    .expect("open successor connection");
+    let successor = build_effect_replay_driver(conn, options, clock.clone(), vec![0; 32]);
+    let pause = injector.pause(SqliteFaultPoint::AfterBegin);
+    let completing = tokio::spawn(async move {
+        successor
+            .execute_effect(
+                &scope,
+                envelope,
+                RuntimeEffectLocalExecutor::testing(move |_| async move {
+                    Ok(RuntimeEffectOutcome::ExecCode {
+                        result: Box::new(Ok(lash_core::ExecResponse {
+                            observations: Vec::new(),
+                            calls: Vec::new(),
+                            printed_images: Vec::new(),
+                            error: None,
+                            duration_ms: 0,
+                            degraded_bindings: Vec::new(),
+                            terminal_finish: Some(serde_json::json!("recorded")),
+                        })),
+                    })
+                }),
+            )
+            .await
+    });
+    pause.wait_until_reached().await;
+    clock.advance(300);
+    pause.release();
+    completing
+        .await
+        .expect("successor task")
+        .expect("successor must finalize after waiting a TTL for SQLite admission");
+}
+
+#[tokio::test]
+async fn effect_lease_writes_refuse_expiry_during_sqlite_admission() {
+    use crate::testing::{SqliteFaultInjector, SqliteFaultPoint};
+
+    #[derive(Clone, Copy, Debug)]
+    enum Write {
+        Renew,
+        Finalize,
+    }
+    for operation in [Write::Finalize, Write::Renew] {
+        let dir = tempfile::tempdir().expect("effect journal directory");
+        let injector = SqliteFaultInjector::default();
+        let conn = SqliteConnection::open_with_fault_injector(
+            &dir.path().join("effects.db"),
+            crate::SqliteConnectionPolicy::default(),
+            Some(injector.clone()),
+        )
+        .await
+        .expect("open effect connection");
+        ensure_versioned_schema(&conn, SqliteDatabase::EffectReplay)
+            .await
+            .expect("provision effect schema");
+        let clock = Arc::new(lash_core::testing::TestClock::new(1_000));
+        let store = Arc::new(SqliteEffectReplayRowStore {
+            conn,
+            clock: clock.clone(),
+        });
+        let mut request = claim("queued-write", "owner");
+        request.lease_ttl_ms = 300;
+        request.group_key = None;
+        assert!(matches!(
+            store.claim(&request).await.expect("claim effect"),
+            EffectClaimObservation::Claimed { .. }
+        ));
+        let pause = injector.pause(SqliteFaultPoint::AfterBegin);
+        let writing = tokio::spawn(async move {
+            match operation {
+                Write::Renew => !store.renew(&fence(&request), 300).await.expect("renew"),
+                Write::Finalize => matches!(
+                    store
+                        .finalize(&fence(&request), &terminal("queued-write"))
+                        .await
+                        .expect("finalize"),
+                    EffectFinalizeOutcome::FenceMoved
+                ),
+            }
+        });
+        pause.wait_until_reached().await;
+        clock.advance(300);
+        pause.release();
+        assert!(
+            writing.await.expect("lease write task"),
+            "{operation:?} must refuse a lease that expired before the fenced write"
+        );
+    }
+}
