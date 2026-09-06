@@ -250,17 +250,14 @@ impl Processes {
                 ..lash_core::ProcessListFilter::default()
             });
         };
-        if matches!(
-            filter.status,
-            lash_core::ProcessStatusFilter::Running | lash_core::ProcessStatusFilter::Waiting
-        ) {
+        if matches!(&filter.status, lash_core::ProcessStatusFilter::In(statuses) if !statuses.is_empty() && statuses.iter().all(|status| !status.is_retired()))
+        {
             return Err(EmbedError::Plugin(lash_core::PluginError::Session(
                 format!(
-                    "process retention filter selects the live status `{}`, \
+                    "process retention filter selects the live status set `{:?}`, \
                      which no prunable row can hold; pass \
-                     `ProcessStatusFilter::Any`, a terminal status, or \
-                     `CallerDeparted`",
-                    filter.status.label().unwrap_or("any")
+                     `ProcessStatusFilter::Any` or a set containing a retired status",
+                    filter.status
                 ),
             )));
         }
@@ -528,7 +525,7 @@ impl Processes {
     ) -> Result<Vec<lash_core::ProcessCancelReceipt>> {
         let running = self
             .list(&lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::Running,
+                status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Running]),
                 ..lash_core::ProcessListFilter::default()
             })
             .await?;
@@ -587,11 +584,9 @@ impl Processes {
     /// "reclaim the work this deleted session originated" and "reclaim terminal
     /// subagent debris after a day" as two scheduled calls over the same lever.
     /// `None` considers every retired row. Because retention only ever deletes
-    /// retired rows, a filter that selects
-    /// [`ProcessStatusFilter::Running`](lash_core::ProcessStatusFilter::Running)
-    /// or [`Waiting`](lash_core::ProcessStatusFilter::Waiting) — including the
-    /// `Running` default a `..Default::default()` filter carries — can never
-    /// match, so it is refused instead of silently reclaiming nothing.
+    /// retired rows, a nonempty set containing only running and waiting
+    /// statuses cannot match and is refused. This includes the running
+    /// default selected by an otherwise unspecified filter.
     pub async fn prune(
         &self,
         cutoff_epoch_ms: u64,

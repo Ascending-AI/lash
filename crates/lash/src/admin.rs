@@ -1154,7 +1154,7 @@ impl SessionProcessAdmin {
     /// Running processes this session may address.
     pub async fn list(&self) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
         self.list_observed(&lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Running,
+            status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Running]),
             ..lash_core::ProcessListFilter::default()
         })
         .await

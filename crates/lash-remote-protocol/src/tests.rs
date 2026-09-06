@@ -1572,8 +1572,14 @@ fn remote_process_dtos_json_round_trip() {
 
     let list_filter = RemoteProcessListFilter {
         definition: Some(remote_process_definition_identity()),
-        status: RemoteProcessStatusFilter::Any,
-        waiting: Some(false),
+        status: RemoteProcessStatusFilter::any_of([
+            RemoteProcessStatus::Running,
+            RemoteProcessStatus::Completed,
+            RemoteProcessStatus::Failed,
+            RemoteProcessStatus::Cancelled,
+            RemoteProcessStatus::Abandoned,
+            RemoteProcessStatus::CallerDeparted,
+        ]),
         ..RemoteProcessListFilter::default()
     };
     list_filter.validate().expect("valid process list filter");

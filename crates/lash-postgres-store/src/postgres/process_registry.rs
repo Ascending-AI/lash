@@ -1076,25 +1076,23 @@ impl ProcessRegistry for PostgresProcessRegistry {
             .map_err(process_decode_error)?;
         let rows = sqlx::query(
             "SELECT record_json FROM lash_processes
-             WHERE ($1::TEXT IS NULL OR status = $1)
-               AND ($2::BOOLEAN IS NULL OR is_waiting = $2)
-               AND ($3::TEXT IS NULL OR originator_id = $3)
-               AND ($4::TEXT IS NULL OR identity_kind = $4)
-               AND ($5::TEXT IS NULL OR identity_label = $5)
-               AND ($6::JSONB IS NULL OR
-                    (record_json::JSONB #> '{identity,definition}') = $6)
+             WHERE ($1::TEXT[] IS NULL OR status = ANY($1))
+               AND ($2::TEXT IS NULL OR originator_id = $2)
+               AND ($3::TEXT IS NULL OR identity_kind = $3)
+               AND ($4::TEXT IS NULL OR identity_label = $4)
+               AND ($5::JSONB IS NULL OR
+                    (record_json::JSONB #> '{identity,definition}') = $5)
+               AND ($6::TEXT IS NULL OR
+                    (record_json::JSONB #>> '{provenance,caused_by,occurrence_id}') = $6)
                AND ($7::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,occurrence_id}') = $7)
-               AND ($8::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,subscription_id}') = $8)
-               AND ($9::BIGINT IS NULL OR created_at_ms >= $9)
-               AND ($10::BIGINT IS NULL OR created_at_ms < $10)
-               AND ($11::BIGINT IS NULL OR status IN ('running', 'waiting')
-                    OR updated_at_ms >= $11)
+                    (record_json::JSONB #>> '{provenance,caused_by,subscription_id}') = $7)
+               AND ($8::BIGINT IS NULL OR created_at_ms >= $8)
+               AND ($9::BIGINT IS NULL OR created_at_ms < $9)
+               AND ($10::BIGINT IS NULL OR status IN ('running', 'waiting')
+                    OR updated_at_ms >= $10)
              ORDER BY process_id ASC",
         )
-        .bind(filter.status.label())
-        .bind(filter.waiting)
+        .bind(filter.status.labels())
         .bind(filter.originator_id.as_deref())
         .bind(filter.identity_kind.as_deref())
         .bind(filter.identity_label.as_deref())

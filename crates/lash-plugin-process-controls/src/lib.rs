@@ -137,9 +137,11 @@ pub fn process_list_tool_definition() -> ToolDefinition {
             "type": "object",
             "properties": {
                 "status": {
-                    "type": "string",
-                    "enum": ["running", "completed", "failed", "cancelled", "any"],
-                    "description": "Lifecycle status to list. The default is `running`; `any` includes historical runs."
+                    "oneOf": [
+                        { "const": "any" },
+                        { "type": "object", "properties": { "in": { "type": "array", "items": { "enum": ["running", "waiting", "completed", "failed", "cancelled", "abandoned", "caller_departed"] } } }, "required": ["in"], "additionalProperties": false }
+                    ],
+                    "description": "Any-of lifecycle status set. Absence selects running runs; `any` includes every status."
                 },
                 "definition": {
                     "type": "object",
@@ -353,7 +355,10 @@ mod tests {
         assert!(rendered.contains("process_id"), "{rendered}");
         assert!(rendered.contains("definition"), "{rendered}");
         assert!(rendered.contains("status: enum["), "{rendered}");
-        assert!(rendered.contains("status?: enum["), "{rendered}");
+        assert!(
+            rendered.contains("status?: any | record{in: list[enum["),
+            "{rendered}"
+        );
         assert!(rendered.contains("definition?: record"), "{rendered}");
         assert!(!rendered.contains("history"), "{rendered}");
         assert!(!rendered.contains("terminal:"), "{rendered}");

@@ -1130,7 +1130,6 @@ async fn agent_contract_process_observations(
         .list(&lash_core::ProcessListFilter {
             definition: None,
             status: lash_core::ProcessStatusFilter::Any,
-            waiting: None,
             ..lash_core::ProcessListFilter::default()
         })
         .await

@@ -723,7 +723,7 @@ mod process_work_tests {
         assert_eq!(running.status, ProcessStatus::Running);
 
         let filter = ProcessListFilter::decode(&json!({
-            "status": "running",
+            "status": {"in":["running"]},
             "originator_id": "session-finance",
             "identity_kind": "report-export",
             "identity_label": "Nightly invoice export",
@@ -733,8 +733,11 @@ mod process_work_tests {
             "created_at_end_ms": record.created_at_ms.saturating_add(1),
         }))
         .expect("decode process filters");
-        assert_eq!(filter.status, ProcessStatusFilter::Running);
-        assert_eq!(filter.status.label(), Some("running"));
+        assert_eq!(
+            filter.status,
+            ProcessStatusFilter::any_of([ProcessStatus::Running])
+        );
+        assert_eq!(filter.status.labels(), Some(vec!["running"]));
         assert_eq!(ProcessStatus::Failed.label(), "failed");
         assert!(ProcessStatus::Failed.is_terminal());
         assert_eq!(filter.list_mode(), ProcessListMode::Live);
@@ -751,8 +754,8 @@ mod process_work_tests {
         assert!(ProcessStatusFilter::Any.matches(ProcessStatus::Running));
         assert_eq!(ProcessStatusFilter::Any.list_mode(), ProcessListMode::All);
         assert_eq!(
-            ProcessStatusFilter::decode(Some("completed")),
-            Ok(ProcessStatusFilter::Completed)
+            ProcessStatusFilter::decode(Some(&json!({"in":["completed"]}))),
+            Ok(ProcessStatusFilter::any_of([ProcessStatus::Completed]))
         );
 
         let live_refs = registry
@@ -852,7 +855,7 @@ mod process_work_tests {
         assert_eq!(
             registry
                 .list_processes(&ProcessListFilter {
-                    status: ProcessStatusFilter::Completed,
+                    status: ProcessStatusFilter::any_of([ProcessStatus::Completed]),
                     ..Default::default()
                 })
                 .await

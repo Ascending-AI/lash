@@ -111,3 +111,58 @@ fn issue_severity_is_required_and_has_pinned_wire_values() {
         serde_json::from_value::<RemoteTurnIssueSeverity>(serde_json::json!("future")).is_err()
     );
 }
+
+#[test]
+fn process_status_sets_pin_vocabulary_and_refuse_removed_fields() {
+    use crate::{RemoteProcessListFilter, RemoteProcessStatus, RemoteProcessStatusFilter};
+    for (status, literal) in [
+        (RemoteProcessStatus::Running, "running"),
+        (RemoteProcessStatus::Waiting, "waiting"),
+        (RemoteProcessStatus::Completed, "completed"),
+        (RemoteProcessStatus::Failed, "failed"),
+        (RemoteProcessStatus::Cancelled, "cancelled"),
+        (RemoteProcessStatus::Abandoned, "abandoned"),
+        (RemoteProcessStatus::CallerDeparted, "caller_departed"),
+    ] {
+        let filter = RemoteProcessStatusFilter::any_of([status]);
+        let core: lash_core::ProcessStatusFilter = filter.clone().into();
+        assert_eq!(core.labels(), Some(vec![literal]));
+        assert_eq!(
+            serde_json::to_value(&filter).unwrap(),
+            serde_json::json!({"in":[literal]})
+        );
+        assert_eq!(
+            serde_json::from_value::<RemoteProcessStatusFilter>(
+                serde_json::json!({"in":[literal,literal]})
+            )
+            .unwrap(),
+            filter
+        );
+    }
+    assert_eq!(
+        serde_json::to_value(RemoteProcessStatusFilter::Any).unwrap(),
+        "any"
+    );
+    assert_eq!(
+        serde_json::from_value::<RemoteProcessListFilter>(serde_json::json!({}))
+            .unwrap()
+            .status,
+        RemoteProcessStatusFilter::any_of([RemoteProcessStatus::Running])
+    );
+    for bad in [
+        serde_json::json!({"waiting":true}),
+        serde_json::json!({"status":"running"}),
+        serde_json::json!({"status":{"in":["future"]}}),
+        serde_json::json!({"status":{"not":["waiting"]}}),
+    ] {
+        assert!(serde_json::from_value::<RemoteProcessListFilter>(bad).is_err());
+    }
+    let core = lash_core::ProcessStatusFilter::decode(Some(
+        &serde_json::json!({"in":["running","waiting"]}),
+    ))
+    .unwrap();
+    assert!(core.matches(lash_core::ProcessStatus::Running));
+    assert!(core.matches(lash_core::ProcessStatus::Waiting));
+    assert!(!core.matches(lash_core::ProcessStatus::Completed));
+    assert!(lash_core::ProcessListFilter::decode(&serde_json::json!({"waiting":false})).is_err());
+}

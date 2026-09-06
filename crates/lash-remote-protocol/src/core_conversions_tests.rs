@@ -851,8 +851,7 @@ fn process_await_wire_round_trip_preserves_failure_source_and_retry() {
 fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     let filter = lash_core::ProcessListFilter {
         definition: Some(process_definition_identity("main")),
-        status: lash_core::ProcessStatusFilter::Any,
-        waiting: Some(true),
+        status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Waiting]),
         originator_id: Some("test".to_string()),
         identity_kind: Some("engine".to_string()),
         identity_label: Some("Main".to_string()),
@@ -866,7 +865,6 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     remote.validate().expect("valid list filter");
     let core = lash_core::ProcessListFilter::try_from(remote).expect("core filter");
     assert_eq!(core.status, filter.status);
-    assert_eq!(core.waiting, filter.waiting);
     assert_eq!(core.originator_id, filter.originator_id);
     assert_eq!(core.identity_kind, filter.identity_kind);
     assert_eq!(core.identity_label, filter.identity_label);

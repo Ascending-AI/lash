@@ -242,7 +242,9 @@ impl RemoteProcessInput {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteProcessStatus {
     #[default]
@@ -1493,28 +1495,34 @@ impl RemoteProcessStartReceipt {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteProcessStatusFilter {
-    #[default]
-    Running,
-    Waiting,
-    Completed,
-    Failed,
-    Cancelled,
-    Abandoned,
-    CallerDeparted,
     Any,
+    In(std::collections::BTreeSet<RemoteProcessStatus>),
+}
+
+impl Default for RemoteProcessStatusFilter {
+    fn default() -> Self {
+        Self::In(std::collections::BTreeSet::from([
+            RemoteProcessStatus::Running,
+        ]))
+    }
+}
+
+impl RemoteProcessStatusFilter {
+    pub fn any_of(statuses: impl IntoIterator<Item = RemoteProcessStatus>) -> Self {
+        Self::In(statuses.into_iter().collect())
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteProcessListFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition: Option<RemoteProcessDefinitionIdentity>,
     #[serde(default)]
     pub status: RemoteProcessStatusFilter,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub waiting: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub originator_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
