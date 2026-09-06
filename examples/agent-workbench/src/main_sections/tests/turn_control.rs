@@ -30,6 +30,27 @@ mod turn_control_timeout_tests {
         }
     }
 
+    /// Acknowledges the parent turn entering its `process.await_handle`
+    /// phase. Stop must land while the turn is parked on the child's await:
+    /// only that await cancels the child ("turn cancelled while awaiting
+    /// process"), so a Stop that arrives after `start` registered the child but
+    /// before the turn reached `await` leaves the child running by contract.
+    struct ProcessAwaitEntered {
+        entered: tokio::sync::Notify,
+    }
+
+    impl lash::runtime::RuntimeTurnPhaseProbe for ProcessAwaitEntered {
+        fn begin(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
+
+        fn end(&self, _phase: lash::runtime::RuntimeTurnPhase) {}
+
+        fn begin_named(&self, phase: &str) {
+            if phase == "process.await_handle" {
+                self.entered.notify_one();
+            }
+        }
+    }
+
     fn expiring_terminal_driver(
         state: &AppState,
     ) -> (lash::TurnWorkDriver, impl Future<Output = ()> + use<>) {
@@ -644,6 +665,14 @@ finish (await handle)?
             .open()
             .await
             .expect("open submitted Stop-over-process session");
+        let await_entered = Arc::new(ProcessAwaitEntered {
+            entered: tokio::sync::Notify::new(),
+        });
+        session
+            .set_turn_phase_probe(
+                Arc::clone(&await_entered) as Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>
+            )
+            .await;
         let run_turn_id = turn_id.clone();
         let turn = tokio::spawn(async move {
             session
@@ -654,6 +683,7 @@ finish (await handle)?
         });
 
         let process_id = tokio::time::timeout(Duration::from_secs(10), async {
+            await_entered.entered.notified().await;
             loop {
                 let live = process_registry
                     .list_non_terminal_page(
