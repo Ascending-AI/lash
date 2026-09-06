@@ -32,7 +32,7 @@ pub(crate) async fn assert_typed_turn_input_application(
         {
             assert!(
                 value.pointer("/activity/kind").is_none(),
-                "workbench must consume a typed event, not RuntimeDiagnostic: {value}"
+                "workbench must consume a typed event, not an untyped diagnostic: {value}"
             );
             typed_application = value.pointer("/activity/applications/0").cloned();
             break;

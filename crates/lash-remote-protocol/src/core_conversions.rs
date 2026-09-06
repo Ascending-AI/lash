@@ -20,6 +20,7 @@ mod llm;
 mod observations;
 mod processes;
 mod prompt;
+mod queued_events;
 mod tools;
 mod triggers;
 mod turn_control;
