@@ -56,7 +56,7 @@ pub enum HttpFailureContext {
 pub struct HttpTransportError {
     pub kind: ProviderFailureKind,
     /// Structured operation evidence used by higher-level adapters.
-    pub context: HttpFailureContext,
+    pub context: Box<HttpFailureContext>,
     pub message: String,
     pub retry_verdict: TransportRetryVerdict,
     retry_verdict_classified: bool,
@@ -82,7 +82,7 @@ impl HttpTransportError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             kind: ProviderFailureKind::Unknown,
-            context: HttpFailureContext::Other,
+            context: Box::new(HttpFailureContext::Other),
             message: message.into(),
             retry_verdict: TransportRetryVerdict::NotRetryable,
             retry_verdict_classified: false,
@@ -101,9 +101,9 @@ impl HttpTransportError {
     pub fn response_read(detail: impl Into<String>) -> Self {
         let detail = detail.into();
         let mut error = Self::new(format!("HTTP response read failed: {detail}"));
-        error.context = HttpFailureContext::ResponseRead {
+        error.context = Box::new(HttpFailureContext::ResponseRead {
             detail: detail.into(),
-        };
+        });
         error
     }
 

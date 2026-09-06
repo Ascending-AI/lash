@@ -719,7 +719,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 event.body_len as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.request.body_sha256",
+                attr::LASH_REQUEST_BODY_SHA256,
                 event.body_sha256.clone(),
             ));
             push_payload_json(
@@ -816,7 +816,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 event.raw_len as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.stream.raw_sha256",
+                attr::LASH_STREAM_RAW_SHA256,
                 event.raw_sha256.clone(),
             ));
             push_payload_json(

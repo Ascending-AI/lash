@@ -251,7 +251,7 @@ where
                 // blank line still reaches the caller.
                 let _ = buffer.finish(&mut capture_then_emit);
                 if let lash_http_transport::HttpFailureContext::ResponseRead { detail } =
-                    &error.context
+                    error.context.as_ref()
                 {
                     error.message = format!("Stream read failed: {detail}");
                 }

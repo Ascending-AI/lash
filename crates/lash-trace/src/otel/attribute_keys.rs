@@ -114,6 +114,7 @@ pub(super) const LASH_REQUEST_BODY_JSON: &str = "lash.request.body_json";
 pub(super) const LASH_REQUEST_BODY_JSON_OMITTED_REASON: &str =
     "lash.request.body_json_omitted_reason";
 pub(super) const LASH_REQUEST_BODY_LEN: &str = "lash.request.body_len";
+pub(super) const LASH_REQUEST_BODY_SHA256: &str = "lash.request.body_sha256";
 pub(super) const LASH_RETRY_ATTEMPTS_JSON: &str = "lash.retry.attempts_json";
 pub(super) const LASH_ROLLING_HISTORY_CONTEXT_BUDGET_TOKENS: &str =
     "lash.rolling_history.context_budget_tokens";
@@ -138,6 +139,7 @@ pub(super) const LASH_STREAM_OUTPUT_INDEX: &str = "lash.stream.output_index";
 pub(super) const LASH_STREAM_RAW_CHARS: &str = "lash.stream.raw_chars";
 pub(super) const LASH_STREAM_RAW_JSON: &str = "lash.stream.raw_json";
 pub(super) const LASH_STREAM_RAW_LEN: &str = "lash.stream.raw_len";
+pub(super) const LASH_STREAM_RAW_SHA256: &str = "lash.stream.raw_sha256";
 pub(super) const LASH_STREAM_SEQUENCE: &str = "lash.stream.sequence";
 pub(super) const LASH_STREAM_VISIBLE_CHARS: &str = "lash.stream.visible_chars";
 pub(super) const LASH_TOOL_ARGS_JSON: &str = "lash.tool.args_json";
