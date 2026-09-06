@@ -12,5 +12,7 @@ import ci_plan
 ci_plan.UNGATED_JOBS.add("worker-artifacts")
 ci_plan.WORKERS_E2E_JOBS.add("worker-artifacts")
 
+ci_plan.GATED_JOBS["nextest-archive"] = "rust"
+
 if __name__ == "__main__":
     raise SystemExit(ci_plan.main())
