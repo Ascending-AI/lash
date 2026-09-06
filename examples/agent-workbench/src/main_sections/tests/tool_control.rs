@@ -1,3 +1,5 @@
+use super::*;
+
 #[derive(Clone, Copy)]
 struct WorkbenchControlTools;
 
@@ -72,10 +74,7 @@ fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
             empty_input,
             json!({ "type": "object" }),
         )
-        .with_tool_binding(lash::tools::ToolBinding::new(
-            ["workbench_control"],
-            "fail",
-        )),
+        .with_tool_binding(lash::tools::ToolBinding::new(["workbench_control"], "fail")),
     ];
     Arc::new(lash::tools::StaticToolProvider::new(
         definitions,
@@ -108,14 +107,11 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
             .complete(move |_| {
                 let responses = Arc::clone(&provider_responses);
                 async move {
-                    responses
-                        .lock_recover()
-                        .pop_front()
-                        .ok_or_else(|| {
-                            lash::provider::LlmTransportError::new(
-                                "workbench tool control response queue exhausted",
-                            )
-                        })
+                    responses.lock_recover().pop_front().ok_or_else(|| {
+                        lash::provider::LlmTransportError::new(
+                            "workbench tool control response queue exhausted",
+                        )
+                    })
                 }
             })
             .build()
@@ -137,7 +133,7 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
                 lash::ModelSpec::builder("workbench-tool-control-model")
                     .context_window_tokens(4_096)
                     .build()
-                .expect("tool control model"),
+                    .expect("tool control model"),
             )
             .tools(workbench_control_tools())
             .plugin(Arc::new(WorkbenchPluginFactory::new("")))
@@ -158,7 +154,10 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
             .await
             .expect("run cancellation turn")
             .result;
-        assert_eq!(cancelled.final_value(), Some(&json!("cancellation observed")));
+        assert_eq!(
+            cancelled.final_value(),
+            Some(&json!("cancellation observed"))
+        );
         let cancellation_output = &cancelled.tool_calls[0].output;
         let cancellation_status =
             serde_json::to_value(cancellation_output.status()).expect("serialize tool status");

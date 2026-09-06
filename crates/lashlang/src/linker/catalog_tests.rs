@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn try_extend_composes_a_module_instance_without_operations() {
     let mut base = LashlangHostCatalog::new();

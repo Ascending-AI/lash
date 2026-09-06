@@ -1,5 +1,7 @@
+use super::*;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Binding {
+pub(super) enum Binding {
     Value(TypeExpr),
     /// A compile-time schema descriptor. This metatype is linker-only: its
     /// described shape cannot be written in Lashlang's surface type grammar.
@@ -17,12 +19,12 @@ enum Binding {
 /// return type mandatory, so a call site never has to guess and a recursive
 /// call is checked against the declaration rather than against a fixpoint.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct FunctionSignature {
-    params: Vec<(String, TypeExpr)>,
-    return_ty: TypeExpr,
+pub(super) struct FunctionSignature {
+    pub(super) params: Vec<(String, TypeExpr)>,
+    pub(super) return_ty: TypeExpr,
 }
 
-fn function_signature(function: &crate::ast::FunctionDecl) -> FunctionSignature {
+pub(super) fn function_signature(function: &crate::ast::FunctionDecl) -> FunctionSignature {
     FunctionSignature {
         params: function
             .params
@@ -33,28 +35,31 @@ fn function_signature(function: &crate::ast::FunctionDecl) -> FunctionSignature 
     }
 }
 
-struct Linker<'module> {
-    program: &'module Program,
-    surface: &'module LashlangHostEnvironment,
-    process_names: BTreeSet<String>,
-    process_types: BTreeMap<String, TypeExpr>,
+pub(super) struct Linker<'module> {
+    pub(super) program: &'module Program,
+    pub(super) surface: &'module LashlangHostEnvironment,
+    pub(super) process_names: BTreeSet<String>,
+    pub(super) process_types: BTreeMap<String, TypeExpr>,
     /// Declared function signatures, keyed by name. Collected before any body
     /// is lowered so a function may call one declared later, and itself.
-    function_signatures: BTreeMap<String, FunctionSignature>,
-    type_names: BTreeSet<String>,
-    type_defs: BTreeMap<String, TypeExpr>,
-    expression_spans: BTreeMap<usize, Span>,
-    expected_type_facts: Option<RefCell<ExpectedTypeFacts>>,
+    pub(super) function_signatures: BTreeMap<String, FunctionSignature>,
+    pub(super) type_names: BTreeSet<String>,
+    pub(super) type_defs: BTreeMap<String, TypeExpr>,
+    pub(super) expression_spans: BTreeMap<usize, Span>,
+    pub(super) expected_type_facts: Option<RefCell<ExpectedTypeFacts>>,
     /// The surface dialect the linked source was written in.
     ///
     /// Linking is dialect-independent — TypeScript is lowered to the same AST —
     /// but link *errors* are model-facing text, and a diagnostic that names a
     /// primitive has to name it in the vocabulary the author actually wrote.
-    dialect: crate::CompilationDialect,
+    pub(super) dialect: crate::CompilationDialect,
 }
 
 impl<'module> Linker<'module> {
-    fn new(program: &'module Program, surface: &'module LashlangHostEnvironment) -> Self {
+    pub(super) fn new(
+        program: &'module Program,
+        surface: &'module LashlangHostEnvironment,
+    ) -> Self {
         Self {
             program,
             surface,
@@ -69,25 +74,25 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn with_dialect(mut self, dialect: crate::CompilationDialect) -> Self {
+    pub(super) fn with_dialect(mut self, dialect: crate::CompilationDialect) -> Self {
         self.dialect = dialect;
         self
     }
 
     /// The active dialect's spelling of the process-only signal receiver.
-    fn wait_signal_keyword(&self) -> &'static str {
+    pub(super) fn wait_signal_keyword(&self) -> &'static str {
         match self.dialect {
             crate::CompilationDialect::Lashlang => "wait_signal",
             crate::CompilationDialect::Typescript => "waitSignal",
         }
     }
 
-    fn with_expected_type_facts(mut self) -> Self {
+    pub(super) fn with_expected_type_facts(mut self) -> Self {
         self.expected_type_facts = Some(RefCell::new(ExpectedTypeFacts::default()));
         self
     }
 
-    fn link_program(&mut self) -> Result<Program, LinkError> {
+    pub(super) fn link_program(&mut self) -> Result<Program, LinkError> {
         // Single walk: collect declaration metadata, then lower (and validate)
         // declarations in source order, then lower main. Declaration errors
         // therefore still surface before main errors, matching the prior
@@ -117,7 +122,7 @@ impl<'module> Linker<'module> {
         })
     }
 
-    fn collect_declarations(&mut self) -> Result<(), LinkError> {
+    pub(super) fn collect_declarations(&mut self) -> Result<(), LinkError> {
         self.ensure_label_annotations_enabled_for_program()?;
         let mut names = BTreeSet::new();
         for (index, declaration) in self.program.declarations.iter().enumerate() {
@@ -225,7 +230,7 @@ impl<'module> Linker<'module> {
         Ok(())
     }
 
-    fn ensure_label_annotations_enabled_for_program(&self) -> Result<(), LinkError> {
+    pub(super) fn ensure_label_annotations_enabled_for_program(&self) -> Result<(), LinkError> {
         if self.surface.language_features.label_annotations {
             return Ok(());
         }
@@ -252,7 +257,7 @@ impl<'module> Linker<'module> {
     /// The source span recorded for the expression at `path`, falling back to
     /// the root statement that contains it when the program was built from an
     /// AST and carries no nested spans.
-    fn annotation_span(&self, path: &[u32]) -> Option<Span> {
+    pub(super) fn annotation_span(&self, path: &[u32]) -> Option<Span> {
         self.program
             .expression_source_spans
             .iter()
@@ -264,14 +269,14 @@ impl<'module> Linker<'module> {
             })
     }
 
-    fn binding_for_type(&self, ty: &TypeExpr) -> Binding {
+    pub(super) fn binding_for_type(&self, ty: &TypeExpr) -> Binding {
         match self.resource_type_for_type(ty) {
             Some(resource_type) => Binding::Resource { resource_type },
             _ => Binding::Value(ty.clone()),
         }
     }
 
-    fn resource_type_for_type(&self, ty: &TypeExpr) -> Option<String> {
+    pub(super) fn resource_type_for_type(&self, ty: &TypeExpr) -> Option<String> {
         match self.resolve_type_aliases(ty) {
             TypeExpr::Ref(name) if self.surface.resources.has_resource_type(name.as_str()) => {
                 Some(name.to_string())
@@ -280,11 +285,11 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn resolve_type_aliases(&self, ty: &TypeExpr) -> TypeExpr {
+    pub(super) fn resolve_type_aliases(&self, ty: &TypeExpr) -> TypeExpr {
         self.resolve_type_aliases_inner(ty, &mut BTreeSet::new())
     }
 
-    fn closed_schema_witness_binding(&self, expr: &Expr) -> Option<Binding> {
+    pub(super) fn closed_schema_witness_binding(&self, expr: &Expr) -> Option<Binding> {
         let described_ty = match strip_label_annotation(expr) {
             Expr::TypeLiteral(ty) => self.close_schema_type_expr(ty, &mut BTreeSet::new())?,
             Expr::Record(entries) => {
@@ -308,7 +313,7 @@ impl<'module> Linker<'module> {
         Some(Binding::SchemaWitness { described_ty })
     }
 
-    fn close_schema_type_expr(
+    pub(super) fn close_schema_type_expr(
         &self,
         ty: &TypeExpr,
         resolving: &mut BTreeSet<String>,
@@ -367,7 +372,7 @@ impl<'module> Linker<'module> {
         })
     }
 
-    fn operation_call_output_type(
+    pub(super) fn operation_call_output_type(
         &self,
         operation: &ResourceOperationBinding,
         args: &[Expr],
@@ -385,7 +390,11 @@ impl<'module> Linker<'module> {
             .unwrap_or(TypeExpr::Any)
     }
 
-    fn resolve_type_aliases_inner(&self, ty: &TypeExpr, seen: &mut BTreeSet<String>) -> TypeExpr {
+    pub(super) fn resolve_type_aliases_inner(
+        &self,
+        ty: &TypeExpr,
+        seen: &mut BTreeSet<String>,
+    ) -> TypeExpr {
         match ty {
             TypeExpr::Ref(name) => {
                 if !seen.insert(name.to_string()) {
@@ -447,13 +456,13 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn is_type_assignable(&self, source: &TypeExpr, target: &TypeExpr) -> bool {
+    pub(super) fn is_type_assignable(&self, source: &TypeExpr, target: &TypeExpr) -> bool {
         let source = self.resolve_type_aliases(source);
         let target = self.resolve_type_aliases(target);
         crate::trigger::is_resolved_type_assignable(&source, &target)
     }
 
-    fn validate_expected_literals(
+    pub(super) fn validate_expected_literals(
         &self,
         expr: &Expr,
         expected: Option<&TypeExpr>,
@@ -508,7 +517,7 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn assignment_target_type(
+    pub(super) fn assignment_target_type(
         &self,
         target: &crate::ast::AssignTarget,
         scope: &Scope,
@@ -525,7 +534,7 @@ impl<'module> Linker<'module> {
         Ok(Some(ty))
     }
 
-    fn validate_binary_operands(
+    pub(super) fn validate_binary_operands(
         &self,
         op: crate::ast::BinaryOp,
         left: &TypeExpr,
@@ -551,7 +560,11 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn membership_operands_compatible(&self, needle: &TypeExpr, haystack: &TypeExpr) -> bool {
+    pub(super) fn membership_operands_compatible(
+        &self,
+        needle: &TypeExpr,
+        haystack: &TypeExpr,
+    ) -> bool {
         match haystack {
             TypeExpr::Any | TypeExpr::Ref(_) => true,
             TypeExpr::Str | TypeExpr::Enum(_) => {
@@ -566,7 +579,7 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn validate_shaping_builtin(
+    pub(super) fn validate_shaping_builtin(
         &self,
         name: &str,
         args: &[TypeExpr],
@@ -649,7 +662,7 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn process_output_type(&self, process: &str) -> TypeExpr {
+    pub(super) fn process_output_type(&self, process: &str) -> TypeExpr {
         match self.process_types.get(process) {
             // Awaited process handles are runtime result envelopes. Preserve
             // the inferred payload as the known branch while keeping the
@@ -661,7 +674,11 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn validate_type_refs(&self, ty: &TypeExpr, span: Option<Span>) -> Result<(), LinkError> {
+    pub(super) fn validate_type_refs(
+        &self,
+        ty: &TypeExpr,
+        span: Option<Span>,
+    ) -> Result<(), LinkError> {
         match ty {
             TypeExpr::Ref(name) => {
                 if self.type_defs.contains_key(name.as_str())
@@ -709,7 +726,7 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn field_type(
+    pub(super) fn field_type(
         &self,
         target: &TypeExpr,
         field: &str,
@@ -721,14 +738,18 @@ impl<'module> Linker<'module> {
         })
     }
 
-    fn index_type(&self, target: &TypeExpr, span: Option<Span>) -> Result<TypeExpr, LinkError> {
+    pub(super) fn index_type(
+        &self,
+        target: &TypeExpr,
+        span: Option<Span>,
+    ) -> Result<TypeExpr, LinkError> {
         let target = self.resolve_type_aliases(target);
         index_type(&target, span, |name| {
             self.surface.resources.is_known_opaque_value_type(name)
         })
     }
 
-    fn iterable_item_type(
+    pub(super) fn iterable_item_type(
         &self,
         target: &TypeExpr,
         span: Option<Span>,
@@ -736,7 +757,7 @@ impl<'module> Linker<'module> {
         iterable_item_type(&self.resolve_type_aliases(target), span)
     }
 
-    fn ensure_feature(
+    pub(super) fn ensure_feature(
         &self,
         enabled: bool,
         feature: &'static str,
@@ -749,7 +770,7 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn validate_resource_ref(
+    pub(super) fn validate_resource_ref(
         &self,
         resource: &ResourceRefExpr,
         span: Option<Span>,
@@ -774,7 +795,7 @@ impl<'module> Linker<'module> {
             })
     }
 
-    fn lower_declaration(
+    pub(super) fn lower_declaration(
         &self,
         declaration: &Declaration,
         span: Option<Span>,
@@ -841,7 +862,7 @@ impl<'module> Linker<'module> {
     /// That ordering matters for the model-facing diagnostic: the effect ban is
     /// the rule a reader has to learn, and an incidental name error would hide
     /// it.
-    fn lower_function_decl(
+    pub(super) fn lower_function_decl(
         &self,
         function: &crate::ast::FunctionDecl,
         span: Option<Span>,
@@ -908,7 +929,7 @@ impl<'module> Linker<'module> {
     /// reader the precise span of an effect they wrote, and the lowered pass is
     /// what makes the ban complete, because resolution can create a forbidden
     /// node from an identifier that looked inert in the source.
-    fn reject_effects_in_function(
+    pub(super) fn reject_effects_in_function(
         &self,
         function: &crate::ast::FunctionDecl,
         body: &Expr,
@@ -938,7 +959,7 @@ impl<'module> Linker<'module> {
     /// surface type grammar, so a name that resolved to both a function and a
     /// value would have no type to report at the value use. Reserving the name
     /// keeps `name(...)` meaning exactly one thing everywhere in the program.
-    fn reject_function_name_binding(
+    pub(super) fn reject_function_name_binding(
         &self,
         name: &str,
         span: Option<Span>,

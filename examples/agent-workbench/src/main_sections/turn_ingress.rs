@@ -1,3 +1,5 @@
+use super::*;
+
 // The workbench's turn-input ingress admission.
 //
 // Two routes admit an input into the session's durable ingress lane —
@@ -5,7 +7,7 @@
 // send arrived while a turn was running — so the admission body they share
 // lives here rather than inside one of them.
 
-async fn enqueue_turn_input(
+pub(crate) async fn enqueue_turn_input(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
     Json(request): Json<TurnInputRequest>,
@@ -47,7 +49,7 @@ async fn enqueue_turn_input(
     Ok(Json(receipt))
 }
 
-async fn admit_queued_send(
+pub(crate) async fn admit_queued_send(
     state: &AppState,
     session_id: &str,
     text: String,
@@ -85,7 +87,7 @@ async fn admit_queued_send(
 /// turn was running and is admitted as the next turn's input instead of starting
 /// a second one (FIG-1000). One body means the two cannot drift in what a viewer
 /// is told about an accepted input.
-async fn admit_turn_input(
+pub(crate) async fn admit_turn_input(
     state: &AppState,
     session_id: &str,
     text: String,
@@ -126,7 +128,7 @@ async fn admit_turn_input(
     Ok(receipt)
 }
 
-async fn reject_if_active_turn_settled(
+pub(crate) async fn reject_if_active_turn_settled(
     state: &AppState,
     acceptance: &lash::TurnInputAcceptanceReceipt,
 ) -> Result<(), AppError> {

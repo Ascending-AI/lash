@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn healthz_reports_workbench_fingerprint() {
     // scripts/agent-workbench-dev.sh readiness-checks this exact shape to
@@ -76,11 +78,9 @@ fn workbench_ui_renders_typed_session_open_errors() {
     // because a failure to load the session is not a fact about the session.
     assert!(ui::INDEX_HTML.contains("typeof body?.error === \"string\""));
     assert!(ui::INDEX_HTML.contains("function snapshotFailureReason(error)"));
-    assert!(
-        ui::INDEX_HTML.contains(
-            "markShellChannel(shellAvailability, \"state\", false, snapshotFailureReason(error))"
-        )
-    );
+    assert!(ui::INDEX_HTML.contains(
+        "markShellChannel(shellAvailability, \"state\", false, snapshotFailureReason(error))"
+    ));
     assert!(ui::INDEX_HTML.contains("shellStatusDetail.textContent = model.banner.detail"));
 }
 
@@ -88,7 +88,9 @@ fn workbench_ui_renders_typed_session_open_errors() {
 fn workbench_ui_renders_delete_failures_and_scopes_the_replacement_session() {
     assert!(ui::INDEX_HTML.contains("async function doReset()"));
     assert!(ui::INDEX_HTML.contains("typeof state?.error === \"string\""));
-    assert!(ui::INDEX_HTML.contains("renderError(\n          error instanceof Error ? error.message"));
+    assert!(
+        ui::INDEX_HTML.contains("renderError(\n          error instanceof Error ? error.message")
+    );
     assert!(ui::INDEX_HTML.contains("scopedSessionId = state.settings.session_id"));
     assert!(
         ui::INDEX_HTML.contains("replacementUrl.searchParams.set(\"session_id\", scopedSessionId)")

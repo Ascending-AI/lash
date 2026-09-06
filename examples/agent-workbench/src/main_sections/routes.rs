@@ -1,12 +1,14 @@
-async fn healthz() -> Json<serde_json::Value> {
+use super::*;
+
+pub(crate) async fn healthz() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "service": "agent-workbench", "status": "ok" }))
 }
 
-async fn index() -> Html<&'static str> {
+pub(crate) async fn index() -> Html<&'static str> {
     Html(ui::INDEX_HTML)
 }
 
-async fn app_state(
+pub(crate) async fn app_state(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<StateReadSnapshot>, AppError> {
@@ -115,9 +117,9 @@ async fn app_state(
     }))
 }
 
-const MAX_WORKBENCH_ATTACHMENT_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_WORKBENCH_ATTACHMENT_BYTES: usize = 1024 * 1024;
 
-async fn upload_attachment(
+pub(crate) async fn upload_attachment(
     State(state): State<AppState>,
     Json(request): Json<AttachmentUploadRequest>,
 ) -> Result<Json<AttachmentUploadResponse>, AppError> {
@@ -189,7 +191,7 @@ async fn upload_attachment(
 // carries no session data. That capability does not expire and blobs outlive sessions; reclaiming
 // them belongs to ADR 0024 retention work. If ids are not content addresses, or an id can reach a
 // viewer who may not read the blob, this route MUST be protected by an authorization gate.
-async fn retrieve_attachment(
+pub(crate) async fn retrieve_attachment(
     AxumPath(attachment_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
@@ -220,7 +222,7 @@ async fn retrieve_attachment(
         .expect("valid attachment response"))
 }
 
-async fn session_events(
+pub(crate) async fn session_events(
     State(state): State<AppState>,
     Query(query): Query<ProductEventsQuery>,
 ) -> Result<Response, AppError> {
@@ -265,7 +267,7 @@ async fn session_events(
     Ok(ndjson_response(ReceiverStream::new(rx)))
 }
 
-async fn session_observations(
+pub(crate) async fn session_observations(
     State(state): State<AppState>,
     Query(query): Query<EventsQuery>,
 ) -> Result<Response, AppError> {
@@ -298,7 +300,7 @@ async fn session_observations(
     Ok(ndjson_response(ReceiverStream::new(rx)))
 }
 
-async fn commit_and_submit_user_turn(
+pub(crate) async fn commit_and_submit_user_turn(
     state: AppState,
     cleanup: ActiveTurnSubmissionGuard,
     request: restate::WorkbenchTurnWorkflowRequest,
@@ -321,7 +323,7 @@ async fn commit_and_submit_user_turn(
     Ok(invocation_id)
 }
 
-async fn submit_tracked_queued_turn(
+pub(crate) async fn submit_tracked_queued_turn(
     cleanup: ActiveTurnSubmissionGuard,
     restate_http: reqwest::Client,
     restate_ingress_url: String,
@@ -333,7 +335,7 @@ async fn submit_tracked_queued_turn(
     Ok(invocation_id)
 }
 
-async fn send_turn(
+pub(crate) async fn send_turn(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
     Json(request): Json<TurnRequest>,
@@ -461,7 +463,7 @@ async fn send_turn(
     Ok(Json(TurnAccepted::started()))
 }
 
-async fn button_trigger(
+pub(crate) async fn button_trigger(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
     Json(request): Json<ButtonEventRequest>,
@@ -502,11 +504,13 @@ async fn button_trigger(
     Ok(Json(CommandAccepted { accepted: true }))
 }
 
-async fn list_accounts(State(state): State<AppState>) -> Json<Vec<mail::AccountSummary>> {
+pub(crate) async fn list_accounts(
+    State(state): State<AppState>,
+) -> Json<Vec<mail::AccountSummary>> {
     Json(state.mail_world.account_summaries())
 }
 
-async fn list_triggers(
+pub(crate) async fn list_triggers(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Vec<WorkbenchTriggerRegistration>>, AppError> {
@@ -527,7 +531,7 @@ async fn list_triggers(
     ))
 }
 
-async fn set_trigger_enabled(
+pub(crate) async fn set_trigger_enabled(
     AxumPath(subscription_key): AxumPath<String>,
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
@@ -601,7 +605,7 @@ async fn set_trigger_enabled(
     }))
 }
 
-async fn delete_trigger(
+pub(crate) async fn delete_trigger(
     AxumPath(subscription_key): AxumPath<String>,
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
@@ -639,7 +643,7 @@ async fn delete_trigger(
     }))
 }
 
-async fn trigger_record_for_session(
+pub(crate) async fn trigger_record_for_session(
     state: &AppState,
     session_id: &str,
     subscription_key: &str,
@@ -657,7 +661,7 @@ async fn trigger_record_for_session(
         .ok_or_else(|| AppError::not_found(format!("unknown trigger `{subscription_key}`")))
 }
 
-async fn add_account(
+pub(crate) async fn add_account(
     State(state): State<AppState>,
     Json(request): Json<AddAccountRequest>,
 ) -> Result<Json<mail::AccountSummary>, AppError> {
@@ -677,7 +681,7 @@ async fn add_account(
     Ok(Json(summary))
 }
 
-async fn delete_account(
+pub(crate) async fn delete_account(
     AxumPath(slug): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<CommandAccepted>, AppError> {
@@ -691,7 +695,7 @@ async fn delete_account(
     Ok(Json(CommandAccepted { accepted: true }))
 }
 
-async fn delete_message(
+pub(crate) async fn delete_message(
     AxumPath((slug, id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<CommandAccepted>, AppError> {
@@ -706,7 +710,7 @@ async fn delete_message(
     Ok(Json(CommandAccepted { accepted: true }))
 }
 
-async fn account_inbox(
+pub(crate) async fn account_inbox(
     AxumPath(slug): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<mail::MailMessage>>, AppError> {
@@ -721,7 +725,7 @@ async fn account_inbox(
 /// context and the runtime commits the refreshed surface to the SQLite session store.
 /// Nothing here executes effects in the foreground — the workbench runs
 /// Restate + SQLite only.
-async fn enqueue_tool_catalog_refresh(
+pub(crate) async fn enqueue_tool_catalog_refresh(
     state: &AppState,
     reason: &str,
 ) -> Result<lash::SessionCommandReceipt, AppError> {
@@ -756,7 +760,7 @@ async fn enqueue_tool_catalog_refresh(
     Ok(receipt)
 }
 
-async fn inject_message(
+pub(crate) async fn inject_message(
     AxumPath(slug): AxumPath<String>,
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
@@ -798,7 +802,7 @@ async fn inject_message(
     .await?;
     Ok(Json(CommandAccepted { accepted: true }))
 }
-async fn reset_chat(
+pub(crate) async fn reset_chat(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<StateSnapshot>, AppError> {
@@ -870,7 +874,7 @@ async fn reset_chat(
     }))
 }
 
-async fn list_work(
+pub(crate) async fn list_work(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Vec<WorkItem>>, AppError> {
@@ -913,12 +917,12 @@ async fn list_work(
 }
 
 #[derive(Debug, Serialize)]
-struct QueuedWorkBatchAction {
-    accepted: bool,
-    batch_id: String,
+pub(crate) struct QueuedWorkBatchAction {
+    pub(crate) accepted: bool,
+    pub(crate) batch_id: String,
 }
 
-async fn list_queued_work(
+pub(crate) async fn list_queued_work(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Vec<lash::persistence::QueuedWorkBatch>>, AppError> {
@@ -936,7 +940,7 @@ async fn list_queued_work(
     ))
 }
 
-async fn run_queued_work_batch(
+pub(crate) async fn run_queued_work_batch(
     AxumPath(batch_id): AxumPath<String>,
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
@@ -1007,7 +1011,7 @@ async fn run_queued_work_batch(
     }))
 }
 
-async fn cancel_queued_work_batch(
+pub(crate) async fn cancel_queued_work_batch(
     AxumPath(batch_id): AxumPath<String>,
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
@@ -1042,7 +1046,7 @@ async fn cancel_queued_work_batch(
     }))
 }
 
-async fn cancel_work(
+pub(crate) async fn cancel_work(
     AxumPath(process_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ProcessCancelAccepted>, AppError> {
@@ -1097,7 +1101,7 @@ async fn cancel_work(
 /// process cannot pin the request. On terminal it reconciles from `events_after`
 /// (ADR 0017): the durable log is the truth; the best-effort event sink is only
 /// freshness and may have dropped events.
-async fn await_work(
+pub(crate) async fn await_work(
     AxumPath(process_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<WorkAwaitResult>, AppError> {
@@ -1145,7 +1149,7 @@ async fn await_work(
     }))
 }
 
-async fn list_lashlang_graphs(
+pub(crate) async fn list_lashlang_graphs(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<execution_graphs::LashlangGraphIndex>, AppError> {
@@ -1159,7 +1163,7 @@ async fn list_lashlang_graphs(
     Ok(Json(index))
 }
 
-async fn lashlang_graph(
+pub(crate) async fn lashlang_graph(
     AxumPath(graph_key): AxumPath<String>,
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
@@ -1175,7 +1179,7 @@ async fn lashlang_graph(
     Ok(Json(graph))
 }
 
-async fn forward_session_observations(
+pub(crate) async fn forward_session_observations(
     session: lash::LashSession,
     cursor: SessionCursor,
     tx: mpsc::Sender<ObservationStreamItem>,
@@ -1285,18 +1289,18 @@ async fn forward_session_observations(
 }
 
 #[derive(Default)]
-struct TurnStreamState {
-    assistant_prose: Vec<TurnStreamProseChunk>,
-    model_attempt_reset_count: usize,
+pub(crate) struct TurnStreamState {
+    pub(crate) assistant_prose: Vec<TurnStreamProseChunk>,
+    pub(crate) model_attempt_reset_count: usize,
 }
 
-struct TurnStreamProseChunk {
-    correlation_id: lash::TurnActivityId,
-    text: String,
+pub(crate) struct TurnStreamProseChunk {
+    pub(crate) correlation_id: lash::TurnActivityId,
+    pub(crate) text: String,
 }
 
 impl TurnStreamState {
-    fn apply(&mut self, activity: &TurnActivity) {
+    pub(crate) fn apply(&mut self, activity: &TurnActivity) {
         match &activity.event {
             TurnEvent::AssistantProseDelta { text } => {
                 self.assistant_prose.push(TurnStreamProseChunk {
@@ -1317,7 +1321,7 @@ impl TurnStreamState {
         }
     }
 
-    fn assistant_prose(&self) -> String {
+    pub(crate) fn assistant_prose(&self) -> String {
         self.assistant_prose
             .iter()
             .map(|chunk| chunk.text.as_str())
@@ -1325,17 +1329,17 @@ impl TurnStreamState {
     }
 
     #[cfg(test)]
-    fn model_attempt_reset_count(&self) -> usize {
+    pub(crate) fn model_attempt_reset_count(&self) -> usize {
         self.model_attempt_reset_count
     }
 
-    fn settle_terminal(&mut self) {
+    pub(crate) fn settle_terminal(&mut self) {
         self.assistant_prose.clear();
     }
 }
 
-struct ChannelTurnEvents {
-    turn_state: Arc<Mutex<TurnStreamState>>,
+pub(crate) struct ChannelTurnEvents {
+    pub(crate) turn_state: Arc<Mutex<TurnStreamState>>,
 }
 
 #[async_trait]
@@ -1347,7 +1351,7 @@ impl TurnActivitySink for ChannelTurnEvents {
 }
 
 #[cfg(test)]
-fn fold_turn_activities<'a>(
+pub(crate) fn fold_turn_activities<'a>(
     activities: impl IntoIterator<Item = &'a TurnActivity>,
 ) -> TurnStreamState {
     let mut state = TurnStreamState::default();
@@ -1355,6 +1359,103 @@ fn fold_turn_activities<'a>(
         state.apply(activity);
     }
     state
+}
+
+pub(crate) async fn enqueue_button_trigger_command(
+    state: &AppState,
+    session_id: &str,
+    button: ButtonChoice,
+    pressed_at: &str,
+    operation_id: &str,
+    scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
+) -> AnyhowResult<lash::triggers::TriggerEmitReport> {
+    let payload = json!({
+        "pressed_at": pressed_at,
+        "button": button.as_str(),
+        "message": format!("user pressed the {} button", button.lower()),
+    });
+    let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)
+        .context("button source key")?;
+    state.trace_for_session(
+        session_id,
+        "trigger.emit",
+        json!({
+            "resource_type": BUTTON_TRIGGER_RESOURCE,
+            "alias": BUTTON_TRIGGER_ALIAS,
+            "event": BUTTON_TRIGGER_EVENT,
+            "source_type": BUTTON_TRIGGER_SOURCE_TYPE,
+            "source_key": source_key,
+            "payload": payload.clone(),
+        }),
+    );
+    state
+        .core
+        .triggers()
+        .emit(
+            lash::triggers::TriggerOccurrenceRequest::new(
+                BUTTON_TRIGGER_SOURCE_TYPE,
+                source_key,
+                payload,
+                format!("workbench-button-trigger:{operation_id}"),
+            )
+            .with_source(json!({}))
+            .for_session(session_id),
+            scoped_effect_controller,
+        )
+        .await
+        .context("emit button trigger occurrence")
+}
+
+pub(crate) async fn enqueue_mail_received_trigger_command(
+    state: &AppState,
+    session_id: &str,
+    message: &mail::MailDelivery,
+    operation_id: &str,
+    scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
+) -> AnyhowResult<lash::triggers::TriggerEmitReport> {
+    let payload = json!({
+        "account": message.account,
+        "title": message.title,
+        "text": message.text,
+    });
+    let source_key = lash::triggers::empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE)
+        .context("mail source key")?;
+    state.trace_for_session(
+        session_id,
+        "trigger.emit",
+        json!({
+            "resource_type": MAIL_EVENT_RESOURCE,
+            "alias": MAIL_EVENT_ALIAS,
+            "event": MAIL_EVENT_EVENT,
+            "source_type": MAIL_RECEIVED_SOURCE_TYPE,
+            "source_key": source_key,
+            "payload": payload.clone(),
+        }),
+    );
+    state
+        .core
+        .triggers()
+        .emit(
+            lash::triggers::TriggerOccurrenceRequest::new(
+                MAIL_RECEIVED_SOURCE_TYPE,
+                source_key,
+                payload,
+                format!("workbench-mail-trigger:{operation_id}"),
+            )
+            .with_source(json!({}))
+            .for_session(session_id),
+            scoped_effect_controller,
+        )
+        .await
+        .context("emit mail received trigger occurrence")
+}
+
+pub(crate) fn workbench_lashlang_abilities() -> lashlang::LashlangAbilities {
+    lashlang::LashlangAbilities::default()
+        .with_processes()
+        .with_sleep()
+        .with_process_signals()
+        .with_triggers()
 }
 
 #[cfg(test)]
@@ -1450,101 +1551,4 @@ mod turn_stream_state_tests {
         assert_eq!(replay_projection.assistant_prose(), "must remain visible");
         assert_eq!(replay_projection.model_attempt_reset_count(), 11);
     }
-}
-
-pub(crate) async fn enqueue_button_trigger_command(
-    state: &AppState,
-    session_id: &str,
-    button: ButtonChoice,
-    pressed_at: &str,
-    operation_id: &str,
-    scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
-) -> AnyhowResult<lash::triggers::TriggerEmitReport> {
-    let payload = json!({
-        "pressed_at": pressed_at,
-        "button": button.as_str(),
-        "message": format!("user pressed the {} button", button.lower()),
-    });
-    let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)
-        .context("button source key")?;
-    state.trace_for_session(
-        session_id,
-        "trigger.emit",
-        json!({
-            "resource_type": BUTTON_TRIGGER_RESOURCE,
-            "alias": BUTTON_TRIGGER_ALIAS,
-            "event": BUTTON_TRIGGER_EVENT,
-            "source_type": BUTTON_TRIGGER_SOURCE_TYPE,
-            "source_key": source_key,
-            "payload": payload.clone(),
-        }),
-    );
-    state
-        .core
-        .triggers()
-        .emit(
-            lash::triggers::TriggerOccurrenceRequest::new(
-                BUTTON_TRIGGER_SOURCE_TYPE,
-                source_key,
-                payload,
-                format!("workbench-button-trigger:{operation_id}"),
-            )
-            .with_source(json!({}))
-            .for_session(session_id),
-            scoped_effect_controller,
-        )
-        .await
-        .context("emit button trigger occurrence")
-}
-
-pub(crate) async fn enqueue_mail_received_trigger_command(
-    state: &AppState,
-    session_id: &str,
-    message: &mail::MailDelivery,
-    operation_id: &str,
-    scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
-) -> AnyhowResult<lash::triggers::TriggerEmitReport> {
-    let payload = json!({
-        "account": message.account,
-        "title": message.title,
-        "text": message.text,
-    });
-    let source_key = lash::triggers::empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE)
-        .context("mail source key")?;
-    state.trace_for_session(
-        session_id,
-        "trigger.emit",
-        json!({
-            "resource_type": MAIL_EVENT_RESOURCE,
-            "alias": MAIL_EVENT_ALIAS,
-            "event": MAIL_EVENT_EVENT,
-            "source_type": MAIL_RECEIVED_SOURCE_TYPE,
-            "source_key": source_key,
-            "payload": payload.clone(),
-        }),
-    );
-    state
-        .core
-        .triggers()
-        .emit(
-            lash::triggers::TriggerOccurrenceRequest::new(
-                MAIL_RECEIVED_SOURCE_TYPE,
-                source_key,
-                payload,
-                format!("workbench-mail-trigger:{operation_id}"),
-            )
-            .with_source(json!({}))
-            .for_session(session_id),
-            scoped_effect_controller,
-        )
-        .await
-        .context("emit mail received trigger occurrence")
-}
-
-fn workbench_lashlang_abilities() -> lashlang::LashlangAbilities {
-    lashlang::LashlangAbilities::default()
-        .with_processes()
-        .with_sleep()
-        .with_process_signals()
-        .with_triggers()
 }

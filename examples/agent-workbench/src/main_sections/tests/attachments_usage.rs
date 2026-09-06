@@ -1,3 +1,5 @@
+use super::*;
+
 const ATTACHMENT_USAGE_GATE_PNG_BASE64: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
@@ -22,7 +24,10 @@ fn workbench_ui_exposes_attachment_and_usage_affordances() {
         "id=\"usageBreakdown\"",
         "renderUsage(state.usage)",
     ] {
-        assert!(ui::INDEX_HTML.contains(contract), "missing UI contract: {contract}");
+        assert!(
+            ui::INDEX_HTML.contains(contract),
+            "missing UI contract: {contract}"
+        );
     }
 }
 
@@ -94,13 +99,16 @@ async fn run_attachment_usage_gate(
 ) {
     let trace_path = data_dir.join("trace.jsonl");
     let session_id_path = data_dir.join("session-id");
-    let sessions = WorkbenchSessions::persistent(session_id_path.clone())
-        .expect("create gate session id");
+    let sessions =
+        WorkbenchSessions::persistent(session_id_path.clone()).expect("create gate session id");
     let session_id = sessions.current();
     let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(&data_dir.join("processes.db"), data_dir.join("lash-sessions"))
-            .await
-            .expect("open gate process registry"),
+        lash_sqlite_store::SqliteProcessRegistry::open(
+            &data_dir.join("processes.db"),
+            data_dir.join("lash-sessions"),
+        )
+        .await
+        .expect("open gate process registry"),
     ) as Arc<dyn lash::process::ProcessRegistry>;
     let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.join("attachments"),
@@ -134,9 +142,7 @@ async fn run_attachment_usage_gate(
         .complete(move |request| {
             let provider_requests = Arc::clone(&provider_requests_for_call);
             async move {
-                provider_requests
-                    .lock_recover()
-                    .push(request);
+                provider_requests.lock_recover().push(request);
                 Ok(usage_gate_response())
             }
         })
@@ -262,24 +268,37 @@ async fn run_attachment_usage_gate(
         assert_eq!(requests.len(), 1, "gate must make exactly one LLM call");
         assert_eq!(requests[0].attachments.len(), 1);
         let source = &requests[0].attachments[0];
-        assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some("image/png"));
-        assert_eq!(requests[0].attachment_bytes(source), Some(png_bytes.as_slice()));
+        assert_eq!(
+            source
+                .media_type()
+                .map(lash::attachments::MediaType::as_str),
+            Some("image/png")
+        );
+        assert_eq!(
+            requests[0].attachment_bytes(source),
+            Some(png_bytes.as_slice())
+        );
         assert_eq!(
             source.stored_ref().map(|reference| &reference.id),
             Some(&uploaded.attachment.id)
         );
     }
 
-    let Json(before_restart) =
-        Box::pin(app_state(State(state.clone()), Query(SessionQuery::default())))
-            .await
-            .expect("read pre-restart workbench state API");
+    let Json(before_restart) = Box::pin(app_state(
+        State(state.clone()),
+        Query(SessionQuery::default()),
+    ))
+    .await
+    .expect("read pre-restart workbench state API");
     assert_snapshot_attachment(&before_restart, &uploaded.attachment.id);
     assert_usage_report_consistent(&before_restart.usage);
     let call_usage = completed_llm_call_usage(&trace_path);
     assert_eq!(call_usage.len(), 1);
     let call_total = call_usage.iter().map(trace_usage_total).sum::<i64>();
-    assert!(call_total > 0, "the deterministic LLM call must report usage");
+    assert!(
+        call_total > 0,
+        "the deterministic LLM call must report usage"
+    );
     assert!(before_restart.usage.usage.total_tokens >= call_total);
     let persisted_usage = before_restart.usage.clone();
     let attachment_id = uploaded.attachment.id.clone();
@@ -314,10 +333,12 @@ async fn run_attachment_usage_gate(
         resumed_session_ids,
     );
     assert_retrieved_attachment(&resumed_state, &attachment_id, &png_bytes).await;
-    let Json(after_restart) =
-        Box::pin(app_state(State(resumed_state), Query(SessionQuery::default())))
-            .await
-            .expect("read post-restart workbench state API");
+    let Json(after_restart) = Box::pin(app_state(
+        State(resumed_state),
+        Query(SessionQuery::default()),
+    ))
+    .await
+    .expect("read post-restart workbench state API");
     assert_snapshot_attachment(&after_restart, &attachment_id);
     assert_eq!(after_restart.usage, persisted_usage);
     assert_usage_report_consistent(&after_restart.usage);
@@ -374,7 +395,9 @@ fn attachment_usage_gate_core(
         .clock(clock)
         .without_queued_work();
     if let Some(trace_sink) = trace_sink {
-        builder = builder.trace_sink(trace_sink).trace_level(TraceLevel::Extended);
+        builder = builder
+            .trace_sink(trace_sink)
+            .trace_level(TraceLevel::Extended);
     }
     builder
         .build(crate::test_core_owner())
@@ -423,9 +446,7 @@ fn attachment_usage_gate_state(
 }
 
 fn usage_gate_response() -> lash::provider::LlmResponse {
-    let mut response = text_response(
-        "<lashlang>\nfinish \"attachment accounted\"\n</lashlang>",
-    );
+    let mut response = text_response("<lashlang>\nfinish \"attachment accounted\"\n</lashlang>");
     response.usage = lash::direct::LlmUsage {
         input_tokens: 21,
         output_tokens: 8,
@@ -441,15 +462,15 @@ async fn assert_retrieved_attachment(
     attachment_id: &lash::attachments::AttachmentId,
     expected: &[u8],
 ) {
-    let response = retrieve_attachment(
-        AxumPath(attachment_id.to_string()),
-        State(state.clone()),
-    )
-    .await
-    .expect("retrieve attachment through workbench API handler");
+    let response = retrieve_attachment(AxumPath(attachment_id.to_string()), State(state.clone()))
+        .await
+        .expect("retrieve attachment through workbench API handler");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
-        response.headers().get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()),
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
         Some("image/png")
     );
     assert_eq!(

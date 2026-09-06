@@ -1,10 +1,11 @@
+use super::*;
 
 /// One turn through the workbench's own session-opening path.
 ///
 /// Deliberately `state.session_builder(...)`, which is what `run_user_turn` and
 /// every route use — opening `state.core.session(...)` directly would bypass
 /// the very code this file exists to test.
-async fn run_turn_through_the_workbench_open_path(
+pub(crate) async fn run_turn_through_the_workbench_open_path(
     state: &AppState,
     session_id: &str,
     turn_id: &str,
@@ -88,7 +89,7 @@ fn transcript_answers(snapshot: &StateReadSnapshot) -> Vec<String> {
         .collect()
 }
 
-fn transcript_code_languages(snapshot: &StateReadSnapshot) -> Vec<String> {
+pub(crate) fn transcript_code_languages(snapshot: &StateReadSnapshot) -> Vec<String> {
     snapshot
         .transcript
         .iter()
@@ -155,16 +156,20 @@ fn the_workbench_tutorials_are_written_in_the_session_dialect() {
 
     // And the marker lists must be able to fire, or the assertion above is
     // decoration: each prompt read against the *other* dialect's list trips.
-    assert!(!foreign_words_in(
-        workbench_prompt(lash::rlm::RlmDialect::Lashlang),
-        HOST_FOREIGN_MARKERS
-    )
-    .is_empty());
-    assert!(!foreign_words_in(
-        workbench_prompt(lash::rlm::RlmDialect::Typescript),
-        HOST_FOREIGN_MARKERS_LASHLANG
-    )
-    .is_empty());
+    assert!(
+        !foreign_words_in(
+            workbench_prompt(lash::rlm::RlmDialect::Lashlang),
+            HOST_FOREIGN_MARKERS
+        )
+        .is_empty()
+    );
+    assert!(
+        !foreign_words_in(
+            workbench_prompt(lash::rlm::RlmDialect::Typescript),
+            HOST_FOREIGN_MARKERS_LASHLANG
+        )
+        .is_empty()
+    );
 }
 
 /// Every `<typescript>` program in the prompt, in prompt order.
@@ -245,7 +250,10 @@ fn the_workbench_typescript_tutorials_link() {
             hits.push(format!("tutorial {}: {error}", index + 1));
         }
     }
-    assert!(hits.is_empty(), "prompt programs that do not link: {hits:#?}");
+    assert!(
+        hits.is_empty(),
+        "prompt programs that do not link: {hits:#?}"
+    );
 
     // The linker must be able to reject, or an empty hit list proves nothing.
     assert!(
@@ -259,12 +267,10 @@ fn the_workbench_typescript_tutorials_link() {
 /// dialect, and copy keyed on configuration teaches the other one.
 #[test]
 fn the_tutorials_follow_the_sessions_recorded_dialect() {
-    let typescript = lash::runtime::ProtocolTurnOptions::typed(
-        lash_rlm_types::RlmCreateExtras {
-            dialect: Some(lash::rlm::RlmDialect::Typescript),
-            ..Default::default()
-        },
-    )
+    let typescript = lash::runtime::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
+        dialect: Some(lash::rlm::RlmDialect::Typescript),
+        ..Default::default()
+    })
     .expect("typed options");
     let resolved = lash::rlm::rlm_session_dialect(&typescript).expect("recorded dialect decodes");
     assert_eq!(resolved, lash::rlm::RlmDialect::Typescript);
@@ -283,9 +289,11 @@ fn the_tutorials_follow_the_sessions_recorded_dialect() {
 /// a session executing the other one.
 #[test]
 fn a_malformed_recorded_dialect_refuses_the_tutorials() {
-    let tampered =
-        lash::runtime::ProtocolTurnOptions::from_payload(serde_json::json!({ "dialect": "python" }));
-    let error = lash::rlm::rlm_session_dialect(&tampered).expect_err("an unknown language id must refuse");
+    let tampered = lash::runtime::ProtocolTurnOptions::from_payload(
+        serde_json::json!({ "dialect": "python" }),
+    );
+    let error =
+        lash::rlm::rlm_session_dialect(&tampered).expect_err("an unknown language id must refuse");
     assert!(
         error.to_string().contains("invalid RLM session config"),
         "the refusal names the config it could not read: {error}"
@@ -434,7 +442,10 @@ async fn a_lashlang_workbench_still_serves_lashlang_turns() {
     .await;
 
     let prompts = served_prompts.lock_recover().clone();
-    assert!(!prompts.is_empty(), "the turn must have reached the provider");
+    assert!(
+        !prompts.is_empty(),
+        "the turn must have reached the provider"
+    );
     assert!(
         prompts
             .iter()
@@ -503,9 +514,16 @@ fn every_scripted_dev_provider_reply_is_a_cell_of_the_hosts_dialect() {
                     continue;
                 };
                 seen += 1;
-                let label = format!("{} call {call} ({})", scenario.as_str(), dialect.language_id());
+                let label = format!(
+                    "{} call {call} ({})",
+                    scenario.as_str(),
+                    dialect.language_id()
+                );
                 if !text.starts_with(&open) || !text.trim_end().ends_with(&close) {
-                    hits.push(format!("{label}: not a {} cell: {text}", dialect.language_id()));
+                    hits.push(format!(
+                        "{label}: not a {} cell: {text}",
+                        dialect.language_id()
+                    ));
                     continue;
                 }
                 let code = text
@@ -536,8 +554,14 @@ fn every_scripted_dev_provider_reply_is_a_cell_of_the_hosts_dialect() {
             }
         }
     }
-    assert!(seen >= 20, "every scenario must script at least one cell in each dialect, saw {seen}");
-    assert!(hits.is_empty(), "scripted replies a session cannot run: {hits:#?}");
+    assert!(
+        seen >= 20,
+        "every scenario must script at least one cell in each dialect, saw {seen}"
+    );
+    assert!(
+        hits.is_empty(),
+        "scripted replies a session cannot run: {hits:#?}"
+    );
 }
 
 /// Every multi-shot scenario must terminate.
@@ -669,7 +693,10 @@ async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
 }
 
 /// A scripted provider that answers each call with the next cell in a list.
-fn scripted_cells_provider(kind: &'static str, cells: Vec<String>) -> lash::provider::ProviderHandle {
+pub(crate) fn scripted_cells_provider(
+    kind: &'static str,
+    cells: Vec<String>,
+) -> lash::provider::ProviderHandle {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     lash::testing::TestProvider::builder()
         .kind(kind)

@@ -1,25 +1,30 @@
-struct StateProjectionReads {
-    read_view: lash::persistence::SessionReadView,
-    cursor: SessionCursor,
-    pending_turn_inputs: Vec<lash::PendingTurnInput>,
-    queued_work: Vec<lash::persistence::QueuedWorkBatch>,
-    turn_input_applications: Vec<lash::remote::observations::RemoteTurnInputApplication>,
-    usage: lash::usage::SessionUsageReport,
+use super::*;
+
+pub(crate) struct StateProjectionReads {
+    pub(crate) read_view: lash::persistence::SessionReadView,
+    pub(crate) cursor: SessionCursor,
+    pub(crate) pending_turn_inputs: Vec<lash::PendingTurnInput>,
+    pub(crate) queued_work: Vec<lash::persistence::QueuedWorkBatch>,
+    pub(crate) turn_input_applications: Vec<lash::remote::observations::RemoteTurnInputApplication>,
+    pub(crate) usage: lash::usage::SessionUsageReport,
 }
 
-fn state_store_request(state: &AppState, session_id: &str) -> lash::persistence::SessionStoreCreateRequest {
+pub(crate) fn state_store_request(
+    state: &AppState,
+    session_id: &str,
+) -> lash::persistence::SessionStoreCreateRequest {
     let mut policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
     policy.session_id = Some(session_id.to_string());
     policy.model = model_spec_from_selection(state.selected_model());
     lash::persistence::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
+        pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation: lash::persistence::SessionRelation::Root,
         policy,
     }
 }
 
-async fn ensure_session_marker_readable(
+pub(crate) async fn ensure_session_marker_readable(
     state: &AppState,
     session_id: &str,
     surface: &'static str,
@@ -37,15 +42,16 @@ async fn ensure_session_marker_readable(
     Ok(())
 }
 
-async fn read_state_projection(
+pub(crate) async fn read_state_projection(
     state: &AppState,
     session_id: &str,
     active_turn: bool,
 ) -> Result<StateProjectionReads, AppError> {
     if !active_turn {
-        let session = state.open_session(session_id).await.map_err(|error| {
-            state.session_admission_error(session_id, "api.state", error)
-        })?;
+        let session = state
+            .open_session(session_id)
+            .await
+            .map_err(|error| state.session_admission_error(session_id, "api.state", error))?;
         let snapshot = session.observe().recoverable_chat_snapshot();
         let pending_turn_inputs = session
             .pending_turn_inputs()

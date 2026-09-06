@@ -1,5 +1,7 @@
+use super::*;
+
 impl<'module> Linker<'module> {
-    fn validate_process_arg_binding(
+    pub(super) fn validate_process_arg_binding(
         &self,
         process: &str,
         arg: &str,
@@ -47,7 +49,7 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn validate_trigger_operation_args(
+    pub(super) fn validate_trigger_operation_args(
         &self,
         operation: crate::TriggerHostOperation,
         args: &[Expr],
@@ -149,7 +151,7 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn lower_trigger_operation_args(
+    pub(super) fn lower_trigger_operation_args(
         &self,
         operation: crate::TriggerHostOperation,
         args: &[Expr],
@@ -208,7 +210,7 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn lower_trigger_registration_args(
+    pub(super) fn lower_trigger_registration_args(
         &self,
         operation: crate::TriggerHostOperation,
         args: &[Expr],
@@ -267,7 +269,7 @@ impl<'module> Linker<'module> {
         Ok((vec![Expr::Record(entries)], operation.output_ty()))
     }
 
-    fn lower_trigger_input_record(
+    pub(super) fn lower_trigger_input_record(
         &self,
         process: &str,
         params: &[ProcessParam],
@@ -337,7 +339,7 @@ impl<'module> Linker<'module> {
         Ok(Expr::Record(lowered))
     }
 
-    fn trigger_target_params(
+    pub(super) fn trigger_target_params(
         &self,
         target: &Expr,
         target_ty: &TypeExpr,
@@ -373,7 +375,7 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn infer_process_output(
+    pub(super) fn infer_process_output(
         &self,
         process: &ProcessDecl,
         span: Option<Span>,
@@ -393,7 +395,11 @@ impl<'module> Linker<'module> {
         Ok(union_type(outputs))
     }
 
-    fn infer_completion(&self, expr: &Expr, scope: &mut Scope) -> Result<Completion, LinkError> {
+    pub(super) fn infer_completion(
+        &self,
+        expr: &Expr,
+        scope: &mut Scope,
+    ) -> Result<Completion, LinkError> {
         match expr {
             Expr::LabelAnnotated { expr, .. } => self.infer_completion(expr, scope),
             Expr::Finish(value) => {
@@ -488,11 +494,15 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn infer_expr_type(&self, expr: &Expr, scope: &mut Scope) -> Result<TypeExpr, LinkError> {
+    pub(super) fn infer_expr_type(
+        &self,
+        expr: &Expr,
+        scope: &mut Scope,
+    ) -> Result<TypeExpr, LinkError> {
         self.infer_expr_type_expected(expr, scope, None)
     }
 
-    fn infer_expr_type_expected(
+    pub(super) fn infer_expr_type_expected(
         &self,
         expr: &Expr,
         scope: &mut Scope,
@@ -923,7 +933,7 @@ impl<'module> Linker<'module> {
         })
     }
 
-    fn infer_try_expr_type(
+    pub(super) fn infer_try_expr_type(
         &self,
         exception: &crate::ast::TryExpr,
         scope: &mut Scope,
@@ -960,7 +970,7 @@ fn trigger_operation_record_entry<'expr>(args: &'expr [Expr], field: &str) -> Op
         .find_map(|(name, value)| (name.as_str() == field).then_some(value))
 }
 
-fn validate_trigger_operation_subscription_key(
+pub(super) fn validate_trigger_operation_subscription_key(
     operation: crate::TriggerHostOperation,
     args: &[Expr],
     span: Option<Span>,
@@ -1006,7 +1016,7 @@ enum StaticTriggerBinding {
     Json(serde_json::Value),
 }
 
-fn materialize_default_trigger_keys(mut program: Program) -> Result<Program, LinkError> {
+pub(super) fn materialize_default_trigger_keys(mut program: Program) -> Result<Program, LinkError> {
     let mut seen = BTreeSet::new();
     let mut derived_keys = VecDeque::new();
     for declaration in &program.declarations {
@@ -1235,11 +1245,11 @@ fn static_trigger_source(
     }
 }
 
-fn semantic_trigger_source_key(source_type: &str, source: &serde_json::Value) -> String {
+pub(super) fn semantic_trigger_source_key(source_type: &str, source: &serde_json::Value) -> String {
     lash_core::facade_support::default_trigger_source_key(source_type, source)
 }
 
-fn semantic_trigger_subscription_key(
+pub(super) fn semantic_trigger_subscription_key(
     process_name: &str,
     source_type: &str,
     source_key: &str,

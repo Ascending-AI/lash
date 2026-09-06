@@ -1,4 +1,6 @@
-fn browser_projection_trigger_identities() -> serde_json::Value {
+use super::*;
+
+pub(crate) fn browser_projection_trigger_identities() -> serde_json::Value {
     serde_json::json!({
         "session_a": lash::triggers::deterministic_subscription_id(
             &lash::triggers::TriggerOwnerScope::session("session-a"),
@@ -33,10 +35,12 @@ async fn workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_re
 
     let snapshot = observable.recoverable_chat_snapshot();
     assert_eq!(snapshot.read_view.session_id(), current.session_id);
-    assert_eq!(observable.recoverable_chat_snapshot().cursor, snapshot.cursor);
-    let remote_cursor = lash::remote::observations::RemoteSessionCursor::new(
-        snapshot.cursor.to_string(),
+    assert_eq!(
+        observable.recoverable_chat_snapshot().cursor,
+        snapshot.cursor
     );
+    let remote_cursor =
+        lash::remote::observations::RemoteSessionCursor::new(snapshot.cursor.to_string());
     let mut direct = match observable
         .subscribe_from_remote_cursor(&remote_cursor)
         .expect("subscribe from remote cursor")
@@ -79,9 +83,8 @@ async fn workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_re
     .expect("direct model-call event timeout");
     assert_eq!(direct_event.session_id, current.session_id);
     assert_ne!(direct_event.cursor, current.cursor);
-    let lash::remote::observations::RemoteSessionObservationEventPayload::TurnActivity {
-        activity,
-    } = &direct_event.event
+    let lash::remote::observations::RemoteSessionObservationEventPayload::TurnActivity { activity } =
+        &direct_event.event
     else {
         unreachable!("loop returns only turn activities")
     };
@@ -138,17 +141,21 @@ async fn workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_re
     .await
     .expect("terminal replacement timeout");
     let lash::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
-        snapshot,
-        event,
-        ..
+        snapshot, event, ..
     } = terminal
     else {
         unreachable!("loop returns only terminal replacements")
     };
-    assert_eq!(event.turn_id.as_deref(), Some("remote-recovery-facade-turn"));
+    assert_eq!(
+        event.turn_id.as_deref(),
+        Some("remote-recovery-facade-turn")
+    );
     assert_eq!(snapshot.cursor, event.cursor);
     drop(direct);
     drop(recovering);
     drop(observable);
-    session.close().await.expect("close remote recovery facade session");
+    session
+        .close()
+        .await
+        .expect("close remote recovery facade session");
 }

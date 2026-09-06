@@ -1,13 +1,15 @@
+use super::*;
+
 #[derive(Clone)]
-struct Scope {
-    bindings: BTreeMap<String, Binding>,
-    process_body: bool,
-    expected_return: Option<TypeExpr>,
-    span: Option<Span>,
+pub(super) struct Scope {
+    pub(super) bindings: BTreeMap<String, Binding>,
+    pub(super) process_body: bool,
+    pub(super) expected_return: Option<TypeExpr>,
+    pub(super) span: Option<Span>,
 }
 
 impl Scope {
-    fn new(process_body: bool, span: Option<Span>) -> Self {
+    pub(super) fn new(process_body: bool, span: Option<Span>) -> Self {
         Self {
             bindings: BTreeMap::new(),
             process_body,
@@ -16,11 +18,11 @@ impl Scope {
         }
     }
 
-    fn bind(&mut self, name: &str, binding: Binding) -> Option<Binding> {
+    pub(super) fn bind(&mut self, name: &str, binding: Binding) -> Option<Binding> {
         self.bindings.insert(name.to_string(), binding)
     }
 
-    fn restore(&mut self, name: &str, previous: Option<Binding>) {
+    pub(super) fn restore(&mut self, name: &str, previous: Option<Binding>) {
         match previous {
             Some(binding) => {
                 self.bindings.insert(name.to_string(), binding);
@@ -31,15 +33,15 @@ impl Scope {
         }
     }
 
-    fn get(&self, name: &AstString) -> Option<Binding> {
+    pub(super) fn get(&self, name: &AstString) -> Option<Binding> {
         self.bindings.get(name.as_str()).cloned()
     }
 
-    fn get_str(&self, name: &str) -> Option<Binding> {
+    pub(super) fn get_str(&self, name: &str) -> Option<Binding> {
         self.bindings.get(name).cloned()
     }
 
-    fn join_branches(&mut self, left: Scope, right: Scope) {
+    pub(super) fn join_branches(&mut self, left: Scope, right: Scope) {
         let names = left
             .bindings
             .keys()
@@ -53,15 +55,15 @@ impl Scope {
         }
     }
 
-    fn widen_loop(&mut self, before: Scope, after_one_pass: Scope) {
+    pub(super) fn widen_loop(&mut self, before: Scope, after_one_pass: Scope) {
         self.join_branches(before, after_one_pass);
     }
 
-    fn binding_type(&self, name: &AstString) -> Option<TypeExpr> {
+    pub(super) fn binding_type(&self, name: &AstString) -> Option<TypeExpr> {
         self.get(name).map(|binding| binding_type(Some(&binding)))
     }
 
-    fn update_path(
+    pub(super) fn update_path(
         &mut self,
         target: &crate::ast::AssignTarget,
         value_ty: &TypeExpr,
@@ -78,13 +80,13 @@ impl Scope {
     }
 }
 
-struct Completion {
-    finishes: Vec<TypeExpr>,
-    can_fallthrough: bool,
+pub(super) struct Completion {
+    pub(super) finishes: Vec<TypeExpr>,
+    pub(super) can_fallthrough: bool,
 }
 
 impl Completion {
-    fn fallthrough() -> Self {
+    pub(super) fn fallthrough() -> Self {
         Self {
             finishes: Vec::new(),
             can_fallthrough: true,
@@ -92,11 +94,11 @@ impl Completion {
     }
 }
 
-fn any_binding() -> Binding {
+pub(super) fn any_binding() -> Binding {
     Binding::Value(TypeExpr::Any)
 }
 
-fn binding_type(binding: Option<&Binding>) -> TypeExpr {
+pub(super) fn binding_type(binding: Option<&Binding>) -> TypeExpr {
     match binding {
         Some(Binding::Value(ty)) => ty.clone(),
         Some(Binding::SchemaWitness { .. }) => TypeExpr::Any,
@@ -207,7 +209,7 @@ fn type_has_field(ty: &TypeExpr, field: &str) -> bool {
     }
 }
 
-fn literal_type(expr: &Expr) -> TypeExpr {
+pub(super) fn literal_type(expr: &Expr) -> TypeExpr {
     match expr {
         Expr::Null => TypeExpr::Null,
         Expr::Undefined => TypeExpr::Any,
@@ -222,14 +224,14 @@ fn literal_type(expr: &Expr) -> TypeExpr {
     }
 }
 
-fn strip_label_annotation(mut expr: &Expr) -> &Expr {
+pub(super) fn strip_label_annotation(mut expr: &Expr) -> &Expr {
     while let Expr::LabelAnnotated { expr: inner, .. } = expr {
         expr = inner;
     }
     expr
 }
 
-fn direct_call_input_field<'a>(args: &'a [Expr], input_field: &str) -> Option<&'a Expr> {
+pub(super) fn direct_call_input_field<'a>(args: &'a [Expr], input_field: &str) -> Option<&'a Expr> {
     let [argument] = args else {
         return None;
     };
@@ -241,7 +243,7 @@ fn direct_call_input_field<'a>(args: &'a [Expr], input_field: &str) -> Option<&'
         .find_map(|(name, value)| (name == input_field).then_some(value))
 }
 
-fn union_type(items: Vec<TypeExpr>) -> TypeExpr {
+pub(super) fn union_type(items: Vec<TypeExpr>) -> TypeExpr {
     let mut flattened = Vec::new();
     for item in items {
         match item {
@@ -266,7 +268,7 @@ fn union_type(items: Vec<TypeExpr>) -> TypeExpr {
     }
 }
 
-fn call_input_type(arg_types: Vec<TypeExpr>) -> TypeExpr {
+pub(super) fn call_input_type(arg_types: Vec<TypeExpr>) -> TypeExpr {
     match arg_types.as_slice() {
         [] => TypeExpr::Null,
         [one] => one.clone(),
@@ -274,7 +276,7 @@ fn call_input_type(arg_types: Vec<TypeExpr>) -> TypeExpr {
     }
 }
 
-fn field_type(
+pub(super) fn field_type(
     target: &TypeExpr,
     field: &str,
     span: Option<Span>,
@@ -323,7 +325,7 @@ fn field_type(
     }
 }
 
-fn index_type(
+pub(super) fn index_type(
     target: &TypeExpr,
     span: Option<Span>,
     is_opaque: impl Fn(&str) -> bool + Copy,
@@ -349,7 +351,10 @@ fn index_type(
     }
 }
 
-fn iterable_item_type(target: &TypeExpr, span: Option<Span>) -> Result<TypeExpr, LinkError> {
+pub(super) fn iterable_item_type(
+    target: &TypeExpr,
+    span: Option<Span>,
+) -> Result<TypeExpr, LinkError> {
     match target {
         TypeExpr::List(item) => Ok(*item.clone()),
         TypeExpr::Any | TypeExpr::Dict | TypeExpr::Ref(_) => Ok(TypeExpr::Any),
@@ -395,7 +400,7 @@ fn builtin_return_type(name: &str) -> TypeExpr {
     }
 }
 
-fn shaping_builtin_return_type(name: &str, args: &[TypeExpr]) -> TypeExpr {
+pub(super) fn shaping_builtin_return_type(name: &str, args: &[TypeExpr]) -> TypeExpr {
     match (name, args) {
         ("sort" | "sort_by" | "unique" | "reverse", [list, ..]) => list.clone(),
         ("min" | "max", [TypeExpr::List(item)]) => *item.clone(),
@@ -403,7 +408,7 @@ fn shaping_builtin_return_type(name: &str, args: &[TypeExpr]) -> TypeExpr {
     }
 }
 
-fn shaping_list_item(ty: &TypeExpr) -> Option<TypeExpr> {
+pub(super) fn shaping_list_item(ty: &TypeExpr) -> Option<TypeExpr> {
     match ty {
         TypeExpr::List(item) => Some(*item.clone()),
         TypeExpr::Any | TypeExpr::Ref(_) => Some(TypeExpr::Any),
@@ -417,7 +422,7 @@ fn shaping_list_item(ty: &TypeExpr) -> Option<TypeExpr> {
     }
 }
 
-fn shaping_number_type(ty: &TypeExpr) -> bool {
+pub(super) fn shaping_number_type(ty: &TypeExpr) -> bool {
     match ty {
         TypeExpr::Any | TypeExpr::Ref(_) | TypeExpr::Int | TypeExpr::Float => true,
         TypeExpr::Union(items) => items.iter().all(shaping_number_type),
@@ -425,7 +430,7 @@ fn shaping_number_type(ty: &TypeExpr) -> bool {
     }
 }
 
-fn shaping_text_type(ty: &TypeExpr) -> bool {
+pub(super) fn shaping_text_type(ty: &TypeExpr) -> bool {
     match ty {
         TypeExpr::Any | TypeExpr::Ref(_) | TypeExpr::Str | TypeExpr::Enum(_) => true,
         TypeExpr::Union(items) => items.iter().all(shaping_text_type),
@@ -433,7 +438,7 @@ fn shaping_text_type(ty: &TypeExpr) -> bool {
     }
 }
 
-fn shaping_record_type(ty: &TypeExpr) -> bool {
+pub(super) fn shaping_record_type(ty: &TypeExpr) -> bool {
     match ty {
         TypeExpr::Any | TypeExpr::Ref(_) | TypeExpr::Object(_) => true,
         TypeExpr::Union(items) => items.iter().all(shaping_record_type),
@@ -441,7 +446,7 @@ fn shaping_record_type(ty: &TypeExpr) -> bool {
     }
 }
 
-fn shaping_comparable_type(ty: &TypeExpr) -> bool {
+pub(super) fn shaping_comparable_type(ty: &TypeExpr) -> bool {
     match ty {
         TypeExpr::Any
         | TypeExpr::Ref(_)
@@ -477,7 +482,7 @@ fn shaping_comparable_category(ty: &TypeExpr) -> Option<u8> {
     }
 }
 
-fn binary_return_type(op: crate::ast::BinaryOp) -> TypeExpr {
+pub(super) fn binary_return_type(op: crate::ast::BinaryOp) -> TypeExpr {
     match op {
         crate::ast::BinaryOp::Equal
         | crate::ast::BinaryOp::NotEqual
@@ -496,7 +501,7 @@ fn binary_return_type(op: crate::ast::BinaryOp) -> TypeExpr {
     }
 }
 
-fn binary_op_source(op: crate::ast::BinaryOp) -> &'static str {
+pub(super) fn binary_op_source(op: crate::ast::BinaryOp) -> &'static str {
     match op {
         crate::ast::BinaryOp::Add => "+",
         crate::ast::BinaryOp::Subtract => "-",
@@ -515,7 +520,11 @@ fn binary_op_source(op: crate::ast::BinaryOp) -> &'static str {
     }
 }
 
-fn binary_operands_compatible(op: crate::ast::BinaryOp, left: &TypeExpr, right: &TypeExpr) -> bool {
+pub(super) fn binary_operands_compatible(
+    op: crate::ast::BinaryOp,
+    left: &TypeExpr,
+    right: &TypeExpr,
+) -> bool {
     if type_is_gradual(left) || type_is_gradual(right) {
         return true;
     }
@@ -576,7 +585,7 @@ fn type_is_scalar(ty: &TypeExpr) -> bool {
     }
 }
 
-fn membership_key_type(ty: &TypeExpr) -> bool {
+pub(super) fn membership_key_type(ty: &TypeExpr) -> bool {
     match ty {
         TypeExpr::Any | TypeExpr::Ref(_) | TypeExpr::Str | TypeExpr::Enum(_) => true,
         TypeExpr::Union(items) => items.iter().all(membership_key_type),
@@ -600,7 +609,7 @@ fn type_category(ty: &TypeExpr) -> u8 {
     }
 }
 
-fn expected_call_arg_type(input: &TypeExpr, arg_count: usize) -> Option<&TypeExpr> {
+pub(super) fn expected_call_arg_type(input: &TypeExpr, arg_count: usize) -> Option<&TypeExpr> {
     match (arg_count, input) {
         (1, input) => Some(input),
         (_, TypeExpr::List(item)) => Some(item),
@@ -608,7 +617,7 @@ fn expected_call_arg_type(input: &TypeExpr, arg_count: usize) -> Option<&TypeExp
     }
 }
 
-fn process_input_type(process: &ProcessDecl) -> TypeExpr {
+pub(super) fn process_input_type(process: &ProcessDecl) -> TypeExpr {
     match process.params.as_slice() {
         [] => TypeExpr::Null,
         [param] => param.ty.clone(),
@@ -616,7 +625,7 @@ fn process_input_type(process: &ProcessDecl) -> TypeExpr {
     }
 }
 
-fn process_input_record_type(process: &ProcessDecl) -> TypeExpr {
+pub(super) fn process_input_record_type(process: &ProcessDecl) -> TypeExpr {
     TypeExpr::Object(
         process
             .params
@@ -630,7 +639,7 @@ fn process_input_record_type(process: &ProcessDecl) -> TypeExpr {
     )
 }
 
-fn process_type_for_decl(process: &ProcessDecl, output: TypeExpr) -> TypeExpr {
+pub(super) fn process_type_for_decl(process: &ProcessDecl, output: TypeExpr) -> TypeExpr {
     TypeExpr::Process {
         input: Box::new(process_input_type(process)),
         output: Box::new(output),
@@ -638,7 +647,7 @@ fn process_type_for_decl(process: &ProcessDecl, output: TypeExpr) -> TypeExpr {
     }
 }
 
-fn module_path_for_expr(expr: &Expr) -> Option<Vec<AstString>> {
+pub(super) fn module_path_for_expr(expr: &Expr) -> Option<Vec<AstString>> {
     match expr {
         Expr::LabelAnnotated { expr, .. } => module_path_for_expr(expr),
         Expr::Variable(name) => Some(vec![name.clone()]),
@@ -652,20 +661,20 @@ fn module_path_for_expr(expr: &Expr) -> Option<Vec<AstString>> {
     }
 }
 
-fn is_trigger_event_expr(expr: &Expr) -> bool {
+pub(super) fn is_trigger_event_expr(expr: &Expr) -> bool {
     matches!(
         module_path_for_expr(expr).as_deref(),
         Some([trigger, event]) if trigger.as_str() == "trigger" && event.as_str() == "event"
     )
 }
 
-fn is_trigger_event_projection_expr(expr: &Expr) -> bool {
+pub(super) fn is_trigger_event_projection_expr(expr: &Expr) -> bool {
     module_path_for_expr(expr).is_some_and(|path| {
         path.len() > 2 && path[0].as_str() == "trigger" && path[1].as_str() == "event"
     })
 }
 
-fn trigger_target_process_name(expr: &Expr) -> Option<String> {
+pub(super) fn trigger_target_process_name(expr: &Expr) -> Option<String> {
     match expr {
         Expr::LabelAnnotated { expr, .. } => trigger_target_process_name(expr),
         Expr::Variable(name) | Expr::ProcessRef { process: name } => Some(name.to_string()),
@@ -673,11 +682,11 @@ fn trigger_target_process_name(expr: &Expr) -> Option<String> {
     }
 }
 
-fn trigger_target_process_label(expr: &Expr) -> String {
+pub(super) fn trigger_target_process_label(expr: &Expr) -> String {
     trigger_target_process_name(expr).unwrap_or_else(|| "target".to_string())
 }
 
-fn expr_has_label_annotation(expr: &Expr) -> bool {
+pub(super) fn expr_has_label_annotation(expr: &Expr) -> bool {
     match expr {
         Expr::LabelAnnotated { .. } => true,
         other => other.children().any(expr_has_label_annotation),
@@ -692,7 +701,7 @@ fn expr_has_label_annotation(expr: &Expr) -> bool {
 /// is the root statement index, so the returned path resolves to the
 /// annotation's own span rather than to whichever statement happens to come
 /// first.
-fn label_annotation_path(expr: &Expr) -> Option<Vec<u32>> {
+pub(super) fn label_annotation_path(expr: &Expr) -> Option<Vec<u32>> {
     if matches!(expr, Expr::LabelAnnotated { .. }) {
         return Some(Vec::new());
     }

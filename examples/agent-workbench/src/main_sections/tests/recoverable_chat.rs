@@ -1,4 +1,6 @@
-async fn recoverable_chat_test_state(
+use super::*;
+
+pub(crate) async fn recoverable_chat_test_state(
     data_dir: &std::path::Path,
     channel_capacity: usize,
 ) -> AppState {
@@ -14,7 +16,7 @@ async fn recoverable_chat_test_state(
     recoverable_chat_test_state_with_provider(data_dir, channel_capacity, provider).await
 }
 
-async fn recoverable_chat_test_state_with_provider(
+pub(crate) async fn recoverable_chat_test_state_with_provider(
     data_dir: &std::path::Path,
     channel_capacity: usize,
     provider: ProviderHandle,
@@ -70,7 +72,7 @@ async fn recoverable_chat_test_state_with_provider_and_trigger_store(
     .await
 }
 
-async fn recoverable_chat_test_state_with_dependencies(
+pub(crate) async fn recoverable_chat_test_state_with_dependencies(
     data_dir: &std::path::Path,
     channel_capacity: usize,
     provider: ProviderHandle,
@@ -91,7 +93,7 @@ async fn recoverable_chat_test_state_with_dependencies(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn recoverable_chat_test_state_with_dependencies_and_context(
+pub(crate) async fn recoverable_chat_test_state_with_dependencies_and_context(
     data_dir: &std::path::Path,
     channel_capacity: usize,
     provider: ProviderHandle,
@@ -161,13 +163,13 @@ async fn recoverable_chat_test_state_with_dependencies_and_context(
 }
 
 struct RetiringSubscriptionListTriggerStore {
-    inner: lash::triggers::InMemoryTriggerStore,
-    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    session_to_retire: Mutex<Option<String>>,
+    pub(super) inner: lash::triggers::InMemoryTriggerStore,
+    pub(super) store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    pub(super) session_to_retire: Mutex<Option<String>>,
 }
 
 impl RetiringSubscriptionListTriggerStore {
-    fn new(store_factory: Arc<dyn lash::persistence::SessionStoreFactory>) -> Self {
+    pub(super) fn new(store_factory: Arc<dyn lash::persistence::SessionStoreFactory>) -> Self {
         Self {
             inner: lash::triggers::InMemoryTriggerStore::new(),
             store_factory,
@@ -175,10 +177,8 @@ impl RetiringSubscriptionListTriggerStore {
         }
     }
 
-    fn retire_on_next_list(&self, session_id: &str) {
-        *self
-            .session_to_retire
-            .lock_recover() = Some(session_id.to_string());
+    pub(super) fn retire_on_next_list(&self, session_id: &str) {
+        *self.session_to_retire.lock_recover() = Some(session_id.to_string());
     }
 }
 
@@ -188,10 +188,7 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
         &self,
         operation_id: &str,
         command: lash::triggers::TriggerCommand,
-    ) -> std::result::Result<
-        lash::triggers::TriggerEffectResult,
-        lash::plugins::PluginError,
-    > {
+    ) -> std::result::Result<lash::triggers::TriggerEffectResult, lash::plugins::PluginError> {
         self.inner.execute_command(operation_id, command).await
     }
 
@@ -202,10 +199,7 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
         Vec<lash::triggers::TriggerSubscriptionRecord>,
         lash::plugins::PluginError,
     > {
-        let session_id = self
-            .session_to_retire
-            .lock_recover()
-            .take();
+        let session_id = self.session_to_retire.lock_recover().take();
         if let Some(session_id) = session_id {
             self.store_factory
                 .delete_session(&session_id)
@@ -225,17 +219,16 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
     async fn ingest_occurrence(
         &self,
         request: lash::triggers::TriggerOccurrenceRequest,
-    ) -> std::result::Result<lash::triggers::TriggerIngressReceipt, lash::plugins::PluginError> {
+    ) -> std::result::Result<lash::triggers::TriggerIngressReceipt, lash::plugins::PluginError>
+    {
         self.inner.ingest_occurrence(request).await
     }
 
     async fn list_occurrences(
         &self,
         filter: lash::triggers::TriggerOccurrenceFilter,
-    ) -> std::result::Result<
-        Vec<lash::triggers::TriggerOccurrenceRecord>,
-        lash::plugins::PluginError,
-    > {
+    ) -> std::result::Result<Vec<lash::triggers::TriggerOccurrenceRecord>, lash::plugins::PluginError>
+    {
         self.inner.list_occurrences(filter).await
     }
 
@@ -307,10 +300,8 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
         &self,
         candidates: &[lash::triggers::TriggerDeliveryRetentionCandidate],
         deleted_session_ids: &[String],
-    ) -> Result<
-        lash::triggers::TriggerRetentionReconciliationReport,
-        lash::plugins::PluginError,
-    > {
+    ) -> Result<lash::triggers::TriggerRetentionReconciliationReport, lash::plugins::PluginError>
+    {
         self.inner
             .reconcile_trigger_retention(candidates, deleted_session_ids)
             .await
@@ -343,22 +334,20 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
 }
 
 struct RetiringQueuedWorkRunHandle {
-    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    session_to_retire: Mutex<Option<String>>,
+    pub(super) store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    pub(super) session_to_retire: Mutex<Option<String>>,
 }
 
 impl RetiringQueuedWorkRunHandle {
-    fn new(store_factory: Arc<dyn lash::persistence::SessionStoreFactory>) -> Self {
+    pub(super) fn new(store_factory: Arc<dyn lash::persistence::SessionStoreFactory>) -> Self {
         Self {
             store_factory,
             session_to_retire: Mutex::new(None),
         }
     }
 
-    fn retire_on_next_run(&self, session_id: &str) {
-        *self
-            .session_to_retire
-            .lock_recover() = Some(session_id.to_string());
+    pub(super) fn retire_on_next_run(&self, session_id: &str) {
+        *self.session_to_retire.lock_recover() = Some(session_id.to_string());
     }
 }
 
@@ -368,10 +357,7 @@ impl lash::runtime::QueuedWorkRunHandle for RetiringQueuedWorkRunHandle {
         &self,
         _request: lash::runtime::QueuedWorkRunRequest,
     ) -> std::result::Result<(), lash::runtime::QueuedWorkRunError> {
-        let session_id = self
-            .session_to_retire
-            .lock_recover()
-            .take();
+        let session_id = self.session_to_retire.lock_recover().take();
         if let Some(session_id) = session_id {
             self.store_factory
                 .delete_session(&session_id)
@@ -425,13 +411,9 @@ fn reset_cron_cancellation_preserves_a_retired_session_refusal() {
         let session_id = state.current_session_id();
         retire_workbench_session(&state, &session_id).await;
 
-        let error = crate::restate::cancel_cron_jobs_for_session(
-            &state,
-            &session_id,
-            "reset",
-        )
-        .await
-        .expect_err("reset cron cancellation must refuse a retired session");
+        let error = crate::restate::cancel_cron_jobs_for_session(&state, &session_id, "reset")
+            .await
+            .expect_err("reset cron cancellation must refuse a retired session");
 
         assert_deleted_session_conflict(&error, &session_id);
     });
@@ -441,9 +423,10 @@ fn reset_cron_cancellation_preserves_a_retired_session_refusal() {
 fn reset_cron_close_preserves_a_concurrent_retirement_refusal() {
     run_async_test_on_stack_budget("retired-session-reset-cron-close-test", || async {
         let data_dir = tempfile::tempdir().expect("tempdir");
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.path().join("lash-sessions")),
-        );
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+            Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+                data_dir.path().join("lash-sessions"),
+            ));
         let trigger_store = Arc::new(RetiringSubscriptionListTriggerStore::new(Arc::clone(
             &store_factory,
         )));
@@ -468,13 +451,10 @@ fn reset_cron_close_preserves_a_concurrent_retirement_refusal() {
         let session_id = state.current_session_id();
         trigger_store.retire_on_next_list(&session_id);
 
-        let error = crate::restate::cancel_cron_jobs_for_session(
-            &state,
-            &session_id,
-            "reset-close-race",
-        )
-        .await
-        .expect_err("cron cancellation close must preserve a concurrent retirement");
+        let error =
+            crate::restate::cancel_cron_jobs_for_session(&state, &session_id, "reset-close-race")
+                .await
+                .expect_err("cron cancellation close must preserve a concurrent retirement");
 
         assert_deleted_session_conflict(&error, &session_id);
     });
@@ -484,13 +464,15 @@ fn reset_cron_close_preserves_a_concurrent_retirement_refusal() {
 fn tool_catalog_refresh_close_preserves_a_concurrent_retirement_refusal() {
     run_async_test_on_stack_budget("retired-session-tool-refresh-close-test", || async {
         let data_dir = tempfile::tempdir().expect("tempdir");
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.path().join("lash-sessions")),
-        );
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+            Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+                data_dir.path().join("lash-sessions"),
+            ));
         let retiring_run_handle =
             Arc::new(RetiringQueuedWorkRunHandle::new(Arc::clone(&store_factory)));
-        let queued_work_driver =
-            Arc::new(lash::runtime::NativeQueuedWork::new(retiring_run_handle.clone()));
+        let queued_work_driver = Arc::new(lash::runtime::NativeQueuedWork::new(
+            retiring_run_handle.clone(),
+        ));
         let provider = lash::testing::TestProvider::builder()
             .kind("retired-session-tool-refresh-close-test")
             .complete(|_| async {
@@ -701,7 +683,9 @@ fn retired_session_http_refusals_record_structured_admission_evidence() {
             })
             .map(|record| {
                 assert_eq!(
-                    record.pointer("/payload/session_id").and_then(Value::as_str),
+                    record
+                        .pointer("/payload/session_id")
+                        .and_then(Value::as_str),
                     Some(session_id.as_str())
                 );
                 assert_eq!(
@@ -735,10 +719,15 @@ fn retired_session_http_refusals_record_structured_admission_evidence() {
             .collect::<BTreeSet<_>>();
         assert_eq!(
             surfaces,
-            ["api.observations", "api.state", "api.turn", "api.turn.input"]
-                .into_iter()
-                .map(str::to_string)
-                .collect()
+            [
+                "api.observations",
+                "api.state",
+                "api.turn",
+                "api.turn.input"
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
         );
     });
 }
@@ -751,8 +740,7 @@ fn every_terminalize_branch_makes_runtime_shaped_session_deletion_terminal() {
         let session_id = state.current_session_id();
         retire_workbench_session(&state, &session_id).await;
 
-        type TerminalizeResult =
-            Result<Result<(), AppError>, Box<dyn std::any::Any + Send>>;
+        type TerminalizeResult = Result<Result<(), AppError>, Box<dyn std::any::Any + Send>>;
         let cases: Vec<(&str, TerminalizeResult)> = vec![
             ("successful_turn", Ok(Ok(()))),
             (
@@ -787,8 +775,8 @@ fn every_terminalize_branch_makes_runtime_shaped_session_deletion_terminal() {
 
 #[tokio::test]
 async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors() {
-    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/browser_projection.mjs");
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/browser_projection.mjs");
     let trigger_identities = browser_projection_trigger_identities();
     let to_event_value = |event: lash::TurnEvent| {
         serde_json::to_value(
@@ -852,8 +840,14 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         })
     );
     assert_eq!(reset_event["type"], "model_attempt_reset");
-    assert_eq!(reset_event["assistant_prose_correlation_ids"][0], "prose-superseded");
-    assert_eq!(reset_event["reasoning_correlation_ids"][0], "reasoning-superseded");
+    assert_eq!(
+        reset_event["assistant_prose_correlation_ids"][0],
+        "prose-superseded"
+    );
+    assert_eq!(
+        reset_event["reasoning_correlation_ids"][0],
+        "reasoning-superseded"
+    );
     let retry_event = to_event_value(lash::TurnEvent::RetryStatus {
         wait_seconds: 2,
         attempt: 1,
@@ -970,11 +964,9 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         .open()
         .await
         .expect("open multi-attachment browser session");
-    let mut committed = lash::plugins::PluginMessage::text(
-        lash::messages::MessageRole::User,
-        "two printed images",
-    )
-    .with_id("rlm-printed-images");
+    let mut committed =
+        lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "two printed images")
+            .with_id("rlm-printed-images");
     for id in ["sha256:rlm-printed-image-a", "sha256:rlm-printed-image-b"] {
         committed
             .attachments
@@ -1001,8 +993,9 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         .persist_current()
         .await
         .expect("persist multi-attachment state before durable tool fixture");
-    persisted.session_graph.append_protocol_event(
-        lash_protocol_rlm::rlm_protocol_event(
+    persisted
+        .session_graph
+        .append_protocol_event(lash_protocol_rlm::rlm_protocol_event(
             lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(
                 lash_rlm_types::RlmTrajectoryEntry {
                     id: "durable-tool-trajectory".to_string(),
@@ -1023,8 +1016,7 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
                     ..lash_rlm_types::RlmTrajectoryEntry::default()
                 },
             ),
-        ),
-    );
+        ));
     session
         .admin()
         .state()
@@ -1044,7 +1036,10 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         .find(|message| message.id == "rlm-printed-images")
         .map(chat_message_from_committed)
         .expect("project committed RLM printed images");
-    session.close().await.expect("close multi-attachment session");
+    session
+        .close()
+        .await
+        .expect("close multi-attachment session");
     let Json(durable_tool_state) = app_state(State(state.clone()), Query(SessionQuery::default()))
         .await
         .expect("reload and project committed durable tool trajectory");
@@ -1564,14 +1559,20 @@ async fn submit_failure_retires_a_user_row_for_a_turn_that_never_commits() {
         }
         TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => true,
     }));
-    assert!(settled.product_events.events.iter().all(|event| match &event.item {
-        StreamItem::Message { message } => {
-            message.text != never_committed && !message.id.starts_with("workbench-user:")
-        }
-        StreamItem::TurnInput { .. }
-        | StreamItem::ModelCallRecorded { .. }
-        | StreamItem::Done { .. } => true,
-    }));
+    assert!(
+        settled
+            .product_events
+            .events
+            .iter()
+            .all(|event| match &event.item {
+                StreamItem::Message { message } => {
+                    message.text != never_committed && !message.id.starts_with("workbench-user:")
+                }
+                StreamItem::TurnInput { .. }
+                | StreamItem::ModelCallRecorded { .. }
+                | StreamItem::Done { .. } => true,
+            })
+    );
 }
 
 #[tokio::test]
@@ -1597,8 +1598,7 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
         })
         .build()
         .into_handle();
-    let mut state =
-        recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let mut state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
     state.event_tx = SessionEventRegistry::persistent(product_events_path.clone(), 16)
         .expect("open persistent product event registry");
     let session_id = state.current_session_id();
@@ -1621,15 +1621,12 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
         .admin()
         .state()
         .append_messages(vec![
-            lash::plugins::PluginMessage::text(
-                lash::messages::MessageRole::User,
-                first_prompt,
-            )
-            .with_id("runtime-first-user")
-            .with_origin(lash::messages::MessageOrigin::TurnInput {
-                turn_id: first_turn_id.to_string(),
-                input_id: Some("first-input".to_string()),
-            }),
+            lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, first_prompt)
+                .with_id("runtime-first-user")
+                .with_origin(lash::messages::MessageOrigin::TurnInput {
+                    turn_id: first_turn_id.to_string(),
+                    input_id: Some("first-input".to_string()),
+                }),
             lash::plugins::PluginMessage::text(
                 lash::messages::MessageRole::Assistant,
                 "old frame answer",
@@ -1641,12 +1638,7 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
 
     let switch_turn_id = "workbench-turn-continue-as";
     let switch_prompt = "switch frames now";
-    state.track_turn_prompt(
-        &session_id,
-        switch_turn_id,
-        switch_prompt.to_string(),
-        None,
-    );
+    state.track_turn_prompt(&session_id, switch_turn_id, switch_prompt.to_string(), None);
     state.push_message_with_id_for_session(
         &session_id,
         workbench_turn_user_message_id(switch_turn_id),
@@ -1695,7 +1687,13 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
             }
             rows
         })
-        .map(|(active, message)| (active, lash::message_role(&message), lash::message_text(&message)))
+        .map(|(active, message)| {
+            (
+                active,
+                lash::message_role(&message),
+                lash::message_text(&message),
+            )
+        })
         .collect::<Vec<_>>();
     assert!(
         durable_rows
@@ -1738,7 +1736,13 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
         .state
         .messages
         .iter()
-        .map(|message| (message.id.clone(), message.role.clone(), message.text.clone()))
+        .map(|message| {
+            (
+                message.id.clone(),
+                message.role.clone(),
+                message.text.clone(),
+            )
+        })
         .collect::<Vec<_>>();
     assert_eq!(projected_rows, expected_rows);
     assert!(boundary.state.messages.iter().all(|message| {
@@ -1750,7 +1754,11 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
             .iter()
             .filter_map(|row| match row {
                 TranscriptRow::Message { message } => {
-                    Some((message.id.clone(), message.role.clone(), message.text.clone()))
+                    Some((
+                        message.id.clone(),
+                        message.role.clone(),
+                        message.text.clone(),
+                    ))
                 }
                 TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => None,
             })
@@ -1782,7 +1790,11 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
             .state
             .messages
             .iter()
-            .map(|message| (message.id.clone(), message.role.clone(), message.text.clone()))
+            .map(|message| (
+                message.id.clone(),
+                message.role.clone(),
+                message.text.clone()
+            ))
             .collect::<Vec<_>>(),
         expected_rows,
         "reload must reproduce the same session-scoped projection"
@@ -1796,7 +1808,8 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
     let session_id = state.current_session_id();
     let turn_id = "workbench-turn-fig994";
     let attachment = lash::attachments::AttachmentRef {
-        id: lash::attachments::AttachmentId::parse("sha256:fig994-backfill").expect("valid attachment id"),
+        id: lash::attachments::AttachmentId::parse("sha256:fig994-backfill")
+            .expect("valid attachment id"),
         media_type: lash::attachments::MediaType::parse("image/png")
             .expect("valid test media type"),
         byte_len: 68,
@@ -1840,15 +1853,13 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
         "the live UI-owned row carries the uploaded attachment reference once"
     );
 
-    let mut committed = lash::plugins::PluginMessage::text(
-        lash::messages::MessageRole::User,
-        "one attached send",
-    )
-    .with_id("m_ingress_workbench-input-fig994")
-    .with_origin(lash::messages::MessageOrigin::TurnInput {
-        turn_id: turn_id.to_string(),
-        input_id: Some("workbench-input-fig994".to_string()),
-    });
+    let mut committed =
+        lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "one attached send")
+            .with_id("m_ingress_workbench-input-fig994")
+            .with_origin(lash::messages::MessageOrigin::TurnInput {
+                turn_id: turn_id.to_string(),
+                input_id: Some("workbench-input-fig994".to_string()),
+            });
     committed
         .attachments
         .push(lash::direct::AttachmentSource::stored(attachment));
@@ -1864,7 +1875,10 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
         .append_messages(vec![committed])
         .await
         .expect("commit attached turn input");
-    session.close().await.expect("close attachment backfill session");
+    session
+        .close()
+        .await
+        .expect("close attachment backfill session");
 
     let Json(running) = Box::pin(app_state(
         State(state.clone()),
@@ -1907,7 +1921,8 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
     let session_id = state.current_session_id();
     let turn_id = "workbench-turn-fig994-replay";
     let attachment = lash::attachments::AttachmentRef {
-        id: lash::attachments::AttachmentId::parse("sha256:fig994-replay").expect("valid attachment id"),
+        id: lash::attachments::AttachmentId::parse("sha256:fig994-replay")
+            .expect("valid attachment id"),
         media_type: lash::attachments::MediaType::parse("image/png")
             .expect("valid test media type"),
         byte_len: 68,
@@ -1952,7 +1967,10 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
         .append_messages(vec![committed])
         .await
         .expect("commit attached turn input");
-    session.close().await.expect("close attachment replay session");
+    session
+        .close()
+        .await
+        .expect("close attachment replay session");
     state.active_turns =
         ActiveTurns::persistent(active_turns_path).expect("reopen persistent active turns");
 
@@ -1975,7 +1993,8 @@ async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
     let state = recoverable_chat_test_state(data_dir.path(), 16).await;
     let session_id = state.current_session_id();
     let attachment = lash::attachments::AttachmentRef {
-        id: lash::attachments::AttachmentId::parse("sha256:fig994-committed").expect("valid attachment id"),
+        id: lash::attachments::AttachmentId::parse("sha256:fig994-committed")
+            .expect("valid attachment id"),
         media_type: lash::attachments::MediaType::parse("image/png")
             .expect("valid test media type"),
         byte_len: 68,
@@ -2003,7 +2022,10 @@ async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
         .append_messages(vec![message])
         .await
         .expect("append committed attachment message");
-    session.close().await.expect("close committed attachment session");
+    session
+        .close()
+        .await
+        .expect("close committed attachment session");
 
     let Json(snapshot) = Box::pin(app_state(State(state), Query(SessionQuery::default())))
         .await
@@ -2029,7 +2051,7 @@ fn user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
         .collect()
 }
 
-fn transcript_user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
+pub(crate) fn transcript_user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
     snapshot
         .transcript
         .iter()
@@ -2109,8 +2131,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         })
         .build()
         .into_handle();
-    let mut state =
-        recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let mut state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     state.restate_ingress_url = restate_ingress_url;
     let session_id = state.current_session_id();
@@ -2196,11 +2217,9 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         .await
         .expect("read the admitted in-flight durable state");
     assert!(
-        in_flight.as_ref().is_none_or(|state| state
-            .read_view()
-            .messages()
-            .iter()
-            .all(|message| {
+        in_flight
+            .as_ref()
+            .is_none_or(|state| state.read_view().messages().iter().all(|message| {
                 !matches!(
                     message.origin.as_ref(),
                     Some(lash::messages::MessageOrigin::TurnInput {
@@ -2271,7 +2290,11 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
             .iter()
             .filter_map(|event| match &event.item {
                 StreamItem::Message { message } => {
-                    Some((message.id.clone(), message.role.clone(), message.text.clone()))
+                    Some((
+                        message.id.clone(),
+                        message.role.clone(),
+                        message.text.clone(),
+                    ))
                 }
                 StreamItem::TurnInput { .. }
                 | StreamItem::ModelCallRecorded { .. }
@@ -2334,9 +2357,7 @@ async fn workbench_sequential_settled_turn_cancels_each_emit_done() {
         .snapshot(&session_id)
         .events
         .into_iter()
-        .filter_map(|event| {
-            matches!(event.item, StreamItem::Done { .. }).then_some(event.event_id)
-        })
+        .filter_map(|event| matches!(event.item, StreamItem::Done { .. }).then_some(event.event_id))
         .collect::<Vec<_>>();
     assert_eq!(
         done_ids.len(),

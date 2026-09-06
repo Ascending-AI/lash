@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test]
 async fn workbench_provider_failure_emits_only_fixed_public_product_copy() {
     const INTERNAL_PROVIDER_FAILURE: &str = "provider rejected credentials for secret account";
@@ -7,8 +9,7 @@ async fn workbench_provider_failure_emits_only_fixed_public_product_copy() {
         .complete_error(INTERNAL_PROVIDER_FAILURE)
         .build()
         .into_handle();
-    let state =
-        recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
     let session_id = state.current_session_id();
     let session = state
         .core

@@ -1,5 +1,7 @@
+use super::*;
+
 impl<'module> Linker<'module> {
-    fn lower_expr(
+    pub(super) fn lower_expr(
         &self,
         expr: &Expr,
         scope: &mut Scope,
@@ -7,7 +9,7 @@ impl<'module> Linker<'module> {
         self.lower_expr_expected(expr, scope, None)
     }
 
-    fn lower_expr_expected(
+    pub(super) fn lower_expr_expected(
         &self,
         expr: &Expr,
         scope: &mut Scope,
@@ -41,7 +43,7 @@ impl<'module> Linker<'module> {
     /// roughly two kilobytes per variant added — 28 KiB across the match, or
     /// about 2 MiB at the nesting cap, which is the entire host budget. Keep
     /// new variants in their own method, and keep the arm a tail call.
-    fn lower_expr_expected_inner(
+    pub(super) fn lower_expr_expected_inner(
         &self,
         expr: &Expr,
         scope: &mut Scope,
@@ -146,7 +148,7 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn lower_block(
+    pub(super) fn lower_block(
         &self,
         expressions: &[Expr],
         scope: &mut Scope,
@@ -167,7 +169,7 @@ impl<'module> Linker<'module> {
         Ok((Expr::Block(lowered), last))
     }
 
-    fn lower_label_annotated(
+    pub(super) fn lower_label_annotated(
         &self,
         label: &crate::ast::LabelMetadata,
         expr: &Expr,
@@ -189,7 +191,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_variable(
+    pub(super) fn lower_variable(
         &self,
         name: &AstString,
         scope: &mut Scope,
@@ -212,7 +214,7 @@ impl<'module> Linker<'module> {
         })
     }
 
-    fn lower_tuple(
+    pub(super) fn lower_tuple(
         &self,
         items: &[Expr],
         scope: &mut Scope,
@@ -238,7 +240,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_list(
+    pub(super) fn lower_list(
         &self,
         items: &[Expr],
         scope: &mut Scope,
@@ -264,7 +266,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_list_comprehension(
+    pub(super) fn lower_list_comprehension(
         &self,
         element: &Expr,
         clauses: &[ListComprehensionClause],
@@ -309,7 +311,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_record(
+    pub(super) fn lower_record(
         &self,
         entries: &[(AstString, Expr)],
         scope: &mut Scope,
@@ -341,7 +343,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_assign(
+    pub(super) fn lower_assign(
         &self,
         target: &crate::ast::AssignTarget,
         expr: &Expr,
@@ -373,7 +375,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_if(
+    pub(super) fn lower_if(
         &self,
         condition: &Expr,
         then_block: &Expr,
@@ -402,7 +404,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_for(
+    pub(super) fn lower_for(
         &self,
         binding: &AstString,
         iterable: &Expr,
@@ -429,7 +431,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_while(
+    pub(super) fn lower_while(
         &self,
         condition: &Expr,
         body: &Expr,
@@ -449,7 +451,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_start_process(
+    pub(super) fn lower_start_process(
         &self,
         start: &crate::ast::ProcessStartExpr,
         scope: &mut Scope,
@@ -507,7 +509,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_process_ref(
+    pub(super) fn lower_process_ref(
         &self,
         process: &AstString,
         scope: &mut Scope,
@@ -526,7 +528,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_host_descriptor_constructor(
+    pub(super) fn lower_host_descriptor_constructor(
         &self,
         type_name: &AstString,
         input: &Expr,
@@ -541,7 +543,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_resource_ref(
+    pub(super) fn lower_resource_ref(
         &self,
         resource: &ResourceRefExpr,
         scope: &mut Scope,
@@ -555,7 +557,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_receiver_call(
+    pub(super) fn lower_receiver_call(
         &self,
         receiver: &Expr,
         operation: &AstString,
@@ -718,7 +720,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_await(
+    pub(super) fn lower_await(
         &self,
         inner: &Expr,
         scope: &mut Scope,
@@ -728,7 +730,7 @@ impl<'module> Linker<'module> {
         Ok((Expr::Await(Box::new(inner)), binding))
     }
 
-    fn lower_sleep_for(
+    pub(super) fn lower_sleep_for(
         &self,
         inner: &Expr,
         scope: &mut Scope,
@@ -740,7 +742,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_sleep_until(
+    pub(super) fn lower_sleep_until(
         &self,
         inner: &Expr,
         scope: &mut Scope,
@@ -752,7 +754,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_wait_signal(
+    pub(super) fn lower_wait_signal(
         &self,
         name: &AstString,
         scope: &mut Scope,
@@ -774,7 +776,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_signal_run(
+    pub(super) fn lower_signal_run(
         &self,
         run: &Expr,
         name: &AstString,
@@ -801,7 +803,7 @@ impl<'module> Linker<'module> {
         )
     }
 
-    fn lower_result_unwrap(
+    pub(super) fn lower_result_unwrap(
         &self,
         inner: &Expr,
         scope: &mut Scope,
@@ -811,7 +813,7 @@ impl<'module> Linker<'module> {
         Ok((Expr::ResultUnwrap(Box::new(inner)), binding))
     }
 
-    fn lower_cancel(
+    pub(super) fn lower_cancel(
         &self,
         inner: &Expr,
         scope: &mut Scope,
@@ -822,7 +824,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_print(
+    pub(super) fn lower_print(
         &self,
         inner: &Expr,
         scope: &mut Scope,
@@ -833,7 +835,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_yield(
+    pub(super) fn lower_yield(
         &self,
         inner: &Expr,
         scope: &mut Scope,
@@ -844,7 +846,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_wake(
+    pub(super) fn lower_wake(
         &self,
         inner: &Expr,
         scope: &mut Scope,
@@ -855,7 +857,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_finish(
+    pub(super) fn lower_finish(
         &self,
         inner: &Expr,
         scope: &mut Scope,
@@ -869,7 +871,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_fail(
+    pub(super) fn lower_fail(
         &self,
         inner: &Expr,
         scope: &mut Scope,
@@ -880,7 +882,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_builtin_call(
+    pub(super) fn lower_builtin_call(
         &self,
         name: &AstString,
         args: &[Expr],
@@ -940,7 +942,7 @@ impl<'module> Linker<'module> {
     /// makes the declared return type usable: the call's binding is the
     /// declared output, so a function result flows into typed positions exactly
     /// like a process result does.
-    fn lower_function_call(
+    pub(super) fn lower_function_call(
         &self,
         function: &AstString,
         args: &[Expr],
@@ -983,7 +985,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_function(
+    pub(super) fn lower_function(
         &self,
         function: &crate::ast::FunctionExpr,
         scope: &mut Scope,
@@ -1018,7 +1020,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_call(
+    pub(super) fn lower_call(
         &self,
         function: &Expr,
         args: &[Expr],
@@ -1036,7 +1038,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_map(
+    pub(super) fn lower_map(
         &self,
         items: &Expr,
         function: &Expr,
@@ -1051,7 +1053,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_field(
+    pub(super) fn lower_field(
         &self,
         target: &Expr,
         field: &AstString,
@@ -1068,7 +1070,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_index(
+    pub(super) fn lower_index(
         &self,
         target: &Expr,
         index: &Expr,
@@ -1088,7 +1090,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_unary(
+    pub(super) fn lower_unary(
         &self,
         op: &crate::ast::UnaryOp,
         expr: &Expr,
@@ -1106,7 +1108,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_binary(
+    pub(super) fn lower_binary(
         &self,
         left: &Expr,
         op: &crate::ast::BinaryOp,
@@ -1131,7 +1133,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_try_expr(
+    pub(super) fn lower_try_expr(
         &self,
         exception: &crate::ast::TryExpr,
         scope: &mut Scope,
@@ -1171,7 +1173,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_throw_expr(
+    pub(super) fn lower_throw_expr(
         &self,
         value: &Expr,
         scope: &mut Scope,
@@ -1182,7 +1184,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_return_expr(
+    pub(super) fn lower_return_expr(
         &self,
         value: &Expr,
         scope: &mut Scope,
@@ -1193,7 +1195,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_javascript_unary(
+    pub(super) fn lower_javascript_unary(
         &self,
         op: &crate::ast::JavaScriptUnaryOp,
         expr: &Expr,
@@ -1208,7 +1210,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_javascript_binary(
+    pub(super) fn lower_javascript_binary(
         &self,
         left: &Expr,
         op: &crate::ast::JavaScriptBinaryOp,
@@ -1225,7 +1227,7 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn lower_javascript_logical(
+    pub(super) fn lower_javascript_logical(
         &self,
         left: &Expr,
         op: &crate::ast::JavaScriptLogicalOp,
@@ -1242,7 +1244,11 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    fn resolve_module_expr(&self, expr: &Expr, scope: &Scope) -> Option<ResourceRefExpr> {
+    pub(super) fn resolve_module_expr(
+        &self,
+        expr: &Expr,
+        scope: &Scope,
+    ) -> Option<ResourceRefExpr> {
         let path = module_path_for_expr(expr)?;
         if path
             .first()
@@ -1254,7 +1260,7 @@ impl<'module> Linker<'module> {
         self.surface.resources.resolve_module_path(&path)
     }
 
-    fn resolve_module_operation_expr(
+    pub(super) fn resolve_module_operation_expr(
         &self,
         receiver: &Expr,
         operation: &AstString,
@@ -1272,7 +1278,7 @@ impl<'module> Linker<'module> {
         Some(resource)
     }
 
-    fn reject_trigger_event_special_form(
+    pub(super) fn reject_trigger_event_special_form(
         &self,
         expr: &Expr,
         span: Option<Span>,

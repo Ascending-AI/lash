@@ -12,6 +12,10 @@ architecture chapters cover the crate layout, turn/effect boundary, and plugin
 model. Before changing a crate boundary, check its
 [per-crate architecture invariants](docs/architecture/crate-invariants.html).
 
+Use `mod` declarations and explicit re-exports for hand-written Rust source.
+Reserve `include!` for build-script-generated code and assets; keep text assets
+in `include_str!` and binary assets in `include_bytes!`.
+
 ## Development workflow
 
 Lash uses trunk-based development. `main` is the only long-lived branch and is

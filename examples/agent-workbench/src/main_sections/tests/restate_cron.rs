@@ -1,8 +1,10 @@
+use super::*;
+
 const LIVE_RESTATE_CRON_SCHEDULE_INTERVAL: Duration = Duration::from_secs(2);
 const LIVE_RESTATE_CRON_JITTER_MARGIN: Duration = Duration::from_secs(60);
-const LIVE_RESTATE_CRON_ZOMBIE_EXPR: &str = "0 0 0 1 1 *";
+pub(crate) const LIVE_RESTATE_CRON_ZOMBIE_EXPR: &str = "0 0 0 1 1 *";
 
-fn live_restate_cron_tick_wait() -> Duration {
+pub(crate) fn live_restate_cron_tick_wait() -> Duration {
     LIVE_RESTATE_CRON_SCHEDULE_INTERVAL
         .saturating_mul(2)
         .saturating_add(LIVE_RESTATE_CRON_JITTER_MARGIN)
@@ -27,7 +29,7 @@ fn test_cron_trigger_source(expr: &str) -> String {
     )
 }
 
-fn live_restate_cron_provider(expr: String) -> ProviderHandle {
+pub(crate) fn live_restate_cron_provider(expr: String) -> ProviderHandle {
     let response_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let response_index_for_provider = Arc::clone(&response_index);
     lash::testing::TestProvider::builder()
@@ -51,8 +53,7 @@ fn live_restate_cron_provider(expr: String) -> ProviderHandle {
         .into_handle()
 }
 
-fn gated_live_restate_cron_provider(
-) -> (
+pub(crate) fn gated_live_restate_cron_provider() -> (
     ProviderHandle,
     mpsc::UnboundedReceiver<usize>,
     Arc<tokio::sync::Notify>,
@@ -93,15 +94,15 @@ fn gated_live_restate_cron_provider(
     (provider, entered_rx, release)
 }
 
-struct LiveRestateCronScenario {
-    data_dir: PathBuf,
-    state: AppState,
-    trace_path: PathBuf,
-    cron_session_id: String,
-    cron_job_key: String,
+pub(crate) struct LiveRestateCronScenario {
+    pub(super) data_dir: PathBuf,
+    pub(super) state: AppState,
+    pub(super) trace_path: PathBuf,
+    pub(super) cron_session_id: String,
+    pub(super) cron_job_key: String,
 }
 
-async fn start_live_restate_cron_scenario(
+pub(crate) async fn start_live_restate_cron_scenario(
     data_dir_label: &str,
     provider: ProviderHandle,
 ) -> LiveRestateCronScenario {
@@ -111,18 +112,15 @@ async fn start_live_restate_cron_scenario(
     // scenarios in the sibling file do.
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
-    let admin_url = std::env::var("RESTATE_ADMIN_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
+    let admin_url =
+        std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
     let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
         .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
         .parse()
         .expect("valid workbench E2E endpoint bind");
     let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
         .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
-    let data_dir = std::env::temp_dir().join(format!(
-        "{data_dir_label}-{}",
-        uuid::Uuid::new_v4()
-    ));
+    let data_dir = std::env::temp_dir().join(format!("{data_dir_label}-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let LiveWorkbenchRestateHarness {
         state,
@@ -151,12 +149,7 @@ async fn start_live_restate_cron_scenario(
     )
     .await;
     wait_for_workbench_message(&state, "cron registered", Duration::from_secs(60)).await;
-    wait_for_restate_invocation_success(
-        &state,
-        &turn_invocation_id,
-        Duration::from_secs(30),
-    )
-    .await;
+    wait_for_restate_invocation_success(&state, &turn_invocation_id, Duration::from_secs(30)).await;
     wait_for_restate_cron_sync(&state, &trace_path, Duration::from_secs(30)).await;
     let cron_session_id = rotate_cron_session_out_of_current(&state);
     let cron_job_key = cron_job_key_for_session(&state, &cron_session_id);
@@ -169,7 +162,9 @@ async fn start_live_restate_cron_scenario(
     }
 }
 
-async fn disable_cron_registration_for_sync_scenario(scenario: &LiveRestateCronScenario) {
+pub(crate) async fn disable_cron_registration_for_sync_scenario(
+    scenario: &LiveRestateCronScenario,
+) {
     let records = scenario
         .state
         .trigger_store
@@ -198,7 +193,7 @@ async fn disable_cron_registration_for_sync_scenario(scenario: &LiveRestateCronS
         .expect("disable cron registration before queued-turn sync");
 }
 
-async fn assert_queued_turn_sync_cancelled(scenario: &LiveRestateCronScenario) {
+pub(crate) async fn assert_queued_turn_sync_cancelled(scenario: &LiveRestateCronScenario) {
     wait_for_cron_trace_record_count(
         &scenario.trace_path,
         "agent_workbench.cron.restate.sync_cancelled",
@@ -216,7 +211,9 @@ async fn assert_queued_turn_sync_cancelled(scenario: &LiveRestateCronScenario) {
     );
     let sync_record = sync_records.last().expect("queued-turn sync cancel trace");
     assert_eq!(
-        sync_record.pointer("/payload/reason").and_then(Value::as_str),
+        sync_record
+            .pointer("/payload/reason")
+            .and_then(Value::as_str),
         Some("queued_turn")
     );
     assert_restate_cron_job_cancelled(&scenario.state, &scenario.cron_job_key).await;
@@ -231,9 +228,7 @@ fn rotate_cron_session_out_of_current(state: &AppState) -> String {
 }
 
 fn cron_job_key_for_session(state: &AppState, session_id: &str) -> String {
-    let guard = state
-        .restate_cron_job_keys
-        .lock_recover();
+    let guard = state.restate_cron_job_keys.lock_recover();
     let matching = guard
         .get(session_id)
         .unwrap_or_else(|| panic!("missing cron job keys for session `{session_id}`"));
@@ -242,10 +237,14 @@ fn cron_job_key_for_session(state: &AppState, session_id: &str) -> String {
         1,
         "expected exactly one cron job key for rotated session `{session_id}`, got {matching:?}"
     );
-    matching.iter().next().expect("one matching cron job key").clone()
+    matching
+        .iter()
+        .next()
+        .expect("one matching cron job key")
+        .clone()
 }
 
-fn cron_trace_records_for_job(
+pub(crate) fn cron_trace_records_for_job(
     trace_path: &std::path::Path,
     name: &str,
     session_id: &str,
@@ -261,10 +260,7 @@ fn cron_trace_records_for_job(
                     .pointer("/payload/job_session_id")
                     .and_then(Value::as_str)
                     == Some(session_id)
-                && record
-                    .pointer("/payload/job_key")
-                    .and_then(Value::as_str)
-                    == Some(job_key)
+                && record.pointer("/payload/job_key").and_then(Value::as_str) == Some(job_key)
         })
         .collect()
 }
@@ -312,7 +308,7 @@ fn cron_trace_timeline_for_job(
     }
 }
 
-async fn wait_for_cron_workbench_message(
+pub(crate) async fn wait_for_cron_workbench_message(
     state: &AppState,
     trace_path: &std::path::Path,
     session_id: &str,
@@ -339,7 +335,7 @@ async fn wait_for_cron_workbench_message(
     }
 }
 
-async fn wait_for_cron_trace_record_count(
+pub(crate) async fn wait_for_cron_trace_record_count(
     trace_path: &std::path::Path,
     name: &str,
     session_id: &str,
@@ -363,7 +359,7 @@ async fn wait_for_cron_trace_record_count(
     }
 }
 
-fn assert_live_non_current_cron_trace(
+pub(crate) fn assert_live_non_current_cron_trace(
     trace_path: &std::path::Path,
     session_id: &str,
     job_key: &str,
@@ -389,7 +385,7 @@ fn assert_live_non_current_cron_trace(
     );
 }
 
-async fn retire_cron_session_and_assert_zombie(
+pub(crate) async fn retire_cron_session_and_assert_zombie(
     state: &AppState,
     trace_path: &std::path::Path,
     cron_session_id: &str,
@@ -410,12 +406,8 @@ async fn retire_cron_session_and_assert_zombie(
     )
     .await
     .expect("submit cron session retirement");
-    wait_for_restate_invocation_success(
-        state,
-        &delete_invocation_id,
-        Duration::from_secs(20),
-    )
-    .await;
+    wait_for_restate_invocation_success(state, &delete_invocation_id, Duration::from_secs(20))
+        .await;
     lash_restate::RestateIngressClient::new(lash_restate::RestateConnection::with_client(
         &state.restate_ingress_url,
         state.restate_http.clone(),
@@ -457,7 +449,9 @@ async fn retire_cron_session_and_assert_zombie(
         cron_session_id,
         job_key,
     );
-    let record = records.last().expect("retired cron trace for rotated session");
+    let record = records
+        .last()
+        .expect("retired cron trace for rotated session");
     assert_eq!(
         record
             .pointer("/payload/session_state")
@@ -470,10 +464,7 @@ async fn retire_cron_session_and_assert_zombie(
     );
 }
 
-async fn assert_restate_cron_job_cancelled(
-    state: &AppState,
-    job_key: &str,
-) {
+async fn assert_restate_cron_job_cancelled(state: &AppState, job_key: &str) {
     let info_url = format!(
         "{}/WorkbenchCronJob/{job_key}/info",
         state.restate_ingress_url.trim_end_matches('/')

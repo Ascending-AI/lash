@@ -1,4 +1,6 @@
-fn queued_work_test_draft(
+use super::*;
+
+pub(crate) fn queued_work_test_draft(
     session_id: &str,
     source_key: &str,
 ) -> lash::persistence::QueuedWorkBatchDraft {
@@ -6,10 +8,7 @@ fn queued_work_test_draft(
         session_id,
         lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
         vec![lash::persistence::QueuedWorkPayload::agent_frame_task(
-            lash::testing::frame_node_id(
-                session_id,
-                "workbench-queued-work-test-frame",
-            ),
+            lash::testing::frame_node_id(session_id, "workbench-queued-work-test-frame"),
             source_key,
             None,
         )],
@@ -69,7 +68,7 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         let cursor = session.observe().current_observation().cursor;
         let store = store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
@@ -91,12 +90,9 @@ fn workbench_lists_and_controls_individual_queued_batches() {
             .await
             .expect("enqueue second controlled batch");
 
-        let Json(listed) = list_queued_work(
-            State(state.clone()),
-            Query(SessionQuery::default()),
-        )
-        .await
-        .expect("list workbench queued work");
+        let Json(listed) = list_queued_work(State(state.clone()), Query(SessionQuery::default()))
+            .await
+            .expect("list workbench queued work");
         assert_eq!(
             listed
                 .iter()
@@ -148,8 +144,10 @@ fn workbench_lists_and_controls_individual_queued_batches() {
                 .collect::<Vec<_>>(),
             vec![second.batch_id.as_str()]
         );
-        let lash::observe::SessionResume::Replayed { events } =
-            session.observe().resume_from_cursor(&cursor).expect("resume queue events")
+        let lash::observe::SessionResume::Replayed { events } = session
+            .observe()
+            .resume_from_cursor(&cursor)
+            .expect("resume queue events")
         else {
             panic!("recent workbench cursor must replay queue events");
         };
@@ -175,9 +173,8 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&data_dir).expect("create selected-drain refusal dir");
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        );
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+            Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
         let state = recoverable_chat_test_state_with_dependencies_and_context(
             &data_dir,
             16,
@@ -208,7 +205,7 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
             .expect("open selected-drain refusal session");
         let store = store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
@@ -328,7 +325,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .expect("open targeted wake session");
         let target = store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
@@ -336,11 +333,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .await
             .expect("open targeted wake receiver");
 
-        let clock = Arc::new(
-            lash::testing::TestClock::new(
-                1_800_000_000_000,
-            ),
-        );
+        let clock = Arc::new(lash::testing::TestClock::new(1_800_000_000_000));
         let wake_delivery_config = lash::process::WakeDeliveryConfig::new(10_000)
             .expect("valid wake expiry")
             .with_enqueuing_stale_after_ms(25)
@@ -479,14 +472,14 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         clock.advance(1);
         let redelivery: lash::process::WakeDeliveryDriveReport =
             lash::process::WakeDeliveryDriver::drive_pending_once(
-            Arc::clone(&registry),
-            Arc::clone(&store_factory),
-            Arc::new(lash::runtime::NoQueuedWork::new()),
-            Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
-            32,
-        )
-        .await
-        .expect("redeliver earlier wake through host driver");
+                Arc::clone(&registry),
+                Arc::clone(&store_factory),
+                Arc::new(lash::runtime::NoQueuedWork::new()),
+                Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
+                32,
+            )
+            .await
+            .expect("redeliver earlier wake through host driver");
         assert_eq!(redelivery.inspected, 1);
         assert_eq!(redelivery.enqueued, 1);
         assert_eq!(redelivery.discarded_expired, 0);
@@ -506,11 +499,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             "live-row absorption must preserve the skipped earlier wake"
         );
 
-        let expiry_clock = Arc::new(
-            lash::testing::TestClock::new(
-                1_900_000_000_000,
-            ),
-        );
+        let expiry_clock = Arc::new(lash::testing::TestClock::new(1_900_000_000_000));
         let expiry_config = lash::process::WakeDeliveryConfig::new(50)
             .expect("valid boundary wake expiry")
             .with_enqueuing_stale_after_ms(25)
@@ -599,7 +588,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let deleted_target_id = "workbench-deleted-wake-target";
         store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
+                pending_observer_intents: Vec::new(),
                 session_id: deleted_target_id.to_string(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
@@ -849,7 +838,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             .expect("open wake single-reply session");
         let target = store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
@@ -959,12 +948,9 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             "a completed wake turn must commit the agent reply exactly once, \
             got {committed_agent_replies:?}"
         );
-        let Json(live_snapshot) = app_state(
-            State(state.clone()),
-            Query(SessionQuery::default()),
-        )
-        .await
-        .expect("read live wake single-reply snapshot");
+        let Json(live_snapshot) = app_state(State(state.clone()), Query(SessionQuery::default()))
+            .await
+            .expect("read live wake single-reply snapshot");
         let live_rendered_agent_rows = live_snapshot
             .transcript
             .iter()
@@ -1064,7 +1050,7 @@ fn selected_drain_reports_claimed_and_already_satisfied_batches() {
             .expect("open selected-drain outcome session");
         let store = store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
@@ -1098,10 +1084,11 @@ fn selected_drain_reports_claimed_and_already_satisfied_batches() {
             .run()
             .await
             .expect("replay selected-drain outcome row");
-        let replay_satisfaction =
-            vec![lash::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+        let replay_satisfaction = vec![
+            lash::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
                 batch_id: batch.batch_id,
-            }];
+            },
+        ];
         assert!(replay.turn.is_none());
         assert!(replay.settled_without_selected_turn());
         assert_eq!(replay.satisfied, replay_satisfaction);
@@ -1220,7 +1207,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
 
         let target = store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),

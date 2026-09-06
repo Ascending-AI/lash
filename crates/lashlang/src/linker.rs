@@ -14,15 +14,42 @@ use crate::ast::{
 };
 use crate::lexer::Span;
 
-include!("linker/catalog.rs");
-include!("linker/host.rs");
-include!("linker/errors.rs");
-include!("linker/pass_setup.rs");
-include!("linker/lower_expr.rs");
-include!("linker/pass_validation.rs");
-include!("linker/type_helpers.rs");
-include!("linker/facets.rs");
-include!("linker/tests.rs");
+mod catalog;
+pub use catalog::LashlangHostCatalog;
+mod host;
+use host::module_path_key;
+pub use host::{
+    LashlangAbilities, LashlangHostCatalogError, LashlangHostEnvironment, LashlangLanguageFeatures,
+    LinkedModule, ModuleInstanceCatalog, ModuleOperationBinding, NamedDataType, NamedDataTypeError,
+    OutputFromInputBinding, ResolvedOperation, ResourceOperationBinding, ResourceTypeCatalog,
+    TriggerSourceBinding, ValueConstructorBinding,
+};
+mod errors;
+pub use errors::LinkError;
+mod pass_setup;
+use pass_setup::{Binding, Linker, function_signature};
+mod lower_expr;
+mod pass_validation;
+use pass_validation::{
+    materialize_default_trigger_keys, validate_trigger_operation_subscription_key,
+};
+mod type_helpers;
+use type_helpers::{
+    Completion, Scope, any_binding, binary_op_source, binary_operands_compatible,
+    binary_return_type, binding_type, call_input_type, direct_call_input_field,
+    expected_call_arg_type, expr_has_label_annotation, field_type, index_type,
+    is_trigger_event_expr, is_trigger_event_projection_expr, iterable_item_type,
+    label_annotation_path, literal_type, membership_key_type, module_path_for_expr,
+    process_input_record_type, process_input_type, process_type_for_decl,
+    shaping_builtin_return_type, shaping_comparable_type, shaping_list_item, shaping_number_type,
+    shaping_record_type, shaping_text_type, strip_label_annotation, trigger_target_process_label,
+    trigger_target_process_name, union_type,
+};
+mod facets;
+pub(crate) use facets::analyze_workflow_program;
+use facets::expression_spans_by_pointer;
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct WorkflowLinkAnalysis {
@@ -46,3 +73,6 @@ pub(crate) struct WorkflowLinkExpectedArgument {
 struct ExpectedTypeFacts {
     by_expression: BTreeMap<usize, TypeExpr>,
 }
+
+#[cfg(test)]
+use pass_validation::{semantic_trigger_source_key, semantic_trigger_subscription_key};

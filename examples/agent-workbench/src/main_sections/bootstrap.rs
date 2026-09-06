@@ -1,28 +1,28 @@
+use super::*;
+
 /// Outer bound on one workbench turn: how many model calls a single send may
 /// spend. Generous, because a real workbench task legitimately takes many
 /// steps; finite, because no send should be able to run forever.
-const WORKBENCH_MAX_TURNS: usize = 128;
+pub(crate) const WORKBENCH_MAX_TURNS: usize = 128;
 
 /// Inner bound on one workbench turn: how many consecutive model calls may
 /// commit no successful execution before the turn stops. Judged workbench
 /// traffic repairs a bad cell within a handful of attempts, so twelve is far
 /// above ordinary repair and far below a loop worth paying for.
-const WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS: usize = 12;
+pub(crate) const WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS: usize = 12;
 
-fn apply_workbench_lease_timings(
+pub(crate) fn apply_workbench_lease_timings(
     config: lash::durability::RuntimeHostConfig,
 ) -> lash::durability::RuntimeHostConfig {
-    let timings = lash::durability::LeaseTimings::new(
-        Duration::from_secs(2),
-        Duration::from_millis(666),
-    )
-    .expect("workbench lease timings satisfy the three-renewal TTL invariant");
+    let timings =
+        lash::durability::LeaseTimings::new(Duration::from_secs(2), Duration::from_millis(666))
+            .expect("workbench lease timings satisfy the three-renewal TTL invariant");
     // Workbench-only: keeps takeover terminal inside the 5s attach budget;
     // tolerates one missed renew; fencing (ADR 0029) bounds stale-owner risk.
     config.with_lease_timings(timings)
 }
 
-fn configure_workbench_plugins(
+pub(crate) fn configure_workbench_plugins(
     plugins: &mut lash::PluginStack,
     tavily_api_key: String,
     mail_world: mail::MailWorld,
@@ -46,20 +46,7 @@ fn configure_workbench_plugins(
     ));
 }
 
-fn main() -> AnyhowResult<()> {
-    let stack_bytes = std::env::var("AGENT_WORKBENCH_TOKIO_STACK_BYTES")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(DEFAULT_TOKIO_THREAD_STACK_BYTES);
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_stack_size(stack_bytes)
-        .build()
-        .context("build agent-workbench tokio runtime")?
-        .block_on(async_main())
-}
-
-async fn async_main() -> AnyhowResult<()> {
+pub(crate) async fn async_main() -> AnyhowResult<()> {
     let _ = dotenvy::dotenv();
     tracing_subscriber::fmt::init();
     let context_window_tokens = context_window_tokens_from_environment()?;
@@ -147,10 +134,12 @@ async fn async_main() -> AnyhowResult<()> {
         )
     };
     let model_spec = lash::ModelSpec::builder(model.clone())
-        .variant(lash::provider::ReasoningSelection::Effort(model_variant.clone()))
+        .variant(lash::provider::ReasoningSelection::Effort(
+            model_variant.clone(),
+        ))
         .context_window_tokens(context_window_tokens)
         .build()
-    .map_err(|err| anyhow!("invalid OPENROUTER_MODEL metadata: {err}"))?;
+        .map_err(|err| anyhow!("invalid OPENROUTER_MODEL metadata: {err}"))?;
     let model_spec = with_workbench_model_capability(model_spec);
     let database_url = std::env::var("AGENT_WORKBENCH_DATABASE_URL")
         .ok()
@@ -170,14 +159,12 @@ async fn async_main() -> AnyhowResult<()> {
     // with. A roster row that already exists wins: it is what the session's
     // durable pin was created from.
     sessions.ensure(&sessions.current(), rlm_dialect);
-    let event_tx =
-        SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)?;
+    let event_tx = SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)?;
     let restate_http = lash_http_transport::build_http_client();
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))?;
-    let deferred_tools = deferred_tools::WorkbenchDeferredTools::open(
-        data_dir.join("deferred-tool-grants.db"),
-    )
-    .context("open workbench deferred-tool grants")?;
+    let deferred_tools =
+        deferred_tools::WorkbenchDeferredTools::open(data_dir.join("deferred-tool-grants.db"))
+            .context("open workbench deferred-tool grants")?;
     let approvals = approvals::WorkbenchApprovals::open(data_dir.join("approvals.db"))
         .context("open workbench approval ledger")?;
     // Best-effort freshness feed for appended process events (ADR 0017). The
@@ -227,34 +214,32 @@ async fn async_main() -> AnyhowResult<()> {
     // the process-work port (see the `/api/work/{id}/await` route).
     let process_work_driver = process_deployment.process_work();
     let queued_run_handle = Arc::new(WorkbenchQueuedWorkSubmitter {
-            sessions: sessions.clone(),
-            store_factory: Arc::clone(&core_store_factory),
-            restate_ingress_url: restate_ingress_url.clone(),
-            restate_http: restate_http.clone(),
-            active_turns: active_turns.clone(),
-        });
+        sessions: sessions.clone(),
+        store_factory: Arc::clone(&core_store_factory),
+        restate_ingress_url: restate_ingress_url.clone(),
+        restate_http: restate_http.clone(),
+        active_turns: active_turns.clone(),
+    });
     let queued_work_driver = lash::runtime::NativeQueuedWork::new(queued_run_handle.clone());
     let queued_work_port = Arc::new(lash::runtime::NativeQueuedWork::new(queued_run_handle));
 
-    let turn_deployment = lash_restate::RestateTurnDeployment::new(
-        lash_restate::RestateConnection::with_client(
+    let turn_deployment =
+        lash_restate::RestateTurnDeployment::new(lash_restate::RestateConnection::with_client(
             restate_ingress_url.clone(),
             restate_http.clone(),
-        ),
-    );
+        ));
 
     let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.join("attachments"),
     )) as Arc<dyn lash::persistence::AttachmentStore>;
-    let mut runtime_host_config = apply_workbench_lease_timings(
-        lash::durability::RuntimeHostConfig::new(
+    let mut runtime_host_config =
+        apply_workbench_lease_timings(lash::durability::RuntimeHostConfig::new(
             turn_deployment.effect_host(),
             Arc::clone(&attachment_store),
             Arc::clone(&stores.process_env_store),
             lash::CommitBudget::bounded(1024 * 1024, 512),
             lash::QueuedWorkBatchingConfig::new(1024),
-        ),
-    );
+        ));
     runtime_host_config.tracing.trace_sink = Some(Arc::clone(&trace_sink));
     runtime_host_config.tracing.trace_level = TraceLevel::Extended;
 
@@ -279,8 +264,7 @@ async fn async_main() -> AnyhowResult<()> {
     let builder = LashCore::rlm_builder(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS), factory)
         .provider(provider)
         .session_spec(
-            lash::SessionSpec::new()
-                .turn_budget(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS)),
+            lash::SessionSpec::new().turn_budget(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS)),
         )
         .no_progress_budget(lash::NoProgressBudget::bounded(
             WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
@@ -405,10 +389,7 @@ async fn async_main() -> AnyhowResult<()> {
             "/api/triggers/{subscription_key}/enabled",
             put(set_trigger_enabled),
         )
-        .route(
-            "/api/triggers/{subscription_key}",
-            delete(delete_trigger),
-        )
+        .route("/api/triggers/{subscription_key}", delete(delete_trigger))
         // Deliberately absent from the UI: see the handler's contract.
         .route(
             "/api/admin/trigger-mutation-receipts/prune",
@@ -452,14 +433,14 @@ async fn async_main() -> AnyhowResult<()> {
     Ok(())
 }
 
-fn process_incarnation_id() -> &'static str {
+pub(crate) fn process_incarnation_id() -> &'static str {
     static PROCESS_INCARNATION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     PROCESS_INCARNATION
         .get_or_init(|| uuid::Uuid::new_v4().to_string())
         .as_str()
 }
 
-fn validate_provider_credentials(
+pub(crate) fn validate_provider_credentials(
     dev_provider_scenario: Option<failure_provider::DevProviderScenario>,
     openrouter_api_key: &str,
 ) -> AnyhowResult<()> {
@@ -472,11 +453,11 @@ fn validate_provider_credentials(
     Ok(())
 }
 
-fn context_window_tokens_from_environment() -> AnyhowResult<usize> {
+pub(crate) fn context_window_tokens_from_environment() -> AnyhowResult<usize> {
     context_window_tokens_from(|name| std::env::var(name))
 }
 
-fn context_window_tokens_from(
+pub(crate) fn context_window_tokens_from(
     read_env: impl FnOnce(&str) -> Result<String, std::env::VarError>,
 ) -> AnyhowResult<usize> {
     let raw = match read_env(AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV) {
@@ -501,13 +482,13 @@ fn context_window_tokens_from(
     Ok(context_window_tokens)
 }
 
-fn invalid_context_window_error(problem: std::fmt::Arguments<'_>) -> anyhow::Error {
+pub(crate) fn invalid_context_window_error(problem: std::fmt::Arguments<'_>) -> anyhow::Error {
     anyhow!(
         "agent-workbench: {AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV} {problem}: rolling-history compaction_needed fires at max_context - {ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS}, so the workbench requires a context window at least twice the plugin's compaction buffer"
     )
 }
 
-fn workbench_context_window_tokens() -> usize {
+pub(crate) fn workbench_context_window_tokens() -> usize {
     let configured = WORKBENCH_CONTEXT_WINDOW_TOKENS.get().copied();
     // `async_main` initializes this before constructing AppState. Unit tests
     // that exercise pure model helpers may intentionally use the default.

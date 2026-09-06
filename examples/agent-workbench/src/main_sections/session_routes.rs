@@ -1,3 +1,5 @@
+use super::*;
+
 // The session-management routes: the roster the selector renders, the
 // create-with-a-dialect flow, and the durable selection a query-less `/api/`
 // call resolves through. They live beside the chat routes rather than in them
@@ -11,7 +13,7 @@
 /// of a data directory that predates the roster, or an ad-hoc `?session_id=`
 /// tab — is still listed while it is the current one, so the selector never
 /// renders a workbench that is serving a session it does not show.
-async fn list_sessions(
+pub(crate) async fn list_sessions(
     State(state): State<AppState>,
 ) -> Result<Json<SessionListResponse>, AppError> {
     let current_session_id = state.current_session_id();
@@ -56,7 +58,7 @@ async fn list_sessions(
 /// The roster row is written before the session is opened, because the row is
 /// where every later open reads the dialect to ask for: the pin only becomes
 /// durable at the first commit, and the handle this route opens does not commit.
-async fn create_session(
+pub(crate) async fn create_session(
     State(state): State<AppState>,
     Json(request): Json<SessionCreateRequest>,
 ) -> Result<Json<SessionSummary>, AppError> {
@@ -121,7 +123,7 @@ async fn create_session(
 /// Only a session on the roster can be selected: selection is what a reload,
 /// a restart, and `<data-dir>/session-id` all agree on, and pointing that at a
 /// session nothing knows about would leave the selector unable to name it.
-async fn select_session(
+pub(crate) async fn select_session(
     State(state): State<AppState>,
     Json(request): Json<SessionSelectRequest>,
 ) -> Result<Json<SessionSummary>, AppError> {

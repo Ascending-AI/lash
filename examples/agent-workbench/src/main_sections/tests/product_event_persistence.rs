@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn product_event_log_rejects_future_format_with_expected_and_found_versions() {
     let data_dir = tempfile::tempdir().expect("future product event tempdir");

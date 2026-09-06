@@ -1,3 +1,5 @@
+use super::*;
+
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum LinkError {
     #[error(transparent)]
