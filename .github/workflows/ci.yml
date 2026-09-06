@@ -220,23 +220,26 @@ jobs:
       - name: Check example facade imports
         run: python3 scripts/check_facade_only_examples.py
 
-  # Sole writer of the shared linux-debug cache and the doctest gate. It builds
-  # the superset (`cargo check --workspace --all-targets` plus the doctest
-  # link) that every read-only debug-profile job restores. The nextest run is
-  # sharded out to the test-shard matrix below.
-  #
-  # This job is deliberately *only* the cache superset (which now includes the
-  # trybuild fixture graph, see the step) and the doctests. Every
-  # gate that neither warms nor needs that superset — the repository gates, the
-  # facade API gates, the package feature checks, the default-off runtime
-  # boundary — used to queue behind it as serial steps, which made this job the
-  # run's critical path (9m40s warm, 20m36s on a cold branch cache) for work
-  # that has no dependency on it. They are sibling jobs now; nothing was dropped
-  # or weakened.
+  # Separate matrix jobs run the workspace check/doctests and API seal in
+  # parallel. The matrix result remains the same required test-doc context.
   test-doc:
-    name: Test docs + build cache
+    name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Check workspace + doctests
+            lane: workspace
+            target: target
+          - name: Seal-test the API surface
+            lane: seal
+            target: target-seal
+    env:
+      # trybuild derives its fixture/output tree from Cargo's target directory.
+      # The seal job has no shared writable output with any other CI job.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/${{ matrix.target }}
 
     steps:
       - name: Check out repository
@@ -263,13 +266,19 @@ jobs:
 
 
       - name: Restore cargo cache
+        if: matrix.lane == 'workspace'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
-          # This job builds a superset of what the other debug-profile jobs
-          # (test shards, Postgres store, Restate E2E, the distributed-workers
-          # e2e workflow) need, so it is the sole writer of the shared cache.
           shared-key: linux-debug
+
+      - name: Restore isolated seal dependencies
+        if: matrix.lane == 'seal'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          shared-key: linux-seal
+          workspaces: . -> target-seal
 
       - name: Install protoc
         uses: ./.github/actions/install-tools
@@ -279,59 +288,23 @@ jobs:
       - name: Setup sccache
         uses: ./.github/actions/setup-sccache
 
-      # Compiles every target of every workspace crate — libs, bins, tests,
-      # examples, and benches. This subsumes the old standalone checks for
-      # docs-snippets and the runtime perf harness, which would otherwise only break post-merge. It also warms the
-      # dependency graph the test-shard matrix restores.
       - name: Check workspace (all targets)
+        if: matrix.lane == 'workspace'
         run: |
           # shellcheck disable=SC2086
           cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}
 
-      # nextest does not run doctests; keep them covered here (also builds the
-      # workspace crates as rlibs, warming the shared cache for the readers).
+      # nextest does not run doctests; keep the full workspace gate.
       - name: Test workspace doctests
+        if: matrix.lane == 'workspace'
         run: |
           # shellcheck disable=SC2086
           cargo test --doc --workspace --locked ${LASH_CI_FEATURES}
 
-      # The trybuild API-sealing suite (crates/lash/tests/ui.rs) compiles its
-      # fixtures in a private cargo project under `target/tests/trybuild` — a
-      # second full build of lash and its dependency graph, and the one part of
-      # the test suite the shared cache never carried. The shards restore that
-      # cache read-only, so whatever they build there dies with the job, and the
-      # three shards holding a `ui` test each paid the cold fixture build every
-      # run (184s, 106s and 103s of shard time).
-      #
-      # Building it here is what puts it in the cache: this job is the sole
-      # writer, and rust-cache already knows `target/tests/trybuild` is a target
-      # directory to keep rather than a stray file to sweep. trybuild rewrites
-      # the fixture manifest on every run, so a warm fixture directory is its
-      # normal operating mode, not a staleness hazard.
-      #
-      # What the shards get back is the fixture's *dependency* graph, not the
-      # whole build: rust-cache's save-time cleaning keeps only artifacts of
-      # packages from outside the workspace, so the fixture's copy of lash and
-      # its sibling crates is swept and rebuilt. Measured on the same machine —
-      # cold fixture 505s, cache-cleaned fixture 184s, untouched fixture 20s —
-      # which is why this buys most of the shard cost back and not all of it.
-      # The rest is sccache's job: the fixture compiles under a `--target`
-      # triple, so its rustc invocations are keyed apart from the ordinary host
-      # build and this step is the first to prime them for the shards.
-      #
-      # The cache only takes the fixture on a run whose cache key misses —
-      # rust-cache skips the save outright on a full key match — so the warming
-      # lands with the next toolchain, manifest or Cargo.lock change, not on the
-      # merge of this step.
-      #
-      # `--test ui` builds that one test target, not the workspace's other test
-      # binaries. The step is named for what it runs, not for the caching:
-      # compile_fail drift fails here, and a red step named for a cache would
-      # send the reader hunting a caching bug. This step is the sole per-push
-      # run of the ui suite: `profile.ci`'s default-filter excludes the ui
-      # binary from the shards, where the same tests were a second, slower
-      # report of the same defect.
-      - name: Seal-test the API surface (warms the trybuild fixture cache)
+      # Every existing compile-fail/pass fixture remains in the ui binary.
+      # Keep workspace feature unification and the original cargo test command.
+      - name: Seal-test the API surface
+        if: matrix.lane == 'seal'
         run: |
           # shellcheck disable=SC2086
           cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
