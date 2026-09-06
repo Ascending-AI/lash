@@ -108,6 +108,23 @@ def successful_needs() -> dict[str, dict[str, object]]:
 
 
 class ConclusionTests(unittest.TestCase):
+    def test_hygiene_jobs_are_required_for_every_event_and_docs_changes(self) -> None:
+        workflow = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
+        for job in ("diff-hygiene", "secret-scan"):
+            self.assertIn(job, ci_plan.UNGATED_JOBS)
+            self.assertIn(job, workflow["ci-conclusion"]["needs"])
+            self.assertNotIn("if", workflow[job])
+            for event in ("pull_request", "merge_group", "push", "workflow_dispatch"):
+                for result in ("failure", "cancelled", "skipped"):
+                    with self.subTest(job=job, event=event, result=result):
+                        needs = successful_needs()
+                        needs["plan"]["outputs"].update({"docs_only": "true", **{f: "false" for f in ci_plan.FAMILIES}})
+                        for gated in ci_plan.GATED_JOBS:
+                            needs[gated]["result"] = "skipped"
+                        needs[job]["result"] = result
+                        problems = ci_plan.evaluate_conclusion(needs, event_name=event)
+                        self.assertTrue(any(job in problem for problem in problems))
+
     def test_all_success_succeeds(self) -> None:
         self.assertEqual([], ci_plan.evaluate_conclusion(successful_needs()))
 

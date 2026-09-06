@@ -60,6 +60,8 @@ UNGATED_JOBS = {
     "test-doc",
     "repo-gates",
     "lint",
+    "diff-hygiene",
+    "secret-scan",
     "restate-postgres-workers",
     "restate-postgres-workers-summary",
 }

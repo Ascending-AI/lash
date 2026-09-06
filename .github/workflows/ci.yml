@@ -405,6 +405,7 @@ jobs:
           python3 scripts/test_runtime_perf_percentiles.py
           python3 scripts/test_perfreport.py
           python3 scripts/test_ci_plan.py
+          python3 scripts/test_ci_plan_hygiene.py
           bash scripts/test-worktree-gate-env.sh
           bash scripts/test-dev-script-process-identity.sh
 
@@ -2012,36 +2013,60 @@ jobs:
           target/restate-postgres-workers-e2e-download/restate-workers-e2e-segment-2-attempt-${{ github.run_attempt }}/completed-workflows.txt
 
   diff-hygiene:
-    if: github.event_name == 'merge_group' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       BASE_REF: origin/main
-      BASE_SHA: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || '' }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
       # Labels exist only on pull_request; the footer override also covers merge_group.
       DIFF_HYGIENE_BYPASS: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'diff-hygiene-override') && '1' || '0' }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git fetch origin +refs/heads/main:refs/remotes/origin/main
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Check diff hygiene
         run: bash scripts/ci/check-diff-hygiene.sh
 
   secret-scan:
-    if: github.event_name == 'merge_group' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      BASE_SHA: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || '' }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
       # Labels exist only on pull_request; the footer override also covers merge_group.
       SECRET_SCAN_BYPASS: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'secret-scan-override') && '1' || '0' }}
       GITLEAKS_VERSION: 8.30.1
       GITLEAKS_LINUX_X64_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git fetch origin +refs/heads/main:refs/remotes/origin/main
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Resolve secret scan range and override
         id: secret-scan
@@ -2058,7 +2083,7 @@ jobs:
           echo "base_sha=${base_sha}" >> "${GITHUB_OUTPUT}"
 
           if [[ "${SECRET_SCAN_BYPASS}" == "1" ]]; then
-            echo "Secret scan bypassed by the secret-scan-override label."
+            echo "::warning::Secret scan bypassed by the secret-scan-override label."
             echo "bypass=1" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -2097,7 +2122,7 @@ jobs:
             exit 1
           fi
           if [[ -n "${footer_reason}" ]]; then
-            echo "Secret scan bypassed by Bypass-Secret-Scan footer: ${footer_reason}"
+            echo "::warning::Secret scan bypassed by Bypass-Secret-Scan footer: ${footer_reason}"
             echo "bypass=1" >> "${GITHUB_OUTPUT}"
           else
             echo "bypass=0" >> "${GITHUB_OUTPUT}"
@@ -2112,6 +2137,12 @@ jobs:
             --output "${archive}"
           echo "${GITLEAKS_LINUX_X64_SHA256}  ${archive}" | sha256sum --check
           tar -xzf "${archive}" -C "${RUNNER_TEMP}" gitleaks
+
+      - name: Test secret rejection
+        if: steps.secret-scan.outputs.bypass != '1'
+        env:
+          GITLEAKS_BINARY: ${{ runner.temp }}/gitleaks
+        run: python3 scripts/test_ci_plan_hygiene.py
 
       - name: Scan pull request commit range
         if: steps.secret-scan.outputs.bypass != '1'
@@ -2141,6 +2172,8 @@ jobs:
       - test-shard
       - heavy-tests
       - lint
+      - diff-hygiene
+      - secret-scan
       - confidence-fast
       - confidence-fast-summary
       - postgres-store

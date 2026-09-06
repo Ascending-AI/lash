@@ -35,7 +35,7 @@ range="${merge_base}..HEAD"
 diff_range="${merge_base}...HEAD"
 
 if [[ "${DIFF_HYGIENE_BYPASS:-0}" == "1" ]]; then
-  echo "Diff hygiene bypassed: DIFF_HYGIENE_BYPASS=1 (the diff-hygiene-override label or an explicit environment override)."
+  echo "::warning::Diff hygiene bypassed: DIFF_HYGIENE_BYPASS=1 (the diff-hygiene-override label or an explicit environment override)."
   exit 0
 fi
 
@@ -71,7 +71,7 @@ if ((${#empty_footer_commits[@]})); then
 fi
 
 if [[ -n "${footer_reason}" ]]; then
-  echo "Diff hygiene bypassed by Bypass-Diff-Hygiene footer: ${footer_reason}"
+  echo "::warning::Diff hygiene bypassed by Bypass-Diff-Hygiene footer: ${footer_reason}"
   exit 0
 fi
 
@@ -202,7 +202,9 @@ done
 declare -a conflict_paths=()
 current_path=""
 if ! git diff --unified=0 --no-color --no-ext-diff "${diff_range}" -- \
-  . ':(exclude,glob)**/*.md' ':(exclude,glob)*.md' > "${tmp_dir}/added-lines"; then
+  . ':(exclude,glob)**/*.md' ':(exclude,glob)*.md' \
+  ':(exclude,glob)**/*.rst' ':(exclude,glob)*.rst' \
+  ':(exclude,glob)**/*.txt' ':(exclude,glob)*.txt' > "${tmp_dir}/added-lines"; then
   echo "Diff hygiene could not enumerate added lines in range '${diff_range}'." >&2
   exit 1
 fi
