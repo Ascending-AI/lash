@@ -1,7 +1,9 @@
-const SESSION_OPEN_MAX_ATTEMPTS: usize = 6;
-const SESSION_OPEN_RETRY_BUDGET: Duration = Duration::from_millis(75);
+use super::*;
 
-async fn open_session_with_bounded_retry(
+pub(crate) const SESSION_OPEN_MAX_ATTEMPTS: usize = 6;
+pub(crate) const SESSION_OPEN_RETRY_BUDGET: Duration = Duration::from_millis(75);
+
+pub(crate) async fn open_session_with_bounded_retry(
     state: &AppState,
     session_id: &str,
 ) -> Result<lash::LashSession, lash::EmbedError> {
@@ -12,7 +14,7 @@ async fn open_session_with_bounded_retry(
     .await
 }
 
-async fn retry_session_open<T, Open, OpenFuture, Trace>(
+pub(crate) async fn retry_session_open<T, Open, OpenFuture, Trace>(
     mut open: Open,
     mut trace: Trace,
 ) -> Result<T, lash::EmbedError>
@@ -21,8 +23,7 @@ where
     OpenFuture: std::future::Future<Output = Result<T, lash::EmbedError>>,
     Trace: FnMut(&str, Value),
 {
-    static RETRY_SEQUENCE: std::sync::atomic::AtomicU64 =
-        std::sync::atomic::AtomicU64::new(0);
+    static RETRY_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
     let started = tokio::time::Instant::now();
     let mut last_contended = None;
@@ -60,8 +61,7 @@ where
                     break;
                 }
                 let base_ms = 1_u64 << (attempt - 1).min(4);
-                let sequence =
-                    RETRY_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let sequence = RETRY_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let delay = Duration::from_millis(base_ms + sequence % (base_ms + 1));
                 let remaining = SESSION_OPEN_RETRY_BUDGET.saturating_sub(started.elapsed());
                 if delay > remaining {
@@ -84,7 +84,7 @@ where
     Err(last_contended.expect("a retry budget exhausts only after typed contention"))
 }
 
-fn session_open_is_contended(error: &lash::EmbedError) -> bool {
+pub(crate) fn session_open_is_contended(error: &lash::EmbedError) -> bool {
     matches!(
         error,
         lash::EmbedError::Store(lash::persistence::StoreError::Contended)
@@ -95,7 +95,7 @@ fn session_open_is_contended(error: &lash::EmbedError) -> bool {
     )
 }
 
-fn temporarily_unavailable_session_open() -> AppError {
+pub(crate) fn temporarily_unavailable_session_open() -> AppError {
     AppError {
         status: StatusCode::SERVICE_UNAVAILABLE,
         message: "session is temporarily busy; retry the request".to_string(),

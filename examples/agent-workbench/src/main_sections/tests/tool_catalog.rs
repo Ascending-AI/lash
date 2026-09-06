@@ -1,4 +1,6 @@
-fn catalog_lifecycle_provider() -> lash::provider::ProviderHandle {
+use super::*;
+
+pub(crate) fn catalog_lifecycle_provider() -> lash::provider::ProviderHandle {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     lash::testing::TestProvider::builder()
         .kind("workbench-test")
@@ -19,7 +21,7 @@ fn catalog_lifecycle_provider() -> lash::provider::ProviderHandle {
         .into_handle()
 }
 
-async fn assert_tool_catalog_contract(
+pub(crate) async fn assert_tool_catalog_contract(
     core: &lash::LashCore,
     session: &lash::LashSession,
 ) {
@@ -86,7 +88,7 @@ async fn assert_tool_catalog_contract(
         .expect("restore send to this session catalog");
 }
 
-async fn assert_plugin_provider_execution(
+pub(crate) async fn assert_plugin_provider_execution(
     session: &lash::LashSession,
     plugin_mail_world: &mail::MailWorld,
 ) {
@@ -97,14 +99,17 @@ async fn assert_plugin_provider_execution(
         .await
         .expect("turn should resolve and execute inbox.test.send");
     assert_eq!(output.final_value(), Some(&serde_json::json!("test-1")));
-    assert_eq!(plugin_mail_world.inbox("test").expect("test inbox").len(), 1);
+    assert_eq!(
+        plugin_mail_world.inbox("test").expect("test inbox").len(),
+        1
+    );
 }
 
 struct LiveProviderFixture {
-    source: lash::tools::ToolSourceHandle,
-    source_id: String,
-    tool_id: lash::tools::ToolId,
-    mail_world: mail::MailWorld,
+    pub(super) source: lash::tools::ToolSourceHandle,
+    pub(super) source_id: String,
+    pub(super) tool_id: lash::tools::ToolId,
+    pub(super) mail_world: mail::MailWorld,
 }
 
 async fn add_live_provider(
@@ -147,9 +152,7 @@ async fn add_live_provider(
         .find(|manifest| manifest.name == "inbox__live__send")
         .expect("the added provider is immediately visible to the model catalog");
     assert!(
-        core_catalog
-            .resolve_contract("inbox__live__send")
-            .is_err(),
+        core_catalog.resolve_contract("inbox__live__send").is_err(),
         "session provider mutation must not change the core catalog projection"
     );
 
@@ -161,7 +164,7 @@ async fn add_live_provider(
     }
 }
 
-async fn assert_live_tool_provider_execution_and_removal(
+pub(crate) async fn assert_live_tool_provider_execution_and_removal(
     core: &lash::LashCore,
     session: &lash::LashSession,
 ) {
@@ -173,10 +176,7 @@ async fn assert_live_tool_provider_execution_and_removal(
         .await
         .expect("turn should resolve and execute inbox.live.send");
     assert_eq!(output.final_value(), Some(&serde_json::json!("live-1")));
-    assert_eq!(
-        live.mail_world.inbox("live").expect("live inbox").len(),
-        1
-    );
+    assert_eq!(live.mail_world.inbox("live").expect("live inbox").len(), 1);
 
     let membership_generation = session
         .tools()

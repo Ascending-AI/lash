@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test]
 async fn two_continue_as_switches_keep_real_sends_and_hide_each_follow_task() {
     let data_dir = tempfile::tempdir().expect("multi-frame send projection tempdir");

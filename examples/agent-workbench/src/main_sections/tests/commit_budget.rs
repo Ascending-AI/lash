@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
     let budget = lash::CommitBudget::new(
@@ -5,7 +7,10 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
         lash::CommitBudgetLimit::Unbounded,
     );
     let expected_bytes = std::num::NonZeroUsize::new(1024 * 1024).expect("non-zero byte budget");
-    assert_eq!(budget.bytes, lash::CommitBudgetLimit::Bounded(expected_bytes));
+    assert_eq!(
+        budget.bytes,
+        lash::CommitBudgetLimit::Bounded(expected_bytes)
+    );
     assert_eq!(budget.nodes, lash::CommitBudgetLimit::Unbounded);
 
     let bounded = lash::CommitBudget::bounded(1024 * 1024, 512);
@@ -17,7 +22,10 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
     assert_eq!(host.durability.queued_work_batching, batching);
     assert_eq!(batching.action_token_reserve(), 1);
     assert_eq!(batching.max_rows(), 8);
-    assert_eq!(batching.max_pending_age(), std::time::Duration::from_secs(5));
+    assert_eq!(
+        batching.max_pending_age(),
+        std::time::Duration::from_secs(5)
+    );
     assert_eq!(lash::QueuedWorkBatchingConfig::DEFAULT_MAX_ROWS, 64);
     let default_pending_age = lash::QueuedWorkBatchingConfig::DEFAULT_MAX_PENDING_AGE;
     assert_eq!(default_pending_age, std::time::Duration::from_secs(30));

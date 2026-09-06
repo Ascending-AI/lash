@@ -1,3 +1,5 @@
+use super::*;
+
 impl From<lash_core::TokenLedgerEntry> for RemoteTokenLedgerEntry {
     fn from(value: lash_core::TokenLedgerEntry) -> Self {
         let lash_core::TokenLedgerEntry {
@@ -89,7 +91,10 @@ impl RemoteTurnReport {
                 total,
             },
             execution: execution.into(),
-            tool_calls: tool_calls.into_iter().map(RemoteToolCallRecord::from).collect(),
+            tool_calls: tool_calls
+                .into_iter()
+                .map(RemoteToolCallRecord::from)
+                .collect(),
             llm_calls: llm_calls.into_iter().map(Into::into).collect(),
             issues: errors.into_iter().map(Into::into).collect(),
             activities,
@@ -113,7 +118,9 @@ impl From<lash_core::facade_support::TurnOutcome> for RemoteTurnOutcome {
                     task,
                 }
             }
-            lash_core::facade_support::TurnOutcome::Stopped(stop) => Self::Stopped { stop: stop.into() },
+            lash_core::facade_support::TurnOutcome::Stopped(stop) => {
+                Self::Stopped { stop: stop.into() }
+            }
         }
     }
 }
@@ -121,8 +128,12 @@ impl From<lash_core::facade_support::TurnOutcome> for RemoteTurnOutcome {
 impl From<lash_core::facade_support::TurnFinish> for RemoteTurnFinish {
     fn from(value: lash_core::facade_support::TurnFinish) -> Self {
         match value {
-            lash_core::facade_support::TurnFinish::AssistantMessage { text } => Self::AssistantMessage { text },
-            lash_core::facade_support::TurnFinish::FinalValue { value } => Self::FinalValue { value },
+            lash_core::facade_support::TurnFinish::AssistantMessage { text } => {
+                Self::AssistantMessage { text }
+            }
+            lash_core::facade_support::TurnFinish::FinalValue { value } => {
+                Self::FinalValue { value }
+            }
             lash_core::facade_support::TurnFinish::ToolValue { tool_name, value } => {
                 Self::ToolValue { tool_name, value }
             }
@@ -141,7 +152,9 @@ impl From<lash_core::facade_support::TurnStop> for RemoteTurnStop {
             lash_core::facade_support::TurnStop::ProviderError => Self::ProviderError,
             lash_core::facade_support::TurnStop::PluginAbort => Self::PluginAbort,
             lash_core::facade_support::TurnStop::RuntimeError => Self::RuntimeError,
-            lash_core::facade_support::TurnStop::SubmittedError { value } => Self::SubmittedError { value },
+            lash_core::facade_support::TurnStop::SubmittedError { value } => {
+                Self::SubmittedError { value }
+            }
             lash_core::facade_support::TurnStop::ToolError { tool_name, value } => {
                 Self::ToolError { tool_name, value }
             }

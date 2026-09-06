@@ -1,3 +1,5 @@
+use super::*;
+
 impl From<RemoteTriggerOccurrenceOutcome> for lash_core::TriggerOccurrenceOutcome {
     fn from(value: RemoteTriggerOccurrenceOutcome) -> Self {
         match value {
@@ -163,17 +165,25 @@ impl TryFrom<RemoteTriggerEmitReport> for lash_core::facade_support::TriggerEmit
     }
 }
 
-impl From<lash_core::facade_support::TriggerDeliveryEmitOutcome> for RemoteTriggerDeliveryEmitOutcome {
+impl From<lash_core::facade_support::TriggerDeliveryEmitOutcome>
+    for RemoteTriggerDeliveryEmitOutcome
+{
     fn from(value: lash_core::facade_support::TriggerDeliveryEmitOutcome) -> Self {
         match value {
             lash_core::facade_support::TriggerDeliveryEmitOutcome::Started => Self::Started,
-            lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved => Self::AlreadyReserved,
-            lash_core::facade_support::TriggerDeliveryEmitOutcome::Failed { reason } => Self::Failed { reason },
+            lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved => {
+                Self::AlreadyReserved
+            }
+            lash_core::facade_support::TriggerDeliveryEmitOutcome::Failed { reason } => {
+                Self::Failed { reason }
+            }
         }
     }
 }
 
-impl From<RemoteTriggerDeliveryEmitOutcome> for lash_core::facade_support::TriggerDeliveryEmitOutcome {
+impl From<RemoteTriggerDeliveryEmitOutcome>
+    for lash_core::facade_support::TriggerDeliveryEmitOutcome
+{
     fn from(value: RemoteTriggerDeliveryEmitOutcome) -> Self {
         match value {
             RemoteTriggerDeliveryEmitOutcome::Started => Self::Started,
@@ -183,7 +193,9 @@ impl From<RemoteTriggerDeliveryEmitOutcome> for lash_core::facade_support::Trigg
     }
 }
 
-impl From<lash_core::facade_support::TriggerDeliveryEmitReceipt> for RemoteTriggerDeliveryEmitReceipt {
+impl From<lash_core::facade_support::TriggerDeliveryEmitReceipt>
+    for RemoteTriggerDeliveryEmitReceipt
+{
     fn from(value: lash_core::facade_support::TriggerDeliveryEmitReceipt) -> Self {
         let lash_core::facade_support::TriggerDeliveryEmitReceipt {
             occurrence_id,
@@ -200,7 +212,9 @@ impl From<lash_core::facade_support::TriggerDeliveryEmitReceipt> for RemoteTrigg
     }
 }
 
-impl From<RemoteTriggerDeliveryEmitReceipt> for lash_core::facade_support::TriggerDeliveryEmitReceipt {
+impl From<RemoteTriggerDeliveryEmitReceipt>
+    for lash_core::facade_support::TriggerDeliveryEmitReceipt
+{
     fn from(value: RemoteTriggerDeliveryEmitReceipt) -> Self {
         let RemoteTriggerDeliveryEmitReceipt {
             occurrence_id,
@@ -314,7 +328,9 @@ impl From<lash_core::facade_support::TriggerRegistration> for RemoteTriggerRegis
             target: RemoteTriggerTarget {
                 label,
                 identity: identity.into(),
-                input: input.try_into().expect("core process input serializes remotely"),
+                input: input
+                    .try_into()
+                    .expect("core process input serializes remotely"),
                 inputs: inputs.into(),
             },
             enabled,
@@ -643,9 +659,7 @@ impl TryFrom<RemoteTriggerRegisterSubscriptionRequest> for lash_core::TriggerSub
 
     fn try_from(value: RemoteTriggerRegisterSubscriptionRequest) -> Result<Self, Self::Error> {
         value.validate()?;
-        let RemoteTriggerRegisterSubscriptionRequest {
-            draft,
-        } = value;
+        let RemoteTriggerRegisterSubscriptionRequest { draft } = value;
         draft.try_into()
     }
 }
@@ -665,9 +679,7 @@ impl TryFrom<RemoteTriggerRegisterSubscriptionReceipt> for lash_core::TriggerSub
 
     fn try_from(value: RemoteTriggerRegisterSubscriptionReceipt) -> Result<Self, Self::Error> {
         value.validate()?;
-        let RemoteTriggerRegisterSubscriptionReceipt {
-            record,
-        } = value;
+        let RemoteTriggerRegisterSubscriptionReceipt { record } = value;
         record.try_into()
     }
 }
@@ -685,21 +697,17 @@ impl TryFrom<Vec<lash_core::TriggerSubscriptionRecord>> for RemoteTriggerListSub
     }
 }
 
-impl TryFrom<RemoteTriggerListSubscriptionsResponse>
-    for Vec<lash_core::TriggerSubscriptionRecord>
-{
+impl TryFrom<RemoteTriggerListSubscriptionsResponse> for Vec<lash_core::TriggerSubscriptionRecord> {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteTriggerListSubscriptionsResponse) -> Result<Self, Self::Error> {
         value.validate()?;
-        let RemoteTriggerListSubscriptionsResponse {
-            subscriptions,
-        } = value;
+        let RemoteTriggerListSubscriptionsResponse { subscriptions } = value;
         subscriptions.into_iter().map(TryInto::try_into).collect()
     }
 }
 
-fn decode_remote_json<T: serde::de::DeserializeOwned>(
+pub(crate) fn decode_remote_json<T: serde::de::DeserializeOwned>(
     value: serde_json::Value,
     type_name: &'static str,
     field: &'static str,
@@ -710,7 +718,7 @@ fn decode_remote_json<T: serde::de::DeserializeOwned>(
     })
 }
 
-fn encode_remote_json<T: serde::Serialize>(
+pub(crate) fn encode_remote_json<T: serde::Serialize>(
     value: T,
     type_name: &'static str,
     field: &'static str,

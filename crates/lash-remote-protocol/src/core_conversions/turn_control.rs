@@ -1,3 +1,5 @@
+use super::*;
+
 impl From<lash_core::facade_support::TurnCancellationEvidence> for RemoteTurnCancellationEvidence {
     fn from(value: lash_core::facade_support::TurnCancellationEvidence) -> Self {
         let lash_core::facade_support::TurnCancellationEvidence {
@@ -11,8 +13,12 @@ impl From<lash_core::facade_support::TurnCancellationEvidence> for RemoteTurnCan
             origin,
             reason,
             undelivered: match undelivered {
-                lash_core::facade_support::TurnCancelDisposition::Defer => RemoteTurnCancelDisposition::Defer,
-                lash_core::facade_support::TurnCancelDisposition::Drop => RemoteTurnCancelDisposition::Drop,
+                lash_core::facade_support::TurnCancelDisposition::Defer => {
+                    RemoteTurnCancelDisposition::Defer
+                }
+                lash_core::facade_support::TurnCancelDisposition::Drop => {
+                    RemoteTurnCancelDisposition::Drop
+                }
             },
         }
     }
@@ -31,8 +37,12 @@ impl From<RemoteTurnCancellationEvidence> for lash_core::facade_support::TurnCan
             origin,
             reason,
             undelivered: match undelivered {
-                RemoteTurnCancelDisposition::Defer => lash_core::facade_support::TurnCancelDisposition::Defer,
-                RemoteTurnCancelDisposition::Drop => lash_core::facade_support::TurnCancelDisposition::Drop,
+                RemoteTurnCancelDisposition::Defer => {
+                    lash_core::facade_support::TurnCancelDisposition::Defer
+                }
+                RemoteTurnCancelDisposition::Drop => {
+                    lash_core::facade_support::TurnCancelDisposition::Drop
+                }
             },
         }
     }
@@ -58,8 +68,12 @@ impl RemoteTurnCancelRequest {
             origin,
             reason,
             undelivered: match undelivered {
-                RemoteTurnCancelDisposition::Defer => lash_core::facade_support::TurnCancelDisposition::Defer,
-                RemoteTurnCancelDisposition::Drop => lash_core::facade_support::TurnCancelDisposition::Drop,
+                RemoteTurnCancelDisposition::Defer => {
+                    lash_core::facade_support::TurnCancelDisposition::Defer
+                }
+                RemoteTurnCancelDisposition::Drop => {
+                    lash_core::facade_support::TurnCancelDisposition::Drop
+                }
             },
         })
     }
@@ -81,8 +95,12 @@ impl From<lash_core::facade_support::TurnCancelRequest> for RemoteTurnCancelRequ
             origin,
             reason,
             undelivered: match undelivered {
-                lash_core::facade_support::TurnCancelDisposition::Defer => RemoteTurnCancelDisposition::Defer,
-                lash_core::facade_support::TurnCancelDisposition::Drop => RemoteTurnCancelDisposition::Drop,
+                lash_core::facade_support::TurnCancelDisposition::Defer => {
+                    RemoteTurnCancelDisposition::Defer
+                }
+                lash_core::facade_support::TurnCancelDisposition::Drop => {
+                    RemoteTurnCancelDisposition::Drop
+                }
             },
         }
     }
@@ -91,16 +109,22 @@ impl From<lash_core::facade_support::TurnCancelRequest> for RemoteTurnCancelRequ
 impl From<lash_core::facade_support::TurnCancelOutcome> for RemoteTurnCancelOutcome {
     fn from(value: lash_core::facade_support::TurnCancelOutcome) -> Self {
         match value {
-            lash_core::facade_support::TurnCancelOutcome::Requested(cancellation) => Self::Requested {
-                cancellation: cancellation.into(),
-            },
+            lash_core::facade_support::TurnCancelOutcome::Requested(cancellation) => {
+                Self::Requested {
+                    cancellation: cancellation.into(),
+                }
+            }
             lash_core::facade_support::TurnCancelOutcome::AlreadyRequested(cancellation) => {
                 Self::AlreadyRequested {
                     cancellation: cancellation.into(),
                 }
             }
-            lash_core::facade_support::TurnCancelOutcome::CompletionWonRace => Self::CompletionWonRace,
-            lash_core::facade_support::TurnCancelOutcome::UnknownOrRevoked => Self::UnknownOrRevoked,
+            lash_core::facade_support::TurnCancelOutcome::CompletionWonRace => {
+                Self::CompletionWonRace
+            }
+            lash_core::facade_support::TurnCancelOutcome::UnknownOrRevoked => {
+                Self::UnknownOrRevoked
+            }
         }
     }
 }

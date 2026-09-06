@@ -1,3 +1,5 @@
+use super::*;
+
 async fn run_provider_evidence_turn(
     state: &AppState,
     session: &lash::LashSession,
@@ -56,7 +58,7 @@ async fn next_remote_model_call(
     .expect("provider model-call observation timeout")
 }
 
-async fn next_terminal_replacement(
+pub(crate) async fn next_terminal_replacement(
     recovery: &mut lash::recoverable_chat::RecoverableChatSubscription,
     sequence: u64,
 ) -> serde_json::Value {
@@ -73,11 +75,12 @@ async fn next_terminal_replacement(
                     snapshot,
                     ..
                 } => {
-                    let remote = lash::remote::observations::RemoteSessionObservationEvent::from_core(
-                        sequence,
-                        Arc::clone(&event),
-                    )
-                    .expect("remote event");
+                    let remote =
+                        lash::remote::observations::RemoteSessionObservationEvent::from_core(
+                            sequence,
+                            Arc::clone(&event),
+                        )
+                        .expect("remote event");
                     return serde_json::json!({
                         "type": "terminal_replacement",
                         "event": remote,
@@ -133,7 +136,7 @@ fn assert_delivered_provider_evidence(
     assert_eq!(evidence["reasoning_output_tokens"], reasoning_tokens);
 }
 
-async fn provider_execution_evidence_scenarios() -> serde_json::Value {
+pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value {
     let mut scenarios = Vec::new();
     for (provider_kind, response_id, served_model, finish, reasoning_tokens) in [
         (
@@ -151,9 +154,8 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
             0,
         ),
     ] {
-        let answer = format!(
-            "<lashlang>\nfinish \"{provider_kind} execution evidence\"\n</lashlang>"
-        );
+        let answer =
+            format!("<lashlang>\nfinish \"{provider_kind} execution evidence\"\n</lashlang>");
         let script = if provider_kind == lash_sim::runtime_providers::GOOGLE_OAUTH {
             lash_sim::runtime_providers::google_runtime_script_for_text_with_explicit_zero_reasoning(
                 &answer,
@@ -165,11 +167,12 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
         };
         let mut failed_before_response = script.clone();
         failed_before_response.name = format!("{provider_kind}.retryable-before-response");
-        *failed_before_response.timeline_mut() = vec![lash_sim::ProviderWireEvent::TransportError {
-            at: 0,
-            message: "connection failed before response".to_string(),
-            retryable: Some(true),
-        }];
+        *failed_before_response.timeline_mut() =
+            vec![lash_sim::ProviderWireEvent::TransportError {
+                at: 0,
+                message: "connection failed before response".to_string(),
+                retryable: Some(true),
+            }];
         failed_before_response.expected_provider = Some(serde_json::json!({
             "failure": "transport",
             "response_started": false,
@@ -183,11 +186,9 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
             ])
             .expect("valid provider scripts"),
         );
-        let (mut provider, model, _) = lash_sim::runtime_providers::runtime_provider_components(
-            provider_kind,
-            &transport,
-        )
-        .expect("provider fixture components");
+        let (mut provider, model, _) =
+            lash_sim::runtime_providers::runtime_provider_components(provider_kind, &transport)
+                .expect("provider fixture components");
         let mut provider_options = provider.options();
         provider_options.reliability = provider_options
             .reliability
@@ -214,9 +215,8 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
 
         let observable = session.observe();
         let initial = observable.recoverable_chat_snapshot();
-        let remote_cursor = lash::remote::observations::RemoteSessionCursor::new(
-            initial.cursor.to_string(),
-        );
+        let remote_cursor =
+            lash::remote::observations::RemoteSessionCursor::new(initial.cursor.to_string());
         let mut observation_recovery = observable
             .subscribe_and_recover_remote(remote_cursor)
             .expect("subscribe through the remote observation facade");
@@ -236,7 +236,10 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
             .clone();
         assert_eq!(first_record.attempts.len(), 2);
         let failed_attempt = &first_record.attempts[0];
-        assert_eq!(failed_attempt.outcome, lash::provider::AttemptOutcome::Failed);
+        assert_eq!(
+            failed_attempt.outcome,
+            lash::provider::AttemptOutcome::Failed
+        );
         assert_eq!(
             failed_attempt.protocol_position,
             lash::provider::ProtocolPosition::NoResponse
@@ -329,7 +332,10 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
             .collect::<BTreeSet<_>>();
         assert_eq!(
             product_records,
-            BTreeSet::from([first_record.call_id.0.as_str(), second_record.call_id.0.as_str()]),
+            BTreeSet::from([
+                first_record.call_id.0.as_str(),
+                second_record.call_id.0.as_str()
+            ]),
             "the product snapshot must contain the exact runtime-published ledgers"
         );
 
@@ -354,7 +360,10 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
         drop(observation_recovery);
         drop(chat_recovery);
         drop(observable);
-        session.close().await.expect("close provider evidence session");
+        session
+            .close()
+            .await
+            .expect("close provider evidence session");
     }
     serde_json::json!({ "providers": scenarios })
 }

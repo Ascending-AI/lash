@@ -1,3 +1,5 @@
+use super::*;
+
 // Operator-only maintenance surface: destructive, deployment-wide verbs that
 // no chat participant may reach and that nothing schedules.
 
@@ -9,14 +11,14 @@ use lash::persistence::EmptyRootSetPolicy;
 /// states an absolute instant, because the only person who can justify the
 /// bound is the one who knows every retry horizon this deployment runs.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct PruneTriggerMutationReceiptsRequest {
-    before_epoch_ms: u64,
+pub(crate) struct PruneTriggerMutationReceiptsRequest {
+    pub(crate) before_epoch_ms: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct PruneTriggerMutationReceiptsResponse {
-    pruned: usize,
-    before_epoch_ms: u64,
+pub(crate) struct PruneTriggerMutationReceiptsResponse {
+    pub(crate) pruned: usize,
+    pub(crate) before_epoch_ms: u64,
 }
 
 /// Operator-invoked reclamation of host- and platform-owned trigger mutation
@@ -45,7 +47,7 @@ struct PruneTriggerMutationReceiptsResponse {
 /// with an absolute cutoff and no default. There is deliberately no button in
 /// the workbench UI and no periodic job: this must never be one click or one
 /// timer away, and the workbench does not schedule it.
-async fn prune_trigger_mutation_receipts(
+pub(crate) async fn prune_trigger_mutation_receipts(
     State(state): State<AppState>,
     Json(request): Json<PruneTriggerMutationReceiptsRequest>,
 ) -> Result<Json<PruneTriggerMutationReceiptsResponse>, AppError> {
@@ -77,8 +79,8 @@ async fn prune_trigger_mutation_receipts(
 /// The absolute cutoff only defers rows whose terminal transition already
 /// armed them; it cannot make a live delivery fan-out eligible.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct ReclaimTriggerOccurrencesRequest {
-    cutoff_epoch_ms: u64,
+pub(crate) struct ReclaimTriggerOccurrencesRequest {
+    pub(crate) cutoff_epoch_ms: u64,
 }
 
 /// Run the deployment-wide trigger-occurrence maintenance lever explicitly.
@@ -87,7 +89,7 @@ struct ReclaimTriggerOccurrencesRequest {
 /// schedule. The complete typed report is returned so a caller can distinguish
 /// reclaimed rows, live fan-out, grace deferral, and a concurrent reinspection
 /// requirement.
-async fn reclaim_trigger_occurrences(
+pub(crate) async fn reclaim_trigger_occurrences(
     State(state): State<AppState>,
     Json(request): Json<ReclaimTriggerOccurrencesRequest>,
 ) -> Result<Json<lash::triggers::TriggerOccurrenceReclamationReport>, AppError> {
@@ -120,7 +122,7 @@ async fn reclaim_trigger_occurrences(
 /// requests are composed by hand, a typo must be a `400`, not a silent reading.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct RunStoreMaintenanceRequest {
+pub(crate) struct RunStoreMaintenanceRequest {
     /// Sessions whose stores to vacuum, named one at a time.
     ///
     /// There is deliberately no "every session" form. `vacuum` is scoped to the
@@ -128,38 +130,38 @@ struct RunStoreMaintenanceRequest {
     /// reclaiming a particular session's settled rows is the one that knows the
     /// session is not about to be resumed.
     #[serde(default)]
-    vacuum_session_ids: Vec<String>,
+    pub(crate) vacuum_session_ids: Vec<String>,
     /// The attachment sweep, omitted when this pass is vacuum-only.
     #[serde(default)]
-    reclaim_attachments: Option<ReclaimAttachmentsRequest>,
+    pub(crate) reclaim_attachments: Option<ReclaimAttachmentsRequest>,
 }
 
 /// The two decisions `lash::persistence::AttachmentReclamationPolicy` leaves to
 /// the host, lifted verbatim into the request so an operator states both.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct ReclaimAttachmentsRequest {
+pub(crate) struct ReclaimAttachmentsRequest {
     /// Post-terminal retention *and* the delete-time freshness window — the one
     /// number standing between an in-flight upload and deletion. See the
     /// handler's doctrine: too small a value deletes live user content on a
     /// perfectly configured deployment.
-    grace_period_ms: u64,
+    pub(crate) grace_period_ms: u64,
     /// How an empty live root set may be read. No serde default: the safe
     /// reading and the wipe-everything reading differ by one word, so the word
     /// is required.
-    empty_root_set: EmptyRootSetAuthorization,
+    pub(crate) empty_root_set: EmptyRootSetAuthorization,
 }
 
 /// Operator authorization for the destructive reading of an empty root set.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum EmptyRootSetAuthorization {
+pub(crate) enum EmptyRootSetAuthorization {
     Refuse,
     AuthorizeDeleteAll,
 }
 
 impl EmptyRootSetAuthorization {
-    fn policy(self) -> EmptyRootSetPolicy {
+    pub(crate) fn policy(self) -> EmptyRootSetPolicy {
         match self {
             Self::Refuse => EmptyRootSetPolicy::Refuse,
             Self::AuthorizeDeleteAll => EmptyRootSetPolicy::AuthorizeDeleteAll,
@@ -168,30 +170,30 @@ impl EmptyRootSetAuthorization {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct RunStoreMaintenanceResponse {
-    vacuumed: Vec<SessionVacuumReport>,
-    reclaimed_attachments: Option<AttachmentReclamationSummary>,
+pub(crate) struct RunStoreMaintenanceResponse {
+    pub(crate) vacuumed: Vec<SessionVacuumReport>,
+    pub(crate) reclaimed_attachments: Option<AttachmentReclamationSummary>,
     /// The policy the sweep actually ran under, echoed back the way the receipt
     /// prune above echoes `before_epoch_ms`. A destructive result is only
     /// readable next to the arguments that produced it: `reclaimed_count: 0`
     /// under a week-long grace period and the same zero under a one-second one
     /// are opposite findings, and an operator reading a stored response should
     /// not have to trust that the request they still have is the one that ran.
-    reclaim_policy: Option<ReclaimAttachmentsRequest>,
+    pub(crate) reclaim_policy: Option<ReclaimAttachmentsRequest>,
 }
 
 /// One session's `lash::persistence::VacuumReport`, kept keyed by session
 /// because the lever is session-scoped and a deployment-wide total would hide
 /// which session actually grew.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct SessionVacuumReport {
-    session_id: String,
-    removed_node_count: usize,
-    removed_pending_turn_input_tombstone_count: usize,
+pub(crate) struct SessionVacuumReport {
+    pub(crate) session_id: String,
+    pub(crate) removed_node_count: usize,
+    pub(crate) removed_pending_turn_input_tombstone_count: usize,
     /// Which arm of the maintenance outcome contract this pass landed on. Zero
     /// counters alone cannot say whether the pass swept nothing because there
     /// was nothing to sweep; the classification says it in one word.
-    sweep: SweepOutcome,
+    pub(crate) sweep: SweepOutcome,
 }
 
 /// The whole of `lash::persistence::AttachmentReclamationReport`, projected to
@@ -202,20 +204,20 @@ struct SessionVacuumReport {
 /// sweep from a root enumeration that failed, or a fenced delete from a
 /// best-effort one that may have raced a writer.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct AttachmentReclamationSummary {
-    scanned_blob_count: usize,
-    reclaimed_count: usize,
+pub(crate) struct AttachmentReclamationSummary {
+    pub(crate) scanned_blob_count: usize,
+    pub(crate) reclaimed_count: usize,
     /// Number of blobs whose destructive step failed.
-    failed_count: usize,
-    failed_ids: Vec<String>,
+    pub(crate) failed_count: usize,
+    pub(crate) failed_ids: Vec<String>,
     /// Number of condemnations deferred for a later pass.
-    condemn_deferred_count: usize,
-    condemn_deferred_ids: Vec<String>,
-    deleted_while_referenced: Vec<String>,
-    root_enumeration_failure: Option<String>,
-    fence: SweepFence,
+    pub(crate) condemn_deferred_count: usize,
+    pub(crate) condemn_deferred_ids: Vec<String>,
+    pub(crate) deleted_while_referenced: Vec<String>,
+    pub(crate) root_enumeration_failure: Option<String>,
+    pub(crate) fence: SweepFence,
     /// Which arm of the maintenance outcome contract this pass landed on.
-    sweep: SweepOutcome,
+    pub(crate) sweep: SweepOutcome,
 }
 
 /// `lash::persistence::MaintenanceSweep` on the wire: the success arm of the
@@ -226,7 +228,7 @@ struct AttachmentReclamationSummary {
 /// as a report with zeroes in it.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum SweepOutcome {
+pub(crate) enum SweepOutcome {
     Swept,
     Incomplete,
     NothingToDo,
@@ -245,7 +247,7 @@ impl From<lash::persistence::MaintenanceSweep> for SweepOutcome {
 /// `lash::persistence::AttachmentGcFence` on the wire.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum SweepFence {
+pub(crate) enum SweepFence {
     Fenced,
     BestEffort,
 }
@@ -310,7 +312,7 @@ impl From<lash::persistence::AttachmentGcFence> for SweepFence {
 ///
 /// Like the receipt prune above, it is wired as an explicit request with no
 /// button in the UI and no periodic job. The workbench schedules neither lever.
-async fn run_store_maintenance(
+pub(crate) async fn run_store_maintenance(
     State(state): State<AppState>,
     Json(request): Json<RunStoreMaintenanceRequest>,
 ) -> Result<Json<RunStoreMaintenanceResponse>, AppError> {
@@ -386,7 +388,7 @@ async fn run_store_maintenance(
 /// whenever one was requested, including when the sweep failed before producing
 /// a report, because the grace period is the number a post-incident reader will
 /// want first.
-fn trace_store_maintenance(
+pub(crate) fn trace_store_maintenance(
     state: &AppState,
     outcome: &str,
     vacuumed: &[SessionVacuumReport],
@@ -411,12 +413,12 @@ fn trace_store_maintenance(
 /// sweep. `open_existing_store` opens only what is already durable — the
 /// create-shaped request carries a policy it never applies on this path — so an
 /// unknown session is a `404` and never a freshly created empty store.
-async fn vacuum_session_store(
+pub(crate) async fn vacuum_session_store(
     state: &AppState,
     session_id: &str,
 ) -> Result<SessionVacuumReport, AppError> {
     let request = lash::persistence::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
+        pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation: lash::persistence::SessionRelation::Root,
         policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
@@ -441,7 +443,7 @@ async fn vacuum_session_store(
 /// Taking the bound handle as the parameter is the point: `vacuum` is scoped to
 /// that binding and refuses an unbound handle rather than widening into a
 /// catalog-wide sweep, so the binding is what the caller has to get right.
-async fn vacuum_bound_store(
+pub(crate) async fn vacuum_bound_store(
     store: &dyn lash::persistence::RuntimePersistence,
 ) -> Result<lash::persistence::VacuumReport, AppError> {
     lash::persistence::StoreMaintenance::vacuum(store)
@@ -461,7 +463,7 @@ async fn vacuum_bound_store(
 }
 
 /// Project one session's vacuum report onto the wire.
-fn session_vacuum_report(
+pub(crate) fn session_vacuum_report(
     session_id: &str,
     report: lash::persistence::VacuumReport,
 ) -> SessionVacuumReport {
@@ -475,7 +477,7 @@ fn session_vacuum_report(
 }
 
 /// Sweep the attachment backend against an explicitly named root authority.
-async fn reclaim_workbench_attachments(
+pub(crate) async fn reclaim_workbench_attachments(
     state: &AppState,
     request: ReclaimAttachmentsRequest,
 ) -> Result<AttachmentReclamationSummary, AppError> {
@@ -483,8 +485,7 @@ async fn reclaim_workbench_attachments(
     // its `AttachmentRootSet`, and handing it over explicitly is what makes the
     // sweep's blast radius reviewable: everything this authority cannot reach
     // is about to be deleted.
-    let root_set: &dyn lash::persistence::AttachmentRootSet =
-        state.session_store_factory.as_ref();
+    let root_set: &dyn lash::persistence::AttachmentRootSet = state.session_store_factory.as_ref();
     sweep_unreferenced_attachments(
         root_set,
         state.attachment_store.as_ref(),
@@ -498,7 +499,7 @@ async fn reclaim_workbench_attachments(
 /// `retention_ms` is a post-terminal retention window *and* the delete-time
 /// freshness window; `empty_roots` is the assertion that decides whether an
 /// empty root set may authorize deletion at all.
-fn attachment_reclamation_policy(
+pub(crate) fn attachment_reclamation_policy(
     retention_ms: u64,
     empty_roots: EmptyRootSetPolicy,
 ) -> lash::persistence::AttachmentReclamationPolicy {
@@ -514,7 +515,7 @@ fn attachment_reclamation_policy(
 /// than things this function reaches for: which authority marks the live set is
 /// the entire safety argument, so it is stated by the caller and readable in
 /// this signature.
-async fn sweep_unreferenced_attachments(
+pub(crate) async fn sweep_unreferenced_attachments(
     root_set: &dyn lash::persistence::AttachmentRootSet,
     backend: &dyn lash::persistence::AttachmentStore,
     policy: lash::persistence::AttachmentReclamationPolicy,
@@ -552,7 +553,7 @@ async fn sweep_unreferenced_attachments(
 }
 
 /// Project the sweep's report onto the wire, degraded signals and all.
-fn attachment_reclamation_summary(
+pub(crate) fn attachment_reclamation_summary(
     report: lash::persistence::AttachmentReclamationReport,
 ) -> AttachmentReclamationSummary {
     let failed_count = report.failed_ids.len();
@@ -571,6 +572,6 @@ fn attachment_reclamation_summary(
     }
 }
 
-fn attachment_ids_to_strings(ids: &[lash::attachments::AttachmentId]) -> Vec<String> {
+pub(crate) fn attachment_ids_to_strings(ids: &[lash::attachments::AttachmentId]) -> Vec<String> {
     ids.iter().map(ToString::to_string).collect()
 }

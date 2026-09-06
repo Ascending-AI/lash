@@ -1,3 +1,5 @@
+use super::*;
+
 impl From<lash_core::CausalRef> for RemoteCausalRef {
     fn from(value: lash_core::CausalRef) -> Self {
         match value {

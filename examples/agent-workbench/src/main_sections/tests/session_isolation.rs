@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn concurrent_sessions_isolate_transcripts_triggers_and_processes() {
     run_async_test_on_stack_budget("workbench-session-isolation-test", || {

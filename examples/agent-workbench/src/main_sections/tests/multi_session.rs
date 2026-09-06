@@ -1,3 +1,5 @@
+use super::*;
+
 // The multi-session workbench: a roster of sessions, each created with its own
 // dialect, surviving the web process that created them (FIG-1306).
 //

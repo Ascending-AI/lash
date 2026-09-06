@@ -1,25 +1,27 @@
+use super::*;
+
 #[derive(Default)]
-struct SessionOpenAdmissionGateState {
-    armed: bool,
-    held_authority: Option<lash::persistence::SessionExecutionLeaseAuthority>,
-    released: bool,
-    tracking: bool,
+pub(crate) struct SessionOpenAdmissionGateState {
+    pub(super) armed: bool,
+    pub(super) held_authority: Option<lash::persistence::SessionExecutionLeaseAuthority>,
+    pub(super) released: bool,
+    pub(super) tracking: bool,
 }
 
-struct SessionOpenAdmissionGate {
-    session_id: String,
-    state: std::sync::Mutex<SessionOpenAdmissionGateState>,
-    admitted: tokio::sync::Notify,
-    contended: tokio::sync::Notify,
-    release: tokio::sync::Notify,
-    attempts: std::sync::atomic::AtomicUsize,
-    acquisitions: std::sync::atomic::AtomicUsize,
-    admissions: std::sync::atomic::AtomicUsize,
-    contentions: std::sync::atomic::AtomicUsize,
+pub(crate) struct SessionOpenAdmissionGate {
+    pub(super) session_id: String,
+    pub(super) state: std::sync::Mutex<SessionOpenAdmissionGateState>,
+    pub(super) admitted: tokio::sync::Notify,
+    pub(super) contended: tokio::sync::Notify,
+    pub(super) release: tokio::sync::Notify,
+    pub(super) attempts: std::sync::atomic::AtomicUsize,
+    pub(super) acquisitions: std::sync::atomic::AtomicUsize,
+    pub(super) admissions: std::sync::atomic::AtomicUsize,
+    pub(super) contentions: std::sync::atomic::AtomicUsize,
 }
 
 impl SessionOpenAdmissionGate {
-    fn new(session_id: impl Into<String>) -> Self {
+    pub(super) fn new(session_id: impl Into<String>) -> Self {
         Self {
             session_id: session_id.into(),
             state: std::sync::Mutex::new(SessionOpenAdmissionGateState::default()),
@@ -33,7 +35,7 @@ impl SessionOpenAdmissionGate {
         }
     }
 
-    fn arm(&self) {
+    pub(super) fn arm(&self) {
         use std::sync::atomic::Ordering;
 
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
@@ -51,7 +53,7 @@ impl SessionOpenAdmissionGate {
         self.contentions.store(0, Ordering::SeqCst);
     }
 
-    fn observe_claim(
+    pub(super) fn observe_claim(
         &self,
         session_id: &str,
         outcome: &lash::persistence::SessionExecutionLeaseClaimOutcome,
@@ -86,7 +88,7 @@ impl SessionOpenAdmissionGate {
         }
     }
 
-    async fn observe_admission(
+    pub(super) async fn observe_admission(
         &self,
         authority: &lash::persistence::SessionExecutionLeaseAuthority,
     ) {
@@ -122,7 +124,7 @@ impl SessionOpenAdmissionGate {
             .held_authority = None;
     }
 
-    async fn wait_until_admitted(&self) {
+    pub(super) async fn wait_until_admitted(&self) {
         use std::sync::atomic::Ordering;
 
         loop {
@@ -134,7 +136,7 @@ impl SessionOpenAdmissionGate {
         }
     }
 
-    async fn wait_until_contended(&self) {
+    pub(super) async fn wait_until_contended(&self) {
         use std::sync::atomic::Ordering;
 
         loop {
@@ -146,7 +148,7 @@ impl SessionOpenAdmissionGate {
         }
     }
 
-    fn release(&self) {
+    pub(super) fn release(&self) {
         self.state
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -154,14 +156,14 @@ impl SessionOpenAdmissionGate {
         self.release.notify_waiters();
     }
 
-    fn finish(&self) {
+    pub(super) fn finish(&self) {
         self.state
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .tracking = false;
     }
 
-    fn counts(&self) -> (usize, usize, usize, usize) {
+    pub(super) fn counts(&self) -> (usize, usize, usize, usize) {
         use std::sync::atomic::Ordering;
 
         (
@@ -173,15 +175,15 @@ impl SessionOpenAdmissionGate {
     }
 }
 
-fn registered_session_open_admission_gates(
-) -> &'static std::sync::Mutex<BTreeMap<String, Arc<SessionOpenAdmissionGate>>> {
+pub(crate) fn registered_session_open_admission_gates()
+-> &'static std::sync::Mutex<BTreeMap<String, Arc<SessionOpenAdmissionGate>>> {
     static GATES: std::sync::OnceLock<
         std::sync::Mutex<BTreeMap<String, Arc<SessionOpenAdmissionGate>>>,
     > = std::sync::OnceLock::new();
     GATES.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()))
 }
 
-fn register_session_open_admission_gate(gate: Arc<SessionOpenAdmissionGate>) {
+pub(crate) fn register_session_open_admission_gate(gate: Arc<SessionOpenAdmissionGate>) {
     registered_session_open_admission_gates()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
@@ -202,7 +204,7 @@ pub(crate) fn arm_registered_session_open_admission_gate(session_id: &str, reaso
     }
 }
 
-fn unregister_session_open_admission_gate(session_id: &str) {
+pub(crate) fn unregister_session_open_admission_gate(session_id: &str) {
     registered_session_open_admission_gates()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
@@ -210,8 +212,8 @@ fn unregister_session_open_admission_gate(session_id: &str) {
 }
 
 struct GatedRuntimePersistence {
-    inner: Arc<dyn lash::persistence::RuntimePersistence>,
-    gate: Arc<SessionOpenAdmissionGate>,
+    pub(super) inner: Arc<dyn lash::persistence::RuntimePersistence>,
+    pub(super) gate: Arc<SessionOpenAdmissionGate>,
 }
 
 // The test-only decorator is still implemented through the host-facing
@@ -228,10 +230,8 @@ impl lash::persistence::RuntimePersistenceDecorator for GatedRuntimePersistence 
         owner: &lash::persistence::LeaseOwnerIdentity,
         executor_id: &str,
         lease_ttl_ms: u64,
-    ) -> Result<
-        lash::persistence::SessionExecutionLeaseClaimOutcome,
-        lash::persistence::StoreError,
-    > {
+    ) -> Result<lash::persistence::SessionExecutionLeaseClaimOutcome, lash::persistence::StoreError>
+    {
         let outcome = self
             .inner
             .try_claim_session_execution_lease(session_id, owner, executor_id, lease_ttl_ms)
@@ -250,9 +250,9 @@ impl lash::persistence::RuntimePersistenceDecorator for GatedRuntimePersistence 
     }
 }
 
-struct GatedSessionStoreFactory {
-    inner: Arc<dyn lash::persistence::SessionStoreFactory>,
-    gate: Arc<SessionOpenAdmissionGate>,
+pub(crate) struct GatedSessionStoreFactory {
+    pub(super) inner: Arc<dyn lash::persistence::SessionStoreFactory>,
+    pub(super) gate: Arc<SessionOpenAdmissionGate>,
 }
 
 #[async_trait::async_trait]

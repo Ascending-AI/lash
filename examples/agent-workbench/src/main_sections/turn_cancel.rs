@@ -1,13 +1,15 @@
+use super::*;
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "outcome", content = "cancellation", rename_all = "snake_case")]
-enum RecordedTurnCancellation {
+pub(crate) enum RecordedTurnCancellation {
     Requested(lash::TurnCancellationEvidence),
     AlreadyRequested(lash::TurnCancellationEvidence),
 }
 
 #[cfg(test)]
 impl RecordedTurnCancellation {
-    fn evidence(&self) -> &lash::TurnCancellationEvidence {
+    pub(crate) fn evidence(&self) -> &lash::TurnCancellationEvidence {
         match self {
             Self::Requested(evidence) | Self::AlreadyRequested(evidence) => evidence,
         }
@@ -16,7 +18,7 @@ impl RecordedTurnCancellation {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
-enum TurnCancelReceipt {
+pub(crate) enum TurnCancelReceipt {
     TerminalAttached {
         address: lash::TurnAddress,
         cancellation: RecordedTurnCancellation,
@@ -35,12 +37,12 @@ enum TurnCancelReceipt {
 }
 
 impl TurnCancelReceipt {
-    fn terminal_is_pending(&self) -> bool {
+    pub(crate) fn terminal_is_pending(&self) -> bool {
         matches!(self, Self::CancellationRecordedTerminalPending { .. })
     }
 }
 
-async fn cancel_turn(
+pub(crate) async fn cancel_turn(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<(StatusCode, Json<TurnCancelResponse>), AppError> {
@@ -48,7 +50,7 @@ async fn cancel_turn(
     cancel_turn_with_driver(state, query, &driver).await
 }
 
-async fn cancel_turn_with_driver(
+pub(crate) async fn cancel_turn_with_driver(
     state: AppState,
     query: SessionQuery,
     driver: &lash::TurnWorkDriver,
@@ -85,7 +87,7 @@ async fn cancel_turn_with_driver(
 /// Only a typed, durably recorded cancellation can turn attachment expiry
 /// into a pending receipt. Every other terminal-attachment failure remains an
 /// HTTP error at its call site.
-async fn attach_recorded_cancel_terminal(
+pub(crate) async fn attach_recorded_cancel_terminal(
     driver: &lash::TurnWorkDriver,
     address: lash::TurnAddress,
     cancellation: RecordedTurnCancellation,

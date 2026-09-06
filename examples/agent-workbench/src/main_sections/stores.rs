@@ -1,22 +1,27 @@
-struct WorkbenchStores {
-    session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    process_registry: Arc<dyn lash::process::ProcessRegistry>,
-    process_continuations: Arc<dyn lash::process::ProcessContinuationStore>,
-    trigger_store: Arc<dyn lash::triggers::TriggerStore>,
-    artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
-    process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
-    backend: &'static str,
+use super::*;
+
+pub(crate) struct WorkbenchStores {
+    pub(crate) session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    pub(crate) process_registry: Arc<dyn lash::process::ProcessRegistry>,
+    pub(crate) process_continuations: Arc<dyn lash::process::ProcessContinuationStore>,
+    pub(crate) trigger_store: Arc<dyn lash::triggers::TriggerStore>,
+    pub(crate) artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
+    pub(crate) process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
+    pub(crate) backend: &'static str,
 }
 
 impl WorkbenchStores {
-    async fn open(data_dir: &std::path::Path, database_url: Option<&str>) -> AnyhowResult<Self> {
+    pub(crate) async fn open(
+        data_dir: &std::path::Path,
+        database_url: Option<&str>,
+    ) -> AnyhowResult<Self> {
         match database_url {
             Some(database_url) => Self::open_postgres(database_url).await,
             None => Self::open_sqlite(data_dir).await,
         }
     }
 
-    async fn open_sqlite(data_dir: &std::path::Path) -> AnyhowResult<Self> {
+    pub(crate) async fn open_sqlite(data_dir: &std::path::Path) -> AnyhowResult<Self> {
         let process_registry_path = data_dir.join("processes.db");
         let session_store_root = data_dir.join("lash-sessions");
         let session_store_factory = Arc::new(
@@ -30,8 +35,8 @@ impl WorkbenchStores {
                 &process_registry_path,
                 session_store_root,
             )
-                .await
-                .context("open SQLite process registry")?,
+            .await
+            .context("open SQLite process registry")?,
         );
         let process_registry = process_store.clone() as Arc<dyn lash::process::ProcessRegistry>;
         let process_continuations =
@@ -57,7 +62,7 @@ impl WorkbenchStores {
         })
     }
 
-    async fn open_postgres(database_url: &str) -> AnyhowResult<Self> {
+    pub(crate) async fn open_postgres(database_url: &str) -> AnyhowResult<Self> {
         anyhow::ensure!(
             !database_url.trim().is_empty(),
             "AGENT_WORKBENCH_DATABASE_URL must not be empty"
@@ -69,8 +74,7 @@ impl WorkbenchStores {
         let process_store = Arc::new(storage.process_registry());
         Ok(Self {
             session_store_factory: Arc::new(
-                storage
-                    .session_store_factory_with_shared_process_registry(),
+                storage.session_store_factory_with_shared_process_registry(),
             ),
             process_registry: process_store.clone(),
             process_continuations: process_store,

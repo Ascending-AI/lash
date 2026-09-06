@@ -1,3 +1,5 @@
+use super::*;
+
 /// The body of `restate::run_user_turn`, minus the Restate effect controller the
 /// in-process test host does not need.
 async fn run_workbench_turn_attempt(
@@ -83,7 +85,7 @@ async fn run_workbench_turn_attempt_with_error_evidence(
     }
 }
 
-fn product_user_rows(state: &AppState, session_id: &str) -> Vec<(String, String)> {
+pub(crate) fn product_user_rows(state: &AppState, session_id: &str) -> Vec<(String, String)> {
     state
         .event_tx
         .snapshot(session_id)
@@ -432,14 +434,14 @@ async fn same_worker_successor_waits_for_dead_boot_ttl() {
 /// defect in the gate (the overlap it exists to prove did not happen), so it
 /// panics and turns the test red.
 struct AppendPreCommitBarrier {
-    arrivals: std::sync::atomic::AtomicUsize,
+    pub(super) arrivals: std::sync::atomic::AtomicUsize,
 }
 
 impl AppendPreCommitBarrier {
-    const OVERLAP_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
-    const OVERLAP_POLL: std::time::Duration = std::time::Duration::from_millis(1);
+    pub(super) const OVERLAP_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+    pub(super) const OVERLAP_POLL: std::time::Duration = std::time::Duration::from_millis(1);
 
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             arrivals: std::sync::atomic::AtomicUsize::new(0),
         }
@@ -634,7 +636,10 @@ fn gated_first_call_provider(
 /// workbench's Restate queued-turn workflow. A state built without a driver gets
 /// lash's `NativeQueuedWorkRunHandle` instead, which drains the input itself
 /// without the workbench in the loop — a shape the workbench never runs in.
-async fn queued_send_test_state(data_dir: &std::path::Path, provider: ProviderHandle) -> AppState {
+pub(crate) async fn queued_send_test_state(
+    data_dir: &std::path::Path,
+    provider: ProviderHandle,
+) -> AppState {
     let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
         lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
     );
@@ -671,8 +676,8 @@ async fn spawn_failing_restate_ingress() -> String {
     format!("http://{addr}")
 }
 
-async fn spawn_terminally_failed_session_delete_restate(
-) -> (String, mpsc::UnboundedReceiver<Value>) {
+async fn spawn_terminally_failed_session_delete_restate() -> (String, mpsc::UnboundedReceiver<Value>)
+{
     let (request_tx, request_rx) = mpsc::unbounded_channel();
     let ingress_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -724,11 +729,13 @@ async fn spawn_ambiguous_session_delete_restate() -> String {
         .expect("ambiguous-delete Restate ingress addr");
     let app = Router::new().route(
         "/{*path}",
-        post(|AxumPath(path): AxumPath<String>, Json(_body): Json<Value>| async move {
-            assert!(path.starts_with("WorkbenchSessionDeleteWorkflow/"));
-            assert!(!path.ends_with("/send"));
-            (StatusCode::OK, Json(json!({ "unexpected": "shape" })))
-        }),
+        post(
+            |AxumPath(path): AxumPath<String>, Json(_body): Json<Value>| async move {
+                assert!(path.starts_with("WorkbenchSessionDeleteWorkflow/"));
+                assert!(!path.ends_with("/send"));
+                (StatusCode::OK, Json(json!({ "unexpected": "shape" })))
+            },
+        ),
     );
     tokio::spawn(async move {
         if let Err(error) = axum::serve(listener, app).await {
@@ -740,7 +747,7 @@ async fn spawn_ambiguous_session_delete_restate() -> String {
 
 #[derive(Clone, Default)]
 struct SlowSessionDeleteRetentionIngress {
-    attempts: Arc<std::sync::atomic::AtomicUsize>,
+    pub(super) attempts: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 async fn spawn_slow_session_delete_retention_restate() -> String {
@@ -805,9 +812,9 @@ async fn slow_delete_retention_is_bounded_and_can_be_retried() {
         ),
     );
     let error = Box::pin(tokio::time::timeout(Duration::from_secs(2), delete))
-    .await
-    .expect("delete attach exceeded its delete-class deadline")
-    .expect_err("the bounded slow attach must be reported as ambiguous");
+        .await
+        .expect("delete attach exceeded its delete-class deadline")
+        .expect_err("the bounded slow attach must be reported as ambiguous");
 
     assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(error.message.contains("could not be confirmed"));
@@ -873,8 +880,8 @@ async fn an_ambiguous_delete_attach_failure_never_claims_the_session_remains_liv
 
 #[derive(Clone)]
 struct TombstoneThenFailDeleteIngress {
-    session_id: String,
-    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    pub(super) session_id: String,
+    pub(super) store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
 }
 
 async fn spawn_tombstone_then_fail_session_delete_restate(
@@ -1399,9 +1406,9 @@ async fn failed_automatic_queued_submission_releases_claim_and_can_retry() {
 }
 
 struct TurnAdmissionGate {
-    event_name: &'static str,
-    entered: std::sync::mpsc::SyncSender<()>,
-    release: Arc<(Mutex<bool>, std::sync::Condvar)>,
+    pub(super) event_name: &'static str,
+    pub(super) entered: std::sync::mpsc::SyncSender<()>,
+    pub(super) release: Arc<(Mutex<bool>, std::sync::Condvar)>,
 }
 
 impl TraceSink for TurnAdmissionGate {

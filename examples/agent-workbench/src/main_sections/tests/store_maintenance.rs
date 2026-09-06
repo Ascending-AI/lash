@@ -1,3 +1,5 @@
+use super::*;
+
 // Coverage for `/api/admin/store-maintenance`: the two levers that bound
 // session-store growth, and — the point of the route — the destruction it
 // refuses to perform.
@@ -24,13 +26,13 @@ const RECLAIM_RETENTION_WINDOW_MS: u64 = 60 * 60 * 1000;
 const TEST_ONLY_INSTANT_ELIGIBILITY_MS: u64 = 0;
 
 struct StoreMaintenanceFixture {
-    state: AppState,
-    session_id: String,
-    attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
+    pub(super) state: AppState,
+    pub(super) session_id: String,
+    pub(super) attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
 }
 
 struct DeleteFailingWorkbenchAttachmentStore {
-    inner: Arc<dyn lash::persistence::AttachmentStore>,
+    pub(super) inner: Arc<dyn lash::persistence::AttachmentStore>,
 }
 
 #[async_trait]
@@ -65,7 +67,8 @@ impl lash::persistence::AttachmentStore for DeleteFailingWorkbenchAttachmentStor
 
     async fn list(
         &self,
-    ) -> Result<Vec<lash::persistence::StoredBlobRef>, lash::persistence::AttachmentStoreError> {
+    ) -> Result<Vec<lash::persistence::StoredBlobRef>, lash::persistence::AttachmentStoreError>
+    {
         self.inner.list().await
     }
 
@@ -100,11 +103,12 @@ async fn store_maintenance_fixture(
     // and fails safe instead of enumerating that half of the root set. A
     // reclamation test on the unwired form would be exercising a degraded root
     // authority the workbench never actually runs.
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
-        Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
+    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+        lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
             data_dir.join("lash-sessions"),
             data_dir.join("processes.db"),
-        ));
+        ),
+    );
     let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.join("attachments"),
     )) as Arc<dyn lash::persistence::AttachmentStore>;
@@ -261,14 +265,15 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
         vec![retained.input_id.as_str()],
         "only the uncancelled input is still pending"
     );
-    session.close().await.expect("close the vacuum test session");
+    session
+        .close()
+        .await
+        .expect("close the vacuum test session");
 
-    let Json(swept) = run_store_maintenance(
-        State(state.clone()),
-        Json(vacuum_only_request(&session_id)),
-    )
-    .await
-    .expect("run the vacuum lever");
+    let Json(swept) =
+        run_store_maintenance(State(state.clone()), Json(vacuum_only_request(&session_id)))
+            .await
+            .expect("run the vacuum lever");
     assert!(
         swept.reclaimed_attachments.is_none(),
         "a vacuum-only request must not sweep the attachment backend"
@@ -306,12 +311,10 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
         .await
         .expect("close the reopened vacuum test session");
 
-    let Json(second_pass) = run_store_maintenance(
-        State(state.clone()),
-        Json(vacuum_only_request(&session_id)),
-    )
-    .await
-    .expect("run the vacuum lever again");
+    let Json(second_pass) =
+        run_store_maintenance(State(state.clone()), Json(vacuum_only_request(&session_id)))
+            .await
+            .expect("run the vacuum lever again");
     assert_eq!(
         second_pass.vacuumed[0].removed_pending_turn_input_tombstone_count, 0,
         "a second pass finds nothing settled left to reclaim"
@@ -643,7 +646,9 @@ async fn store_maintenance_refuses_an_empty_root_set_inner() {
     // The refusal is reported as a refusal, not as a successful empty sweep.
     assert_eq!(refused.status, StatusCode::CONFLICT);
     assert!(
-        refused.message.contains("empty_root_set=authorize_delete_all"),
+        refused
+            .message
+            .contains("empty_root_set=authorize_delete_all"),
         "the refusal must name the assertion that would authorize it: {}",
         refused.message
     );

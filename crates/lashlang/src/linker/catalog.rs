@@ -1,15 +1,17 @@
+use super::*;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LashlangHostCatalog {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    module_instances: BTreeMap<String, ModuleInstanceCatalog>,
+    pub(super) module_instances: BTreeMap<String, ModuleInstanceCatalog>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    resource_types: BTreeMap<String, ResourceTypeCatalog>,
+    pub(super) resource_types: BTreeMap<String, ResourceTypeCatalog>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    named_data_types: BTreeMap<String, NamedDataType>,
+    pub(super) named_data_types: BTreeMap<String, NamedDataType>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    value_constructors: BTreeMap<String, ValueConstructorBinding>,
+    pub(super) value_constructors: BTreeMap<String, ValueConstructorBinding>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    trigger_sources: BTreeMap<String, TriggerSourceBinding>,
+    pub(super) trigger_sources: BTreeMap<String, TriggerSourceBinding>,
 }
 
 impl LashlangHostCatalog {
@@ -752,7 +754,7 @@ impl LashlangHostCatalog {
         suggestions
     }
 
-    fn refuse_named_data_type(
+    pub(super) fn refuse_named_data_type(
         &self,
         data_type: &NamedDataType,
     ) -> Result<(), LashlangHostCatalogError> {
@@ -764,7 +766,7 @@ impl LashlangHostCatalog {
         Ok(())
     }
 
-    fn merge_named_data_type(
+    pub(super) fn merge_named_data_type(
         &mut self,
         data_type: NamedDataType,
     ) -> Result<(), LashlangHostCatalogError> {
@@ -774,7 +776,7 @@ impl LashlangHostCatalog {
         Ok(())
     }
 
-    fn insert_module_instance(&mut self, path: Vec<String>, resource_type: String) {
+    pub(super) fn insert_module_instance(&mut self, path: Vec<String>, resource_type: String) {
         let alias = module_path_key(&path);
         self.module_instances.insert(
             alias.clone(),
@@ -788,7 +790,7 @@ impl LashlangHostCatalog {
         self.ensure_resource_type(resource_type);
     }
 
-    fn insert_resource_operation(
+    pub(super) fn insert_resource_operation(
         &mut self,
         resource_type: String,
         operation: String,
@@ -808,7 +810,7 @@ impl LashlangHostCatalog {
         Ok(())
     }
 
-    fn insert_value_constructor(
+    pub(super) fn insert_value_constructor(
         &mut self,
         path: String,
         binding: ValueConstructorBinding,
@@ -820,7 +822,7 @@ impl LashlangHostCatalog {
         Ok(())
     }
 
-    fn insert_trigger_source(
+    pub(super) fn insert_trigger_source(
         &mut self,
         source_type: String,
         event_type: NamedDataType,

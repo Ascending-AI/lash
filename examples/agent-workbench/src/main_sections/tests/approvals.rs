@@ -1,3 +1,5 @@
+use super::*;
+
 async fn approval_test_core(
     data_dir: &std::path::Path,
     provider: ProviderHandle,

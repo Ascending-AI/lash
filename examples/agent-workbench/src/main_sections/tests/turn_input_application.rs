@@ -1,4 +1,6 @@
-async fn assert_typed_turn_input_application(
+use super::*;
+
+pub(crate) async fn assert_typed_turn_input_application(
     session: &lash::LashSession,
     rx: &mut mpsc::Receiver<ObservationStreamItem>,
 ) {
@@ -26,8 +28,7 @@ async fn assert_typed_turn_input_application(
         };
         let value = serde_json::to_value(&event).expect("remote event json");
         if value.pointer("/type").and_then(Value::as_str) == Some("turn_activity")
-            && value.pointer("/activity/type").and_then(Value::as_str)
-                == Some("turn_input_applied")
+            && value.pointer("/activity/type").and_then(Value::as_str) == Some("turn_input_applied")
         {
             assert!(
                 value.pointer("/activity/kind").is_none(),

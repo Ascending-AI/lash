@@ -1,7 +1,9 @@
+use super::*;
+
 impl AppState {
     /// The dialect this session is opened with: its roster row's, or the
     /// ambient default for a session the roster never recorded.
-    fn requested_dialect(&self, session_id: &str) -> lash::rlm::RlmDialect {
+    pub(crate) fn requested_dialect(&self, session_id: &str) -> lash::rlm::RlmDialect {
         self.sessions
             .dialect_for(session_id)
             .unwrap_or(self.rlm_dialect)
@@ -17,7 +19,10 @@ impl AppState {
     /// The decode is strict (FIG-1979): a recorded bag that does not decode is
     /// reported, never smoothed into the default dialect. Absence is a
     /// different answer from malformed and keeps its fallback.
-    async fn recorded_dialect(&self, session_id: &str) -> Result<lash::rlm::RlmDialect, AppError> {
+    pub(crate) async fn recorded_dialect(
+        &self,
+        session_id: &str,
+    ) -> Result<lash::rlm::RlmDialect, AppError> {
         use lash::rlm::RlmSessionExt as _;
 
         let Ok(session) = self.open_session(session_id).await else {
@@ -46,7 +51,7 @@ impl AppState {
     /// operator created with a dialect asks for that one for the rest of its
     /// life (FIG-1306), and a session the roster does not know asks for the
     /// ambient `LASH_RUNBOOK_DIALECT`.
-    fn session_builder(&self, session_id: impl Into<String>) -> lash::SessionBuilder {
+    pub(crate) fn session_builder(&self, session_id: impl Into<String>) -> lash::SessionBuilder {
         let session_id = session_id.into();
         let dialect = self.requested_dialect(&session_id);
         let model = model_spec_from_selection(self.selected_model());
@@ -68,26 +73,29 @@ impl AppState {
 
     /// Opens a session through [`Self::session_builder`], so every open states
     /// the dialect this workbench means that session to run.
-    async fn open_session(&self, session_id: &str) -> Result<lash::LashSession, lash::EmbedError> {
+    pub(crate) async fn open_session(
+        &self,
+        session_id: &str,
+    ) -> Result<lash::LashSession, lash::EmbedError> {
         open_session_with_bounded_retry(self, session_id).await
     }
 
-    fn current_session_id(&self) -> String {
+    pub(crate) fn current_session_id(&self) -> String {
         self.sessions.current()
     }
 
-    fn selected_model(&self) -> ModelSelection {
+    pub(crate) fn selected_model(&self) -> ModelSelection {
         self.selected_model.lock_recover().clone()
     }
 
-    fn set_selected_model(&self, model: ModelSelection) {
+    pub(crate) fn set_selected_model(&self, model: ModelSelection) {
         *self.selected_model.lock_recover() = model;
     }
 
     /// The settings panel for one session, labelled with the dialect that
     /// session *recorded* rather than the one this process is configured with —
     /// the two differ exactly when the label matters (FIG-1306, ADR 0063).
-    fn settings_for_session(
+    pub(crate) fn settings_for_session(
         &self,
         session_id: String,
         rlm_dialect: lash::rlm::RlmDialect,
@@ -109,15 +117,15 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn messages_snapshot(&self) -> Vec<ChatMessage> {
+    pub(crate) fn messages_snapshot(&self) -> Vec<ChatMessage> {
         self.messages.lock_recover().clone()
     }
 
-    fn trace(&self, name: &str, payload: Value) {
+    pub(crate) fn trace(&self, name: &str, payload: Value) {
         self.trace_for_session(&self.current_session_id(), name, payload);
     }
 
-    fn trace_for_session(&self, session_id: &str, name: &str, payload: Value) {
+    pub(crate) fn trace_for_session(&self, session_id: &str, name: &str, payload: Value) {
         emit_workbench_trace(
             &self.trace_sink,
             Some(session_id.to_string()),
@@ -126,7 +134,7 @@ impl AppState {
         );
     }
 
-    fn session_admission_error(
+    pub(crate) fn session_admission_error(
         &self,
         session_id: &str,
         surface: &str,
@@ -153,7 +161,7 @@ impl AppState {
         AppError::session_open(error)
     }
 
-    fn publish_for_session_identified(
+    pub(crate) fn publish_for_session_identified(
         &self,
         session_id: &str,
         event_id: impl Into<String>,
@@ -162,7 +170,7 @@ impl AppState {
         let _ = self.event_tx.publish_identified(session_id, event_id, item);
     }
 
-    fn publish_turn_done(&self, session_id: &str, turn_id: &str) {
+    pub(crate) fn publish_turn_done(&self, session_id: &str, turn_id: &str) {
         self.publish_for_session_identified(
             session_id,
             format!("turn:{turn_id}:done"),
@@ -182,11 +190,11 @@ impl AppState {
     /// `Failed` outcome runs last so a viewer that already rendered those rows
     /// knows to re-derive from the authoritative snapshot instead of keeping a
     /// phantom whose commit was refused.
-    fn publish_turn_failed(&self, session_id: &str, turn_id: &str) {
+    pub(crate) fn publish_turn_failed(&self, session_id: &str, turn_id: &str) {
         self.publish_turn_failed_with_message(session_id, turn_id, PUBLIC_TURN_FAILURE_MESSAGE);
     }
 
-    fn publish_turn_failed_with_message(
+    pub(crate) fn publish_turn_failed_with_message(
         &self,
         session_id: &str,
         turn_id: &str,
@@ -214,7 +222,7 @@ impl AppState {
         );
     }
 
-    fn publish_trigger_dispatch_done(&self, session_id: &str, operation_id: &str) {
+    pub(crate) fn publish_trigger_dispatch_done(&self, session_id: &str, operation_id: &str) {
         if self.active_turns.for_session(session_id).is_empty() {
             self.publish_for_session_identified(
                 session_id,
@@ -228,12 +236,12 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn track_turn(&self, session_id: &str, turn_id: &str) {
+    pub(crate) fn track_turn(&self, session_id: &str, turn_id: &str) {
         self.active_turns.insert(session_id, turn_id);
     }
 
     #[cfg(test)]
-    fn track_turn_prompt(
+    pub(crate) fn track_turn_prompt(
         &self,
         session_id: &str,
         turn_id: &str,
@@ -253,7 +261,7 @@ impl AppState {
     /// detaches. Cleanup failures are retryable. The workflow deliberately
     /// replays this idempotent delete before retrying retention so its Restate
     /// journal command sequence remains stable.
-    async fn delete_session_and_reclaim_processes(
+    pub(crate) async fn delete_session_and_reclaim_processes(
         &self,
         session_id: &str,
         scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
@@ -332,7 +340,7 @@ impl AppState {
     /// at delete time, not a standing sweep, so work that was live at the delete
     /// and terminates afterwards stays observable on the rail — the property the
     /// `workbench-process-lifecycle` runbook judges.
-    async fn prune_processes_originated_by(
+    pub(crate) async fn prune_processes_originated_by(
         &self,
         session_id: &str,
     ) -> Result<lash::process::ProcessPruneReport, lash::EmbedError> {
@@ -354,7 +362,7 @@ impl AppState {
     /// Fan out exact-address cooperative cancellation to the active turns the
     /// UI submitted for `session_id`.
     #[cfg(test)]
-    async fn cancel_turns_for_session(
+    pub(crate) async fn cancel_turns_for_session(
         &self,
         session_id: &str,
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
@@ -362,7 +370,7 @@ impl AppState {
             .await
     }
 
-    async fn cancel_turns_for_session_with_driver(
+    pub(crate) async fn cancel_turns_for_session_with_driver(
         &self,
         session_id: &str,
         driver: &lash::TurnWorkDriver,
@@ -508,7 +516,10 @@ impl AppState {
         Ok(receipts)
     }
 
-    async fn restate_turn_is_active(&self, address: &lash::TurnAddress) -> AnyhowResult<bool> {
+    pub(crate) async fn restate_turn_is_active(
+        &self,
+        address: &lash::TurnAddress,
+    ) -> AnyhowResult<bool> {
         let workflow = if address.turn_id.starts_with("workbench-queued-") {
             "WorkbenchQueuedTurnWorkflow"
         } else {
@@ -525,11 +536,15 @@ impl AppState {
             .is_some_and(|status| status.is_still_active()))
     }
 
-    fn push_message(&self, role: impl Into<String>, text: impl Into<String>) -> ChatMessage {
+    pub(crate) fn push_message(
+        &self,
+        role: impl Into<String>,
+        text: impl Into<String>,
+    ) -> ChatMessage {
         self.push_message_for_session(&self.current_session_id(), role, text)
     }
 
-    fn push_message_for_session(
+    pub(crate) fn push_message_for_session(
         &self,
         session_id: &str,
         role: impl Into<String>,
@@ -543,7 +558,7 @@ impl AppState {
         )
     }
 
-    fn push_message_with_id_for_session(
+    pub(crate) fn push_message_with_id_for_session(
         &self,
         session_id: &str,
         id: impl Into<String>,
@@ -559,7 +574,7 @@ impl AppState {
         )
     }
 
-    fn push_message_with_id_and_attachments_for_session(
+    pub(crate) fn push_message_with_id_and_attachments_for_session(
         &self,
         session_id: &str,
         id: impl Into<String>,
@@ -577,7 +592,7 @@ impl AppState {
         )
     }
 
-    fn push_assistant_message_for_turn(
+    pub(crate) fn push_assistant_message_for_turn(
         &self,
         session_id: &str,
         id: impl Into<String>,
@@ -596,7 +611,7 @@ impl AppState {
         )
     }
 
-    fn push_message_with_id_and_attachments_and_provenance_for_session(
+    pub(crate) fn push_message_with_id_and_attachments_and_provenance_for_session(
         &self,
         session_id: &str,
         id: impl Into<String>,
@@ -627,7 +642,7 @@ impl AppState {
     }
 }
 
-fn emit_workbench_trace(
+pub(crate) fn emit_workbench_trace(
     sink: &Option<Arc<dyn TraceSink>>,
     session_id: Option<String>,
     name: &str,
@@ -651,7 +666,7 @@ fn emit_workbench_trace(
     }
 }
 
-fn trace_work_item(item: &WorkItem) -> Value {
+pub(crate) fn trace_work_item(item: &WorkItem) -> Value {
     json!({
         "process_id": item.process.process_id.clone(),
         "graph_key": item.process.graph_key.clone(),
@@ -682,13 +697,13 @@ fn trace_work_item(item: &WorkItem) -> Value {
 /// session actually *recorded* is read back from its own read view, never from
 /// this row (FIG-1306).
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct WorkbenchSessionEntry {
-    session_id: String,
+pub(crate) struct WorkbenchSessionEntry {
+    pub(crate) session_id: String,
     /// The operator's name for this session, or the id when they gave none.
-    name: String,
-    dialect: lash::rlm::RlmDialect,
-    created_at_ms: i64,
-    last_active_ms: i64,
+    pub(crate) name: String,
+    pub(crate) dialect: lash::rlm::RlmDialect,
+    pub(crate) created_at_ms: i64,
+    pub(crate) last_active_ms: i64,
 }
 
 /// The sessions this workbench knows about, and which one is current.
@@ -704,16 +719,16 @@ struct WorkbenchSessionEntry {
 /// ambient `LASH_RUNBOOK_DIALECT`, which is how every pre-roster deployment and
 /// every ad-hoc `?session_id=` tab reads.
 #[derive(Clone, Debug)]
-struct WorkbenchSessions {
-    current: Arc<Mutex<String>>,
-    path: Option<Arc<PathBuf>>,
-    roster: Arc<Mutex<BTreeMap<String, WorkbenchSessionEntry>>>,
-    roster_path: Option<Arc<PathBuf>>,
+pub(crate) struct WorkbenchSessions {
+    pub(crate) current: Arc<Mutex<String>>,
+    pub(crate) path: Option<Arc<PathBuf>>,
+    pub(crate) roster: Arc<Mutex<BTreeMap<String, WorkbenchSessionEntry>>>,
+    pub(crate) roster_path: Option<Arc<PathBuf>>,
 }
 
 impl WorkbenchSessions {
     #[cfg(test)]
-    fn fresh() -> Self {
+    pub(crate) fn fresh() -> Self {
         Self {
             current: Arc::new(Mutex::new(new_session_id())),
             path: None,
@@ -722,7 +737,7 @@ impl WorkbenchSessions {
         }
     }
 
-    fn persistent(path: PathBuf) -> AnyhowResult<Self> {
+    pub(crate) fn persistent(path: PathBuf) -> AnyhowResult<Self> {
         let current = match std::fs::read_to_string(&path) {
             Ok(session_id) if !session_id.trim().is_empty() => session_id,
             Ok(_) => new_session_id(),
@@ -756,13 +771,13 @@ impl WorkbenchSessions {
         Ok(ids)
     }
 
-    fn current(&self) -> String {
+    pub(crate) fn current(&self) -> String {
         self.current.lock_recover().clone()
     }
 
     /// Replace one retired roster slot without disturbing a session selected
     /// while the durable delete was settling.
-    fn replace(
+    pub(crate) fn replace(
         &self,
         retired_session_id: &str,
         fallback_dialect: lash::rlm::RlmDialect,
@@ -803,7 +818,7 @@ impl WorkbenchSessions {
     }
 
     #[cfg(test)]
-    fn rotate(&self) -> (String, String) {
+    pub(crate) fn rotate(&self) -> (String, String) {
         let old = self.current();
         let dialect = self
             .dialect_for(&old)
@@ -814,7 +829,7 @@ impl WorkbenchSessions {
     }
 
     /// Add a session to the roster, or refresh the row of one already there.
-    fn record(
+    pub(crate) fn record(
         &self,
         session_id: String,
         name: String,
@@ -845,14 +860,14 @@ impl WorkbenchSessions {
     /// This is how the boot session joins the roster: its dialect is the
     /// ambient one, and a row that already exists wins, because that row is
     /// what the session's durable pin was created from.
-    fn ensure(&self, session_id: &str, dialect: lash::rlm::RlmDialect) {
+    pub(crate) fn ensure(&self, session_id: &str, dialect: lash::rlm::RlmDialect) {
         if self.roster.lock_recover().contains_key(session_id) {
             return;
         }
         self.record(session_id.to_string(), session_id.to_string(), dialect);
     }
 
-    fn touch(&self, session_id: &str) {
+    pub(crate) fn touch(&self, session_id: &str) {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let mut roster = self.roster.lock_recover();
         let Some(entry) = roster.get_mut(session_id) else {
@@ -864,7 +879,7 @@ impl WorkbenchSessions {
 
     /// A row for a session the roster never recorded, so the selector can show
     /// it without the read side writing to the roster.
-    fn unrostered_entry(
+    pub(crate) fn unrostered_entry(
         &self,
         session_id: String,
         dialect: lash::rlm::RlmDialect,
@@ -878,17 +893,17 @@ impl WorkbenchSessions {
         }
     }
 
-    fn entry(&self, session_id: &str) -> Option<WorkbenchSessionEntry> {
+    pub(crate) fn entry(&self, session_id: &str) -> Option<WorkbenchSessionEntry> {
         self.roster.lock_recover().get(session_id).cloned()
     }
 
     /// The dialect this session must be opened with, if the roster knows it.
-    fn dialect_for(&self, session_id: &str) -> Option<lash::rlm::RlmDialect> {
+    pub(crate) fn dialect_for(&self, session_id: &str) -> Option<lash::rlm::RlmDialect> {
         self.entry(session_id).map(|entry| entry.dialect)
     }
 
     /// The roster, oldest first, which is the order the selector renders.
-    fn list(&self) -> Vec<WorkbenchSessionEntry> {
+    pub(crate) fn list(&self) -> Vec<WorkbenchSessionEntry> {
         let mut entries = self
             .roster
             .lock_recover()
@@ -908,7 +923,7 @@ impl WorkbenchSessions {
     /// Selection is durable for the same reason the boot id is: a reload, a
     /// restart, and the drivers that read `<data-dir>/session-id` must all
     /// agree on which session the workbench is serving.
-    fn select(&self, session_id: &str) -> Option<WorkbenchSessionEntry> {
+    pub(crate) fn select(&self, session_id: &str) -> Option<WorkbenchSessionEntry> {
         let roster = self.roster.lock_recover();
         let entry = roster.get(session_id)?.clone();
         *self.current.lock_recover() = session_id.to_string();
@@ -918,7 +933,7 @@ impl WorkbenchSessions {
         Some(entry)
     }
 
-    fn persist_roster(&self, roster: &BTreeMap<String, WorkbenchSessionEntry>) {
+    pub(crate) fn persist_roster(&self, roster: &BTreeMap<String, WorkbenchSessionEntry>) {
         let Some(path) = self.roster_path.as_deref() else {
             return;
         };
@@ -937,7 +952,7 @@ impl WorkbenchSessions {
         });
     }
 
-    fn persist(&self) {
+    pub(crate) fn persist(&self) {
         let Some(path) = self.path.as_deref() else {
             return;
         };
@@ -955,11 +970,11 @@ impl WorkbenchSessions {
     }
 }
 
-fn new_session_id() -> String {
+pub(crate) fn new_session_id() -> String {
     format!("{SESSION_ID_PREFIX}-{}", uuid::Uuid::new_v4().simple())
 }
 
-fn model_spec_for_request(
+pub(crate) fn model_spec_for_request(
     selected_model: &ModelSelection,
     model: Option<&str>,
     model_variant: Option<&str>,
@@ -982,7 +997,7 @@ fn model_spec_for_request(
         .map_err(|error| AppError::bad_request(error.to_string()))
 }
 
-fn model_variant_for_request(
+pub(crate) fn model_variant_for_request(
     selected_model: &ModelSelection,
     model_variant: Option<&str>,
 ) -> Option<String> {
@@ -999,7 +1014,7 @@ fn model_variant_for_request(
     }
 }
 
-fn model_spec_from_selection(selection: ModelSelection) -> lash::ModelSpec {
+pub(crate) fn model_spec_from_selection(selection: ModelSelection) -> lash::ModelSpec {
     lash::ModelSpec::builder(selection.model)
         .variant(
             selection
@@ -1013,11 +1028,11 @@ fn model_spec_from_selection(selection: ModelSelection) -> lash::ModelSpec {
         .with_capability(workbench_model_capability())
 }
 
-fn with_workbench_model_capability(model: lash::ModelSpec) -> lash::ModelSpec {
+pub(crate) fn with_workbench_model_capability(model: lash::ModelSpec) -> lash::ModelSpec {
     model.with_capability(workbench_model_capability())
 }
 
-fn workbench_model_capability() -> lash::provider::ModelCapability {
+pub(crate) fn workbench_model_capability() -> lash::provider::ModelCapability {
     lash::provider::ModelCapability {
         reasoning: Some(lash::provider::ReasoningCapability {
             efforts: ["low", "medium", "high"]
@@ -1036,7 +1051,7 @@ fn workbench_model_capability() -> lash::provider::ModelCapability {
     }
 }
 
-async fn apply_model_selection_to_session(
+pub(crate) async fn apply_model_selection_to_session(
     state: &AppState,
     session: &lash::LashSession,
     model: lash::ModelSpec,
@@ -1079,7 +1094,7 @@ async fn apply_model_selection_to_session(
 /// `finish`, and the runtime deliberately keeps that value out of the
 /// conversation. The reply the workbench renders is then the workbench's own to
 /// commit, so resume and `/api/state` still read it from durable truth.
-fn workbench_owns_committed_agent_reply(output: &TurnReport) -> bool {
+pub(crate) fn workbench_owns_committed_agent_reply(output: &TurnReport) -> bool {
     output.assistant_message().is_none()
 }
 
@@ -1136,7 +1151,7 @@ pub(crate) async fn commit_assistant_transcript(
         .map_err(AppError::runtime)
 }
 
-fn replay_route_committed_reply<'a>(
+pub(crate) fn replay_route_committed_reply<'a>(
     assistant_text: &str,
     model: Option<&'a str>,
 ) -> Option<(usize, &'a str)> {
@@ -1148,7 +1163,7 @@ fn replay_route_committed_reply<'a>(
     Some((turn, model))
 }
 
-fn assistant_text_for_display(output: &TurnReport, streamed_prose: &str) -> String {
+pub(crate) fn assistant_text_for_display(output: &TurnReport, streamed_prose: &str) -> String {
     let terminal = output.final_value().map(terminal_value_text).or_else(|| {
         output
             .tool_value()
@@ -1165,7 +1180,10 @@ fn assistant_text_for_display(output: &TurnReport, streamed_prose: &str) -> Stri
     combine_assistant_display_parts(assistant, terminal)
 }
 
-fn combine_assistant_display_parts(assistant: Option<String>, terminal: Option<String>) -> String {
+pub(crate) fn combine_assistant_display_parts(
+    assistant: Option<String>,
+    terminal: Option<String>,
+) -> String {
     let assistant = assistant.filter(|text| !text.trim().is_empty());
     let terminal = terminal.filter(|text| !text.trim().is_empty());
     match (assistant, terminal) {
@@ -1177,14 +1195,14 @@ fn combine_assistant_display_parts(assistant: Option<String>, terminal: Option<S
     }
 }
 
-fn terminal_value_text(value: &Value) -> String {
+pub(crate) fn terminal_value_text(value: &Value) -> String {
     value
         .as_str()
         .map(str::to_string)
         .unwrap_or_else(|| value.to_string())
 }
 
-fn compact_payload(value: Value) -> Value {
+pub(crate) fn compact_payload(value: Value) -> Value {
     match value {
         Value::String(text) if text.len() > 1_200 => Value::String(truncate_chars(&text, 1_200)),
         Value::Array(items) => {
@@ -1199,14 +1217,14 @@ fn compact_payload(value: Value) -> Value {
     }
 }
 
-fn truncate_chars(text: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_chars(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         return text.to_string();
     }
     format!("{}...", text.chars().take(max_chars).collect::<String>())
 }
 
-fn work_item_from_observed(item: lash::process::ObservedWorkItem) -> WorkItem {
+pub(crate) fn work_item_from_observed(item: lash::process::ObservedWorkItem) -> WorkItem {
     WorkItem {
         process: work_process_from_observed(item.process),
         events: item
@@ -1219,7 +1237,7 @@ fn work_item_from_observed(item: lash::process::ObservedWorkItem) -> WorkItem {
     }
 }
 
-fn work_process_from_observed(process: lash::process::ObservedProcess) -> WorkProcess {
+pub(crate) fn work_process_from_observed(process: lash::process::ObservedProcess) -> WorkProcess {
     WorkProcess {
         process_id: process.process_id,
         graph_key: process.graph_key,
@@ -1239,7 +1257,7 @@ fn work_process_from_observed(process: lash::process::ObservedProcess) -> WorkPr
     }
 }
 
-fn work_event_from_observed(event: lash::process::ObservedProcessEvent) -> WorkEvent {
+pub(crate) fn work_event_from_observed(event: lash::process::ObservedProcessEvent) -> WorkEvent {
     WorkEvent {
         sequence: event.sequence,
         event_type: event.event_type,
@@ -1249,18 +1267,19 @@ fn work_event_from_observed(event: lash::process::ObservedProcessEvent) -> WorkE
 }
 
 #[cfg(test)]
-static SESSION_DELETE_RETENTION_FAULTS: std::sync::LazyLock<Mutex<BTreeMap<String, String>>> =
-    std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
+pub(crate) static SESSION_DELETE_RETENTION_FAULTS: std::sync::LazyLock<
+    Mutex<BTreeMap<String, String>>,
+> = std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 #[cfg(test)]
-fn fail_session_delete_retention_once(session_id: &str, turn_id: &str) {
+pub(crate) fn fail_session_delete_retention_once(session_id: &str, turn_id: &str) {
     SESSION_DELETE_RETENTION_FAULTS
         .lock_recover()
         .insert(session_id.to_string(), turn_id.to_string());
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AppErrorVerdict {
+pub(crate) enum AppErrorVerdict {
     Retryable,
     ReplacementAbort,
     Terminal,
@@ -1268,14 +1287,14 @@ enum AppErrorVerdict {
 }
 
 #[derive(Debug)]
-struct AppError {
-    status: StatusCode,
-    message: String,
-    verdict: AppErrorVerdict,
+pub(crate) struct AppError {
+    pub(crate) status: StatusCode,
+    pub(crate) message: String,
+    pub(crate) verdict: AppErrorVerdict,
 }
 
 impl AppError {
-    fn bad_request(message: impl Into<String>) -> Self {
+    pub(crate) fn bad_request(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
@@ -1283,7 +1302,7 @@ impl AppError {
         }
     }
 
-    fn conflict(message: impl Into<String>) -> Self {
+    pub(crate) fn conflict(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::CONFLICT,
             message: message.into(),
@@ -1291,7 +1310,7 @@ impl AppError {
         }
     }
 
-    fn session_delete_failed(session_id: &str, error: impl std::fmt::Display) -> Self {
+    pub(crate) fn session_delete_failed(session_id: &str, error: impl std::fmt::Display) -> Self {
         let message = format!(
             "session deletion failed for `{session_id}`; the session remains live: {error}"
         );
@@ -1299,7 +1318,7 @@ impl AppError {
         Self::conflict(message)
     }
 
-    fn retryable_internal(error: impl std::fmt::Display) -> Self {
+    pub(crate) fn retryable_internal(error: impl std::fmt::Display) -> Self {
         eprintln!("agent-workbench retryable internal request failure: {error}");
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
@@ -1308,7 +1327,7 @@ impl AppError {
         }
     }
 
-    fn session_delete_unconfirmed(
+    pub(crate) fn session_delete_unconfirmed(
         session_id: &str,
         call_error: impl std::fmt::Display,
         probe_error: impl std::fmt::Display,
@@ -1324,7 +1343,7 @@ impl AppError {
         }
     }
 
-    fn not_found(message: impl Into<String>) -> Self {
+    pub(crate) fn not_found(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
             message: message.into(),
@@ -1332,7 +1351,7 @@ impl AppError {
         }
     }
 
-    fn internal(message: impl std::fmt::Display) -> Self {
+    pub(crate) fn internal(message: impl std::fmt::Display) -> Self {
         eprintln!("agent-workbench internal request failure: {message}");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -1341,7 +1360,7 @@ impl AppError {
         }
     }
 
-    fn session_open(error: lash::EmbedError) -> Self {
+    pub(crate) fn session_open(error: lash::EmbedError) -> Self {
         if let Some((session_id, context)) = deleted_session_details(&error) {
             log_deleted_session_refusal(session_id, context);
             return Self::conflict(deleted_session_message(session_id));
@@ -1356,7 +1375,7 @@ impl AppError {
         dead_code,
         reason = "production authorizers use this denial constructor"
     )]
-    fn forbidden(message: impl Into<String>) -> Self {
+    pub(crate) fn forbidden(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::FORBIDDEN,
             message: message.into(),
@@ -1364,7 +1383,7 @@ impl AppError {
         }
     }
 
-    fn gateway_timeout(message: impl Into<String>) -> Self {
+    pub(crate) fn gateway_timeout(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::GATEWAY_TIMEOUT,
             message: message.into(),
@@ -1372,7 +1391,7 @@ impl AppError {
         }
     }
 
-    fn runtime(error: lash::EmbedError) -> Self {
+    pub(crate) fn runtime(error: lash::EmbedError) -> Self {
         if let Some(message) = replay_divergence_abort_message(&error) {
             eprintln!("agent-workbench replay divergence aborted turn: {error}");
             return Self {
@@ -1413,7 +1432,7 @@ impl AppError {
     }
 }
 
-fn replay_divergence_abort_message(error: &lash::EmbedError) -> Option<String> {
+pub(crate) fn replay_divergence_abort_message(error: &lash::EmbedError) -> Option<String> {
     let code = match error {
         lash::EmbedError::Runtime(error) if error.code.is_worker_replacement_abort() => &error.code,
         lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(error))
@@ -1430,7 +1449,7 @@ fn replay_divergence_abort_message(error: &lash::EmbedError) -> Option<String> {
     ))
 }
 
-fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str, Option<&str>)> {
+pub(crate) fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str, Option<&str>)> {
     let (source, context) = match error {
         lash::EmbedError::Store(source) => (source, None),
         lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {
@@ -1459,14 +1478,14 @@ fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str, Option<&st
     }
 }
 
-fn deleted_session_message(session_id: &str) -> String {
+pub(crate) fn deleted_session_message(session_id: &str) -> String {
     lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted {
         session_id: session_id.to_string(),
     })
     .to_string()
 }
 
-fn log_deleted_session_refusal(session_id: &str, context: Option<&str>) {
+pub(crate) fn log_deleted_session_refusal(session_id: &str, context: Option<&str>) {
     eprintln!(
         "agent-workbench session admission refusal: session_id={session_id:?} \
          tombstone_outcome=\"retired\" outcome=\"refused\" store_context={context:?}"

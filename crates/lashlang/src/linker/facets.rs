@@ -1,3 +1,5 @@
+use super::*;
+
 pub(crate) fn analyze_workflow_program(
     program: &Program,
     surface: &LashlangHostEnvironment,
@@ -98,7 +100,7 @@ impl LinkError {
 }
 
 impl<'module> Linker<'module> {
-    fn prepare_for_workflow_analysis(&mut self) {
+    pub(super) fn prepare_for_workflow_analysis(&mut self) {
         for declaration in &self.program.declarations {
             match declaration {
                 Declaration::Type(declaration) => {
@@ -139,7 +141,7 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn analyze_workflow_block(
+    pub(super) fn analyze_workflow_block(
         &self,
         expr: &Expr,
         scope: &mut Scope,
@@ -156,7 +158,7 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn analyze_workflow_node(
+    pub(super) fn analyze_workflow_node(
         &self,
         expr: &Expr,
         scope: &mut Scope,
@@ -191,7 +193,7 @@ impl<'module> Linker<'module> {
         self.analyze_nested_workflow_nodes(expr, &before, spans, analysis);
     }
 
-    fn analyze_nested_workflow_nodes(
+    pub(super) fn analyze_nested_workflow_nodes(
         &self,
         expr: &Expr,
         scope: &Scope,
@@ -252,7 +254,10 @@ impl<'module> Linker<'module> {
         }
     }
 
-    fn expected_arguments_for_node(&self, expr: &Expr) -> Vec<WorkflowLinkExpectedArgument> {
+    pub(super) fn expected_arguments_for_node(
+        &self,
+        expr: &Expr,
+    ) -> Vec<WorkflowLinkExpectedArgument> {
         let Some(expected_type_facts) = &self.expected_type_facts else {
             return Vec::new();
         };
@@ -350,7 +355,7 @@ fn collect_expected_slots(
     }
 }
 
-fn expression_spans_by_pointer(program: &Program) -> BTreeMap<usize, Span> {
+pub(super) fn expression_spans_by_pointer(program: &Program) -> BTreeMap<usize, Span> {
     let spans_by_path = program
         .expression_source_spans
         .iter()

@@ -33,6 +33,7 @@ use lash::plugins::{
 };
 use lash::prompt::PromptContribution;
 use lash::provider::{ProviderHandle, ProviderOptions};
+use lash::sync::MutexExt;
 use lash::triggers::TriggerEvent;
 use lash::{
     LashCore, SessionSpec, TurnActivity, TurnActivitySink, TurnEvent, TurnReport,
@@ -91,23 +92,76 @@ const TURN_TERMINAL_ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(test)]
 const TURN_TERMINAL_ATTACH_TIMEOUT: Duration = Duration::from_millis(250);
 
-include!("main_sections/bootstrap.rs");
-include!("main_sections/stores.rs");
-include!("main_sections/state.rs");
-include!("main_sections/turn_cancel.rs");
-include!("main_sections/attachment_media.rs");
-include!("main_sections/chat_projection.rs");
-include!("main_sections/state_reads.rs");
-include!("main_sections/routes.rs");
-include!("main_sections/approval_routes.rs");
-include!("main_sections/session_routes.rs");
-include!("main_sections/turn_ingress.rs");
-include!("main_sections/admin.rs");
-include!("main_sections/session_open_retry.rs");
-include!("main_sections/app_state.rs");
-include!("main_sections/plugins.rs");
-include!("main_sections/prompt.rs");
-include!("main_sections/tests.rs");
-include!("main_sections/tests/process_work.rs");
-include!("main_sections/tests/turn_control.rs");
-include!("main_sections/tests/derived_notes.rs");
+#[path = "main_sections/bootstrap.rs"]
+mod bootstrap;
+pub(crate) use bootstrap::*;
+#[path = "main_sections/stores.rs"]
+mod stores;
+pub(crate) use stores::*;
+#[path = "main_sections/state.rs"]
+mod state;
+pub(crate) use state::*;
+#[path = "main_sections/turn_cancel.rs"]
+mod turn_cancel;
+pub(crate) use turn_cancel::*;
+#[path = "main_sections/attachment_media.rs"]
+mod attachment_media;
+pub(crate) use attachment_media::*;
+#[path = "main_sections/chat_projection.rs"]
+mod chat_projection;
+pub(crate) use chat_projection::*;
+#[path = "main_sections/state_reads.rs"]
+mod state_reads;
+pub(crate) use state_reads::*;
+#[path = "main_sections/routes.rs"]
+mod routes;
+pub(crate) use routes::*;
+#[path = "main_sections/approval_routes.rs"]
+mod approval_routes;
+pub(crate) use approval_routes::*;
+#[path = "main_sections/session_routes.rs"]
+mod session_routes;
+pub(crate) use session_routes::*;
+#[path = "main_sections/turn_ingress.rs"]
+mod turn_ingress;
+pub(crate) use turn_ingress::*;
+#[path = "main_sections/admin.rs"]
+mod admin;
+pub(crate) use admin::*;
+#[path = "main_sections/session_open_retry.rs"]
+mod session_open_retry;
+pub(crate) use session_open_retry::*;
+#[path = "main_sections/app_state.rs"]
+mod app_state;
+pub(crate) use app_state::*;
+#[path = "main_sections/plugins.rs"]
+mod plugins;
+pub(crate) use plugins::*;
+#[path = "main_sections/prompt.rs"]
+mod prompt;
+pub(crate) use prompt::*;
+#[cfg(test)]
+#[path = "main_sections/tests/derived_notes.rs"]
+mod derived_notes_tests;
+#[cfg(test)]
+#[path = "main_sections/tests/process_work.rs"]
+mod process_work_tests;
+#[cfg(test)]
+#[path = "main_sections/tests.rs"]
+mod tests;
+#[cfg(test)]
+#[path = "main_sections/tests/turn_control.rs"]
+mod turn_control_timeout_tests;
+
+fn main() -> AnyhowResult<()> {
+    let stack_bytes = std::env::var("AGENT_WORKBENCH_TOKIO_STACK_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_TOKIO_THREAD_STACK_BYTES);
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(stack_bytes)
+        .build()
+        .context("build agent-workbench tokio runtime")?
+        .block_on(async_main())
+}

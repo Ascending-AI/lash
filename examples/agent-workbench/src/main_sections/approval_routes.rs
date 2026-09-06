@@ -1,32 +1,32 @@
+use super::*;
+
 // The approval routes: listing pending tool approvals, and submitting operator
 // approve / deny decisions that resolve parked durable tool completions.
 
-async fn list_approvals(
+pub(crate) async fn list_approvals(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<approvals::PendingApproval>>, AppError> {
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageApprovals)?;
-    Ok(Json(
-        state.approvals.pending().map_err(AppError::internal)?,
-    ))
+    Ok(Json(state.approvals.pending().map_err(AppError::internal)?))
 }
 
-async fn approve_wait(
+pub(crate) async fn approve_wait(
     State(state): State<AppState>,
     AxumPath(key): AxumPath<String>,
 ) -> Result<Json<Value>, AppError> {
     decide_approval(&state, &key, true).await
 }
 
-async fn deny_wait(
+pub(crate) async fn deny_wait(
     State(state): State<AppState>,
     AxumPath(key): AxumPath<String>,
 ) -> Result<Json<Value>, AppError> {
     decide_approval(&state, &key, false).await
 }
 
-async fn decide_approval(
+pub(crate) async fn decide_approval(
     state: &AppState,
     key_id: &str,
     approved: bool,

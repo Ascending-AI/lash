@@ -1,3 +1,5 @@
+use super::*;
+
 use lash_sansio::sync::{LockResultExt, MutexExt};
 impl RemoteTurnActivity {
     pub fn from_core(
@@ -263,11 +265,9 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
             lash_core::TurnEvent::ModelRequestStarted { protocol_iteration } => {
                 Ok(Self::ModelRequestStarted { protocol_iteration })
             }
-            lash_core::TurnEvent::AssistantProseDelta { text } => {
-                Ok(Self::AssistantProseDelta {
-                    text: text.to_string(),
-                })
-            }
+            lash_core::TurnEvent::AssistantProseDelta { text } => Ok(Self::AssistantProseDelta {
+                text: text.to_string(),
+            }),
             lash_core::TurnEvent::ReasoningDelta { text } => Ok(Self::ReasoningDelta {
                 text: text.to_string(),
             }),
@@ -388,13 +388,15 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                 max_attempts,
                 reason,
             }),
-            lash_core::TurnEvent::PluginRuntime { plugin_id, event } => Ok(Self::RuntimeDiagnostic {
-                kind: "plugin_runtime".to_string(),
-                data: serde_json::json!({
-                    "plugin_id": plugin_id,
-                    "event": event,
-                }),
-            }),
+            lash_core::TurnEvent::PluginRuntime { plugin_id, event } => {
+                Ok(Self::RuntimeDiagnostic {
+                    kind: "plugin_runtime".to_string(),
+                    data: serde_json::json!({
+                        "plugin_id": plugin_id,
+                        "event": event,
+                    }),
+                })
+            }
             lash_core::TurnEvent::QueuedInputAccepted { applications } => {
                 Ok(Self::TurnInputApplied {
                     applications: applications.iter().map(Into::into).collect(),
@@ -455,7 +457,9 @@ impl<W: Write + Send + 'static> RemoteTurnActivitySink<W> {
     }
 }
 
-impl<W: Write + Send + 'static> lash_core::facade_support::TurnActivitySink for RemoteTurnActivitySink<W> {
+impl<W: Write + Send + 'static> lash_core::facade_support::TurnActivitySink
+    for RemoteTurnActivitySink<W>
+{
     fn emit<'life0, 'async_trait>(
         &'life0 self,
         activity: lash_core::TurnActivity,
@@ -474,21 +478,13 @@ impl<W: Write + Send + 'static> lash_core::facade_support::TurnActivitySink for 
                 }
             };
             let result = {
-                let mut writer = self
-                    .writer
-                    .lock_recover();
+                let mut writer = self.writer.lock_recover();
                 serde_json::to_writer(&mut *writer, &Envelope::new(remote))
-                    .and_then(|_| {
-                        writer
-                            .write_all(b"\n")
-                            .map_err(serde_json::Error::io)
-                    })
+                    .and_then(|_| writer.write_all(b"\n").map_err(serde_json::Error::io))
                     .and_then(|_| writer.flush().map_err(serde_json::Error::io))
             };
             if let Err(err) = result {
-                self.errors
-                    .lock_recover()
-                    .push(err.to_string());
+                self.errors.lock_recover().push(err.to_string());
             }
         })
     }

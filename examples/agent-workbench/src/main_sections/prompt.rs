@@ -42,7 +42,7 @@ pub(crate) fn workbench_prompt(dialect: lash::rlm::RlmDialect) -> &'static str {
     }
 }
 
-const WORKBENCH_PROMPT_LASHLANG: &str = r###"You are running inside the Agent Workbench demo.
+pub(crate) const WORKBENCH_PROMPT_LASHLANG: &str = r###"You are running inside the Agent Workbench demo.
 
 Available host features:
 - Web access is limited to `web.search(...)` and `web.fetch(...)`, both backed by the same Tavily tools the CLI uses.
@@ -131,7 +131,7 @@ Use background processes or subagents only when they clarify the user's request 
 /// (there is no result wrapper to unwrap), and module authorities are not
 /// passed as process parameters, so the multi-inbox advice is written as a
 /// parallel read instead of an account-parametric process.
-const WORKBENCH_PROMPT_TYPESCRIPT: &str = r###"You are running inside the Agent Workbench demo.
+pub(crate) const WORKBENCH_PROMPT_TYPESCRIPT: &str = r###"You are running inside the Agent Workbench demo.
 
 Available host features:
 - Web access is limited to `web.search(...)` and `web.fetch(...)`, both backed by the same Tavily tools the CLI uses.

@@ -1,7 +1,9 @@
+use super::*;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NamedDataType {
-    name: String,
-    ty: TypeExpr,
+    pub(super) name: String,
+    pub(super) ty: TypeExpr,
 }
 
 impl NamedDataType {
@@ -220,11 +222,11 @@ pub struct ValueConstructorBinding {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerSourceBinding {
-    event_type: NamedDataType,
+    pub(super) event_type: NamedDataType,
 }
 
 impl TriggerSourceBinding {
-    fn new(event_type: NamedDataType) -> Self {
+    pub(super) fn new(event_type: NamedDataType) -> Self {
         Self { event_type }
     }
 
@@ -379,7 +381,7 @@ impl LashlangAbilities {
     }
 }
 
-fn module_path_key(path: &[impl AsRef<str>]) -> String {
+pub(super) fn module_path_key(path: &[impl AsRef<str>]) -> String {
     path.iter()
         .map(|segment| segment.as_ref())
         .collect::<Vec<_>>()
@@ -392,7 +394,7 @@ pub struct LinkedModule {
     pub host_requirements_ref: crate::HostRequirementsRef,
     pub artifact: ModuleArtifact,
     #[serde(skip)]
-    linked_program: Option<Program>,
+    pub(super) linked_program: Option<Program>,
 }
 
 impl LinkedModule {

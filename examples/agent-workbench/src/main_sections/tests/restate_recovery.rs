@@ -1,3 +1,4 @@
+use super::*;
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
@@ -79,11 +80,9 @@ finish (await handle)?
     wait_for_endpoint_socket(endpoint_bind).await;
     register_restate_deployment(&admin_url, &endpoint_url).await;
 
-    let invocation = run_workbench_turn_via_restate(
-        &harness.state,
-        "Run the typed process llm_query repro.",
-    )
-    .await;
+    let invocation =
+        run_workbench_turn_via_restate(&harness.state, "Run the typed process llm_query repro.")
+            .await;
     wait_for_restate_invocation_success(&harness.state, &invocation, Duration::from_secs(30)).await;
     wait_for_workbench_message(&harness.state, "personal", Duration::from_secs(30)).await;
     assert_eq!(
@@ -390,10 +389,7 @@ finish (await handle)?
     .expect("late cancellation evidence must arrive on the SSE product stream");
     let process_terminal = tokio::time::timeout(
         Duration::from_secs(10),
-        harness
-            .state
-            .core
-            .processes().await_output(&process_id),
+        harness.state.core.processes().await_output(&process_id),
     )
     .await
     .expect("Stop-over-process must terminate the awaited process")
@@ -565,7 +561,9 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
         Duration::from_secs(20),
     )
     .await;
-    println!("workbench auth-failure gate passed: failed terminal, visible error, next turn recovered");
+    println!(
+        "workbench auth-failure gate passed: failed terminal, visible error, next turn recovered"
+    );
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -610,12 +608,11 @@ async fn wait_for_restate_invocation_completion(
     invocation_id: &lash_restate::RestateInvocationId,
     timeout: Duration,
 ) -> lash_restate::RestateInvocationStatus {
-    let admin = lash_restate::RestateAdminClient::new(
-        lash_restate::RestateConnection::with_client(
+    let admin =
+        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
             state.restate_admin_url.clone(),
             state.restate_http.clone(),
-        ),
-    );
+        ));
     let deadline = std::time::Instant::now() + timeout;
     loop {
         if let Some(status) = admin
@@ -648,11 +645,10 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() {
         .await
         .expect("open observer session");
     let cursor = session.observe().current_observation().cursor;
-    let lash::observe::SessionObservationSubscription::Subscribed(mut subscription) =
-        session
-            .observe()
-            .subscribe_from_cursor(&cursor)
-            .expect("subscribe before retry turn")
+    let lash::observe::SessionObservationSubscription::Subscribed(mut subscription) = session
+        .observe()
+        .subscribe_from_cursor(&cursor)
+        .expect("subscribe before retry turn")
     else {
         panic!("fresh observer cursor unexpectedly had a replay gap");
     };
@@ -664,10 +660,10 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() {
                 Duration::from_secs(20),
                 futures_util::StreamExt::next(&mut subscription),
             )
-                .await
-                .expect("retry observer event timeout")
-                .expect("retry observer subscription closed")
-                .expect("retry observer event");
+            .await
+            .expect("retry observer event timeout")
+            .expect("retry observer subscription closed")
+            .expect("retry observer event");
             saw_turn_activity |= matches!(
                 event.payload,
                 lash::observe::SessionObservationEventPayload::TurnActivity(_)
@@ -766,8 +762,13 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() {
         .await
         .expect("reload retry session");
     assert_single_retry_marker_message("reload", reloaded.read_view().messages());
-    reloaded.close().await.expect("close reloaded retry session");
-    println!("workbench rate-limit gate passed: retry succeeded and live/replay observers converged");
+    reloaded
+        .close()
+        .await
+        .expect("close reloaded retry session");
+    println!(
+        "workbench rate-limit gate passed: retry succeeded and live/replay observers converged"
+    );
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -854,7 +855,7 @@ async fn live_failure_path_harness(
 }
 
 struct LiveFailurePathHarness {
-    state: AppState,
+    pub(super) state: AppState,
 }
 
 async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inner() {
@@ -1076,10 +1077,7 @@ finish (await handle)?
     );
     let process_terminal = tokio::time::timeout(
         Duration::from_secs(45),
-        harness
-            .state
-            .core
-            .processes().await_output(&process_id),
+        harness.state.core.processes().await_output(&process_id),
     )
     .await
     .expect("revoked session must not stop the independent process")
@@ -1213,12 +1211,10 @@ finish "started lifecycle gates"
     )
     .await;
 
-    let Json(work_after_delete) = list_work(
-        State(harness.state.clone()),
-        Query(SessionQuery::default()),
-    )
-        .await
-        .expect("list runtime work after session deletion");
+    let Json(work_after_delete) =
+        list_work(State(harness.state.clone()), Query(SessionQuery::default()))
+            .await
+            .expect("list runtime work after session deletion");
     for process_id in [&survivor_id, &cancellable_id] {
         assert!(
             work_after_delete
@@ -1244,10 +1240,7 @@ finish "started lifecycle gates"
     .await;
     let cancelled = tokio::time::timeout(
         Duration::from_secs(20),
-        harness
-            .state
-            .core
-            .processes().await_output(&cancellable_id),
+        harness.state.core.processes().await_output(&cancellable_id),
     )
     .await
     .expect("cancelled process terminal timeout")
@@ -1264,10 +1257,7 @@ finish "started lifecycle gates"
 
     let survived = tokio::time::timeout(
         Duration::from_secs(20),
-        harness
-            .state
-            .core
-            .processes().await_output(&survivor_id),
+        harness.state.core.processes().await_output(&survivor_id),
     )
     .await
     .expect("surviving process terminal timeout")
@@ -1281,12 +1271,10 @@ finish "started lifecycle gates"
         ),
         "session-independent process did not complete successfully: {survived:#?}"
     );
-    let Json(terminal_work) = list_work(
-        State(harness.state.clone()),
-        Query(SessionQuery::default()),
-    )
-        .await
-        .expect("list terminal runtime work");
+    let Json(terminal_work) =
+        list_work(State(harness.state.clone()), Query(SessionQuery::default()))
+            .await
+            .expect("list terminal runtime work");
     assert!(terminal_work.iter().any(|item| {
         item.process.process_id == survivor_id
             && item.process.terminal
@@ -1304,11 +1292,7 @@ finish "started lifecycle gates"
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
-async fn wait_for_running_process(
-    state: &AppState,
-    label: &str,
-    timeout: Duration,
-) -> String {
+async fn wait_for_running_process(state: &AppState, label: &str, timeout: Duration) -> String {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let processes = state
@@ -1430,9 +1414,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
             async move {
                 let serialized =
                     serde_json::to_string(&request).expect("serialize provider request");
-                requests
-                    .lock_recover()
-                    .push(serialized);
+                requests.lock_recover().push(serialized);
                 let call_index = response_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let _ = provider_call_tx.send(call_index);
                 if call_index == 0 {
@@ -1561,7 +1543,10 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     .await;
     admission_gate.finish();
     let (_attempts, acquisitions, admissions, contentions) = admission_gate.counts();
-    assert!(contentions >= 1, "the deterministic read never observed contention");
+    assert!(
+        contentions >= 1,
+        "the deterministic read never observed contention"
+    );
     assert_eq!(
         acquisitions, admissions,
         "every successful open claim must pass admit_session_state"
@@ -1570,9 +1555,8 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     admission_gate.arm();
     let state_for_holder = harness.state.clone();
     let session_id_for_holder = session_id.clone();
-    let held_open = tokio::spawn(async move {
-        state_for_holder.open_session(&session_id_for_holder).await
-    });
+    let held_open =
+        tokio::spawn(async move { state_for_holder.open_session(&session_id_for_holder).await });
     admission_gate.wait_until_admitted().await;
     let exhausted = Box::pin(app_state(
         State(harness.state.clone()),
@@ -1665,8 +1649,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     assert_eq!(captured[2].matches("queued next marker").count(), 1);
 
     assert_eq!(
-        snapshot.observation.turn_index,
-        2,
+        snapshot.observation.turn_index, 2,
         "queued input must commit its own turn"
     );
     let committed = snapshot
@@ -1708,9 +1691,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
             Ok(ProductEvent {
                 item: StreamItem::Message { message },
                 ..
-            })
-                if message.role == "user" && message.text == "active injection marker" =>
-            {
+            }) if message.role == "user" && message.text == "active injection marker" => {
                 rendered_active_input = true;
             }
             Ok(_) => {}
@@ -1725,7 +1706,10 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         rendered_active_input,
         "rendered page stream must receive the committed active input as a normal user message"
     );
-    assert!(snapshot.pending_turn_inputs.is_empty(), "both ingress claims must settle");
+    assert!(
+        snapshot.pending_turn_inputs.is_empty(),
+        "both ingress claims must settle"
+    );
     unregister_session_open_admission_gate(&session_id);
     let _ = std::fs::remove_dir_all(data_dir);
 }
@@ -1887,10 +1871,9 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     let product_event_path = data_dir.join("product-events.json");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        let product_events =
-            SessionEventRegistry::persistent(product_event_path.clone(), 4)
-                .expect("reopen product events after ingress-owner replacement")
-                .snapshot(&session_id);
+        let product_events = SessionEventRegistry::persistent(product_event_path.clone(), 4)
+            .expect("reopen product events after ingress-owner replacement")
+            .snapshot(&session_id);
         let done_count = product_events
             .events
             .iter()
@@ -1985,8 +1968,8 @@ async fn live_restate_recovery_child() {
         .into_handle();
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))
         .expect("open child active-turn routing");
-    let sessions = WorkbenchSessions::persistent(data_dir.join("session-id"))
-        .expect("open child session id");
+    let sessions =
+        WorkbenchSessions::persistent(data_dir.join("session-id")).expect("open child session id");
     let lease_timings = recovery_e2e_lease_timings();
     let harness = live_workbench_restate_state_with_provider_and_database(
         &data_dir,
@@ -2032,12 +2015,11 @@ async fn wait_for_workbench_restate_invocation_suspended(
     invocation_id: &lash_restate::RestateInvocationId,
     timeout: Duration,
 ) {
-    let admin = lash_restate::RestateAdminClient::new(
-        lash_restate::RestateConnection::with_client(
+    let admin =
+        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
             state.restate_admin_url.clone(),
             state.restate_http.clone(),
-        ),
-    );
+        ));
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let last_status = admin
@@ -2144,12 +2126,11 @@ async fn wait_for_restate_workflow_success(
     workflow_key: &str,
     timeout: Duration,
 ) {
-    let admin = lash_restate::RestateAdminClient::new(
-        lash_restate::RestateConnection::with_client(
+    let admin =
+        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
             state.restate_admin_url.clone(),
             state.restate_http.clone(),
-        ),
-    );
+        ));
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         match admin

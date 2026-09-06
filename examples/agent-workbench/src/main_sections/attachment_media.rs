@@ -11,7 +11,7 @@
 /// Returns `None` for anything that is not a PNG with a plausible IHDR, so an
 /// upload of another media type simply carries no dimensions rather than
 /// fabricated ones.
-fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+pub(crate) fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
     if bytes.len() < 24 || &bytes[..8] != PNG_SIGNATURE || &bytes[12..16] != b"IHDR" {
         return None;

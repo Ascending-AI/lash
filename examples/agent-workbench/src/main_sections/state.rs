@@ -1,15 +1,16 @@
-use lash::sync::MutexExt;
+use super::*;
+
 #[derive(Clone)]
-struct AppState {
-    core: LashCore,
+pub(crate) struct AppState {
+    pub(crate) core: LashCore,
     /// The dialect new sessions are created with, from `LASH_RUNBOOK_DIALECT`.
     ///
     /// A plain field rather than a `cfg(test)` fork: forking it meant the
     /// production and test builds of `session_builder` differed by
     /// construction, so no test could ever reach the TypeScript branch of the
     /// code that ships.
-    rlm_dialect: lash::rlm::RlmDialect,
-    attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
+    pub(crate) rlm_dialect: lash::rlm::RlmDialect,
+    pub(crate) attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     /// The deployment's session-store factory, retained beside the core it was
     /// built with because it is also this host's attachment **root authority**
     /// (`lash::persistence::AttachmentRootSet`). Store-growth maintenance needs
@@ -17,49 +18,49 @@ struct AppState {
     /// `reclaim_unreferenced_attachments` an explicit root set — so the route
     /// names it rather than reaching into the core for a store it did not
     /// choose.
-    session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    trigger_store: Arc<dyn lash::triggers::TriggerStore>,
-    process_observer: lash::process::ProcessWorkObserver,
-    sessions: WorkbenchSessions,
-    messages: Arc<Mutex<Vec<ChatMessage>>>,
-    selected_model: Arc<Mutex<ModelSelection>>,
-    web_configured: bool,
-    trace_sink: Option<Arc<dyn TraceSink>>,
-    lashlang_execution: Arc<TraceLashlangGraphStore>,
-    event_tx: SessionEventRegistry,
-    queued_work_driver: lash::runtime::NativeQueuedWork,
-    restate_ingress_url: String,
+    pub(crate) session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    pub(crate) trigger_store: Arc<dyn lash::triggers::TriggerStore>,
+    pub(crate) process_observer: lash::process::ProcessWorkObserver,
+    pub(crate) sessions: WorkbenchSessions,
+    pub(crate) messages: Arc<Mutex<Vec<ChatMessage>>>,
+    pub(crate) selected_model: Arc<Mutex<ModelSelection>>,
+    pub(crate) web_configured: bool,
+    pub(crate) trace_sink: Option<Arc<dyn TraceSink>>,
+    pub(crate) lashlang_execution: Arc<TraceLashlangGraphStore>,
+    pub(crate) event_tx: SessionEventRegistry,
+    pub(crate) queued_work_driver: lash::runtime::NativeQueuedWork,
+    pub(crate) restate_ingress_url: String,
     #[cfg_attr(not(test), allow(dead_code))]
-    restate_admin_url: String,
-    restate_http: reqwest::Client,
-    restate_cron_job_keys: Arc<Mutex<BTreeMap<String, BTreeSet<String>>>>,
-    mail_world: mail::MailWorld,
-    active_turns: ActiveTurns,
-    authorization: WorkbenchAuthorization,
-    approvals: approvals::WorkbenchApprovals,
+    pub(crate) restate_admin_url: String,
+    pub(crate) restate_http: reqwest::Client,
+    pub(crate) restate_cron_job_keys: Arc<Mutex<BTreeMap<String, BTreeSet<String>>>>,
+    pub(crate) mail_world: mail::MailWorld,
+    pub(crate) active_turns: ActiveTurns,
+    pub(crate) authorization: WorkbenchAuthorization,
+    pub(crate) approvals: approvals::WorkbenchApprovals,
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct Settings {
-    model: String,
-    model_variant: Option<String>,
-    web_configured: bool,
-    model_variants: Vec<&'static str>,
-    session_id: String,
+pub(crate) struct Settings {
+    pub(crate) model: String,
+    pub(crate) model_variant: Option<String>,
+    pub(crate) web_configured: bool,
+    pub(crate) model_variants: Vec<&'static str>,
+    pub(crate) session_id: String,
     /// The operator's name for this session, or its id when they gave none.
-    session_name: String,
+    pub(crate) session_name: String,
     /// The language id this session recorded, for the dialect badge.
-    rlm_dialect: &'static str,
+    pub(crate) rlm_dialect: &'static str,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct ModelSelection {
-    model: String,
-    model_variant: Option<String>,
+pub(crate) struct ModelSelection {
+    pub(crate) model: String,
+    pub(crate) model_variant: Option<String>,
 }
 
 impl ModelSelection {
-    fn from_spec(model: &lash::ModelSpec) -> Self {
+    pub(crate) fn from_spec(model: &lash::ModelSpec) -> Self {
         Self {
             model: model.id.clone(),
             model_variant: model.variant.effort().map(str::to_string),
@@ -68,25 +69,25 @@ impl ModelSelection {
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct StateSnapshot {
-    settings: Settings,
-    messages: Vec<ChatMessage>,
-    observation: RemoteSessionObservation,
-    product_events: ProductEventSnapshot,
-    active_turns: Vec<lash::TurnAddress>,
-    pending_turn_inputs: Vec<lash::PendingTurnInput>,
-    queued_work: Vec<lash::persistence::QueuedWorkBatch>,
-    turn_input_applications: Vec<lash::remote::observations::RemoteTurnInputApplication>,
-    turn_failure_settlements: Vec<lash::TurnFailureSettlement>,
-    usage: lash::usage::SessionUsageReport,
-    pending_approvals: Vec<approvals::PendingApproval>,
+pub(crate) struct StateSnapshot {
+    pub(crate) settings: Settings,
+    pub(crate) messages: Vec<ChatMessage>,
+    pub(crate) observation: RemoteSessionObservation,
+    pub(crate) product_events: ProductEventSnapshot,
+    pub(crate) active_turns: Vec<lash::TurnAddress>,
+    pub(crate) pending_turn_inputs: Vec<lash::PendingTurnInput>,
+    pub(crate) queued_work: Vec<lash::persistence::QueuedWorkBatch>,
+    pub(crate) turn_input_applications: Vec<lash::remote::observations::RemoteTurnInputApplication>,
+    pub(crate) turn_failure_settlements: Vec<lash::TurnFailureSettlement>,
+    pub(crate) usage: lash::usage::SessionUsageReport,
+    pub(crate) pending_approvals: Vec<approvals::PendingApproval>,
 }
 
 #[derive(Debug, Serialize)]
-struct StateReadSnapshot {
+pub(crate) struct StateReadSnapshot {
     #[serde(flatten)]
-    state: StateSnapshot,
-    transcript: Vec<TranscriptRow>,
+    pub(crate) state: StateSnapshot,
+    pub(crate) transcript: Vec<TranscriptRow>,
 }
 
 impl std::ops::Deref for StateReadSnapshot {
@@ -98,7 +99,7 @@ impl std::ops::Deref for StateReadSnapshot {
 }
 
 #[derive(Clone, Debug)]
-enum WorkbenchAuthorizationAction {
+pub(crate) enum WorkbenchAuthorizationAction {
     Observe {
         session_id: String,
     },
@@ -129,30 +130,30 @@ enum WorkbenchAuthorizationAction {
     RunStoreMaintenance,
 }
 
-trait WorkbenchAuthorizer: Send + Sync {
+pub(crate) trait WorkbenchAuthorizer: Send + Sync {
     fn authorize(&self, action: &WorkbenchAuthorizationAction) -> Result<(), AppError>;
 }
 
 #[derive(Clone)]
-struct WorkbenchAuthorization {
-    authorizer: Arc<dyn WorkbenchAuthorizer>,
+pub(crate) struct WorkbenchAuthorization {
+    pub(crate) authorizer: Arc<dyn WorkbenchAuthorizer>,
 }
 
 impl WorkbenchAuthorization {
-    fn allow_all() -> Self {
+    pub(crate) fn allow_all() -> Self {
         Self::with_authorizer(Arc::new(AllowAllWorkbenchAuthorizer))
     }
 
-    fn with_authorizer(authorizer: Arc<dyn WorkbenchAuthorizer>) -> Self {
+    pub(crate) fn with_authorizer(authorizer: Arc<dyn WorkbenchAuthorizer>) -> Self {
         Self { authorizer }
     }
 
-    fn authorize(&self, action: WorkbenchAuthorizationAction) -> Result<(), AppError> {
+    pub(crate) fn authorize(&self, action: WorkbenchAuthorizationAction) -> Result<(), AppError> {
         self.authorizer.authorize(&action)
     }
 }
 
-struct AllowAllWorkbenchAuthorizer;
+pub(crate) struct AllowAllWorkbenchAuthorizer;
 
 impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
     fn authorize(&self, action: &WorkbenchAuthorizationAction) -> Result<(), AppError> {
@@ -174,30 +175,30 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum ChatMessageProvenance {
+pub(crate) enum ChatMessageProvenance {
     TurnOutput { turn_id: String },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct ChatMessage {
-    id: String,
-    role: String,
-    text: String,
-    at: String,
+pub(crate) struct ChatMessage {
+    pub(crate) id: String,
+    pub(crate) role: String,
+    pub(crate) text: String,
+    pub(crate) at: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    attachments: Vec<ChatAttachment>,
+    pub(crate) attachments: Vec<ChatAttachment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    provenance: Option<ChatMessageProvenance>,
+    pub(crate) provenance: Option<ChatMessageProvenance>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct ChatAttachment {
-    attachment_id: String,
-    retrieve_url: String,
+pub(crate) struct ChatAttachment {
+    pub(crate) attachment_id: String,
+    pub(crate) retrieve_url: String,
 }
 
 impl ChatAttachment {
-    fn from_id(attachment_id: impl Into<String>) -> Self {
+    pub(crate) fn from_id(attachment_id: impl Into<String>) -> Self {
         let attachment_id = attachment_id.into();
         Self {
             retrieve_url: attachment_retrieve_url(&attachment_id),
@@ -206,7 +207,7 @@ impl ChatAttachment {
     }
 }
 
-fn attachment_retrieve_url(attachment_id: &str) -> String {
+pub(crate) fn attachment_retrieve_url(attachment_id: &str) -> String {
     let encoded =
         percent_encoding::utf8_percent_encode(attachment_id, percent_encoding::NON_ALPHANUMERIC);
     format!("/api/attachments/{encoded}")
@@ -218,11 +219,11 @@ fn attachment_retrieve_url(attachment_id: &str) -> String {
 /// The runtime's committed copy of the same text keeps its runtime-minted id
 /// and is correlated by `MessageOrigin::TurnInput`, never by id shape
 /// (FIG-972).
-fn workbench_turn_user_message_id(turn_id: &str) -> String {
+pub(crate) fn workbench_turn_user_message_id(turn_id: &str) -> String {
     format!("workbench-user:{turn_id}")
 }
 
-fn workbench_turn_id_from_user_message_id(message_id: &str) -> Option<&str> {
+pub(crate) fn workbench_turn_id_from_user_message_id(message_id: &str) -> Option<&str> {
     message_id.strip_prefix("workbench-user:")
 }
 
@@ -234,17 +235,17 @@ fn workbench_turn_id_from_user_message_id(message_id: &str) -> Option<&str> {
 /// predicts, so this row retires from the product-event log when its turn stops
 /// running rather than when a committed message happens to share its id
 /// (FIG-984).
-fn workbench_turn_assistant_message_id(turn_id: &str) -> String {
+pub(crate) fn workbench_turn_assistant_message_id(turn_id: &str) -> String {
     format!("workbench-assistant:{turn_id}")
 }
 
-fn workbench_turn_id_from_assistant_message_id(message_id: &str) -> Option<&str> {
+pub(crate) fn workbench_turn_id_from_assistant_message_id(message_id: &str) -> Option<&str> {
     message_id.strip_prefix("workbench-assistant:")
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum TranscriptRow {
+pub(crate) enum TranscriptRow {
     Message {
         message: ChatMessage,
     },
@@ -266,7 +267,7 @@ enum TranscriptRow {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum TranscriptTool {
+pub(crate) enum TranscriptTool {
     DurableSummary {
         operation: String,
         status: &'static str,
@@ -277,38 +278,38 @@ enum TranscriptTool {
 }
 
 #[derive(Debug, Deserialize)]
-struct TurnRequest {
-    text: String,
-    model: Option<String>,
-    model_variant: Option<String>,
+pub(crate) struct TurnRequest {
+    pub(crate) text: String,
+    pub(crate) model: Option<String>,
+    pub(crate) model_variant: Option<String>,
     #[serde(default)]
-    attachment_id: Option<String>,
+    pub(crate) attachment_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct AttachmentUploadRequest {
-    name: String,
-    mime: String,
-    data_base64: String,
+pub(crate) struct AttachmentUploadRequest {
+    pub(crate) name: String,
+    pub(crate) mime: String,
+    pub(crate) data_base64: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct AttachmentUploadResponse {
-    attachment: lash::attachments::AttachmentRef,
-    retrieve_url: String,
+pub(crate) struct AttachmentUploadResponse {
+    pub(crate) attachment: lash::attachments::AttachmentRef,
+    pub(crate) retrieve_url: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum TurnInputIngressRequest {
+pub(crate) enum TurnInputIngressRequest {
     ActiveTurn,
     NextTurn,
 }
 
 #[derive(Debug, Deserialize)]
-struct TurnInputRequest {
-    text: String,
-    ingress: TurnInputIngressRequest,
+pub(crate) struct TurnInputRequest {
+    pub(crate) text: String,
+    pub(crate) ingress: TurnInputIngressRequest,
 }
 
 /// What `/api/turn` did with a send.
@@ -318,15 +319,15 @@ struct TurnInputRequest {
 /// turn's input rather than started now, and the caller has to be able to tell
 /// the two apart (FIG-1000).
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct TurnAccepted {
-    accepted: bool,
-    queued: bool,
+pub(crate) struct TurnAccepted {
+    pub(crate) accepted: bool,
+    pub(crate) queued: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    queued_input: Option<TurnInputReceipt>,
+    pub(crate) queued_input: Option<TurnInputReceipt>,
 }
 
 impl TurnAccepted {
-    fn started() -> Self {
+    pub(crate) fn started() -> Self {
         Self {
             accepted: true,
             queued: false,
@@ -334,7 +335,7 @@ impl TurnAccepted {
         }
     }
 
-    fn queued(receipt: TurnInputReceipt) -> Self {
+    pub(crate) fn queued(receipt: TurnInputReceipt) -> Self {
         Self {
             accepted: true,
             queued: true,
@@ -344,36 +345,36 @@ impl TurnAccepted {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct TurnInputReceipt {
-    accepted: bool,
-    input_id: String,
-    ingress: lash::persistence::TurnInputIngress,
-    state: lash::persistence::TurnInputState,
-    text: String,
+pub(crate) struct TurnInputReceipt {
+    pub(crate) accepted: bool,
+    pub(crate) input_id: String,
+    pub(crate) ingress: lash::persistence::TurnInputIngress,
+    pub(crate) state: lash::persistence::TurnInputState,
+    pub(crate) text: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct EventsQuery {
-    cursor: Option<String>,
+pub(crate) struct EventsQuery {
+    pub(crate) cursor: Option<String>,
     #[serde(default)]
-    session_id: Option<String>,
+    pub(crate) session_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ProductEventsQuery {
-    cursor: Option<u64>,
+pub(crate) struct ProductEventsQuery {
+    pub(crate) cursor: Option<u64>,
     #[serde(default)]
-    session_id: Option<String>,
+    pub(crate) session_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-struct SessionQuery {
+pub(crate) struct SessionQuery {
     #[serde(default)]
-    session_id: Option<String>,
+    pub(crate) session_id: Option<String>,
 }
 
 impl SessionQuery {
-    fn resolve(&self, state: &AppState) -> Result<String, AppError> {
+    pub(crate) fn resolve(&self, state: &AppState) -> Result<String, AppError> {
         let Some(session_id) = self.session_id.as_deref() else {
             return Ok(state.current_session_id());
         };
@@ -391,7 +392,7 @@ impl SessionQuery {
         Ok(session_id.to_string())
     }
 
-    fn is_explicit(&self) -> bool {
+    pub(crate) fn is_explicit(&self) -> bool {
         self.session_id.is_some()
     }
 }
@@ -399,42 +400,42 @@ impl SessionQuery {
 /// The create-a-session request: a name the operator can read, and the dialect
 /// the session is pinned to for its durable lifetime.
 #[derive(Clone, Debug, Default, Deserialize)]
-struct SessionCreateRequest {
+pub(crate) struct SessionCreateRequest {
     #[serde(default)]
-    name: Option<String>,
+    pub(crate) name: Option<String>,
     /// A registered RLM language id. Absent means the deployment's ambient
     /// `LASH_RUNBOOK_DIALECT`; an unregistered id is refused, never defaulted.
     #[serde(default)]
-    dialect: Option<String>,
+    pub(crate) dialect: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct SessionSelectRequest {
-    session_id: String,
+pub(crate) struct SessionSelectRequest {
+    pub(crate) session_id: String,
 }
 
 /// One session as the selector renders it.
 #[derive(Clone, Debug, Serialize)]
-struct SessionSummary {
-    session_id: String,
-    name: String,
+pub(crate) struct SessionSummary {
+    pub(crate) session_id: String,
+    pub(crate) name: String,
     /// The dialect this session recorded, read back from the session itself.
-    dialect: &'static str,
-    created_at_ms: i64,
-    last_active_ms: i64,
-    current: bool,
+    pub(crate) dialect: &'static str,
+    pub(crate) created_at_ms: i64,
+    pub(crate) last_active_ms: i64,
+    pub(crate) current: bool,
 }
 
 /// The session list, with the menu a create form has to offer.
 #[derive(Clone, Debug, Serialize)]
-struct SessionListResponse {
-    sessions: Vec<SessionSummary>,
-    current_session_id: String,
+pub(crate) struct SessionListResponse {
+    pub(crate) sessions: Vec<SessionSummary>,
+    pub(crate) current_session_id: String,
     /// Every registered RLM language id, from the substrate's own dialect
     /// enumeration rather than a list this host writes down.
-    dialects: Vec<&'static str>,
+    pub(crate) dialects: Vec<&'static str>,
     /// The dialect a session gets when the create form offers no choice.
-    default_dialect: &'static str,
+    pub(crate) default_dialect: &'static str,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -444,14 +445,14 @@ pub(crate) enum ButtonChoice {
 }
 
 impl ButtonChoice {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Red => "Red",
             Self::Blue => "Blue",
         }
     }
 
-    fn lower(self) -> &'static str {
+    pub(crate) fn lower(self) -> &'static str {
         match self {
             Self::Red => "red",
             Self::Blue => "blue",
@@ -460,29 +461,29 @@ impl ButtonChoice {
 }
 
 #[derive(Debug, Deserialize)]
-struct ButtonEventRequest {
-    button: ButtonChoice,
-    model: Option<String>,
-    model_variant: Option<String>,
+pub(crate) struct ButtonEventRequest {
+    pub(crate) button: ButtonChoice,
+    pub(crate) model: Option<String>,
+    pub(crate) model_variant: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct AddAccountRequest {
-    name: String,
+pub(crate) struct AddAccountRequest {
+    pub(crate) name: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct InjectMessageRequest {
-    title: String,
-    text: String,
-    model: Option<String>,
-    model_variant: Option<String>,
+pub(crate) struct InjectMessageRequest {
+    pub(crate) title: String,
+    pub(crate) text: String,
+    pub(crate) model: Option<String>,
+    pub(crate) model_variant: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum StreamItem {
+pub(crate) enum StreamItem {
     Message {
         message: ChatMessage,
     },
@@ -506,7 +507,7 @@ enum StreamItem {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum TurnDoneOutcome {
+pub(crate) enum TurnDoneOutcome {
     /// The turn reached a terminal outcome of its own — finished, stopped, or
     /// cancelled. Whatever it committed is durable truth.
     #[default]
@@ -517,44 +518,44 @@ enum TurnDoneOutcome {
 }
 
 impl TurnDoneOutcome {
-    fn is_completed(&self) -> bool {
+    pub(crate) fn is_completed(&self) -> bool {
         *self == Self::Completed
     }
 }
 
-const PUBLIC_TURN_FAILURE_MESSAGE: &str = "turn could not be completed";
-const REPLAY_DIVERGENCE_TURN_FAILURE_MESSAGE: &str =
+pub(crate) const PUBLIC_TURN_FAILURE_MESSAGE: &str = "turn could not be completed";
+pub(crate) const REPLAY_DIVERGENCE_TURN_FAILURE_MESSAGE: &str =
     "durable replay diverged for this turn; retry after the deployment is stable";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct ProductEvent {
-    event_id: String,
-    sequence: u64,
+pub(crate) struct ProductEvent {
+    pub(crate) event_id: String,
+    pub(crate) sequence: u64,
     #[serde(flatten)]
-    item: StreamItem,
+    pub(crate) item: StreamItem,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct ProductEventSnapshot {
-    cursor: u64,
-    events: Vec<ProductEvent>,
+pub(crate) struct ProductEventSnapshot {
+    pub(crate) cursor: u64,
+    pub(crate) events: Vec<ProductEvent>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct ProductEventHistory {
-    cursor: u64,
-    events: Vec<ProductEvent>,
+pub(crate) struct ProductEventHistory {
+    pub(crate) cursor: u64,
+    pub(crate) events: Vec<ProductEvent>,
     #[serde(default)]
-    event_ids: BTreeSet<String>,
+    pub(crate) event_ids: BTreeSet<String>,
     /// UI-owned user rows that have been correlated with durable turn-input
     /// provenance. This survives frame-scoped read models, which may no longer
     /// expose the old frame's messages on a later `/api/state` read.
     #[serde(default)]
-    committed_user_turn_ids: BTreeSet<String>,
+    pub(crate) committed_user_turn_ids: BTreeSet<String>,
 }
 
 impl ProductEventHistory {
-    fn normalized(mut self) -> Self {
+    pub(crate) fn normalized(mut self) -> Self {
         self.cursor = self
             .events
             .last()
@@ -565,16 +566,16 @@ impl ProductEventHistory {
     }
 }
 
-const PRODUCT_EVENT_LOG_FORMAT_VERSION: u32 = 2;
+pub(crate) const PRODUCT_EVENT_LOG_FORMAT_VERSION: u32 = 2;
 
 #[derive(Serialize)]
-struct PersistedProductEventLog<'a> {
-    format_version: u32,
-    histories: &'a HashMap<String, ProductEventHistory>,
+pub(crate) struct PersistedProductEventLog<'a> {
+    pub(crate) format_version: u32,
+    pub(crate) histories: &'a HashMap<String, ProductEventHistory>,
 }
 
 #[derive(Debug, thiserror::Error)]
-enum ProductEventLogDecodeError {
+pub(crate) enum ProductEventLogDecodeError {
     #[error("invalid JSON: {0}")]
     InvalidJson(#[source] serde_json::Error),
     #[error("field `format_version` must be an unsigned 32-bit integer")]
@@ -599,13 +600,13 @@ enum ProductEventLogDecodeError {
 
 #[derive(Debug, thiserror::Error)]
 #[error("decode product event log `{path}`: {source}")]
-struct ProductEventLogLoadError {
-    path: PathBuf,
+pub(crate) struct ProductEventLogLoadError {
+    pub(crate) path: PathBuf,
     #[source]
-    source: ProductEventLogDecodeError,
+    pub(crate) source: ProductEventLogDecodeError,
 }
 
-fn decode_product_event_histories(
+pub(crate) fn decode_product_event_histories(
     bytes: &[u8],
 ) -> Result<HashMap<String, ProductEventHistory>, ProductEventLogDecodeError> {
     let value: serde_json::Value =
@@ -654,14 +655,14 @@ fn decode_product_event_histories(
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum ProductStreamItem {
+pub(crate) enum ProductStreamItem {
     Event { event: ProductEvent },
     Resync { snapshot: ProductEventSnapshot },
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum ObservationStreamItem {
+pub(crate) enum ObservationStreamItem {
     Cursor {
         cursor: String,
     },
@@ -683,16 +684,16 @@ enum ObservationStreamItem {
 }
 
 #[derive(Clone)]
-struct SessionEventRegistry {
-    histories: Arc<Mutex<HashMap<String, ProductEventHistory>>>,
-    senders: Arc<Mutex<HashMap<String, broadcast::Sender<ProductEvent>>>>,
-    channel_capacity: usize,
-    path: Option<Arc<PathBuf>>,
+pub(crate) struct SessionEventRegistry {
+    pub(crate) histories: Arc<Mutex<HashMap<String, ProductEventHistory>>>,
+    pub(crate) senders: Arc<Mutex<HashMap<String, broadcast::Sender<ProductEvent>>>>,
+    pub(crate) channel_capacity: usize,
+    pub(crate) path: Option<Arc<PathBuf>>,
 }
 
 impl SessionEventRegistry {
     #[cfg(test)]
-    fn new(channel_capacity: usize) -> Self {
+    pub(crate) fn new(channel_capacity: usize) -> Self {
         Self {
             histories: Arc::new(Mutex::new(HashMap::new())),
             senders: Arc::new(Mutex::new(HashMap::new())),
@@ -701,7 +702,7 @@ impl SessionEventRegistry {
         }
     }
 
-    fn persistent(path: PathBuf, channel_capacity: usize) -> AnyhowResult<Self> {
+    pub(crate) fn persistent(path: PathBuf, channel_capacity: usize) -> AnyhowResult<Self> {
         let histories = match std::fs::read(&path) {
             Ok(bytes) => decode_product_event_histories(&bytes).map_err(|source| {
                 ProductEventLogLoadError {
@@ -723,7 +724,7 @@ impl SessionEventRegistry {
         })
     }
 
-    fn sender(&self, session_id: &str) -> broadcast::Sender<ProductEvent> {
+    pub(crate) fn sender(&self, session_id: &str) -> broadcast::Sender<ProductEvent> {
         let mut senders = self.senders.lock_recover();
         senders
             .entry(session_id.to_string())
@@ -732,11 +733,11 @@ impl SessionEventRegistry {
     }
 
     #[cfg(test)]
-    fn subscribe(&self, session_id: &str) -> broadcast::Receiver<ProductEvent> {
+    pub(crate) fn subscribe(&self, session_id: &str) -> broadcast::Receiver<ProductEvent> {
         self.sender(session_id).subscribe()
     }
 
-    fn subscribe_after(
+    pub(crate) fn subscribe_after(
         &self,
         session_id: &str,
         cursor: u64,
@@ -755,7 +756,7 @@ impl SessionEventRegistry {
     }
 
     #[cfg(test)]
-    fn publish(&self, session_id: &str, item: StreamItem) {
+    pub(crate) fn publish(&self, session_id: &str, item: StreamItem) {
         self.publish_identified(
             session_id,
             format!("workbench-product-event:{}", uuid::Uuid::new_v4()),
@@ -763,7 +764,7 @@ impl SessionEventRegistry {
         );
     }
 
-    fn publish_identified(
+    pub(crate) fn publish_identified(
         &self,
         session_id: &str,
         event_id: impl Into<String>,
@@ -790,7 +791,7 @@ impl SessionEventRegistry {
         true
     }
 
-    fn snapshot(&self, session_id: &str) -> ProductEventSnapshot {
+    pub(crate) fn snapshot(&self, session_id: &str) -> ProductEventSnapshot {
         let history = self
             .histories
             .lock_recover()
@@ -803,7 +804,7 @@ impl SessionEventRegistry {
         }
     }
 
-    fn reconcile_settled(
+    pub(crate) fn reconcile_settled(
         &self,
         session_id: &str,
         committed_message_ids: &BTreeSet<String>,
@@ -884,7 +885,7 @@ impl SessionEventRegistry {
     /// Retirement drops the events and keeps their identities, exactly as
     /// settlement compaction does: a Restate replay that re-publishes the same
     /// row must be a no-op, not a resurrection of the row this just retired.
-    fn retire_turn_rows(&self, session_id: &str, turn_id: &str) -> BTreeSet<String> {
+    pub(crate) fn retire_turn_rows(&self, session_id: &str, turn_id: &str) -> BTreeSet<String> {
         let mut retired = BTreeSet::new();
         let mut histories = self.histories.lock_recover();
         let Some(history) = histories.get_mut(session_id) else {
@@ -908,7 +909,7 @@ impl SessionEventRegistry {
         retired
     }
 
-    fn remove(&self, session_id: &str) {
+    pub(crate) fn remove(&self, session_id: &str) {
         let mut histories = self.histories.lock_recover();
         histories.remove(session_id);
         self.persist_snapshot(&histories);
@@ -916,7 +917,7 @@ impl SessionEventRegistry {
         self.senders.lock_recover().remove(session_id);
     }
 
-    fn persist_snapshot(&self, histories: &HashMap<String, ProductEventHistory>) {
+    pub(crate) fn persist_snapshot(&self, histories: &HashMap<String, ProductEventHistory>) {
         let Some(path) = self.path.as_deref() else {
             return;
         };
@@ -939,24 +940,24 @@ impl SessionEventRegistry {
     }
 
     #[cfg(test)]
-    fn contains(&self, session_id: &str) -> bool {
+    pub(crate) fn contains(&self, session_id: &str) -> bool {
         self.senders.lock_recover().contains_key(session_id)
     }
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct TriggerEnabledRequest {
-    enabled: bool,
+pub(crate) struct TriggerEnabledRequest {
+    pub(crate) enabled: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct WorkbenchTriggerRegistration {
+pub(crate) struct WorkbenchTriggerRegistration {
     // Keep these sibling names absent from the flattened core DTO: serde would
     // otherwise emit duplicate JSON keys with order-dependent browser values.
     #[serde(flatten)]
-    registration: lash::triggers::TriggerRegistration,
-    subscription_id: String,
-    registrant_scope: String,
+    pub(crate) registration: lash::triggers::TriggerRegistration,
+    pub(crate) subscription_id: String,
+    pub(crate) registrant_scope: String,
 }
 
 impl From<&lash::triggers::TriggerSubscriptionRecord> for WorkbenchTriggerRegistration {
@@ -970,22 +971,22 @@ impl From<&lash::triggers::TriggerSubscriptionRecord> for WorkbenchTriggerRegist
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct TriggerMutationResponse {
-    changed: bool,
-    registration: Option<lash::triggers::TriggerRegistration>,
+pub(crate) struct TriggerMutationResponse {
+    pub(crate) changed: bool,
+    pub(crate) registration: Option<lash::triggers::TriggerRegistration>,
 }
 
 #[derive(Clone, Default)]
-struct ActiveTurns {
-    inner: Arc<Mutex<BTreeSet<(String, String)>>>,
-    prompts: Arc<Mutex<BTreeMap<(String, String), ActiveTurnPrompt>>>,
-    path: Option<Arc<PathBuf>>,
+pub(crate) struct ActiveTurns {
+    pub(crate) inner: Arc<Mutex<BTreeSet<(String, String)>>>,
+    pub(crate) prompts: Arc<Mutex<BTreeMap<(String, String), ActiveTurnPrompt>>>,
+    pub(crate) path: Option<Arc<PathBuf>>,
 }
 
 #[derive(Clone, Debug)]
-struct ActiveTurnPrompt {
-    text: String,
-    attachment_id: Option<String>,
+pub(crate) struct ActiveTurnPrompt {
+    pub(crate) text: String,
+    pub(crate) attachment_id: Option<String>,
 }
 
 /// Cleans up an active-turn claim unless its work-driver submission completes.
@@ -995,16 +996,16 @@ struct ActiveTurnPrompt {
 /// or the task unwinds after a panic. User-turn admission also retires its
 /// optimistic row and publishes the terminal failure expected by the browser;
 /// queued turns have no optimistic row, so they only release their claim.
-struct ActiveTurnSubmissionGuard {
-    active_turns: ActiveTurns,
-    failure_publisher: Option<AppState>,
-    session_id: String,
-    turn_id: String,
-    armed: bool,
+pub(crate) struct ActiveTurnSubmissionGuard {
+    pub(crate) active_turns: ActiveTurns,
+    pub(crate) failure_publisher: Option<AppState>,
+    pub(crate) session_id: String,
+    pub(crate) turn_id: String,
+    pub(crate) armed: bool,
 }
 
 impl ActiveTurnSubmissionGuard {
-    fn user_turn(state: &AppState, session_id: &str, turn_id: &str) -> Self {
+    pub(crate) fn user_turn(state: &AppState, session_id: &str, turn_id: &str) -> Self {
         Self {
             active_turns: state.active_turns.clone(),
             failure_publisher: Some(state.clone()),
@@ -1014,7 +1015,7 @@ impl ActiveTurnSubmissionGuard {
         }
     }
 
-    fn queued_turn(active_turns: ActiveTurns, session_id: &str, turn_id: &str) -> Self {
+    pub(crate) fn queued_turn(active_turns: ActiveTurns, session_id: &str, turn_id: &str) -> Self {
         Self {
             active_turns,
             failure_publisher: None,
@@ -1024,7 +1025,7 @@ impl ActiveTurnSubmissionGuard {
         }
     }
 
-    fn complete(mut self) {
+    pub(crate) fn complete(mut self) {
         self.armed = false;
     }
 }
@@ -1055,38 +1056,38 @@ impl Drop for ActiveTurnSubmissionGuard {
 }
 
 #[derive(Deserialize)]
-struct PersistedActiveTurns {
-    turns: BTreeSet<(String, String)>,
+pub(crate) struct PersistedActiveTurns {
+    pub(crate) turns: BTreeSet<(String, String)>,
     #[serde(default)]
-    prompts: Vec<PersistedActiveTurnPrompt>,
+    pub(crate) prompts: Vec<PersistedActiveTurnPrompt>,
 }
 
 #[derive(Serialize)]
-struct PersistedActiveTurnsRef<'a> {
-    turns: &'a BTreeSet<(String, String)>,
-    prompts: Vec<PersistedActiveTurnPromptRef<'a>>,
+pub(crate) struct PersistedActiveTurnsRef<'a> {
+    pub(crate) turns: &'a BTreeSet<(String, String)>,
+    pub(crate) prompts: Vec<PersistedActiveTurnPromptRef<'a>>,
 }
 
 #[derive(Deserialize)]
-struct PersistedActiveTurnPrompt {
-    session_id: String,
-    turn_id: String,
-    prompt: String,
+pub(crate) struct PersistedActiveTurnPrompt {
+    pub(crate) session_id: String,
+    pub(crate) turn_id: String,
+    pub(crate) prompt: String,
     #[serde(default)]
-    attachment_id: Option<String>,
+    pub(crate) attachment_id: Option<String>,
 }
 
 #[derive(Serialize)]
-struct PersistedActiveTurnPromptRef<'a> {
-    session_id: &'a str,
-    turn_id: &'a str,
-    prompt: &'a str,
+pub(crate) struct PersistedActiveTurnPromptRef<'a> {
+    pub(crate) session_id: &'a str,
+    pub(crate) turn_id: &'a str,
+    pub(crate) prompt: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    attachment_id: Option<&'a str>,
+    pub(crate) attachment_id: Option<&'a str>,
 }
 
 impl ActiveTurns {
-    fn persistent(path: PathBuf) -> AnyhowResult<Self> {
+    pub(crate) fn persistent(path: PathBuf) -> AnyhowResult<Self> {
         let (turns, prompts) = match std::fs::read(&path) {
             Ok(bytes) => {
                 let persisted: PersistedActiveTurns = serde_json::from_slice(&bytes)
@@ -1136,12 +1137,12 @@ impl ActiveTurns {
     }
 
     #[cfg(test)]
-    fn insert(&self, session_id: impl Into<String>, turn_id: impl Into<String>) {
+    pub(crate) fn insert(&self, session_id: impl Into<String>, turn_id: impl Into<String>) {
         self.insert_with_prompt(session_id, turn_id, None, None);
     }
 
     #[cfg(test)]
-    fn insert_with_prompt(
+    pub(crate) fn insert_with_prompt(
         &self,
         session_id: impl Into<String>,
         turn_id: impl Into<String>,
@@ -1164,11 +1165,11 @@ impl ActiveTurns {
         self.persist_snapshot(&active, &prompts);
     }
 
-    fn try_insert_for_idle_session(&self, session_id: &str, turn_id: &str) -> bool {
+    pub(crate) fn try_insert_for_idle_session(&self, session_id: &str, turn_id: &str) -> bool {
         self.try_insert_with_prompt_for_idle_session(session_id, turn_id, None, None)
     }
 
-    fn try_insert_with_prompt_for_idle_session(
+    pub(crate) fn try_insert_with_prompt_for_idle_session(
         &self,
         session_id: &str,
         turn_id: &str,
@@ -1198,7 +1199,7 @@ impl ActiveTurns {
         true
     }
 
-    fn remove(&self, session_id: &str, turn_id: &str) {
+    pub(crate) fn remove(&self, session_id: &str, turn_id: &str) {
         let key = (session_id.to_string(), turn_id.to_string());
         let mut active = self.inner.lock_recover();
         let mut prompts = self.prompts.lock_recover();
@@ -1207,13 +1208,13 @@ impl ActiveTurns {
         self.persist_snapshot(&active, &prompts);
     }
 
-    fn contains(&self, session_id: &str, turn_id: &str) -> bool {
+    pub(crate) fn contains(&self, session_id: &str, turn_id: &str) -> bool {
         self.inner
             .lock_recover()
             .contains(&(session_id.to_string(), turn_id.to_string()))
     }
 
-    fn for_session(&self, session_id: &str) -> Vec<lash::TurnAddress> {
+    pub(crate) fn for_session(&self, session_id: &str) -> Vec<lash::TurnAddress> {
         self.inner
             .lock_recover()
             .iter()
@@ -1222,20 +1223,20 @@ impl ActiveTurns {
             .collect()
     }
 
-    fn prompt_for(&self, session_id: &str, turn_id: &str) -> Option<ActiveTurnPrompt> {
+    pub(crate) fn prompt_for(&self, session_id: &str, turn_id: &str) -> Option<ActiveTurnPrompt> {
         self.prompts
             .lock_recover()
             .get(&(session_id.to_string(), turn_id.to_string()))
             .cloned()
     }
 
-    fn persist(&self) {
+    pub(crate) fn persist(&self) {
         let active = self.inner.lock_recover();
         let prompts = self.prompts.lock_recover();
         self.persist_snapshot(&active, &prompts);
     }
 
-    fn persist_snapshot(
+    pub(crate) fn persist_snapshot(
         &self,
         active: &BTreeSet<(String, String)>,
         prompts: &BTreeMap<(String, String), ActiveTurnPrompt>,
@@ -1273,21 +1274,21 @@ impl ActiveTurns {
 }
 
 #[derive(Debug, Serialize)]
-struct CommandAccepted {
-    accepted: bool,
+pub(crate) struct CommandAccepted {
+    pub(crate) accepted: bool,
 }
 
 #[derive(Debug, Serialize)]
-struct ProcessCancelAccepted {
-    accepted: bool,
-    operation_id: String,
-    process_id: String,
+pub(crate) struct ProcessCancelAccepted {
+    pub(crate) accepted: bool,
+    pub(crate) operation_id: String,
+    pub(crate) process_id: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct TurnCancelResponse {
-    accepted: bool,
-    cancellations: Vec<TurnCancelReceipt>,
+pub(crate) struct TurnCancelResponse {
+    pub(crate) accepted: bool,
+    pub(crate) cancellations: Vec<TurnCancelReceipt>,
 }
 
 /// Host-visible notice the workbench renders when the durable-process worker
@@ -1303,15 +1304,15 @@ struct TurnCancelResponse {
 /// line out on the workbench's stderr process log (the browser feed carries
 /// process *events*; a worker fault is an operator signal, not a UI row).
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct WorkerFaultNotice {
-    kind: &'static str,
-    process_id: Option<String>,
-    operation: Option<String>,
-    error: String,
+pub(crate) struct WorkerFaultNotice {
+    pub(crate) kind: &'static str,
+    pub(crate) process_id: Option<String>,
+    pub(crate) operation: Option<String>,
+    pub(crate) error: String,
 }
 
 impl WorkerFaultNotice {
-    fn from_fault(fault: &lash::process::ProcessWorkerFault) -> Self {
+    pub(crate) fn from_fault(fault: &lash::process::ProcessWorkerFault) -> Self {
         match fault {
             lash::process::ProcessWorkerFault::RecoveryBackendError {
                 process_id,
@@ -1348,7 +1349,7 @@ impl WorkerFaultNotice {
         }
     }
 
-    fn render(&self) -> String {
+    pub(crate) fn render(&self) -> String {
         format!(
             "kind={} process={} operation={} error={}",
             self.kind,
@@ -1370,13 +1371,13 @@ impl WorkerFaultNotice {
 /// pass lost a row, so the fault channel is sized for the whole feed rather
 /// than sharing the event channel's drop-under-pressure budget.
 #[derive(Clone)]
-struct ChannelProcessEventSink {
-    tx: mpsc::Sender<lash::process::ProcessEvent>,
-    faults: mpsc::Sender<WorkerFaultNotice>,
+pub(crate) struct ChannelProcessEventSink {
+    pub(crate) tx: mpsc::Sender<lash::process::ProcessEvent>,
+    pub(crate) faults: mpsc::Sender<WorkerFaultNotice>,
 }
 
 impl ChannelProcessEventSink {
-    fn new(
+    pub(crate) fn new(
         tx: mpsc::Sender<lash::process::ProcessEvent>,
         faults: mpsc::Sender<WorkerFaultNotice>,
     ) -> Self {
@@ -1398,12 +1399,12 @@ impl lash::process::ProcessEventSink for ChannelProcessEventSink {
 }
 
 #[derive(Clone)]
-struct WorkbenchQueuedWorkSubmitter {
-    sessions: WorkbenchSessions,
-    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    restate_ingress_url: String,
-    restate_http: reqwest::Client,
-    active_turns: ActiveTurns,
+pub(crate) struct WorkbenchQueuedWorkSubmitter {
+    pub(crate) sessions: WorkbenchSessions,
+    pub(crate) store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    pub(crate) restate_ingress_url: String,
+    pub(crate) restate_http: reqwest::Client,
+    pub(crate) active_turns: ActiveTurns,
 }
 
 #[async_trait]
@@ -1468,7 +1469,10 @@ impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
 }
 
 impl WorkbenchQueuedWorkSubmitter {
-    async fn has_queued_work(&self, session_id: &str) -> std::result::Result<bool, PluginError> {
+    pub(crate) async fn has_queued_work(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<bool, PluginError> {
         let store = self
             .store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
@@ -1494,7 +1498,7 @@ impl WorkbenchQueuedWorkSubmitter {
 }
 
 #[cfg(test)]
-struct NoopQueuedWorkRunHandle;
+pub(crate) struct NoopQueuedWorkRunHandle;
 
 #[cfg(test)]
 #[async_trait]
@@ -1508,12 +1512,12 @@ impl lash::runtime::QueuedWorkRunHandle for NoopQueuedWorkRunHandle {
 }
 
 #[cfg(test)]
-fn inert_queued_work() -> lash::runtime::NativeQueuedWork {
+pub(crate) fn inert_queued_work() -> lash::runtime::NativeQueuedWork {
     lash::runtime::NativeQueuedWork::new(Arc::new(NoopQueuedWorkRunHandle))
 }
 
 #[cfg(test)]
-fn inert_queued_work_port() -> Arc<dyn lash::runtime::QueuedWorkSubstrate> {
+pub(crate) fn inert_queued_work_port() -> Arc<dyn lash::runtime::QueuedWorkSubstrate> {
     Arc::new(lash::runtime::NativeQueuedWork::new(Arc::new(
         NoopQueuedWorkRunHandle,
     )))
@@ -1523,48 +1527,48 @@ fn inert_queued_work_port() -> Arc<dyn lash::runtime::QueuedWorkSubstrate> {
 // The AppState no longer mirrors that driver as a second source of truth.
 
 #[derive(Debug, Serialize)]
-struct WorkItem {
-    process: WorkProcess,
-    events: Vec<WorkEvent>,
-    kind: String,
-    label: String,
+pub(crate) struct WorkItem {
+    pub(crate) process: WorkProcess,
+    pub(crate) events: Vec<WorkEvent>,
+    pub(crate) kind: String,
+    pub(crate) label: String,
 }
 
 #[derive(Debug, Serialize)]
-struct WorkProcess {
-    process_id: String,
-    graph_key: String,
-    lifecycle: lash::process::ProcessStatus,
-    status_label: String,
-    terminal: bool,
-    error: Option<String>,
-    created_at_ms: u64,
-    updated_at_ms: u64,
-    input: Value,
-    external_ref: Option<Value>,
-    child_session_id: Option<String>,
-    label: String,
+pub(crate) struct WorkProcess {
+    pub(crate) process_id: String,
+    pub(crate) graph_key: String,
+    pub(crate) lifecycle: lash::process::ProcessStatus,
+    pub(crate) status_label: String,
+    pub(crate) terminal: bool,
+    pub(crate) error: Option<String>,
+    pub(crate) created_at_ms: u64,
+    pub(crate) updated_at_ms: u64,
+    pub(crate) input: Value,
+    pub(crate) external_ref: Option<Value>,
+    pub(crate) child_session_id: Option<String>,
+    pub(crate) label: String,
 }
 
 #[derive(Debug, Serialize)]
-struct WorkEvent {
-    sequence: u64,
-    event_type: String,
-    occurred_at_ms: u64,
-    payload: Value,
+pub(crate) struct WorkEvent {
+    pub(crate) sequence: u64,
+    pub(crate) event_type: String,
+    pub(crate) occurred_at_ms: u64,
+    pub(crate) payload: Value,
 }
 
 #[derive(Debug, Serialize)]
-struct WorkAwaitResult {
-    process_id: String,
-    outcome: lash::process::ProcessAwaitOutput,
+pub(crate) struct WorkAwaitResult {
+    pub(crate) process_id: String,
+    pub(crate) outcome: lash::process::ProcessAwaitOutput,
     /// Reconciled from the durable log at terminal (ADR 0017): the authoritative,
     /// complete record, unlike the best-effort event sink.
-    events: Vec<WorkAwaitEvent>,
+    pub(crate) events: Vec<WorkAwaitEvent>,
 }
 
 #[derive(Debug, Serialize)]
-struct WorkAwaitEvent {
-    sequence: u64,
-    event_type: String,
+pub(crate) struct WorkAwaitEvent {
+    pub(crate) sequence: u64,
+    pub(crate) event_type: String,
 }

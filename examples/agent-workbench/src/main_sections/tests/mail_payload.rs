@@ -1,3 +1,6 @@
+use super::*;
+use lash::triggers::TriggerStore as _;
+
 use axum::extract::FromRequest;
 
 #[test]

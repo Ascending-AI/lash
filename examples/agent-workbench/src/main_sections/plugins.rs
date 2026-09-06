@@ -1,15 +1,17 @@
-struct WorkbenchPluginFactory {
-    tavily_api_key: String,
-    mail_world: mail::MailWorld,
-    derived_notes: WorkbenchDerivedNotes,
-    config_changes: WorkbenchConfigChanges,
-    context_budget: WorkbenchContextBudget,
-    deferred_tools: deferred_tools::WorkbenchDeferredTools,
-    approvals: approvals::WorkbenchApprovals,
+use super::*;
+
+pub(crate) struct WorkbenchPluginFactory {
+    pub(crate) tavily_api_key: String,
+    pub(crate) mail_world: mail::MailWorld,
+    pub(crate) derived_notes: WorkbenchDerivedNotes,
+    pub(crate) config_changes: WorkbenchConfigChanges,
+    pub(crate) context_budget: WorkbenchContextBudget,
+    pub(crate) deferred_tools: deferred_tools::WorkbenchDeferredTools,
+    pub(crate) approvals: approvals::WorkbenchApprovals,
 }
 
 impl WorkbenchPluginFactory {
-    fn new(tavily_api_key: impl Into<String>) -> Self {
+    pub(crate) fn new(tavily_api_key: impl Into<String>) -> Self {
         Self {
             tavily_api_key: tavily_api_key.into(),
             mail_world: mail::MailWorld::new(),
@@ -23,12 +25,12 @@ impl WorkbenchPluginFactory {
         }
     }
 
-    fn with_mail_world(mut self, mail_world: mail::MailWorld) -> Self {
+    pub(crate) fn with_mail_world(mut self, mail_world: mail::MailWorld) -> Self {
         self.mail_world = mail_world;
         self
     }
 
-    fn with_deferred_tools(
+    pub(crate) fn with_deferred_tools(
         mut self,
         deferred_tools: deferred_tools::WorkbenchDeferredTools,
     ) -> Self {
@@ -36,7 +38,7 @@ impl WorkbenchPluginFactory {
         self
     }
 
-    fn with_approvals(mut self, approvals: approvals::WorkbenchApprovals) -> Self {
+    pub(crate) fn with_approvals(mut self, approvals: approvals::WorkbenchApprovals) -> Self {
         self.approvals = approvals;
         self
     }
@@ -44,19 +46,19 @@ impl WorkbenchPluginFactory {
     /// Handle on the annotator's decision log, so a harness can read what the
     /// append fence did with each derived note.
     #[cfg(test)]
-    fn derived_notes(&self) -> WorkbenchDerivedNotes {
+    pub(crate) fn derived_notes(&self) -> WorkbenchDerivedNotes {
         self.derived_notes.clone()
     }
 
     #[cfg(test)]
-    fn config_changes(&self) -> WorkbenchConfigChanges {
+    pub(crate) fn config_changes(&self) -> WorkbenchConfigChanges {
         self.config_changes.clone()
     }
 
     /// Handle on what the per-turn context transform actually saw, so a harness
     /// can check the prepared context the runtime handed it.
     #[cfg(test)]
-    fn context_budget(&self) -> WorkbenchContextBudget {
+    pub(crate) fn context_budget(&self) -> WorkbenchContextBudget {
         self.context_budget.clone()
     }
 }
@@ -100,15 +102,15 @@ impl PluginFactory for WorkbenchPluginFactory {
     }
 }
 
-struct WorkbenchSessionPlugin {
-    dialect: lash::rlm::RlmDialect,
-    tavily_api_key: String,
-    mail_world: mail::MailWorld,
-    derived_notes: WorkbenchDerivedNotes,
-    config_changes: WorkbenchConfigChanges,
-    context_budget: WorkbenchContextBudget,
-    deferred_tools: deferred_tools::WorkbenchDeferredTools,
-    approvals: approvals::WorkbenchApprovals,
+pub(crate) struct WorkbenchSessionPlugin {
+    pub(crate) dialect: lash::rlm::RlmDialect,
+    pub(crate) tavily_api_key: String,
+    pub(crate) mail_world: mail::MailWorld,
+    pub(crate) derived_notes: WorkbenchDerivedNotes,
+    pub(crate) config_changes: WorkbenchConfigChanges,
+    pub(crate) context_budget: WorkbenchContextBudget,
+    pub(crate) deferred_tools: deferred_tools::WorkbenchDeferredTools,
+    pub(crate) approvals: approvals::WorkbenchApprovals,
 }
 
 impl SessionPlugin for WorkbenchSessionPlugin {
@@ -199,28 +201,26 @@ impl SessionPlugin for WorkbenchSessionPlugin {
 /// into the prompt the provider actually receives, so a harness can prove the
 /// transform ran against the real assembled context and not a fabricated one.
 #[derive(Clone, Default)]
-struct WorkbenchContextBudget {
-    observed: Arc<Mutex<Option<WorkbenchContextObservation>>>,
+pub(crate) struct WorkbenchContextBudget {
+    pub(crate) observed: Arc<Mutex<Option<WorkbenchContextObservation>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct WorkbenchContextObservation {
-    session_id: String,
-    message_count: usize,
-    contribution_count: usize,
-    tool_provider_count: usize,
-    include_base_tools: bool,
-    committed_message_count: usize,
-    max_context_tokens: Option<usize>,
-    last_prompt_context_tokens: Option<usize>,
+pub(crate) struct WorkbenchContextObservation {
+    pub(crate) session_id: String,
+    pub(crate) message_count: usize,
+    pub(crate) contribution_count: usize,
+    pub(crate) tool_provider_count: usize,
+    pub(crate) include_base_tools: bool,
+    pub(crate) committed_message_count: usize,
+    pub(crate) max_context_tokens: Option<usize>,
+    pub(crate) last_prompt_context_tokens: Option<usize>,
 }
 
 impl WorkbenchContextBudget {
     #[cfg(test)]
-    fn observation(&self) -> Option<WorkbenchContextObservation> {
-        self.observed
-            .lock_recover()
-            .clone()
+    pub(crate) fn observation(&self) -> Option<WorkbenchContextObservation> {
+        self.observed.lock_recover().clone()
     }
 }
 
@@ -248,9 +248,7 @@ impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {
                 .as_ref()
                 .map(|usage: &lash::runtime::PromptUsage| usage.prompt_context_tokens),
         };
-        *self
-            .observed
-            .lock_recover() = Some(observation.clone());
+        *self.observed.lock_recover() = Some(observation.clone());
 
         let mut output = input;
         output.prompt_contributions.push(
@@ -275,27 +273,25 @@ impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {
 }
 
 #[derive(Clone, Default)]
-struct WorkbenchConfigChanges {
-    latest: Arc<Mutex<Option<WorkbenchConfigChange>>>,
+pub(crate) struct WorkbenchConfigChanges {
+    pub(crate) latest: Arc<Mutex<Option<WorkbenchConfigChange>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct WorkbenchConfigChange {
-    session_id: String,
-    previous_model_id: String,
-    current_model_id: String,
-    service_model_id: String,
+pub(crate) struct WorkbenchConfigChange {
+    pub(crate) session_id: String,
+    pub(crate) previous_model_id: String,
+    pub(crate) current_model_id: String,
+    pub(crate) service_model_id: String,
 }
 
 impl WorkbenchConfigChanges {
-    async fn observe(
+    pub(crate) async fn observe(
         &self,
         ctx: &lash::plugins::SessionConfigChangedContext,
     ) -> Result<(), PluginError> {
         let snapshot = ctx.sessions.snapshot_current().await?;
-        *self
-            .latest
-            .lock_recover() = Some(WorkbenchConfigChange {
+        *self.latest.lock_recover() = Some(WorkbenchConfigChange {
             session_id: ctx.session_id.clone(),
             previous_model_id: ctx.previous.model_id().to_string(),
             current_model_id: ctx.current.model_id().to_string(),
@@ -305,10 +301,8 @@ impl WorkbenchConfigChanges {
     }
 
     #[cfg(test)]
-    fn latest(&self) -> Option<WorkbenchConfigChange> {
-        self.latest
-            .lock_recover()
-            .clone()
+    pub(crate) fn latest(&self) -> Option<WorkbenchConfigChange> {
+        self.latest.lock_recover().clone()
     }
 }
 
@@ -327,26 +321,26 @@ impl WorkbenchConfigChanges {
 /// throws it away, because the conversation it summarizes is not the one this
 /// session is having.
 #[derive(Clone, Default)]
-struct WorkbenchDerivedNotes {
-    inner: Arc<WorkbenchDerivedNotesState>,
+pub(crate) struct WorkbenchDerivedNotes {
+    pub(crate) inner: Arc<WorkbenchDerivedNotesState>,
 }
 
 #[derive(Default)]
-struct WorkbenchDerivedNotesState {
-    pending: Mutex<Vec<WorkbenchPendingNote>>,
-    settled: Mutex<Vec<WorkbenchSettledNote>>,
+pub(crate) struct WorkbenchDerivedNotesState {
+    pub(crate) pending: Mutex<Vec<WorkbenchPendingNote>>,
+    pub(crate) settled: Mutex<Vec<WorkbenchSettledNote>>,
 }
 
 #[derive(Clone, Debug)]
-struct WorkbenchPendingNote {
+pub(crate) struct WorkbenchPendingNote {
     /// The node the summary was read at. Not where the note lands.
-    base_node_id: String,
-    summary: String,
+    pub(crate) base_node_id: String,
+    pub(crate) summary: String,
 }
 
 /// What the append fence decided about one derived note.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum WorkbenchSettledNote {
+pub(crate) enum WorkbenchSettledNote {
     /// Kept: `node_id` is where it actually landed, which is the leaf as of
     /// the append and generally *not* `base_node_id`.
     Written {
@@ -360,7 +354,10 @@ enum WorkbenchSettledNote {
 }
 
 impl WorkbenchDerivedNotes {
-    async fn on_turn_persisted(&self, ctx: &lash::plugins::SessionStateChangedContext<'_>) {
+    pub(crate) async fn on_turn_persisted(
+        &self,
+        ctx: &lash::plugins::SessionStateChangedContext<'_>,
+    ) {
         for note in self.take_pending() {
             self.write_back(ctx, note).await;
         }
@@ -377,7 +374,7 @@ impl WorkbenchDerivedNotes {
         }
     }
 
-    async fn write_back(
+    pub(crate) async fn write_back(
         &self,
         ctx: &lash::plugins::SessionStateChangedContext<'_>,
         note: WorkbenchPendingNote,
@@ -420,10 +417,7 @@ impl WorkbenchDerivedNotes {
                 // A store or plugin failure is not a verdict about the branch;
                 // keep the note and let the next persisted turn retry it.
                 eprintln!("workbench derived note write-back failed: {error}");
-                self.inner
-                    .pending
-                    .lock_recover()
-                    .push(note);
+                self.inner.pending.lock_recover().push(note);
                 return;
             }
         };
@@ -434,10 +428,7 @@ impl WorkbenchDerivedNotes {
                 ctx.session_id
             );
         }
-        let mut log = self
-            .inner
-            .settled
-            .lock_recover();
+        let mut log = self.inner.settled.lock_recover();
         log.push(settled);
         // The decision log is a rolling operator aid, not a record: a long-lived
         // workbench must not accumulate one entry per turn forever.
@@ -445,34 +436,30 @@ impl WorkbenchDerivedNotes {
         log.drain(..overflow);
     }
 
-    fn take_pending(&self) -> Vec<WorkbenchPendingNote> {
-        std::mem::take(
-            &mut *self
-                .inner
-                .pending
-                .lock_recover(),
-        )
+    pub(crate) fn take_pending(&self) -> Vec<WorkbenchPendingNote> {
+        std::mem::take(&mut *self.inner.pending.lock_recover())
     }
 
     #[cfg(test)]
-    fn settled(&self) -> Vec<WorkbenchSettledNote> {
-        self.inner
-            .settled
-            .lock_recover()
-            .clone()
+    pub(crate) fn settled(&self) -> Vec<WorkbenchSettledNote> {
+        self.inner.settled.lock_recover().clone()
     }
 }
 
-const WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE: &str = "workbench.turn_note";
-const WORKBENCH_DERIVED_NOTE_LOG_LIMIT: usize = 64;
+pub(crate) const WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE: &str = "workbench.turn_note";
+pub(crate) const WORKBENCH_DERIVED_NOTE_LOG_LIMIT: usize = 64;
 
 /// Stand-in for the expensive derivation: in a deployment this is a model call
 /// over the transcript, which is exactly why the write-back lands a commit late.
-fn workbench_note_summary(state: &lash::persistence::SessionReadView) -> String {
-    format!("{} messages after turn {}", state.messages().len(), state.turn_index())
+pub(crate) fn workbench_note_summary(state: &lash::persistence::SessionReadView) -> String {
+    format!(
+        "{} messages after turn {}",
+        state.messages().len(),
+        state.turn_index()
+    )
 }
 
-fn workbench_lashlang_resources() -> lashlang::LashlangHostCatalog {
+pub(crate) fn workbench_lashlang_resources() -> lashlang::LashlangHostCatalog {
     let mut resources = lashlang::LashlangHostCatalog::new();
     resources
         .add_trigger_source_constructor(
@@ -509,7 +496,7 @@ fn workbench_lashlang_resources() -> lashlang::LashlangHostCatalog {
     resources
 }
 
-fn button_pressed_event_type() -> lashlang::NamedDataType {
+pub(crate) fn button_pressed_event_type() -> lashlang::NamedDataType {
     lashlang::NamedDataType::object(
         "ui.button.Pressed",
         vec![
@@ -521,7 +508,7 @@ fn button_pressed_event_type() -> lashlang::NamedDataType {
     .expect("valid button pressed event type")
 }
 
-fn mail_received_event_type() -> lashlang::NamedDataType {
+pub(crate) fn mail_received_event_type() -> lashlang::NamedDataType {
     lashlang::NamedDataType::object(
         "mail.Received",
         vec![
@@ -533,7 +520,7 @@ fn mail_received_event_type() -> lashlang::NamedDataType {
     .expect("valid mail received event type")
 }
 
-fn mail_received_payload_schema() -> lash::triggers::LashSchema {
+pub(crate) fn mail_received_payload_schema() -> lash::triggers::LashSchema {
     lash::triggers::LashSchema::new(serde_json::json!({
         "type": "object",
         "properties": {
@@ -546,7 +533,7 @@ fn mail_received_payload_schema() -> lash::triggers::LashSchema {
     }))
 }
 
-fn button_trigger_payload_schema() -> lash::triggers::LashSchema {
+pub(crate) fn button_trigger_payload_schema() -> lash::triggers::LashSchema {
     lash::triggers::LashSchema::new(serde_json::json!({
         "type": "object",
         "properties": {
@@ -559,7 +546,7 @@ fn button_trigger_payload_schema() -> lash::triggers::LashSchema {
     }))
 }
 
-fn field(name: &str, ty: lashlang::TypeExpr) -> lashlang::TypeField {
+pub(crate) fn field(name: &str, ty: lashlang::TypeExpr) -> lashlang::TypeField {
     lashlang::TypeField {
         name: name.into(),
         ty,
@@ -570,7 +557,7 @@ fn field(name: &str, ty: lashlang::TypeExpr) -> lashlang::TypeField {
 /// Live, per-turn prompt line naming the inbox authorities that actually exist,
 /// so the agent never assumes the illustrative `inbox.work`/`inbox.personal`
 /// names from the static guidance are real.
-fn connected_accounts_prompt(mail_world: &mail::MailWorld) -> String {
+pub(crate) fn connected_accounts_prompt(mail_world: &mail::MailWorld) -> String {
     let accounts = mail_world.account_summaries();
     if accounts.is_empty() {
         return "Connected inbox accounts: none yet. The `inbox` namespace is empty until the \
@@ -591,7 +578,7 @@ fn connected_accounts_prompt(mail_world: &mail::MailWorld) -> String {
     )
 }
 
-fn cron_tick_event_type() -> lashlang::NamedDataType {
+pub(crate) fn cron_tick_event_type() -> lashlang::NamedDataType {
     lashlang::NamedDataType::object(
         "cron.Tick",
         vec![lashlang::TypeField {

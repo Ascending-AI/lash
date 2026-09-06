@@ -1,3 +1,5 @@
+use super::*;
+
 fn deferred_tools_test_core(
     data_dir: &std::path::Path,
     provider: ProviderHandle,
@@ -46,14 +48,11 @@ fn deferred_tools_test_core(
     );
     LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
-        .session_spec(
-            lash::SessionSpec::new()
-                .turn_budget(lash::TurnBudget::Unbounded),
-        )
+        .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
         .model(test_model())
-        .store_factory(Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-        ))
+        .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+            data_dir.join("lash-sessions"),
+        )))
         .plugin(Arc::new(
             WorkbenchPluginFactory::new("").with_deferred_tools(deferred),
         ))
@@ -73,10 +72,9 @@ fn deferred_search_observation_enables_next_block_call() {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&data_dir).expect("create deferred round-trip dir");
-        let deferred = deferred_tools::WorkbenchDeferredTools::open(
-            data_dir.join("deferred-tool-grants.db"),
-        )
-        .expect("open deferred grants");
+        let deferred =
+            deferred_tools::WorkbenchDeferredTools::open(data_dir.join("deferred-tool-grants.db"))
+                .expect("open deferred grants");
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-deferred-round-trip")
@@ -142,10 +140,9 @@ fn same_block_discovery_cannot_relink_and_unknown_paths_report_link_errors() {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&data_dir).expect("create deferred link-error dir");
-        let deferred = deferred_tools::WorkbenchDeferredTools::open(
-            data_dir.join("deferred-tool-grants.db"),
-        )
-        .expect("open deferred grants");
+        let deferred =
+            deferred_tools::WorkbenchDeferredTools::open(data_dir.join("deferred-tool-grants.db"))
+                .expect("open deferred grants");
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-deferred-link-errors")
@@ -202,7 +199,10 @@ finish "typed link failures observed"
             .run()
             .await
             .expect("recover after typed link errors");
-        assert_eq!(output.final_value(), Some(&json!("typed link failures observed")));
+        assert_eq!(
+            output.final_value(),
+            Some(&json!("typed link failures observed"))
+        );
         let _ = std::fs::remove_dir_all(data_dir);
     });
 }

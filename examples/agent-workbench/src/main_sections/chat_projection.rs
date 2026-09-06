@@ -1,3 +1,5 @@
+use super::*;
+
 // Projection of a chat snapshot from the two sources the workbench reads: the
 // durable session graph, which is authoritative, and the product-event log the
 // UI owns. Where the two carry the same turn's user text, the UI-owned row
@@ -9,7 +11,7 @@
 ///
 /// Returns replayed prompt rows, which the caller appends after the product
 /// rows so ordering is unchanged.
-fn replayed_active_user_rows(
+pub(crate) fn replayed_active_user_rows(
     state: &AppState,
     active_turns: &[lash::TurnAddress],
     product_messages: &[ChatMessage],
@@ -58,7 +60,7 @@ fn replayed_active_user_rows(
 /// survives (the product log was truncated, or the turn came from a trigger or
 /// mail rather than the chat box) nothing is replaced and the committed copy
 /// is what the transcript renders.
-fn ui_owned_turn_input_replacements(
+pub(crate) fn ui_owned_turn_input_replacements(
     read_view: &lash::persistence::SessionReadView,
     ui_user_rows: &BTreeMap<String, ChatMessage>,
 ) -> BTreeMap<String, ChatMessage> {
@@ -87,7 +89,7 @@ fn ui_owned_turn_input_replacements(
 /// frame. Hiding it does not depend on either the runtime message id or a
 /// textual comparison with the tool arguments. Later turn inputs remain chat
 /// rows, including inputs injected while the follow turn is running.
-fn continue_as_protocol_state_message_ids(
+pub(crate) fn continue_as_protocol_state_message_ids(
     read_view: &lash::persistence::SessionReadView,
 ) -> BTreeSet<String> {
     let graph = read_view.session_graph();
@@ -120,7 +122,7 @@ fn continue_as_protocol_state_message_ids(
         .unwrap_or_default()
 }
 
-fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage {
+pub(crate) fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage {
     ChatMessage {
         id: message.id.clone(),
         role: lash::message_role(message).to_string(),
@@ -146,7 +148,7 @@ fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage
     }
 }
 
-fn committed_turn_output_turn_ids(messages: &[ChatMessage]) -> BTreeSet<String> {
+pub(crate) fn committed_turn_output_turn_ids(messages: &[ChatMessage]) -> BTreeSet<String> {
     messages
         .iter()
         .filter_map(|message| {
@@ -162,7 +164,7 @@ fn committed_turn_output_turn_ids(messages: &[ChatMessage]) -> BTreeSet<String> 
         .collect()
 }
 
-fn is_committed_turn_output_copy(
+pub(crate) fn is_committed_turn_output_copy(
     message: &ChatMessage,
     committed_turn_output_turn_ids: &BTreeSet<String>,
 ) -> bool {
@@ -175,7 +177,7 @@ fn is_committed_turn_output_copy(
         }
 }
 
-fn committed_chat_text(message: &lash::messages::Message) -> String {
+pub(crate) fn committed_chat_text(message: &lash::messages::Message) -> String {
     message
         .parts
         .iter()
@@ -185,7 +187,7 @@ fn committed_chat_text(message: &lash::messages::Message) -> String {
         .join("\n")
 }
 
-fn is_durable_internal_rlm_message(message: &lash::messages::Message) -> bool {
+pub(crate) fn is_durable_internal_rlm_message(message: &lash::messages::Message) -> bool {
     matches!(
         message.origin.as_ref(),
         Some(lash::messages::MessageOrigin::Plugin {
@@ -205,7 +207,7 @@ fn is_durable_internal_rlm_message(message: &lash::messages::Message) -> bool {
 /// an assistant message carrying visible prose. The protocol's system copies —
 /// finish reminders, retry copy, cell diagnostics — never can be, and its
 /// reasoning-only messages carry nothing for a chat row to say.
-fn is_rlm_assistant_prose_message(message: &lash::messages::Message) -> bool {
+pub(crate) fn is_rlm_assistant_prose_message(message: &lash::messages::Message) -> bool {
     is_durable_internal_rlm_message(message)
         && lash::message_role(message) == "assistant"
         && message.parts.iter().any(|part| {
@@ -252,7 +254,7 @@ fn is_rlm_assistant_prose_message(message: &lash::messages::Message) -> bool {
 /// before the next turn's input commits, so a session-wide test would blink the
 /// previous answer out on every send and hide it for good behind an entry whose
 /// process died mid-turn.
-fn durable_rlm_reply_message_ids(
+pub(crate) fn durable_rlm_reply_message_ids(
     messages: &[lash::messages::Message],
     running_turn_ids: &BTreeSet<String>,
 ) -> BTreeSet<String> {
@@ -292,7 +294,7 @@ fn durable_rlm_reply_message_ids(
     replies
 }
 
-fn project_committed_chat_message(
+pub(crate) fn project_committed_chat_message(
     message: &lash::messages::Message,
     rlm_reply_ids: &BTreeSet<String>,
 ) -> Option<ChatMessage> {
@@ -300,7 +302,7 @@ fn project_committed_chat_message(
         .then(|| chat_message_from_committed(message))
 }
 
-fn durable_rlm_reasoning_rows(message: &lash::messages::Message) -> Vec<TranscriptRow> {
+pub(crate) fn durable_rlm_reasoning_rows(message: &lash::messages::Message) -> Vec<TranscriptRow> {
     message
         .parts
         .iter()
@@ -315,7 +317,7 @@ fn durable_rlm_reasoning_rows(message: &lash::messages::Message) -> Vec<Transcri
         .collect()
 }
 
-fn transcript_tool(call: lash_rlm_types::RlmExecutedCall) -> TranscriptTool {
+pub(crate) fn transcript_tool(call: lash_rlm_types::RlmExecutedCall) -> TranscriptTool {
     let status = match call.outcome {
         lash_rlm_types::RlmExecutedCallOutcome::Ok => "success",
         lash_rlm_types::RlmExecutedCallOutcome::Err => "failure",
@@ -326,7 +328,7 @@ fn transcript_tool(call: lash_rlm_types::RlmExecutedCall) -> TranscriptTool {
     }
 }
 
-fn transcript_tools(
+pub(crate) fn transcript_tools(
     calls: Vec<lash_rlm_types::RlmExecutedCall>,
     calls_omitted: usize,
 ) -> Vec<TranscriptTool> {
@@ -339,7 +341,7 @@ fn transcript_tools(
     tools
 }
 
-fn transcript_rows_from_committed(
+pub(crate) fn transcript_rows_from_committed(
     read_view: &lash::persistence::SessionReadView,
     recorded_dialect: lash::rlm::RlmDialect,
     user_replacements: &BTreeMap<String, ChatMessage>,
@@ -419,14 +421,14 @@ fn transcript_rows_from_committed(
         .collect()
 }
 
-struct ChatProjection {
-    messages: Vec<ChatMessage>,
-    transcript: Vec<TranscriptRow>,
+pub(crate) struct ChatProjection {
+    pub(crate) messages: Vec<ChatMessage>,
+    pub(crate) transcript: Vec<TranscriptRow>,
 }
 
 /// Builds the two public chat projections from one set of replacement,
 /// historical-row, protocol-state, and stable-id deduplication rules.
-fn project_chat(
+pub(crate) fn project_chat(
     state: &AppState,
     read_view: &lash::persistence::SessionReadView,
     recorded_dialect: lash::rlm::RlmDialect,

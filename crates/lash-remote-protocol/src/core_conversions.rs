@@ -16,15 +16,18 @@ use lash_core::llm::types as core_llm;
 
 use super::*;
 
-include!("core_conversions/triggers.rs");
-include!("core_conversions/processes.rs");
-include!("core_conversions/turn_input.rs");
-include!("core_conversions/turn_control.rs");
-include!("core_conversions/llm.rs");
-include!("core_conversions/turn_result.rs");
-include!("core_conversions/observations.rs");
-include!("core_conversions/prompt.rs");
-include!("core_conversions/tools.rs");
+mod llm;
+mod observations;
+mod processes;
+mod prompt;
+mod tools;
+mod triggers;
+mod turn_control;
+mod turn_input;
+mod turn_result;
+
+pub use observations::{RemoteTurnActivitySink, replay_collected_activities};
+pub(crate) use triggers::{decode_remote_json, encode_remote_json};
 
 #[cfg(test)]
 #[path = "core_conversions_tests.rs"]

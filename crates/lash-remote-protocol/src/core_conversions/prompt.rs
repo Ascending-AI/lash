@@ -1,3 +1,5 @@
+use super::*;
+
 impl From<lash_core::PromptLayer> for RemotePromptLayer {
     fn from(value: lash_core::PromptLayer) -> Self {
         let lash_core::PromptLayer { template, slots } = value;
