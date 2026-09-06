@@ -2344,3 +2344,44 @@ fn test_delivered(
         observed,
     }
 }
+
+#[tokio::test]
+async fn confidence_seed_claim_before_cancel_replays_exact_outcome() {
+    let workload = generate_workload(0x80ea_b361_fe47_8810, "full-random", 2000).expect("workload");
+    let trace = run_generated_workload_for_fixture(workload, "confidence-claim-regression")
+        .await
+        .expect("live workload");
+    let cancellation = trace
+        .events
+        .iter()
+        .find(|event| event.boundary_id == "session-002:cancellation:001")
+        .expect("pinned cancellation");
+    assert_eq!(cancellation.observed["cancel_outcome"], "already_claimed");
+    assert_eq!(cancellation.observed["cancelled"], false);
+    assert!(
+        trace
+            .events
+            .iter()
+            .any(|event| event.kind == BoundaryKind::Cancellation
+                && event.observed["cancel_outcome"] == "cancelled")
+    );
+    crate::replay::replay_trace(Path::new("confidence-claim-regression"), &trace)
+        .expect("exact cancellation replay");
+    let mut missing_admissions = trace.clone();
+    for event in &mut missing_admissions.events {
+        event
+            .payload
+            .as_object_mut()
+            .expect("payload")
+            .remove("provider_admissions");
+    }
+    assert!(
+        crate::replay::replay_trace(Path::new("missing-admissions"), &missing_admissions).is_err()
+    );
+    let mut predecessor = trace;
+    predecessor.schema = "lash.sim.trace.v1".to_string();
+    assert!(matches!(
+        crate::replay::replay_trace(Path::new("predecessor"), &predecessor),
+        Err(crate::replay::ReplayError::IncompatibleTrace(_))
+    ));
+}

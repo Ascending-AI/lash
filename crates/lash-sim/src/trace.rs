@@ -8,8 +8,8 @@ use sha2::{Digest, Sha256};
 
 use crate::scheduler::DeliveredBoundary;
 
-pub const TRACE_SCHEMA: &str = "lash.sim.trace.v1";
-pub const TRACE_EVENT_LINE_SCHEMA: &str = "lash.sim.trace-event-line.v1";
+pub const TRACE_SCHEMA: &str = "lash.sim.trace.v2";
+pub const TRACE_EVENT_LINE_SCHEMA: &str = "lash.sim.trace-event-line.v2";
 pub const REPLAY_REPORT_SCHEMA: &str = "lash.sim.replay-report.v1";
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

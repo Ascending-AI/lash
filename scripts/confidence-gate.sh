@@ -616,7 +616,7 @@ bootstrap_tools() {
     cargo install cargo-llvm-cov --version 0.8.7 --locked
   fi
   if command -v rustup >/dev/null 2>&1 \
-    && ! rustup component list --installed | grep -Eq '^llvm-tools-preview($|-)'; then
+    && ! rustup component list --installed | grep -Eq '^llvm-tools(-preview)?($|-)'; then
     step "Bootstrap rustup component llvm-tools-preview"
     rustup component add llvm-tools-preview
   fi
@@ -758,7 +758,7 @@ require_llvm_tools() {
     return
   fi
   if command -v rustup >/dev/null 2>&1 \
-    && rustup component list --installed | grep -Eq '^llvm-tools-preview($|-)'; then
+    && rustup component list --installed | grep -Eq '^llvm-tools(-preview)?($|-)'; then
     return
   fi
   if [ "${LASH_CONFIDENCE_BOOTSTRAP:-0}" = "1" ] \
@@ -1404,7 +1404,7 @@ write_full_lane_prerequisites() {
   if [ -n "${LLVM_COV:-}" ] && [ -n "${LLVM_PROFDATA:-}" ]; then
     llvm_tools="available_by_env"
   elif command -v rustup >/dev/null 2>&1 \
-    && rustup component list --installed | grep -Eq '^llvm-tools-preview($|-)'; then
+    && rustup component list --installed | grep -Eq '^llvm-tools(-preview)?($|-)'; then
     llvm_tools="available_by_rustup_component"
   elif command -v nix >/dev/null 2>&1; then
     llvm_tools="bootstrap_available_by_nix"

@@ -184,7 +184,9 @@ pub(super) async fn register_ready_runtime_completions(
     scheduler: &mut BoundaryScheduler,
     registered_after: &crate::scheduler::DeliveredBoundary,
     world: &mut GeneratedRuntimeWorld,
-) -> Result<(), FixedScriptRunnerError> {
+    store: &ModelStore,
+) -> Result<Vec<Value>, FixedScriptRunnerError> {
+    let mut admissions = Vec::new();
     let ready = queue.take_ready(|event| runtime_completion_ready(event, state));
     for event in ready {
         if !runtime_completion_ready(&event, state) {
@@ -196,17 +198,25 @@ pub(super) async fn register_ready_runtime_completions(
         if event.kind == BoundaryKind::Provider {
             let turn_event = event.clone();
             let actor_alias = event.actor_alias.clone();
+            let provider_boundary = event.boundary_id.clone();
             let (_pending, completion_event) =
                 queue.register_pending_event(event, registered_after, family, units);
             world
-                .start_provider_turn(turn_event, completion_event, scheduler)
+                .start_provider_turn(
+                    turn_event,
+                    completion_event,
+                    scheduler,
+                    &store.queued_next_turn_boundaries(&actor_alias),
+                )
                 .await?;
             state.provider_started(&actor_alias);
+            admissions
+                .push(json!({"session": actor_alias, "provider_boundary": provider_boundary}));
         } else {
             queue.register(scheduler, event, registered_after, family, units);
         }
     }
-    Ok(())
+    Ok(admissions)
 }
 
 pub(super) fn runtime_completion_ready(

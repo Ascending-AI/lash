@@ -99,6 +99,13 @@ pub fn replay_trace(
                 expected.boundary_id, expected_observed, actual_observed
             )));
         }
+        if let Some(admissions) = event
+            .payload
+            .get("provider_admissions")
+            .and_then(Value::as_array)
+        {
+            store.apply_provider_admissions(admissions);
+        }
         sequence.push(delivered.boundary_id);
     }
 
