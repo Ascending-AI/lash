@@ -78,3 +78,36 @@ fn in_progress_turn_report_is_refused_by_version_negotiation_before_body_decode(
         })
     ));
 }
+
+#[test]
+fn issue_severity_is_required_and_has_pinned_wire_values() {
+    for (severity, literal) in [
+        (RemoteTurnIssueSeverity::Advisory, "advisory"),
+        (RemoteTurnIssueSeverity::Blocking, "blocking"),
+    ] {
+        assert_eq!(
+            serde_json::to_value(severity).unwrap(),
+            serde_json::json!(literal)
+        );
+        let issue = RemoteTurnIssue {
+            severity,
+            kind: "runtime".into(),
+            code: None,
+            terminal_reason: None,
+            message: "evidence".into(),
+            raw: None,
+            retryable: None,
+            provider_failure_kind: None,
+        };
+        let mut wire = serde_json::to_value(&issue).unwrap();
+        assert_eq!(
+            serde_json::from_value::<RemoteTurnIssue>(wire.clone()).unwrap(),
+            issue
+        );
+        wire.as_object_mut().unwrap().remove("severity");
+        assert!(serde_json::from_value::<RemoteTurnIssue>(wire).is_err());
+    }
+    assert!(
+        serde_json::from_value::<RemoteTurnIssueSeverity>(serde_json::json!("future")).is_err()
+    );
+}

@@ -393,8 +393,17 @@ pub enum RemoteToolCallOutcome {
     Cancelled(serde_json::Value),
 }
 
+/// Producer-selected effect of an issue on turn completion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteTurnIssueSeverity {
+    Advisory,
+    Blocking,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnIssue {
+    pub severity: RemoteTurnIssueSeverity,
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,

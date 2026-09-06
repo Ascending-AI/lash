@@ -129,6 +129,7 @@ pub(crate) fn plugin_lifecycle_hook_issue(error: PluginError) -> crate::runtime:
     let error = match error {
         PluginError::SessionExecutionLeaseLost { session_id } => {
             return crate::runtime::TurnIssue {
+                severity: crate::runtime::TurnIssueSeverity::Blocking,
                 kind: "runtime".to_string(),
                 code: Some(
                     crate::RuntimeErrorCode::SessionExecutionLeaseLost
@@ -147,6 +148,7 @@ pub(crate) fn plugin_lifecycle_hook_issue(error: PluginError) -> crate::runtime:
         error => error,
     };
     crate::runtime::TurnIssue {
+        severity: crate::runtime::TurnIssueSeverity::Blocking,
         kind: "plugin".to_string(),
         code: Some("lifecycle_hook_failed".to_string()),
         terminal_reason: None,

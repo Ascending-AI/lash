@@ -346,6 +346,7 @@ impl From<lash_core::ToolCallOutput> for RemoteToolCallOutcome {
 impl From<lash_core::facade_support::TurnIssue> for RemoteTurnIssue {
     fn from(value: lash_core::facade_support::TurnIssue) -> Self {
         let lash_core::facade_support::TurnIssue {
+            severity,
             kind,
             code,
             terminal_reason,
@@ -355,6 +356,7 @@ impl From<lash_core::facade_support::TurnIssue> for RemoteTurnIssue {
             provider_failure_kind,
         } = value;
         Self {
+            severity: severity.into(),
             kind,
             code,
             terminal_reason: terminal_reason.map(Into::into),
@@ -362,6 +364,15 @@ impl From<lash_core::facade_support::TurnIssue> for RemoteTurnIssue {
             raw,
             retryable,
             provider_failure_kind: provider_failure_kind.map(Into::into),
+        }
+    }
+}
+
+impl From<lash_core::facade_support::TurnIssueSeverity> for RemoteTurnIssueSeverity {
+    fn from(value: lash_core::facade_support::TurnIssueSeverity) -> Self {
+        match value {
+            lash_core::facade_support::TurnIssueSeverity::Advisory => Self::Advisory,
+            lash_core::facade_support::TurnIssueSeverity::Blocking => Self::Blocking,
         }
     }
 }
