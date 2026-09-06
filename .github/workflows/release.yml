@@ -7,6 +7,11 @@ on:
         description: "Commit on main to release (blank uses the current main head)"
         required: false
         type: string
+      # Overrides only Confidence; target-specific full-profile CI is still required.
+      confidence_override_reason:
+        description: "Override the weekly Confidence gate with a non-empty audit reason (logged loudly)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -53,6 +58,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_SHA: ${{ inputs.release_sha }}
+          CONFIDENCE_OVERRIDE_REASON: ${{ inputs.confidence_override_reason }}
         run: |
           set -euo pipefail
           git fetch --force origin main --tags
@@ -108,6 +114,53 @@ jobs:
                   f"{run.get('url', 'URL unavailable')}"
               )
           PY
+
+          CONFIDENCE_TARGET_SHA="${sha}" python3 - <<'CONFIDENCE_PY'
+          import datetime as dt
+          import json
+          import os
+          import subprocess
+
+
+          def check_confidence(target, reason, now=None):
+              if reason.strip():
+                  print("::warning::CONFIDENCE RELEASE OVERRIDE: " + json.dumps(reason))
+                  return
+              now = now or dt.datetime.now(dt.timezone.utc)
+              runs = json.loads(subprocess.check_output([
+                  "gh", "run", "list", "--workflow", "Confidence", "--branch", "main",
+                  "--event", "schedule", "--limit", "1", "--json",
+                  "conclusion,databaseId,headSha,status,url,createdAt",
+              ], text=True))
+              if not runs:
+                  raise SystemExit("release refused: scheduled Confidence missing; run URL=unavailable; head SHA=unavailable; age=unknown; conclusion=missing")
+              run = runs[0]  # Never fall back to an older green weekly.
+              head = run["headSha"]
+              # Job completion timestamps cannot be refreshed by metadata edits to a run.
+              pages = json.loads(subprocess.check_output([
+                  "gh", "api", f"repos/{{owner}}/{{repo}}/actions/runs/{run['databaseId']}/jobs?filter=latest&per_page=100",
+                  "--paginate", "--slurp",
+              ], text=True))
+              completed = [dt.datetime.fromisoformat(job["completed_at"].replace("Z", "+00:00"))
+                           for page in pages for job in page["jobs"] if job.get("completed_at")]
+              age = now - max(completed) if completed else None
+              age_text = f"{age.total_seconds() / 86400:.3f} days" if age is not None else "unknown"
+              detail = f"run URL={run['url']}; head SHA={head}; age={age_text}; conclusion={run['conclusion'] or run['status']}"
+              problems = []
+              if run["status"] != "completed" or run["conclusion"] != "success":
+                  problems.append("latest scheduled Confidence is not green")
+              if age is None or not dt.timedelta(0) <= age <= dt.timedelta(days=8):
+                  problems.append("Confidence completion is missing, future-dated, or older than 8 days")
+              if subprocess.run(["git", "merge-base", "--is-ancestor", head, target], check=False).returncode != 0:
+                  problems.append("Confidence head is not an ancestor of the release SHA")
+              if problems:
+                  raise SystemExit("release refused: " + "; ".join(problems) + "; " + detail)
+              print("Confidence release precondition passed: " + detail)
+
+
+          if __name__ == "__main__":
+              check_confidence(os.environ["CONFIDENCE_TARGET_SHA"], os.environ.get("CONFIDENCE_OVERRIDE_REASON", ""))
+          CONFIDENCE_PY
 
           git checkout --detach "${sha}"
           tag="$(git tag --points-at "${sha}" --list 'v*' --sort=-v:refname | head -n 1)"
