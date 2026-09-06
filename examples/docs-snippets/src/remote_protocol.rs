@@ -828,8 +828,7 @@ mod asserted_process_examples {
             definition: Some(RemoteProcessDefinitionIdentity {
                 value: json!({ "workflow": "invoice-export", "revision": 7 }),
             }),
-            status: RemoteProcessStatusFilter::Waiting,
-            waiting: Some(true),
+            status: RemoteProcessStatusFilter::any_of([RemoteProcessStatus::Waiting]),
             originator_id: Some("session-finance".to_string()),
             identity_kind: Some("report-export".to_string()),
             identity_label: Some("Nightly invoice export".to_string()),
@@ -841,8 +840,8 @@ mod asserted_process_examples {
         };
         RemoteProcessListFilter::validate(&list_filter).expect("valid process list filter");
         let list_json = serde_json::to_value(&list_filter).expect("list filter serializes");
-        assert_eq!(list_json["status"], "waiting");
-        assert_eq!(list_json["waiting"], true);
+        assert_eq!(list_json["status"], json!({"in": ["waiting"]}));
+        assert!(list_json.get("waiting").is_none());
         assert_eq!(list_json["definition"]["value"]["revision"], 7);
         assert_eq!(list_json["originator_id"], "session-finance");
         assert_eq!(list_json["identity_kind"], "report-export");
@@ -1165,25 +1164,25 @@ mod asserted_process_examples {
             ])
         );
         let filters = [
-            RemoteProcessStatusFilter::Running,
-            RemoteProcessStatusFilter::Waiting,
-            RemoteProcessStatusFilter::Completed,
-            RemoteProcessStatusFilter::Failed,
-            RemoteProcessStatusFilter::Cancelled,
-            RemoteProcessStatusFilter::Abandoned,
-            RemoteProcessStatusFilter::CallerDeparted,
+            RemoteProcessStatusFilter::any_of([RemoteProcessStatus::Running]),
+            RemoteProcessStatusFilter::any_of([RemoteProcessStatus::Waiting]),
+            RemoteProcessStatusFilter::any_of([RemoteProcessStatus::Completed]),
+            RemoteProcessStatusFilter::any_of([RemoteProcessStatus::Failed]),
+            RemoteProcessStatusFilter::any_of([RemoteProcessStatus::Cancelled]),
+            RemoteProcessStatusFilter::any_of([RemoteProcessStatus::Abandoned]),
+            RemoteProcessStatusFilter::any_of([RemoteProcessStatus::CallerDeparted]),
             RemoteProcessStatusFilter::Any,
         ];
         assert_eq!(
             serde_json::to_value(filters).expect("process filters serialize"),
             json!([
-                "running",
-                "waiting",
-                "completed",
-                "failed",
-                "cancelled",
-                "abandoned",
-                "caller_departed",
+                {"in": ["running"]},
+                {"in": ["waiting"]},
+                {"in": ["completed"]},
+                {"in": ["failed"]},
+                {"in": ["cancelled"]},
+                {"in": ["abandoned"]},
+                {"in": ["caller_departed"]},
                 "any"
             ])
         );

@@ -1956,29 +1956,20 @@ impl TryFrom<RemoteProcessStartReceipt> for lash_core::ProcessRecord {
 impl From<lash_core::ProcessStatusFilter> for RemoteProcessStatusFilter {
     fn from(value: lash_core::ProcessStatusFilter) -> Self {
         match value {
-            lash_core::ProcessStatusFilter::Running => Self::Running,
-            lash_core::ProcessStatusFilter::Waiting => Self::Waiting,
-            lash_core::ProcessStatusFilter::Completed => Self::Completed,
-            lash_core::ProcessStatusFilter::Failed => Self::Failed,
-            lash_core::ProcessStatusFilter::Cancelled => Self::Cancelled,
-            lash_core::ProcessStatusFilter::Abandoned => Self::Abandoned,
-            lash_core::ProcessStatusFilter::CallerDeparted => Self::CallerDeparted,
             lash_core::ProcessStatusFilter::Any => Self::Any,
+            lash_core::ProcessStatusFilter::In(statuses) => {
+                Self::In(statuses.into_iter().map(Into::into).collect())
+            }
         }
     }
 }
-
 impl From<RemoteProcessStatusFilter> for lash_core::ProcessStatusFilter {
     fn from(value: RemoteProcessStatusFilter) -> Self {
         match value {
-            RemoteProcessStatusFilter::Running => Self::Running,
-            RemoteProcessStatusFilter::Waiting => Self::Waiting,
-            RemoteProcessStatusFilter::Completed => Self::Completed,
-            RemoteProcessStatusFilter::Failed => Self::Failed,
-            RemoteProcessStatusFilter::Cancelled => Self::Cancelled,
-            RemoteProcessStatusFilter::Abandoned => Self::Abandoned,
-            RemoteProcessStatusFilter::CallerDeparted => Self::CallerDeparted,
             RemoteProcessStatusFilter::Any => Self::Any,
+            RemoteProcessStatusFilter::In(statuses) => {
+                Self::In(statuses.into_iter().map(Into::into).collect())
+            }
         }
     }
 }
@@ -1991,7 +1982,6 @@ impl TryFrom<RemoteProcessListFilter> for lash_core::ProcessListFilter {
         let RemoteProcessListFilter {
             definition,
             status,
-            waiting,
             originator_id,
             identity_kind,
             identity_label,
@@ -2004,7 +1994,6 @@ impl TryFrom<RemoteProcessListFilter> for lash_core::ProcessListFilter {
         Ok(Self {
             definition: definition.map(Into::into),
             status: status.into(),
-            waiting,
             originator_id,
             identity_kind,
             identity_label,
@@ -2022,7 +2011,6 @@ impl From<lash_core::ProcessListFilter> for RemoteProcessListFilter {
         let lash_core::ProcessListFilter {
             definition,
             status,
-            waiting,
             originator_id,
             identity_kind,
             identity_label,
@@ -2035,7 +2023,6 @@ impl From<lash_core::ProcessListFilter> for RemoteProcessListFilter {
         Self {
             definition: definition.map(Into::into),
             status: status.into(),
-            waiting,
             originator_id,
             identity_kind,
             identity_label,

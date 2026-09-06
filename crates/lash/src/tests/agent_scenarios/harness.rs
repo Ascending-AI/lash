@@ -518,7 +518,7 @@ async fn all_host_process_summaries(core: &LashCore) -> Result<Vec<lash_core::Pr
         .list(&lash_core::ProcessListFilter {
             definition: None,
             status: lash_core::ProcessStatusFilter::Any,
-            waiting: None,
+
             ..lash_core::ProcessListFilter::default()
         })
         .await?;
@@ -548,7 +548,7 @@ async fn assert_remote_process_dto_surface(
     let filter = lash_core::ProcessListFilter {
         definition: None,
         status: lash_core::ProcessStatusFilter::Any,
-        waiting: None,
+
         ..lash_core::ProcessListFilter::default()
     };
 

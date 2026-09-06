@@ -157,12 +157,21 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
         ("schema.rs", include_str!("../../src/schema.rs")),
     ];
     let mut live_sites = 0usize;
+    let mut parameterized_sites = 0usize;
     let mut vocabulary_sites = 0usize;
     let mut foreign_sites = 0usize;
     for (name, source) in sources {
         for delimiter in ["status IN ", "status NOT IN "] {
             for (offset, _) in source.match_indices(delimiter) {
                 let site = &source[offset + delimiter.len()..];
+                // Caller-selected status sets are a bound query expression,
+                // not a hard-coded live-status or DDL vocabulary literal.
+                if delimiter == "status IN "
+                    && site.starts_with("(SELECT value FROM json_each(?1))")
+                {
+                    parameterized_sites += 1;
+                    continue;
+                }
                 let prefix = &source[..offset];
                 if delimiter == "status IN " && prefix.ends_with(FOREIGN_VOCABULARY_SITE) {
                     foreign_sites += 1;
@@ -188,6 +197,10 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
             }
         }
     }
+    assert_eq!(
+        parameterized_sites, 3,
+        "three bound status-set membership sites: initial, time cursor, and id cursor"
+    );
     assert_eq!(
         live_sites, 5,
         "expected exactly five live-status list literal sites in the SQLite backend; \

@@ -1,5 +1,5 @@
 use lash_sansio::sync::MutexExt;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -908,7 +908,7 @@ impl ProcessRegistration {
 /// Operationally: upgrade readers before any writer can emit a new status.
 /// A mixed-version fleet sharing one registry must roll all binaries forward
 /// first; rolling a writer out ahead of its readers stalls their feeds.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessStatus {
     #[default]
@@ -1373,79 +1373,55 @@ impl ProcessCancelReceipt {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Any-of selection over the closed process lifecycle vocabulary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProcessStatusFilter {
-    #[default]
-    Running,
-    Waiting,
-    Completed,
-    Failed,
-    Cancelled,
-    Abandoned,
-    CallerDeparted,
     Any,
+    In(BTreeSet<ProcessStatus>),
+}
+
+impl Default for ProcessStatusFilter {
+    fn default() -> Self {
+        Self::In(BTreeSet::from([ProcessStatus::Running]))
+    }
 }
 
 impl ProcessStatusFilter {
-    /// Exposes label to store and process-engine implementors while persisting and coordinating
-    /// durable process execution. Returns `None` when no label is present.
-    pub fn label(self) -> Option<&'static str> {
+    /// Selects precisely the supplied statuses; an empty set matches no rows.
+    pub fn any_of(statuses: impl IntoIterator<Item = ProcessStatus>) -> Self {
+        Self::In(statuses.into_iter().collect())
+    }
+    /// Returns the selected storage labels; absence means all statuses.
+    pub fn labels(&self) -> Option<Vec<&'static str>> {
         match self {
-            Self::Running => Some("running"),
-            Self::Waiting => Some("waiting"),
-            Self::Completed => Some("completed"),
-            Self::Failed => Some("failed"),
-            Self::Cancelled => Some("cancelled"),
-            Self::Abandoned => Some("abandoned"),
-            Self::CallerDeparted => Some("caller_departed"),
             Self::Any => None,
+            Self::In(statuses) => Some(statuses.iter().map(ProcessStatus::label).collect()),
         }
     }
-
-    /// Parses the process-status filter for store and protocol implementors, defaults absence to
-    /// `running`, and rejects unknown labels.
-    pub fn decode(value: Option<&str>) -> Result<Self, String> {
-        match value.unwrap_or("running") {
-            "running" => Ok(Self::Running),
-            "waiting" => Ok(Self::Waiting),
-            "completed" => Ok(Self::Completed),
-            "failed" => Ok(Self::Failed),
-            "cancelled" => Ok(Self::Cancelled),
-            "abandoned" => Ok(Self::Abandoned),
-            "caller_departed" => Ok(Self::CallerDeparted),
-            "any" => Ok(Self::Any),
-            other => Err(format!(
-                "processes.list status must be `running`, `waiting`, `completed`, `failed`, `cancelled`, `abandoned`, `caller_departed`, or `any`, got `{other}`"
-            )),
-        }
+    /// Decodes the closed set shape, with absence selecting running processes.
+    pub fn decode(value: Option<&serde_json::Value>) -> Result<Self, String> {
+        value
+            .map(|value| {
+                serde_json::from_value(value.clone())
+                    .map_err(|error| format!("processes.list invalid status set: {error}"))
+            })
+            .unwrap_or_else(|| Ok(Self::default()))
     }
-
-    /// Requests the live-only store scan for running or waiting filters and the all-row scan for
-    /// terminal or `any` filters.
-    pub fn list_mode(self) -> ProcessListMode {
+    /// Selects the live scan only when every selected status is live.
+    pub fn list_mode(&self) -> ProcessListMode {
         match self {
-            Self::Running | Self::Waiting => ProcessListMode::Live,
-            Self::Completed
-            | Self::Failed
-            | Self::Cancelled
-            | Self::Abandoned
-            | Self::CallerDeparted
-            | Self::Any => ProcessListMode::All,
+            Self::In(statuses) if statuses.iter().all(|status| !status.is_retired()) => {
+                ProcessListMode::Live
+            }
+            Self::In(_) | Self::Any => ProcessListMode::All,
         }
     }
-
-    /// Applies exact status matching for process-store implementors, with `any` as the sole
-    /// wildcard.
-    pub fn matches(self, status: ProcessStatus) -> bool {
+    /// Tests any-of membership in the selected status set.
+    pub fn matches(&self, status: ProcessStatus) -> bool {
         match self {
-            Self::Running => status == ProcessStatus::Running,
-            Self::Waiting => status == ProcessStatus::Waiting,
-            Self::Completed => status == ProcessStatus::Completed,
-            Self::Failed => status == ProcessStatus::Failed,
-            Self::Cancelled => status == ProcessStatus::Cancelled,
-            Self::Abandoned => status == ProcessStatus::Abandoned,
-            Self::CallerDeparted => status == ProcessStatus::CallerDeparted,
             Self::Any => true,
+            Self::In(statuses) => statuses.contains(&status),
         }
     }
 }
@@ -1454,7 +1430,6 @@ impl ProcessStatusFilter {
 pub struct ProcessListFilter {
     pub definition: Option<serde_json::Value>,
     pub status: ProcessStatusFilter,
-    pub waiting: Option<bool>,
     pub originator_id: Option<String>,
     pub identity_kind: Option<String>,
     pub identity_label: Option<String>,
@@ -1483,7 +1458,6 @@ impl ProcessListFilter {
             match key.as_str() {
                 "definition"
                 | "status"
-                | "waiting"
                 | "originator_id"
                 | "identity_kind"
                 | "identity_label"
@@ -1496,16 +1470,7 @@ impl ProcessListFilter {
             }
         }
         let definition = args.get("definition").cloned();
-        let status =
-            ProcessStatusFilter::decode(args.get("status").and_then(serde_json::Value::as_str))?;
-        let waiting = args
-            .get("waiting")
-            .map(|value| {
-                value
-                    .as_bool()
-                    .ok_or_else(|| "processes.list `waiting` filter must be a boolean".to_string())
-            })
-            .transpose()?;
+        let status = ProcessStatusFilter::decode(args.get("status"))?;
         let originator_id = optional_string_filter(args, "originator_id")?;
         let identity_kind = optional_string_filter(args, "identity_kind")?;
         let identity_label = optional_string_filter(args, "identity_label")?;
@@ -1517,7 +1482,6 @@ impl ProcessListFilter {
         Ok(Self {
             definition,
             status,
-            waiting,
             originator_id,
             identity_kind,
             identity_label,
@@ -1545,9 +1509,6 @@ impl ProcessListFilter {
                 .definition
                 .as_ref()
                 .is_none_or(|definition| record.identity.definition.as_ref() == Some(definition))
-            && self
-                .waiting
-                .is_none_or(|waiting| record.wait.is_some() == waiting)
             && self
                 .originator_id
                 .as_ref()
