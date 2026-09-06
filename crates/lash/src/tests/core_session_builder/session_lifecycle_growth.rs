@@ -92,6 +92,15 @@ impl AttachmentRootSet for GrowthFactory {
     }
 }
 
+fn assert_flat_checkpoint_sizes(peaks: &[usize]) {
+    let min = peaks.iter().min().expect("checkpoint samples");
+    let max = peaks.iter().max().expect("checkpoint samples");
+    assert_eq!(
+        min, max,
+        "checkpoint size must remain flat across dirty turns: {peaks:?}"
+    );
+}
+
 #[test]
 fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
     run_async_test_on_stack_budget("flat-checkpoint-growth", || async {
@@ -168,11 +177,22 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
                     .all(|sample| sample.rewritten_leaves.is_empty()),
                 "stable large values must never be resubmitted: turn {turn}: {writes:?}"
             );
+            assert!(
+                writes
+                    .iter()
+                    .all(|sample| sample.budget.total_bytes < state_bytes / 2),
+                "sanity floor: stable leaf bodies must be excluded from the commit budget"
+            );
             commit_count += writes.len();
             peaks.push(
                 writes
                     .iter()
-                    .map(|sample| sample.budget.total_bytes)
+                    // FIG-1196 bounds checkpoint growth, not graph JSON: the
+                    // SystemClock RFC3339 timestamp can shed three fractional
+                    // digits. Use the typed budget's named-MessagePack manifest
+                    // plus submitted component bodies, retaining all checkpoint
+                    // state and reference overhead in the exact flatness law.
+                    .map(|sample| sample.budget.checkpoint_bytes)
                     .max()
                     .unwrap(),
             );
@@ -180,17 +200,10 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
         let min = *peaks.iter().min().unwrap();
         let max = *peaks.iter().max().unwrap();
         eprintln!(
-            "FIG-1196 dirty-turn peaks={peaks:?}; min={min}; max={max}; spread={}; state_bytes={state_bytes}; commits={commit_count}",
+            "FIG-1196 dirty-turn checkpoint peaks={peaks:?}; min={min}; max={max}; spread={}; state_bytes={state_bytes}; commits={commit_count}",
             max - min
         );
-        assert_eq!(
-            min, max,
-            "commit size must remain flat across forty dirty turns: {peaks:?}"
-        );
-        assert!(
-            max < state_bytes / 2,
-            "sanity floor: stable leaf bodies must be excluded from the commit budget"
-        );
+        assert_flat_checkpoint_sizes(&peaks);
         session
             .turn(TurnInput::text("rebind"))
             .require_finish()?
@@ -243,6 +256,62 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
                 .iter()
                 .all(|sample| sample.rewritten_leaves.is_empty()),
             "replacement leaf must also stabilize"
+        );
+        Ok(())
+    })
+}
+
+#[test]
+fn checkpoint_flatness_rejects_a_binding_that_grows_each_turn() -> Result<()> {
+    run_async_test_on_stack_budget("growing-checkpoint-witness", || async {
+        const GROWING_TURNS: usize = 4;
+        let samples = Arc::new(Mutex::new(Vec::new()));
+        let mut programs = vec![lashlang_block("growing = \"\"\nfinish \"stored\"")];
+        for turn in 1..=GROWING_TURNS {
+            programs.push(lashlang_block(&format!(
+                "growing = {:?}\nfinish \"stored\"",
+                "x".repeat(turn * 256)
+            )));
+        }
+        let core = explicit_ephemeral_facets(rlm_core_builder())
+            .provider(queued_text_provider(programs))
+            .model(mock_model_spec())
+            .store_factory(Arc::new(GrowthFactory {
+                inner: lash_core::facade_support::InMemorySessionStoreFactory::new(),
+                samples: Arc::clone(&samples),
+            }))
+            .build(crate::testing::runtime_lease_owner())?;
+        let session = core.session("growing-checkpoint-witness").open().await?;
+        session
+            .turn(TurnInput::text("store"))
+            .require_finish()?
+            .run()
+            .await?;
+        samples.lock_recover().clear();
+        let mut peaks = Vec::new();
+        for _ in 0..GROWING_TURNS {
+            session
+                .turn(TurnInput::text("grow"))
+                .require_finish()?
+                .run()
+                .await?;
+            let writes = std::mem::take(&mut *samples.lock_recover());
+            peaks.push(
+                writes
+                    .iter()
+                    .map(|sample| sample.budget.checkpoint_bytes)
+                    .max()
+                    .expect("growing turn committed"),
+            );
+        }
+        assert!(
+            peaks.windows(2).all(|pair| pair[1] > pair[0]),
+            "real binding growth must increase each checkpoint: {peaks:?}"
+        );
+        // Catch only the shared law: a setup/runtime panic cannot satisfy the witness.
+        assert!(
+            std::panic::catch_unwind(|| assert_flat_checkpoint_sizes(&peaks)).is_err(),
+            "the flatness law must reject real per-turn growth: {peaks:?}"
         );
         Ok(())
     })
