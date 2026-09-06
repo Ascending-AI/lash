@@ -44,7 +44,11 @@ impl TurnCause {
         Message {
             id: self.id.clone(),
             role: MessageRole::Event,
-            parts: Arc::new(vec![Part::text(format!("{}.p0", self.id), self.text.clone(), None)]),
+            parts: Arc::new(vec![Part::text(
+                format!("{}.p0", self.id),
+                self.text.clone(),
+                None,
+            )]),
             origin: Some(self.origin.clone()),
         }
     }
@@ -266,11 +270,8 @@ impl<M: TurnProtocol> Clone for Effect<M> {
 pub struct LlmCallError {
     pub message: String,
     pub retryable: bool,
-    /// Typed transport classification of the failure. Defaults to
-    /// [`ProviderFailureKind::Unknown`] for wrappers that are not provider
-    /// failures (and when decoding effect journals written before the field
-    /// existed).
-    #[serde(default)]
+    /// Required transport classification. Non-provider failures explicitly
+    /// carry `ProviderFailureKind::Unknown`; missing or future kinds are refused.
     pub kind: crate::llm::types::ProviderFailureKind,
     pub raw: Option<String>,
     pub code: Option<String>,
@@ -630,21 +631,37 @@ mod llm_call_error_tests {
     use crate::llm::types::ProviderFailureKind;
 
     #[test]
-    fn llm_call_error_decodes_journal_entries_that_predate_kind() {
-        // `LlmCallError` is serialized inside durable effect journals
-        // (`RuntimeEffectOutcome::LlmCall`). Entries written before the typed
-        // `kind` field existed must decode with `Unknown`.
-        let legacy = r#"{
-            "message":"rate limited",
-            "retryable":true,
-            "raw":null,
-            "code":"429",
-            "terminal_reason":"provider_error",
-            "request_body":null
-        }"#;
-        let decoded: LlmCallError = serde_json::from_str(legacy).expect("legacy call error");
-        assert!(decoded.retryable);
-        assert_eq!(decoded.kind, ProviderFailureKind::Unknown);
+    fn llm_call_error_requires_a_recognized_journal_kind() {
+        let mut wire = serde_json::json!({"message":"rate limited","retryable":true,"raw":null,"code":"429","terminal_reason":"provider_error","request_body":null});
+        assert!(
+            serde_json::from_value::<LlmCallError>(wire.clone())
+                .unwrap_err()
+                .to_string()
+                .contains("kind")
+        );
+        wire["kind"] = serde_json::json!("future_kind");
+        assert!(
+            serde_json::from_value::<LlmCallError>(wire.clone())
+                .unwrap_err()
+                .to_string()
+                .contains("future_kind")
+        );
+        for (literal, expected) in [
+            ("transport", ProviderFailureKind::Transport),
+            ("timeout", ProviderFailureKind::Timeout),
+            ("http", ProviderFailureKind::Http),
+            ("stream", ProviderFailureKind::Stream),
+            ("auth", ProviderFailureKind::Auth),
+            ("validation", ProviderFailureKind::Validation),
+            ("quota", ProviderFailureKind::Quota),
+            ("unsupported", ProviderFailureKind::Unsupported),
+            ("unknown", ProviderFailureKind::Unknown),
+        ] {
+            wire["kind"] = serde_json::json!(literal);
+            let decoded = serde_json::from_value::<LlmCallError>(wire.clone()).unwrap();
+            assert_eq!(decoded.kind, expected);
+            assert_eq!(serde_json::to_value(decoded).unwrap()["kind"], literal);
+        }
     }
 }
 

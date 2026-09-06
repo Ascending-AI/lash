@@ -927,12 +927,11 @@ mod tests {
     }
 
     #[test]
-    fn provider_failure_kind_decodes_unknown_future_codes() {
-        // Forward compatibility: a snapshot written by a newer runtime with a
-        // kind this build does not know decodes as `Unknown`.
-        let decoded: ProviderFailureKind =
-            serde_json::from_value(serde_json::json!("some_future_kind")).expect("future kind");
-        assert_eq!(decoded, ProviderFailureKind::Unknown);
+    fn provider_failure_kind_refuses_unknown_future_codes() {
+        assert!(
+            serde_json::from_value::<ProviderFailureKind>(serde_json::json!("some_future_kind"))
+                .is_err()
+        );
         for kind in [
             ProviderFailureKind::Transport,
             ProviderFailureKind::Timeout,
