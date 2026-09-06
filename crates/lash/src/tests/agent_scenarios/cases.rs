@@ -15,6 +15,8 @@ use super::harness::{
     run_agent_turn_scenario_without_success_assertions,
 };
 #[cfg(feature = "rlm")]
+use super::plugin_operations::agent_scenario_plugin_task_query_command;
+#[cfg(feature = "rlm")]
 use super::process_parent_atomicity::agent_scenario_public_process_parents_are_literal_and_crash_atomic_on_postgres;
 #[cfg(feature = "rlm")]
 use super::transcript::agent_scenario_transcript;
@@ -124,7 +126,14 @@ const FIG1293_MIGRATED_TOOL_COMPOSITION: AgentScenarioCoverage = agent_scenario_
     "Facade composition of tracked and detached shell starts, stdin signalling, process cancellation, subagent spawn/await, and protocol batch."
 );
 
+const PLUGIN_OPERATIONS: AgentScenarioCoverage = agent_scenario_coverage!(
+    agent_scenario_plugin_task_query_command,
+    "plugin task query command",
+    "Typed facade results, owned operation events, read-only query, and in-flight cooperative cancellation."
+);
+
 const AGENT_SCENARIO_COVERAGE: &[AgentScenarioCoverage] = &[
+    PLUGIN_OPERATIONS,
     FOREGROUND_LABELED_TOOL_CALL,
     STARTED_PROCESS_LABELED_TOOL_CALL,
     AWAITED_PROCESS_ATTACHMENT_RETENTION,
@@ -145,7 +154,7 @@ const AGENT_SCENARIO_COVERAGE: &[AgentScenarioCoverage] = &[
 
 #[test]
 fn agent_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(AGENT_SCENARIO_COVERAGE.len(), 16);
+    assert_eq!(AGENT_SCENARIO_COVERAGE.len(), 17);
     let mut names = BTreeSet::new();
     for coverage in AGENT_SCENARIO_COVERAGE {
         #[cfg(feature = "rlm")]
