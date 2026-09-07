@@ -85,7 +85,6 @@ fn request(model: &str, stream: bool, structured: bool) -> LlmRequest {
     LlmRequest {
         model: model.to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,

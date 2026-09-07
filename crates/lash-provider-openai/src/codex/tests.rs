@@ -67,7 +67,6 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
         model: "gpt-5.4".to_string(),
         messages,
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,

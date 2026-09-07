@@ -599,11 +599,11 @@ fn llm_request_includes_image_prompt_parts_for_attached_images() {
     let (_, request) = find_llm_call(&effects).expect("llm call");
 
     use crate::llm::types::LlmContentBlock;
-    assert_eq!(request.attachments.len(), 1);
+    assert_eq!(request.attachments().len(), 1);
     assert!(request.messages.iter().any(|msg| {
         msg.blocks
             .iter()
-            .any(|block| matches!(block, LlmContentBlock::Attachment { attachment_idx: 0 }))
+            .any(|block| matches!(block, LlmContentBlock::Attachment { .. }))
     }));
     assert!(request.messages.iter().any(|msg| {
         msg.blocks.iter().any(|block| match block {

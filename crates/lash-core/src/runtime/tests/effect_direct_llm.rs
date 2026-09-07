@@ -49,7 +49,6 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
                 cache_breakpoint: false,
             }],
         )],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::None,

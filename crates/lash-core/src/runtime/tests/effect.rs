@@ -583,7 +583,7 @@ impl RuntimeEffectController for RecordingEffectController {
                     gate.1.notified().await;
                 }
                 let prompt = format!("{:?}", request.messages);
-                let is_full = prompt.contains("raw prompt") || !request.attachments.is_empty();
+                let is_full = prompt.contains("raw prompt") || !request.attachments().is_empty();
                 let (text, usage) = if is_full {
                     (
                         "raw direct answer",
@@ -2317,11 +2317,12 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
         model: "mock-model".to_string(),
         messages: vec![LlmMessage::new(
             LlmRole::User,
-            vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
-        )],
-        attachments: vec![AttachmentSource::inline(
-            crate::MediaType::parse("image/png").unwrap(),
-            image_bytes,
+            vec![LlmContentBlock::Attachment {
+                source: Box::new(AttachmentSource::inline(
+                    crate::MediaType::parse("image/png").unwrap(),
+                    image_bytes,
+                )),
+            }],
         )],
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),

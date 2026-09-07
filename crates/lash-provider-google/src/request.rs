@@ -41,7 +41,7 @@ impl GoogleOAuthProvider {
     }
 
     pub(crate) fn validate_attachments(req: &LlmRequest) -> Result<(), LlmTransportError> {
-        for source in &req.attachments {
+        for source in &req.attachments() {
             let supported = match source {
                 AttachmentSource::ExternalUrl { .. } => false,
                 AttachmentSource::ProviderFile { provider_scope, .. } => matches!(
@@ -76,13 +76,6 @@ impl GoogleOAuthProvider {
         Ok(())
     }
 
-    fn attachment_part_for_index(attachment_parts: &[Value], idx: usize) -> Value {
-        attachment_parts
-            .get(idx)
-            .cloned()
-            .unwrap_or_else(|| json!({ "text": "[Attachment]" }))
-    }
-
     fn valid_text_signature(meta: &ResponseTextMeta) -> Option<String> {
         let signature = meta.provider_payload.as_deref()?.trim();
         if signature.is_empty() {
@@ -98,7 +91,7 @@ impl GoogleOAuthProvider {
     pub(crate) fn build_contents_with_attachment_parts(
         &self,
         req: &LlmRequest,
-        attachment_parts: &[Value],
+        attachment_parts: &[(AttachmentSource, Value)],
     ) -> Vec<Value> {
         let serving_route = self.route_identity_for_model(&req.model);
         let safe_request = req.replay_safe_for(&serving_route);
@@ -140,12 +133,15 @@ impl GoogleOAuthProvider {
                         }
                         parts.push(part);
                     }
-                    LlmContentBlock::Attachment { attachment_idx } => {
+                    LlmContentBlock::Attachment { source } => {
                         if matches!(msg.role, LlmRole::User) {
-                            parts.push(Self::attachment_part_for_index(
-                                attachment_parts,
-                                *attachment_idx,
-                            ));
+                            parts.push(
+                                attachment_parts
+                                    .iter()
+                                    .find(|(candidate, _)| candidate == source.as_ref())
+                                    .map(|(_, part)| part.clone())
+                                    .unwrap_or_else(|| Self::inline_attachment_part(req, source)),
+                            );
                         }
                     }
                     LlmContentBlock::ToolCall {

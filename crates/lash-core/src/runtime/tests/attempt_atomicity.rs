@@ -1267,7 +1267,6 @@ fn direct_llm_request(request_id: &str) -> crate::LlmRequest {
                 cache_breakpoint: false,
             }],
         )],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: crate::llm::types::LlmToolChoice::None,

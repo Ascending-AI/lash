@@ -40,7 +40,6 @@ fn request() -> LlmRequest {
     LlmRequest {
         model: "gemini-2.5-pro".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,

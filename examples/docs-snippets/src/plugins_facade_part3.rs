@@ -111,10 +111,10 @@ pub(crate) fn plugin_area_facade_witnesses() {
     variant_witness(|value: &lash::provider::LlmContentBlock| {
         matches!(value, lash::provider::LlmContentBlock::Attachment { .. })
     });
-    // FIG-2104-WITNESS-0770: lash::provider::LlmContentBlock::Attachment::attachment_idx
+    // FIG-2104-WITNESS-0770: lash::provider::LlmContentBlock::Attachment::source
     field_witness(|value: &lash::provider::LlmContentBlock| {
-        if let lash::provider::LlmContentBlock::Attachment { attachment_idx, .. } = value {
-            let _ = attachment_idx;
+        if let lash::provider::LlmContentBlock::Attachment { source, .. } = value {
+            let _ = source;
         }
     });
     // FIG-2104-WITNESS-0771: lash::provider::LlmContentBlock::Reasoning

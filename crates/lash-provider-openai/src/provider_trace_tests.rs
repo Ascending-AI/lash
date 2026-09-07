@@ -119,7 +119,6 @@ fn request() -> LlmRequest {
             LlmRole::User,
             format!("large prompt: {}", "x".repeat(3_000)),
         )],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,

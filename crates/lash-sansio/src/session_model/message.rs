@@ -458,7 +458,20 @@ fn render_message_for_transcript(msg: &Message, attachments: &mut Vec<Attachment
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RenderedPrompt {
     pub messages: Vec<LlmMessage>,
-    pub attachments: Vec<AttachmentSource>,
+}
+
+impl RenderedPrompt {
+    /// Sources in message order, derived from the structured blocks.
+    pub fn attachments(&self) -> Vec<&AttachmentSource> {
+        self.messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 /// Memoized render of a `MessageSequence`'s `base`. Shared across the
@@ -865,9 +878,14 @@ pub fn render_transcript_prompt(msgs: &[Message]) -> RenderedPrompt {
         "Continue from the latest turn as Lash.\nIf the task is complete, provide the final answer.\nOtherwise produce the next valid step for this runtime.",
     );
 
+    let mut message = LlmMessage::text(LlmRole::User, text);
+    Arc::make_mut(&mut message.blocks).extend(attachments.into_iter().map(|source| {
+        LlmContentBlock::Attachment {
+            source: Box::new(source),
+        }
+    }));
     RenderedPrompt {
-        messages: vec![LlmMessage::text(LlmRole::User, text)],
-        attachments,
+        messages: vec![message],
     }
 }
 
@@ -922,9 +940,9 @@ fn append_structured_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
                     if let Some(attachment) = attachment_from_part(part)
                         && matches!(msg.role, MessageRole::User)
                     {
-                        let attachment_idx = rendered.attachments.len();
-                        rendered.attachments.push(attachment);
-                        blocks.push(LlmContentBlock::Attachment { attachment_idx });
+                        blocks.push(LlmContentBlock::Attachment {
+                            source: Box::new(attachment),
+                        });
                         continue;
                     }
 

@@ -568,7 +568,6 @@ fn openai_compatible_request(stream: bool) -> LlmRequest {
     LlmRequest {
         model: "openai/gpt-5.4".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "lookup x")],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
@@ -601,7 +600,6 @@ fn openai_responses_request() -> LlmRequest {
     LlmRequest {
         model: "gpt-5.4".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
@@ -623,7 +621,6 @@ fn anthropic_messages_request() -> LlmRequest {
     LlmRequest {
         model: "claude-sonnet-4-20250514".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
@@ -645,7 +642,6 @@ fn google_request(stream: bool) -> LlmRequest {
     LlmRequest {
         model: "gemini-3.1-pro-preview".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,

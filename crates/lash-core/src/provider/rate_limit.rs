@@ -181,7 +181,7 @@ fn estimate_request_tokens(request: &LlmRequest) -> u32 {
     }
     chars = chars.saturating_add(
         request
-            .attachments
+            .attachments()
             .iter()
             .filter_map(|source| request.attachment_bytes(source))
             .map(|bytes| bytes.len() / 4)

@@ -35,7 +35,6 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
         model: "claude-sonnet-4-6".to_string(),
         messages,
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,

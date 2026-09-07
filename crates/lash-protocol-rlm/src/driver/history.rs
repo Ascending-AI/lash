@@ -480,9 +480,10 @@ fn append_borrowed_entry_image_blocks(
                 let Some(attachment) = part.attachment.as_ref() else {
                     continue;
                 };
-                let attachment_idx = attachments.len();
                 attachments.push(attachment.source.clone());
-                blocks.push(LlmContentBlock::Attachment { attachment_idx });
+                blocks.push(LlmContentBlock::Attachment {
+                    source: Box::new(attachment.source.clone()),
+                });
             }
         }
         BorrowedChronologicalPayload::ProtocolEvent(event) => {
@@ -490,9 +491,11 @@ fn append_borrowed_entry_image_blocks(
                 decode_rlm_protocol_event(event)
             {
                 for image in &entry.images {
-                    let attachment_idx = attachments.len();
-                    attachments.push(AttachmentSource::stored(image.clone()));
-                    blocks.push(LlmContentBlock::Attachment { attachment_idx });
+                    let source = AttachmentSource::stored(image.clone());
+                    attachments.push(source.clone());
+                    blocks.push(LlmContentBlock::Attachment {
+                        source: Box::new(source),
+                    });
                 }
             }
         }

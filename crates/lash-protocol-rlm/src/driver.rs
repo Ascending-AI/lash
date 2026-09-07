@@ -349,7 +349,6 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         Arc::new(LlmRequest {
             model: ctx.config.model.clone(),
             messages,
-            attachments,
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::new()),
             tool_choice: LlmToolChoice::None,
@@ -1327,7 +1326,7 @@ mod tests {
                 && message
                     .blocks
                     .iter()
-                    .any(|block| matches!(block, LlmContentBlock::Attachment { attachment_idx: 0 }))
+                    .any(|block| matches!(block, LlmContentBlock::Attachment { .. }))
         }));
     }
 
