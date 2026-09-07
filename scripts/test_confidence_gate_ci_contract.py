@@ -353,6 +353,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "confidence-fast-summary",
             "s3-store",
             "functional-e2e",
+            "functional-e2e-process-operations",
         }
         guard = (
             "github.event_name != 'pull_request' "
