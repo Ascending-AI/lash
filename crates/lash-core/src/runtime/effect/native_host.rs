@@ -9,11 +9,9 @@ use super::{
     ExecutionScope, GroupSettlement, LoserPolicy, NativeRuntimeEffectController, Resolution,
     ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, ScopedEffectController, SegmentProgress, TurnControlBinding,
-    TurnControlParticipation,
+    RuntimeEffectOutcome, ScopedEffectController, SegmentProgress, TurnControlParticipation,
 };
 use crate::RuntimeError;
-use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
 
 /// In-process deployment effect host.
 #[derive(Clone)]
@@ -121,6 +119,10 @@ impl AwaitEventResolver for NativeEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for NativeEffectHost {
+    fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
+        self
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,
@@ -136,22 +138,6 @@ impl EffectHost for NativeEffectHost {
             Arc::new(self.clone()),
             scope,
         )?))
-    }
-
-    async fn turn_control_binding<'a>(
-        &'a self,
-        scoped: &'a ScopedEffectController<'_>,
-    ) -> Result<TurnControlBinding<'a>, RuntimeError> {
-        match scoped.controller().turn_control_participation().await? {
-            TurnControlParticipation::Local => Ok(TurnControlBinding::HostOwned {
-                resolver: self,
-                peek: self.scoped(scoped.execution_scope().clone())?,
-            }),
-            TurnControlParticipation::DurableJournaled => Ok(TurnControlBinding::RunScoped {
-                resolver: scoped.controller(),
-                durable_cancel_after_llm: true,
-            }),
-        }
     }
 
     async fn retire_effect_journal(

@@ -1,3 +1,4 @@
+use self::facade_ops::ScopedEffectControllerFacadeOps;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
@@ -1383,19 +1384,25 @@ pub trait EffectHost: AwaitEventResolver {
         Ok(None)
     }
 
+    /// Projects this host to the resolver that owns its await-event registry.
+    fn await_event_resolver(&self) -> &dyn AwaitEventResolver;
+
     async fn turn_control_binding<'a>(
         &'a self,
         scoped: &'a ScopedEffectController<'_>,
     ) -> Result<TurnControlBinding<'a>, RuntimeError> {
-        let durable_cancel_after_llm =
-            match scoped.controller().turn_control_participation().await? {
-                TurnControlParticipation::Local => false,
-                TurnControlParticipation::DurableJournaled => true,
-            };
-        Ok(TurnControlBinding::RunScoped {
-            resolver: scoped.controller(),
-            durable_cancel_after_llm,
-        })
+        // Local turn gates must share the host registry used by the live watcher
+        // and external cancellation requests. Durable observations remain journaled.
+        match scoped.controller().turn_control_participation().await? {
+            TurnControlParticipation::Local => Ok(TurnControlBinding::HostOwned {
+                resolver: self.await_event_resolver(),
+                peek: self.scoped(scoped.execution_scope().clone())?,
+            }),
+            TurnControlParticipation::DurableJournaled => Ok(TurnControlBinding::RunScoped {
+                resolver: scoped.controller(),
+                durable_cancel_after_llm: true,
+            }),
+        }
     }
 
     async fn prepare_tool_intent(

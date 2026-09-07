@@ -556,6 +556,10 @@ impl<'ctx, C> EffectHost for RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx> + Sync,
 {
+    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+        self
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,

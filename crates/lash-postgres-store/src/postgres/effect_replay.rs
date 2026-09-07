@@ -170,6 +170,10 @@ impl AwaitEventResolver for PostgresEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for PostgresEffectHost {
+    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+        self
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,

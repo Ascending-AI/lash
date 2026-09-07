@@ -201,6 +201,10 @@ impl AwaitEventResolver for SqliteEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for SqliteEffectHost {
+    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+        self
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,

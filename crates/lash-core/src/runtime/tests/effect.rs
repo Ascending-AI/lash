@@ -9,6 +9,7 @@ use controller_doubles::{SerialOnlyEffectController, WrongOutcomeEffectControlle
 mod fig1127;
 mod fig1416;
 mod fig1535;
+mod fig2471;
 mod response_settlement;
 #[derive(Clone, Debug)]
 struct EffectControllerRecord {

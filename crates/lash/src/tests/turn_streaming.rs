@@ -605,6 +605,10 @@ impl lash_core::AwaitEventResolver for DurableNoopEffectHost {
 
 #[async_trait]
 impl lash_core::EffectHost for DurableNoopEffectHost {
+    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+        self
+    }
+
     async fn prepare_tool_intent(
         &self,
         _sink: &dyn lash_core::ToolIntentOutcomeSink,

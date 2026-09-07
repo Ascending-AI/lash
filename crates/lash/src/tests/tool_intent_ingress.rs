@@ -328,6 +328,10 @@ impl lash_core::AwaitEventResolver for KeyJournalController {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for KeyJournalController {
+    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+        self
+    }
+
     async fn prepare_tool_intent(
         &self,
         _sink: &dyn lash_core::ToolIntentOutcomeSink,
@@ -426,6 +430,10 @@ impl lash_core::AwaitEventResolver for AdmissionCrashController {}
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for AdmissionCrashController {
+    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+        self
+    }
+
     async fn prepare_tool_intent(
         &self,
         _sink: &dyn lash_core::ToolIntentOutcomeSink,
