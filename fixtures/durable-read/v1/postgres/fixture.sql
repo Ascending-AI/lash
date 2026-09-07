@@ -3,7 +3,7 @@
 --
 
 
--- Dumped from database version 16.15
+-- Dumped from database version 16.15 (Debian 16.15-1.pgdg13+2)
 -- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
@@ -335,7 +335,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_wake_deliveries (
 --
 
 CREATE TABLE lash_durable_read_fixture.lash_processes (
-    process_id text NOT NULL,
+    process_id text NOT NULL COLLATE pg_catalog."C",
     incarnation bigint NOT NULL,
     registration_fingerprint text NOT NULL,
     originator_id text NOT NULL,
@@ -947,7 +947,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 75);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 76);
 
 
 --
