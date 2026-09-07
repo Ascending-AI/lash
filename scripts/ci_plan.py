@@ -29,6 +29,7 @@ GATED_JOBS = {
     "postgres-store": "stores",
     "s3-store": "stores",
     "functional-e2e": "functional_e2e",
+    "functional-e2e-process-operations": "functional_e2e",
 }
 
 # Jobs deferred entirely to trunk runs (push / workflow_dispatch): their
@@ -47,6 +48,7 @@ TRUNK_ONLY_JOBS = {
     "confidence-fast-summary",
     "s3-store",
     "functional-e2e",
+    "functional-e2e-process-operations",
 }
 
 DEFERRED_EVENTS = {"pull_request", "merge_group"}

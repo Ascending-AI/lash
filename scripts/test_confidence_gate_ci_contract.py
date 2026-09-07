@@ -890,7 +890,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
 
     def test_asserting_operator_e2es_are_in_functional_matrix(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        functional = workflow_job_block(workflow, "functional-e2e")
+        functional = (workflow_job_block(workflow, "functional-e2e")
+                      + workflow_job_block(workflow, "functional-e2e-process-operations"))
 
         for name, recipe in (
             ("process-operations", "process-operations-e2e"),
