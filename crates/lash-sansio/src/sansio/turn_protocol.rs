@@ -1,3 +1,5 @@
+use super::*;
+
 impl TurnProtocol for UnitTurnProtocol {
     type Event = ();
     type Termination = ();
@@ -44,7 +46,11 @@ impl TurnCause {
         Message {
             id: self.id.clone(),
             role: MessageRole::Event,
-            parts: Arc::new(vec![Part::text(format!("{}.p0", self.id), self.text.clone(), None)]),
+            parts: Arc::new(vec![Part::text(
+                format!("{}.p0", self.id),
+                self.text.clone(),
+                None,
+            )]),
             origin: Some(self.origin.clone()),
         }
     }
@@ -322,7 +328,7 @@ pub struct ExecutionEnvironmentSync {
 
 pub struct WaitingLlmState<M: TurnProtocol = UnitTurnProtocol> {
     pub request: Arc<LlmRequest>,
-    driver_state: Option<M::DriverState>,
+    pub(super) driver_state: Option<M::DriverState>,
 }
 
 impl<M: TurnProtocol> WaitingLlmState<M> {
@@ -332,7 +338,7 @@ impl<M: TurnProtocol> WaitingLlmState<M> {
 }
 
 pub struct WaitingExecState<M: TurnProtocol = UnitTurnProtocol> {
-    driver_state: M::DriverState,
+    pub(super) driver_state: M::DriverState,
 }
 
 impl<M: TurnProtocol> WaitingExecState<M> {
@@ -380,14 +386,14 @@ pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
 }
 
 pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
-    config: &'a TurnMachineConfig<M>,
-    messages: &'a MessageSequence,
-    events: &'a [SessionHistoryRecord<M::Event>],
-    turn_causes: &'a [TurnCause],
-    protocol_iteration: usize,
-    protocol_run_offset: usize,
-    termination: &'a TurnTerminationPolicyState,
-    observed_cancellation: Option<&'a crate::TurnCancellationEvidence>,
+    pub(super) config: &'a TurnMachineConfig<M>,
+    pub(super) messages: &'a MessageSequence,
+    pub(super) events: &'a [SessionHistoryRecord<M::Event>],
+    pub(super) turn_causes: &'a [TurnCause],
+    pub(super) protocol_iteration: usize,
+    pub(super) protocol_run_offset: usize,
+    pub(super) termination: &'a TurnTerminationPolicyState,
+    pub(super) observed_cancellation: Option<&'a crate::TurnCancellationEvidence>,
 }
 
 impl<'a, M: TurnProtocol> DriverContextView<'a, M> {

@@ -1,12 +1,14 @@
+use super::*;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum EffectDeliveryStatus {
+pub(super) enum EffectDeliveryStatus {
     #[default]
     Pending,
     Delivered,
 }
 
 #[derive(Debug, Serialize, serde::Deserialize)]
-enum MachineState<M: TurnProtocol = UnitTurnProtocol> {
+pub(super) enum MachineState<M: TurnProtocol = UnitTurnProtocol> {
     PreparingProtocol,
     WaitingExecutionEnvironment {
         effect_id: EffectId,
@@ -48,22 +50,22 @@ enum MachineState<M: TurnProtocol = UnitTurnProtocol> {
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
-    state: MachineState<M>,
-    pending_effects: Vec<Effect<M>>,
-    next_effect_id: u64,
+    pub(super) state: MachineState<M>,
+    pub(super) pending_effects: Vec<Effect<M>>,
+    pub(super) next_effect_id: u64,
     #[serde(default)]
-    next_synthetic_message_id: u64,
-    messages: Vec<Message>,
-    events: Vec<SessionHistoryRecord<M::Event>>,
+    pub(super) next_synthetic_message_id: u64,
+    pub(super) messages: Vec<Message>,
+    pub(super) events: Vec<SessionHistoryRecord<M::Event>>,
     #[serde(default)]
-    turn_causes: Vec<TurnCause>,
+    pub(super) turn_causes: Vec<TurnCause>,
     #[serde(default)]
-    progress_event_cursor: usize,
-    protocol_iteration: usize,
-    protocol_run_offset: usize,
-    cumulative_usage: TokenUsage,
-    termination: TurnTerminationPolicyState,
-    synced_protocol_iteration: Option<usize>,
+    pub(super) progress_event_cursor: usize,
+    pub(super) protocol_iteration: usize,
+    pub(super) protocol_run_offset: usize,
+    pub(super) cumulative_usage: TokenUsage,
+    pub(super) termination: TurnTerminationPolicyState,
+    pub(super) synced_protocol_iteration: Option<usize>,
 }
 
 impl<M: TurnProtocol> Clone for MachineState<M> {
@@ -130,7 +132,7 @@ impl<M: TurnProtocol> Clone for MachineState<M> {
 }
 
 impl<M: TurnProtocol> MachineState<M> {
-    fn schedule_outstanding_effect(&mut self) {
+    pub(super) fn schedule_outstanding_effect(&mut self) {
         match self {
             Self::WaitingExecutionEnvironment { delivery, .. }
             | Self::WaitingLlm { delivery, .. }
@@ -143,7 +145,7 @@ impl<M: TurnProtocol> MachineState<M> {
         }
     }
 
-    fn poll_outstanding_effect(&mut self) -> Option<Effect<M>> {
+    pub(super) fn poll_outstanding_effect(&mut self) -> Option<Effect<M>> {
         match self {
             Self::WaitingExecutionEnvironment {
                 effect_id,
@@ -212,20 +214,20 @@ impl<M: TurnProtocol> MachineState<M> {
 
 /// Sans-IO state machine for a single session run (multi-turn).
 pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
-    config: TurnMachineConfig<M>,
-    state: MachineState<M>,
-    side_effect_outbox: VecDeque<Effect<M>>,
-    next_effect_id: u64,
-    next_synthetic_message_id: u64,
-    messages: MessageSequence,
-    events: Arc<Vec<SessionHistoryRecord<M::Event>>>,
-    turn_causes: Vec<TurnCause>,
-    progress_event_cursor: usize,
-    protocol_iteration: usize,
-    protocol_run_offset: usize,
-    cumulative_usage: TokenUsage,
-    termination: TurnTerminationPolicyState,
-    synced_protocol_iteration: Option<usize>,
+    pub(super) config: TurnMachineConfig<M>,
+    pub(super) state: MachineState<M>,
+    pub(super) side_effect_outbox: VecDeque<Effect<M>>,
+    pub(super) next_effect_id: u64,
+    pub(super) next_synthetic_message_id: u64,
+    pub(super) messages: MessageSequence,
+    pub(super) events: Arc<Vec<SessionHistoryRecord<M::Event>>>,
+    pub(super) turn_causes: Vec<TurnCause>,
+    pub(super) progress_event_cursor: usize,
+    pub(super) protocol_iteration: usize,
+    pub(super) protocol_run_offset: usize,
+    pub(super) cumulative_usage: TokenUsage,
+    pub(super) termination: TurnTerminationPolicyState,
+    pub(super) synced_protocol_iteration: Option<usize>,
     /// Cancellation evidence the host has observed for this turn, recorded
     /// before the machine is told the provider call was cancelled. Lets the
     /// machine name the request that stopped it instead of minting internal

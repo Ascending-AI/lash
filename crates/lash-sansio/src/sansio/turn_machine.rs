@@ -1,3 +1,5 @@
+use super::*;
+
 impl<M: TurnProtocol> TurnMachine<M> {
     /// Create a new machine in `PrepareIteration` state.
     pub fn new(
@@ -350,7 +352,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         true
     }
 
-    fn append_event(&mut self, event: SessionHistoryRecord<M::Event>) {
+    pub(super) fn append_event(&mut self, event: SessionHistoryRecord<M::Event>) {
         match event {
             SessionHistoryRecord::Conversation(record) => {
                 Arc::make_mut(&mut self.events)
@@ -358,7 +360,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 self.messages.push(record.to_message());
             }
             SessionHistoryRecord::Protocol(protocol_event) => {
-                Arc::make_mut(&mut self.events).push(SessionHistoryRecord::Protocol(protocol_event));
+                Arc::make_mut(&mut self.events)
+                    .push(SessionHistoryRecord::Protocol(protocol_event));
             }
         }
     }
@@ -441,10 +444,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// Fallible host seam for delivering a response whose usage must remain
     /// suitable for durable accumulation.
     #[doc(hidden)]
-    pub fn try_handle_response(
-        &mut self,
-        response: Response,
-    ) -> Result<(), TokenUsageOverflow> {
+    pub fn try_handle_response(&mut self, response: Response) -> Result<(), TokenUsageOverflow> {
         match response {
             Response::ExecutionEnvironmentSynced { id, result } => {
                 self.handle_execution_environment_synced(id, result);
@@ -525,11 +525,21 @@ impl<M: TurnProtocol> TurnMachine<M> {
         {
             let message_id = self.next_synthetic_message_id("checkpoint");
             let mut parts = if message.parts.is_empty() && !message.content.is_empty() {
-                vec![Part::text(format!("{message_id}.p0"), message.content.clone(), None)]
+                vec![Part::text(
+                    format!("{message_id}.p0"),
+                    message.content.clone(),
+                    None,
+                )]
             } else {
                 message.parts.clone()
             };
-            parts.extend(message.attachments.iter().cloned().map(|source| Part::attachment_part(String::new(), String::new(), Some(crate::PartAttachment { source }))));
+            parts.extend(message.attachments.iter().cloned().map(|source| {
+                Part::attachment_part(
+                    String::new(),
+                    String::new(),
+                    Some(crate::PartAttachment { source }),
+                )
+            }));
             reassign_part_ids(&message_id, &mut parts);
             appended.push(Message {
                 id: message_id.clone(),

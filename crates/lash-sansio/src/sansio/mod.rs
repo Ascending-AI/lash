@@ -37,10 +37,19 @@ pub trait TurnProtocol: Send + Sync + 'static {
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct UnitTurnProtocol;
 
-include!("sections/turn_protocol.rs");
-include!("sections/machine_state.rs");
-include!("sections/turn_machine.rs");
-include!("sections/helpers.rs");
+mod turn_protocol;
+pub use turn_protocol::{
+    ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
+    ContextProjector, DriverAction, DriverContextView, Effect, EffectId, ExecutionEnvironmentSync,
+    LlmCallError, LogEvent, PendingToolCall, ProjectorContext, ProtocolDriverHandle, Response,
+    TurnCause, TurnMachineConfig, WaitingExecState, WaitingLlmState, render_turn_causes_prompt,
+};
+mod machine_state;
+use machine_state::{EffectDeliveryStatus, MachineState};
+pub use machine_state::{TurnCheckpoint, TurnMachine};
+mod helpers;
+mod turn_machine;
+use helpers::{checked_turn_usage_from_llm_usage, refine_terminal_reason_for_context_window};
 
 #[cfg(test)]
 mod tests;
