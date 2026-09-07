@@ -913,12 +913,16 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         }] if evidence.request_id == "original-stop"
             && evidence.origin.as_deref() == Some("user")
     ));
+    // The execution publisher owns the terminal event; the cancel route
+    // publishes nothing for this core-run turn.
+    assert!(events.try_recv().is_err(), "cancel route owns no terminal");
+    state.publish_turn_done(&session_id, "turn-cancel");
     assert!(matches!(
         events.try_recv(),
         Ok(ProductEvent {
-            item: StreamItem::Done { .. },
+            item: StreamItem::Done { turn_id: Some(turn_id), .. },
             ..
-        })
+        }) if turn_id == "turn-cancel"
     ));
     let duplicate = state
         .core
