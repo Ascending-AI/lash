@@ -806,9 +806,9 @@ pub mod runtime {
 /// Prompt templates, layers, and contributions.
 pub mod prompt {
     pub use lash_core::{
-        PromptBuiltin, PromptContribution, PromptContributionGate, PromptLayer, PromptSlot,
-        PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
-        facade_support::default_prompt_template,
+        PromptBuiltin, PromptContribution, PromptContributionBody, PromptContributionGate,
+        PromptLayer, PromptSlot, PromptSlotLayer, PromptTemplate, PromptTemplateEntry,
+        PromptTemplateSection, facade_support::default_prompt_template,
     };
 }
 

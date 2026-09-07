@@ -77,6 +77,63 @@ pub struct PromptContribution {
     pub content: Arc<str>,
 }
 
+/// Contribution payload whose slot identity belongs exclusively to its map key.
+///
+/// A map value cannot encode a conflicting slot:
+/// ```compile_fail,E0609
+/// use lash_sansio::{PromptContributionBody, PromptSlot};
+/// fn contradict_key(body: &mut PromptContributionBody) {
+///     body.slot = PromptSlot::Guidance;
+/// }
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PromptContributionBody {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<Arc<str>>,
+    #[serde(default)]
+    pub priority: i32,
+    #[serde(default, skip_serializing_if = "PromptContributionGate::is_empty")]
+    pub gate: PromptContributionGate,
+    pub content: Arc<str>,
+}
+
+impl From<PromptContribution> for PromptContributionBody {
+    fn from(value: PromptContribution) -> Self {
+        let PromptContribution {
+            slot: _,
+            title,
+            priority,
+            gate,
+            content,
+        } = value;
+        Self {
+            title,
+            priority,
+            gate,
+            content,
+        }
+    }
+}
+impl PromptContributionBody {
+    /// Reattach the sole slot identity from the containing map key.
+    pub fn in_slot(self, slot: crate::PromptSlot) -> PromptContribution {
+        let Self {
+            title,
+            priority,
+            gate,
+            content,
+        } = self;
+        PromptContribution {
+            slot,
+            title,
+            priority,
+            gate,
+            content,
+        }
+    }
+}
+
 impl PromptContribution {
     pub fn new(
         slot: crate::PromptSlot,

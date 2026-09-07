@@ -236,6 +236,16 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .await
     .expect("refresh refusal fixture pending-input and process-lease catalog");
     upgrade_prior_fixture_frame_identity(&pool).await;
+    // Keep the component-v1 payload as the refusal witness while refreshing
+    // the enclosing head so hydration reaches that intended boundary.
+    sqlx::query(
+        "UPDATE lash_sessions
+            SET head_json = jsonb_set(head_json::jsonb, '{schema_version}', to_jsonb($1::bigint))::text",
+    )
+    .bind(i64::from(lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION))
+    .execute(&pool)
+    .await
+    .expect("refresh refusal fixture head schema without changing its checkpoint");
     pool.close().await;
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await

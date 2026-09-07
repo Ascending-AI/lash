@@ -535,7 +535,6 @@ mod asserted_examples {
                     RemotePromptSlotLayer {
                         reset: false,
                         contributions: vec![RemotePromptContribution {
-                            slot: RemotePromptSlot::Intro,
                             title: Some("Remote host".to_string()),
                             priority: -10,
                             gate: RemotePromptContributionGate {

@@ -377,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_layers_replace_slot_and_normalize_contribution_slot() {
+    fn prompt_layers_replace_slot_and_reconstruct_from_map_key() {
         let core =
             PromptLayer::new().with_contribution(PromptContribution::guidance("Guide", "old"));
         let session = PromptLayer::new().with_replaced_slot(

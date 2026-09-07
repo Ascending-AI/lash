@@ -5456,6 +5456,12 @@ lash::prompt::PromptContribution::runtime_context
 lash::prompt::PromptContribution::slot
 lash::prompt::PromptContribution::title
 lash::prompt::PromptContribution::with_priority
+lash::prompt::PromptContributionBody
+lash::prompt::PromptContributionBody::content
+lash::prompt::PromptContributionBody::gate
+lash::prompt::PromptContributionBody::in_slot
+lash::prompt::PromptContributionBody::priority
+lash::prompt::PromptContributionBody::title
 lash::prompt::PromptContributionGate
 lash::prompt::PromptContributionGate::is_empty
 lash::prompt::PromptContributionGate::tools
@@ -6650,7 +6656,6 @@ lash::remote::prompt::RemotePromptContribution
 lash::remote::prompt::RemotePromptContribution::content
 lash::remote::prompt::RemotePromptContribution::gate
 lash::remote::prompt::RemotePromptContribution::priority
-lash::remote::prompt::RemotePromptContribution::slot
 lash::remote::prompt::RemotePromptContribution::title
 lash::remote::prompt::RemotePromptContributionGate
 lash::remote::prompt::RemotePromptContributionGate::is_empty
