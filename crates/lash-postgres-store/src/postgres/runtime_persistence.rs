@@ -3394,8 +3394,9 @@ async fn postgres_refusal_for_empty_scan(
         let head_batch = queued_work_batch_from_row(tx, head_row.clone()).await?;
         let head_candidates = vec![claim_candidate_from_row(&head_row, &head_batch)?];
         let head_prefix = select_turn_work_claim_prefix(&head_candidates, boundary, policy, now)?;
-        // A head the state machine would take contradicts the empty scan; there
-        // is no such state, and `Empty` stays the conservative answer.
+        // Under READ COMMITTED, concurrent enqueue can make this probe select
+        // a head after the initial empty scan. Preserve the existing Empty
+        // refusal for that changed observation (pinned by refusal_probe_tests).
         return Ok(head_prefix.refusal.unwrap_or(QueuedWorkClaimRefusal::Empty));
     }
     let epoch_ms = transaction_epoch_sql!();
