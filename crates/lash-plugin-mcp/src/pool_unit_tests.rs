@@ -764,6 +764,32 @@ fn known_protocol_errors_are_not_connection_loss() {
     assert!(is_connection_loss(&ServiceError::TransportClosed));
 }
 
+// Subscribe before the call that terminates the mock. Publication follows
+// discovery and catalog installation, and the generation excludes the old peer.
+// watch retains the latest publication even if the actor wins the scheduling race.
+#[cfg(unix)]
+fn replacement_connection(
+    pool: &McpConnectionPool,
+    server: &str,
+) -> impl std::future::Future<Output = ()> {
+    let mut service = pool.entries.read_recover()[server].service.clone();
+    let generation = service
+        .borrow()
+        .as_ref()
+        .expect("initial connection is published")
+        .generation;
+    async move {
+        service
+            .wait_for(|published| {
+                published
+                    .as_ref()
+                    .is_some_and(|peer| peer.generation > generation)
+            })
+            .await
+            .expect("lifecycle actor stopped before acknowledging the replacement connection");
+    }
+}
+
 #[cfg(all(unix, feature = "lashlang"))]
 #[tokio::test]
 async fn normalization_collisions_dispatch_stably_across_respawn() {
@@ -860,26 +886,18 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
         )
     }
 
+    let replacement = replacement_connection(&pool, "directory");
     let first = dispatch(&pool, "get_user")
         .await
         .expect("base Lashlang operation is available before respawn");
     assert_eq!(first.value_for_projection(), json!("hyphen"));
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(15);
-    loop {
-        let Some(result) = dispatch(&pool, "get_user_2").await else {
-            panic!("missing uniquified Lashlang operation `get_user_2` after respawn");
-        };
-        if result.is_success() {
-            assert_eq!(result.value_for_projection(), json!("underscore"));
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "server did not respawn before deadline: {result:?}"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    replacement.await;
+    let result = dispatch(&pool, "get_user_2")
+        .await
+        .expect("uniquified Lashlang operation is available after respawn");
+    assert!(result.is_success(), "replacement call succeeds: {result:?}");
+    assert_eq!(result.value_for_projection(), json!("underscore"));
 
     pool.shutdown_all().await;
 }
@@ -1075,49 +1093,40 @@ async fn pool_reconnects_after_transport_death() {
     let ctx = lash_core::testing::mock_attempt_context();
     let args = json!({});
 
+    let reconnect = Arc::new(policy_tests::ActorPauseHook::default());
+    pool.entries.read_recover()["flaky"].set_mid_establish_hook(Some(Arc::clone(&reconnect)));
+    let replacement = replacement_connection(&pool, "flaky");
     let first = pool.call_tool("mcp__flaky__ping", &args, &ctx).await;
     assert!(first.is_success(), "first call succeeds: {first:?}");
 
-    // The mock exited after the first call. Definitions must survive the
-    // outage, and calls must fail until the reconnect loop brings the
-    // (respawned) server back, after which calls succeed again.
-    let deadline = std::time::Instant::now() + Duration::from_secs(15);
-    let mut recovered = false;
-    while std::time::Instant::now() < deadline {
-        assert_eq!(
-            pool.advertised_tools().len(),
-            1,
-            "tool definitions are kept across a disconnect"
-        );
-        let result = pool.call_tool("mcp__flaky__ping", &args, &ctx).await;
-        if result.is_success() {
-            recovered = true;
-            break;
+    // Pause the reconnect after the old peer is unpublished, so the outage
+    // assertions run at a known state instead of depending on a scheduling race.
+    reconnect.reached.notified().await;
+    assert_eq!(
+        pool.advertised_tools().len(),
+        1,
+        "tool definitions are kept across a disconnect"
+    );
+    let unavailable = pool.call_tool("mcp__flaky__ping", &args, &ctx).await;
+    let output = unavailable
+        .as_done_output()
+        .expect("a disconnected MCP call must complete with a failure");
+    let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+        panic!("a disconnected MCP call must be a structured failure: {output:?}");
+    };
+    assert_eq!(failure.class, ToolFailureClass::Unavailable);
+    assert_eq!(failure.code, "mcp_server_unavailable");
+    assert_eq!(
+        failure.retry,
+        ToolRetryStatus::Safe {
+            after_ms: Some(500)
         }
-        let output = result
-            .as_done_output()
-            .expect("a disconnected MCP call must complete with a failure");
-        let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
-            panic!("a disconnected MCP call must be a structured failure: {output:?}");
-        };
-        assert_eq!(failure.class, ToolFailureClass::Unavailable);
-        assert!(
-            matches!(
-                failure.code.as_str(),
-                "mcp_connection_lost" | "mcp_server_unavailable"
-            ),
-            "unexpected unavailable code: {}",
-            failure.code
-        );
-        assert_eq!(
-            failure.retry,
-            ToolRetryStatus::Safe {
-                after_ms: Some(500)
-            }
-        );
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-    assert!(recovered, "pool must reconnect after the transport died");
+    );
+    reconnect.release.notify_one();
+    replacement.await;
+    assert_eq!(pool.advertised_tools().len(), 1);
+    let result = pool.call_tool("mcp__flaky__ping", &args, &ctx).await;
+    assert!(result.is_success(), "replacement call succeeds: {result:?}");
 
     pool.shutdown_all().await;
 }
