@@ -42,8 +42,10 @@ pub(crate) fn sqlite_await_events(
     )
 }
 
+/// `pub` only because it names an associated type of the shared replay
+/// adapter; the module is private, so nothing outside this crate can reach it.
 #[derive(Clone)]
-pub(crate) struct SqliteAwaitEventBackend {
+pub struct SqliteAwaitEventBackend {
     conn: SqliteConnection,
 }
 

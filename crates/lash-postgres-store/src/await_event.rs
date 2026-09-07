@@ -46,8 +46,10 @@ pub(crate) fn postgres_await_events(
     AwaitEventCoordinator::new(PostgresAwaitEventBackend { pool }, signing_secret, clock)
 }
 
+/// `pub` only because it names an associated type of the shared replay
+/// adapter; the module is private, so nothing outside this crate can reach it.
 #[derive(Clone)]
-pub(crate) struct PostgresAwaitEventBackend {
+pub struct PostgresAwaitEventBackend {
     pool: PgPool,
 }
 

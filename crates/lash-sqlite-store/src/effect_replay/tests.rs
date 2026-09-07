@@ -6,6 +6,10 @@
 //! allowed to leave behind — and a host would only obscure which write did what.
 
 use super::*;
+use lash_core::{
+    RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome,
+};
 
 use lash_core::facade_support::effect_replay_driver::{
     EffectClaimObservation, EffectFinalizeOutcome, EffectGroupRecord, EffectLeaseFence,
@@ -36,6 +40,7 @@ async fn row_store() -> SqliteEffectReplayRowStore {
         .await
         .expect("provision the effect schema");
     SqliteEffectReplayRowStore {
+        completion_keys: CompletionKeys::Unsupported,
         conn,
         clock: Arc::new(lash_core::facade_support::SystemClock),
     }
@@ -559,7 +564,13 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
     )
     .await
     .expect("open successor connection");
-    let successor = build_effect_replay_driver(conn, options, clock.clone(), vec![0; 32]);
+    let successor = build_effect_replay_driver(
+        conn,
+        options,
+        clock.clone(),
+        vec![0; 32],
+        CompletionKeys::Issued,
+    );
     let pause = injector.pause(SqliteFaultPoint::AfterBegin);
     let completing = tokio::spawn(async move {
         successor
@@ -615,6 +626,7 @@ async fn effect_lease_writes_refuse_expiry_during_sqlite_admission() {
             .expect("provision effect schema");
         let clock = Arc::new(lash_core::testing::TestClock::new(1_000));
         let store = Arc::new(SqliteEffectReplayRowStore {
+            completion_keys: CompletionKeys::Issued,
             conn,
             clock: clock.clone(),
         });
