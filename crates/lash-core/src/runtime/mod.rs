@@ -14,6 +14,7 @@ pub use effect::await_event_coordinator;
 #[doc(hidden)]
 pub use effect::effect_replay_driver;
 pub use effect::promise_semantics;
+mod claim_settlement;
 mod environment;
 mod error;
 mod event_pump;
@@ -21,6 +22,7 @@ mod host;
 mod in_memory_store;
 mod io;
 mod lifecycle;
+use claim_settlement::TurnClaimSettlement;
 mod logical_turn;
 pub(crate) mod native_substrate;
 mod observation;

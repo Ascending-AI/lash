@@ -1,3 +1,4 @@
+use crate::runtime::claim_settlement::TurnClaimSettlement;
 use crate::store::RuntimePersistence;
 use crate::{OmittedToolCalls, PluginSession, ToolCallRecord, TurnOutcome};
 
@@ -14,12 +15,7 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) usage_deltas: &'a [crate::store::RuntimeUsageDelta],
     pub(super) failure_evidence: &'a [crate::TurnFailureEvidence],
     pub(super) outcome: &'a TurnOutcome,
-    pub(super) originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
-    pub(super) originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
-    pub(super) completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
-    pub(super) completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
-    pub(super) queue_claim_generations: std::collections::HashMap<String, u64>,
-    pub(super) turn_input_claim_generations: std::collections::HashMap<String, u64>,
+    pub(super) claim_settlement: TurnClaimSettlement,
     pub(super) current_session_lease_generation: Option<u64>,
     pub(super) enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
     pub(super) interrupted_turn_input_turn_id: Option<String>,

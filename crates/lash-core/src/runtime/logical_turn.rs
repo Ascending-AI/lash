@@ -49,8 +49,6 @@ impl LogicalTurnClaims {
             .iter()
             .map(|claim| claim.completion())
             .collect();
-        let originating_queue_claims = completed_queue_claims.clone();
-        let originating_turn_input_claims = completed_turn_input_claims.clone();
         let queue_claim_generations = self
             .queued
             .iter()
@@ -84,24 +82,19 @@ impl LogicalTurnClaims {
             _ => Vec::new(),
         };
         LogicalTurnCommitEffects {
-            originating_queue_claims,
-            originating_turn_input_claims,
-            completed_queue_claims,
-            completed_turn_input_claims,
-            queue_claim_generations,
-            turn_input_claim_generations,
+            claim_settlement: TurnClaimSettlement::new(
+                completed_queue_claims,
+                completed_turn_input_claims,
+                queue_claim_generations,
+                turn_input_claim_generations,
+            ),
             enqueued_queue_batches,
         }
     }
 }
 
 pub(super) struct LogicalTurnCommitEffects {
-    pub(super) originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
-    pub(super) originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
-    pub(super) completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
-    pub(super) completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
-    pub(super) queue_claim_generations: std::collections::HashMap<String, u64>,
-    pub(super) turn_input_claim_generations: std::collections::HashMap<String, u64>,
+    pub(super) claim_settlement: TurnClaimSettlement,
     pub(super) enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
 }
 

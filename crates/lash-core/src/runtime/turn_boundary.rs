@@ -5,6 +5,7 @@ use super::{
 use crate::facade_support::SessionGraphFacadeOps;
 #[cfg(test)]
 use crate::facade_support::SessionNodeProjection;
+use crate::runtime::claim_settlement::TurnClaimSettlement;
 use crate::session_model::SessionHistoryRecord;
 use crate::store::{GraphAppend, RuntimeCommit, RuntimePersistence, StoreError};
 use crate::{
@@ -21,8 +22,6 @@ mod execution_state;
 use execution_state::*;
 mod final_commit_input;
 use final_commit_input::FinalCommitInput;
-mod settlement;
-use settlement::*;
 type FinalCommitResult = Result<
     (
         Vec<crate::QueuedWorkBatch>,
@@ -309,12 +308,7 @@ impl TurnBoundary {
         returned_turn: &mut AssembledTurn,
         session: Option<&mut Session>,
         usage_deltas: &[crate::store::RuntimeUsageDelta],
-        originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
-        originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
-        completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
-        completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
-        queue_claim_generations: std::collections::HashMap<String, u64>,
-        turn_input_claim_generations: std::collections::HashMap<String, u64>,
+        claim_settlement: TurnClaimSettlement,
         current_session_lease_generation: Option<u64>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<String>,
@@ -358,12 +352,7 @@ impl TurnBoundary {
                 usage_deltas,
                 failure_evidence: &returned_turn.failure_evidence,
                 outcome: &returned_turn.outcome,
-                originating_queue_claims,
-                originating_turn_input_claims,
-                completed_queue_claims,
-                completed_turn_input_claims,
-                queue_claim_generations,
-                turn_input_claim_generations,
+                claim_settlement,
                 current_session_lease_generation,
                 enqueued_queue_batches,
                 interrupted_turn_input_turn_id,
@@ -441,12 +430,7 @@ impl TurnBoundary {
             usage_deltas,
             failure_evidence,
             outcome,
-            originating_queue_claims,
-            originating_turn_input_claims,
-            completed_queue_claims,
-            completed_turn_input_claims,
-            queue_claim_generations,
-            turn_input_claim_generations,
+            claim_settlement,
             current_session_lease_generation,
             enqueued_queue_batches,
             interrupted_turn_input_turn_id,
@@ -504,12 +488,7 @@ impl TurnBoundary {
                 usage_deltas,
                 failure_evidence,
                 self.final_operation(),
-                originating_queue_claims,
-                originating_turn_input_claims,
-                completed_queue_claims,
-                completed_turn_input_claims,
-                queue_claim_generations,
-                turn_input_claim_generations,
+                claim_settlement,
                 current_session_lease_generation,
                 enqueued_queue_batches,
                 interrupted_turn_input_turn_id,
@@ -539,12 +518,7 @@ impl TurnBoundary {
         usage_deltas: &[crate::store::RuntimeUsageDelta],
         failure_evidence: &[crate::TurnFailureEvidence],
         operation: crate::OperationId,
-        mut originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
-        mut originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
-        completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
-        completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
-        queue_claim_generations: std::collections::HashMap<String, u64>,
-        turn_input_claim_generations: std::collections::HashMap<String, u64>,
+        mut claim_settlement: TurnClaimSettlement,
         current_session_lease_generation: Option<u64>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<String>,
@@ -595,17 +569,12 @@ impl TurnBoundary {
         if let Some(completion) = session_execution_lease_completion {
             commit = commit.releasing_session_execution_lease(completion);
         }
-        commit.completed_queue_claims = completed_queue_claims;
-        commit.completed_turn_input_claims = completed_turn_input_claims;
+        commit.completed_queue_claims = claim_settlement.queued.completions.clone();
+        commit.completed_turn_input_claims = claim_settlement.turn_inputs.completions.clone();
         commit.enqueued_queue_batches = enqueued_queue_batches;
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
         let can_retry_recovered_settlement =
-            current_session_lease_generation.is_some_and(|current| {
-                queue_claim_generations
-                    .values()
-                    .chain(turn_input_claim_generations.values())
-                    .any(|generation| *generation < current)
-            });
+            claim_settlement.has_recovered(current_session_lease_generation);
         let result = if can_retry_recovered_settlement {
             // Each retry can remove one stale row. Permit at most one retry
             // per original row, followed by the final commit attempt.
@@ -625,8 +594,8 @@ impl TurnBoundary {
             );
             loop {
                 commit.validate_claim_settlement(
-                    &originating_queue_claims,
-                    &originating_turn_input_claims,
+                    claim_settlement.queued.originating(),
+                    claim_settlement.turn_inputs.originating(),
                 )?;
                 match crate::store::commit_runtime_state_verified(store, commit.clone()).await {
                     Ok(result) => break result,
@@ -634,19 +603,11 @@ impl TurnBoundary {
                         if !retry_budget.consume() {
                             return Err(err);
                         }
-                        let dropped = drop_superseded_recovered_queue_settlement(
-                            &err,
-                            &queue_claim_generations,
-                            current_session_lease_generation,
-                            &mut commit.completed_queue_claims,
-                            &mut originating_queue_claims,
-                        ) || drop_superseded_recovered_turn_input_settlement(
-                            &err,
-                            &turn_input_claim_generations,
-                            current_session_lease_generation,
-                            &mut commit.completed_turn_input_claims,
-                            &mut originating_turn_input_claims,
-                        );
+                        let dropped = claim_settlement
+                            .drop_superseded(&err, current_session_lease_generation);
+                        commit.completed_queue_claims = claim_settlement.queued.completions.clone();
+                        commit.completed_turn_input_claims =
+                            claim_settlement.turn_inputs.completions.clone();
                         if !dropped {
                             return Err(err);
                         }
@@ -655,8 +616,8 @@ impl TurnBoundary {
             }
         } else {
             commit.validate_claim_settlement(
-                &originating_queue_claims,
-                &originating_turn_input_claims,
+                claim_settlement.queued.originating(),
+                claim_settlement.turn_inputs.originating(),
             )?;
             crate::store::commit_runtime_state_verified(store, commit).await?
         };
