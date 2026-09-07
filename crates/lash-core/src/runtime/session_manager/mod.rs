@@ -32,10 +32,17 @@ pub(in crate::runtime) use usage::{
 
 #[derive(Clone)]
 enum CurrentSnapshot {
+    /// Host-scoped services own a full persistence snapshot and commit
+    /// against the store themselves.
     Owned(RuntimeSessionState),
+    /// Turn-scoped services see a read projection of the running turn's base
+    /// state. It is never a durable base: graph appends made through these
+    /// services ride the turn's commit draft and are overlaid on this
+    /// projection for in-turn readers.
     ReadModel {
         meta: RuntimeSessionState,
         messages: Arc<Vec<Message>>,
+        graph_appends: TurnGraphAppendDraft,
     },
 }
 
@@ -43,9 +50,14 @@ impl CurrentSnapshot {
     fn to_runtime_state(&self) -> RuntimeSessionState {
         match self {
             Self::Owned(snapshot) => snapshot.clone(),
-            Self::ReadModel { meta, messages } => {
+            Self::ReadModel {
+                meta,
+                messages,
+                graph_appends,
+            } => {
                 let mut snapshot = meta.clone();
                 snapshot.replace_active_read_state(messages.as_slice());
+                graph_appends.overlay_on_read_state(&mut snapshot);
                 snapshot
             }
         }
@@ -213,18 +225,20 @@ impl CurrentSessionCapability {
     fn new(
         runtime: &LashRuntime,
         plugins: Arc<crate::PluginSession>,
-        persist_usage_to_store: bool,
+        turn_graph_appends: Option<&TurnGraphAppendDraft>,
         held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Self {
         Self {
             session_id: runtime.state.session_id.clone(),
-            snapshot: if persist_usage_to_store {
-                CurrentSnapshot::Owned(runtime.export_persistence_state())
-            } else {
-                let read_model = runtime.state.read_model();
-                CurrentSnapshot::ReadModel {
-                    meta: Self::snapshot_meta_with_frame_root(runtime),
-                    messages: read_model.messages,
+            snapshot: match turn_graph_appends {
+                None => CurrentSnapshot::Owned(runtime.export_persistence_state()),
+                Some(graph_appends) => {
+                    let read_model = runtime.state.read_model();
+                    CurrentSnapshot::ReadModel {
+                        meta: Self::snapshot_meta_with_frame_root(runtime),
+                        messages: read_model.messages,
+                        graph_appends: graph_appends.clone(),
+                    }
                 }
             },
             policy: runtime.state.effective_policy().clone(),
@@ -358,9 +372,47 @@ impl RuntimeSessionServices {
         })
     }
 
+    /// Host-scoped services: they own a persistence snapshot and commit usage
+    /// and graph writes against the store themselves. `persist_usage_to_store`
+    /// must be `true`; turn-scoped services come from [`Self::for_turn`].
     pub(super) fn new(
         runtime: &LashRuntime,
         persist_usage_to_store: bool,
+        child_usage_event_relay: Option<ChildUsageEventRelay>,
+        held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+    ) -> Result<Self, PluginOperationInvokeError> {
+        if !persist_usage_to_store {
+            return Err(PluginOperationInvokeError::Unknown(
+                "turn-scoped session services require the turn's graph append draft".to_string(),
+            ));
+        }
+        Self::with_scope(
+            runtime,
+            None,
+            child_usage_event_relay,
+            held_session_execution_lease,
+        )
+    }
+
+    /// Turn-scoped services: usage stays in the shared ledger and graph
+    /// appends ride `turn_graph_appends`, both committed once by the turn.
+    pub(super) fn for_turn(
+        runtime: &LashRuntime,
+        child_usage_event_relay: Option<ChildUsageEventRelay>,
+        held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        turn_graph_appends: &TurnGraphAppendDraft,
+    ) -> Result<Self, PluginOperationInvokeError> {
+        Self::with_scope(
+            runtime,
+            Some(turn_graph_appends),
+            child_usage_event_relay,
+            held_session_execution_lease,
+        )
+    }
+
+    fn with_scope(
+        runtime: &LashRuntime,
+        turn_graph_appends: Option<&TurnGraphAppendDraft>,
         child_usage_event_relay: Option<ChildUsageEventRelay>,
         held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<Self, PluginOperationInvokeError> {
@@ -369,11 +421,12 @@ impl RuntimeSessionServices {
                 "session_manager".to_string(),
             ));
         };
+        let persist_usage_to_store = turn_graph_appends.is_none();
         Ok(Self {
             current: CurrentSessionCapability::new(
                 runtime,
                 Arc::clone(session.plugins()),
-                persist_usage_to_store,
+                turn_graph_appends,
                 held_session_execution_lease,
             ),
             managed: ManagedSessionCapability::new(runtime),

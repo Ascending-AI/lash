@@ -107,7 +107,7 @@ pub(crate) mod facade_ops {
     }
 }
 
-fn draft_node_id(namespace: &str, ordinal: u64) -> String {
+pub(crate) fn draft_node_id(namespace: &str, ordinal: u64) -> String {
     let preimage = format!("{}:{namespace}:{ordinal}", namespace.len());
     format!(
         "draft-node/v3/{}",

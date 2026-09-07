@@ -58,10 +58,10 @@ fn sqlite_head_and_max_generation(
     (leaf, max_generation)
 }
 
-fn sqlite_messages(
+fn sqlite_nodes(
     store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
     session_id: &str,
-) -> Vec<lash_core::Message> {
+) -> Vec<lash_core::SessionNodeRecord> {
     let conn = rusqlite::Connection::open(store_factory.catalog_path())
         .expect("open SQLite session catalog");
     let mut stmt = conn
@@ -83,8 +83,17 @@ fn sqlite_messages(
         lash_core::SessionNodeRecord::decode_storage_body(node_id, parent_node_id, &node_json)
             .expect("decode stored graph node")
     })
-    .filter_map(|node| node.message())
     .collect()
+}
+
+fn sqlite_messages(
+    store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
+    session_id: &str,
+) -> Vec<lash_core::Message> {
+    sqlite_nodes(store_factory, session_id)
+        .iter()
+        .filter_map(|node| node.message())
+        .collect()
 }
 
 #[tokio::test]
@@ -482,5 +491,427 @@ async fn rolling_history_threshold_continue_as_extends_the_pre_switch_durable_le
         "the threshold-crossing continue_as turn must extend the leaf from before the frame switch"
     );
 
+    Ok(())
+}
+
+fn sqlite_node_rows(
+    store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
+    session_id: &str,
+) -> Vec<(String, Option<String>, i64)> {
+    let conn = rusqlite::Connection::open(store_factory.catalog_path())
+        .expect("open SQLite session catalog");
+    let mut stmt = conn
+        .prepare(
+            "SELECT node_id, parent_node_id, generation FROM graph_nodes
+             WHERE session_id = ?1 ORDER BY generation ASC",
+        )
+        .expect("prepare graph-node read");
+    stmt.query_map([session_id], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })
+    .expect("read graph nodes")
+    .map(|row| row.expect("decode graph-node row"))
+    .collect()
+}
+
+/// Mirrors lash-core's draft node id derivation so the test can name the ids a
+/// projection-namespaced (`unscoped-replacement:*`) append would mint.
+fn draft_node_id(namespace: &str, ordinal: u64) -> String {
+    let preimage = format!("{}:{namespace}:{ordinal}", namespace.len());
+    format!(
+        "draft-node/v3/{}",
+        lash_sansio::core_support::blake3_domain_hash_hex(
+            "lash-draft-node/v3",
+            preimage.as_bytes()
+        )
+    )
+}
+
+fn synthetic_replacement_ids(persisted_ids: &[String]) -> std::collections::HashSet<String> {
+    std::iter::once("root".to_string())
+        .chain(persisted_ids.iter().cloned())
+        .flat_map(|leaf| {
+            (0..8)
+                .map(move |ordinal| draft_node_id(&format!("unscoped-replacement:{leaf}"), ordinal))
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Result<()> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "after-turn-enqueue-resident";
+    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+        dir.path().join("sessions"),
+    ));
+    let plugin = crate::plugins::StaticPluginFactory::new(
+        "after-turn-injection",
+        lash_core::facade_support::PluginSpec::new().with_after_turn(Arc::new(|_| {
+            Box::pin(async {
+                Ok(vec![
+                    lash_core::facade_support::AfterTurnPluginDirective::EnqueueMessages(
+                        lash_core::facade_support::EnqueueMessagesDirective {
+                            messages: vec![lash_core::PluginMessage::text(
+                                lash_core::MessageRole::User,
+                                "enqueued after turn",
+                            )],
+                        },
+                    ),
+                ])
+            })
+        })),
+    );
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(rolling_history_provider(vec![
+            response_with_usage("first response", 1),
+            response_with_usage("second response", 1),
+        ]))
+        .model(model_spec("after-turn-model", None, 40_000))
+        .plugin(Arc::new(plugin))
+        .store_factory(store_factory.clone())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(session_id).open().await?;
+    session
+        .turn(TurnInput::text("first request"))
+        .turn_id("enqueue-first")
+        .run()
+        .await?;
+    assert!(
+        session
+            .observe()
+            .current_observation()
+            .read_view
+            .messages()
+            .iter()
+            .any(|message| message_text(message) == "enqueued after turn")
+    );
+
+    let turn_one_rows = sqlite_node_rows(store_factory.as_ref(), session_id);
+    let persisted_ids = turn_one_rows
+        .iter()
+        .map(|(id, _, _)| id.clone())
+        .collect::<Vec<_>>();
+    let synthetic = synthetic_replacement_ids(&persisted_ids);
+    let persisted_synthetic = persisted_ids
+        .iter()
+        .filter(|id| synthetic.contains(*id))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        persisted_synthetic.is_empty(),
+        "projection-namespaced `unscoped-replacement:*` nodes must never be persisted, found {persisted_synthetic:?}"
+    );
+    let (leaf, generation) = sqlite_head_and_max_generation(store_factory.as_ref(), session_id);
+    let real_leaf = turn_one_rows
+        .iter()
+        .rev()
+        .map(|(id, _, _)| id.clone())
+        .find(|id| !synthetic.contains(id))
+        .expect("a real durable node");
+    assert_eq!(
+        leaf, real_leaf,
+        "durable head must be the last real append, not a projection node"
+    );
+
+    session
+        .turn(TurnInput::text("second request"))
+        .turn_id("enqueue-second")
+        .run()
+        .await?;
+    let next = sqlite_node_rows(store_factory.as_ref(), session_id)
+        .into_iter()
+        .find(|(_, _, node_generation)| *node_generation > generation)
+        .expect("turn two committed nodes");
+    assert_eq!(
+        next.1.as_deref(),
+        Some(real_leaf.as_str()),
+        "next commit must extend the last real durable node, not a projection node"
+    );
+    assert_eq!(
+        next.1.as_deref(),
+        Some(leaf.as_str()),
+        "next commit must extend the durable head"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Result<()> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "mid-turn-graph-append";
+    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+        dir.path().join("sessions"),
+    ));
+    let appended = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let hook_appended = Arc::clone(&appended);
+    let completions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let append_error = Arc::new(std::sync::Mutex::new(None::<String>));
+    let hook_append_error = Arc::clone(&append_error);
+    let plugin = crate::plugins::StaticPluginFactory::new(
+        "mid-turn-append",
+        lash_core::facade_support::PluginSpec::new().with_checkpoint(Arc::new(move |ctx| {
+            let appended = Arc::clone(&hook_appended);
+            let completions = Arc::clone(&completions);
+            let append_error = Arc::clone(&hook_append_error);
+            Box::pin(async move {
+                if ctx.checkpoint != lash_core::CheckpointKind::BeforeCompletion {
+                    return Ok(Vec::new());
+                }
+                // Fire on the second turn only: turn one must have committed a durable read tail.
+                if completions.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0
+                    || appended.swap(true, std::sync::atomic::Ordering::SeqCst)
+                {
+                    return Ok(Vec::new());
+                }
+                let outcome = match ctx
+                    .session_graph
+                    .append_session_nodes(
+                        &ctx.session_id,
+                        lash_core::AppendSessionNodesRequest {
+                            operation_id: "mid-turn-append".to_string(),
+                            nodes: vec![lash_core::SessionAppendNode::plugin(
+                                "test.mid-turn",
+                                serde_json::json!({"probe": true}),
+                            )],
+                            requires_ancestor_node_id: None,
+                        },
+                    )
+                    .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(error) => {
+                        *append_error.lock().expect("append error slot") = Some(error.to_string());
+                        return Err(error);
+                    }
+                };
+                assert!(matches!(
+                    outcome,
+                    lash_core::AppendSessionNodesOutcome::Appended { .. }
+                ));
+                Ok(Vec::new())
+            })
+        })),
+    );
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(rolling_history_provider(vec![
+            response_with_usage("first response", 1),
+            response_with_usage("second response", 1),
+        ]))
+        .model(model_spec("mid-turn-model", None, 40_000))
+        .plugin(Arc::new(plugin))
+        .store_factory(store_factory.clone())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(session_id).open().await?;
+    session
+        .turn(TurnInput::text("first request"))
+        .turn_id("append-first")
+        .run()
+        .await?;
+    let (durable_leaf_before_second, _) =
+        sqlite_head_and_max_generation(store_factory.as_ref(), session_id);
+    // Second turn: the checkpoint hook appends through the in-turn graph service while the
+    // durable read tail already holds two messages.
+    session
+        .turn(TurnInput::text("second request"))
+        .turn_id("append-second")
+        .run()
+        .await?;
+    assert!(
+        appended.load(std::sync::atomic::Ordering::SeqCst),
+        "hook ran"
+    );
+    let rows = sqlite_node_rows(store_factory.as_ref(), session_id);
+    let texts = sqlite_messages(store_factory.as_ref(), session_id)
+        .iter()
+        .map(message_text)
+        .collect::<Vec<_>>();
+    let append_error = append_error.lock().expect("append error slot").clone();
+    assert_eq!(
+        append_error, None,
+        "an in-turn graph append must extend the durable leaf {durable_leaf_before_second}, not a projection parent"
+    );
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    for text in &texts {
+        *counts.entry(text.clone()).or_default() += 1;
+    }
+    let duplicated = counts
+        .iter()
+        .filter(|(_, n)| **n > 1)
+        .map(|(t, n)| format!("{t:?} x{n}"))
+        .collect::<Vec<_>>();
+    assert!(
+        duplicated.is_empty(),
+        "durable history must hold each message once; projection replicas persisted: {duplicated:?}"
+    );
+    let mut children = std::collections::BTreeMap::<String, usize>::new();
+    for (_, parent, _) in &rows {
+        if let Some(parent) = parent {
+            *children.entry(parent.clone()).or_default() += 1;
+        }
+    }
+    let forks = children
+        .iter()
+        .filter(|(_, n)| **n > 1)
+        .map(|(p, n)| format!("{p} -> {n} children"))
+        .collect::<Vec<_>>();
+    assert!(
+        forks.is_empty(),
+        "durable graph must stay a single chain; projection forks persisted: {forks:?}"
+    );
+    Ok(())
+}
+
+/// FIG-1059: an in-turn `SessionGraphService::append_session_nodes` on the
+/// current store-backed session rides the turn's commit draft. On an EMPTY
+/// durable tail (turn one) it must neither commit ahead of the turn (which
+/// used to leave the turn's own final commit with a head-revision conflict)
+/// nor derive its nodes from the read projection: the turn's nodes and the
+/// appended nodes land in one commit, in that order, on one chain.
+#[tokio::test]
+async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -> Result<()> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "same-turn-graph-append";
+    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+        dir.path().join("sessions"),
+    ));
+    let draft_node_ids = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let hook_draft_node_ids = Arc::clone(&draft_node_ids);
+    let visible_in_turn = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let hook_visible_in_turn = Arc::clone(&visible_in_turn);
+    let plugin = crate::plugins::StaticPluginFactory::new(
+        "same-turn-append",
+        lash_core::facade_support::PluginSpec::new().with_checkpoint(Arc::new(move |ctx| {
+            let draft_node_ids = Arc::clone(&hook_draft_node_ids);
+            let visible_in_turn = Arc::clone(&hook_visible_in_turn);
+            Box::pin(async move {
+                if ctx.checkpoint != lash_core::CheckpointKind::BeforeCompletion
+                    || !draft_node_ids.lock().expect("draft ids").is_empty()
+                {
+                    return Ok(Vec::new());
+                }
+                let outcome = ctx
+                    .session_graph
+                    .append_session_nodes(
+                        &ctx.session_id,
+                        lash_core::AppendSessionNodesRequest {
+                            operation_id: "same-turn-append".to_string(),
+                            nodes: vec![lash_core::SessionAppendNode::plugin(
+                                "test.same-turn",
+                                serde_json::json!({"probe": "same-turn"}),
+                            )],
+                            requires_ancestor_node_id: None,
+                        },
+                    )
+                    .await?;
+                let lash_core::AppendSessionNodesOutcome::Appended {
+                    node_ids,
+                    leaf_node_id,
+                } = outcome
+                else {
+                    panic!("an unconditional append on a fresh session is never a stale branch");
+                };
+                assert_eq!(node_ids.len(), 1);
+                assert_eq!(leaf_node_id, node_ids[0]);
+                // In-turn readers see the appended node before the turn commits.
+                let snapshot = ctx.sessions.snapshot_session(&ctx.session_id).await?;
+                visible_in_turn.store(
+                    snapshot.session_graph.find_node(&node_ids[0]).is_some(),
+                    std::sync::atomic::Ordering::SeqCst,
+                );
+                *draft_node_ids.lock().expect("draft ids") = node_ids;
+                Ok(Vec::new())
+            })
+        })),
+    );
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(rolling_history_provider(vec![
+            response_with_usage("first response", 1),
+            response_with_usage("second response", 1),
+        ]))
+        .model(model_spec("same-turn-model", None, 40_000))
+        .plugin(Arc::new(plugin))
+        .store_factory(store_factory.clone())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(session_id).open().await?;
+    // Before the fix this turn failed its own final commit:
+    // `store head revision conflict: expected 0, actual 1`.
+    session
+        .turn(TurnInput::text("first request"))
+        .turn_id("same-turn-first")
+        .run()
+        .await?;
+    let draft_node_ids = draft_node_ids.lock().expect("draft ids").clone();
+    assert_eq!(draft_node_ids.len(), 1, "the hook appended exactly once");
+    assert!(
+        visible_in_turn.load(std::sync::atomic::Ordering::SeqCst),
+        "the in-turn read snapshot must show the appended node immediately"
+    );
+
+    let nodes = sqlite_nodes(store_factory.as_ref(), session_id);
+    for pair in nodes.windows(2) {
+        assert_eq!(
+            pair[1].parent_node_id.as_deref(),
+            Some(pair[0].node_id.as_str()),
+            "the durable graph is one continuous chain in commit order"
+        );
+    }
+    assert_eq!(
+        nodes
+            .iter()
+            .filter_map(|node| node.message())
+            .map(|message| message_text(&message))
+            .collect::<Vec<_>>(),
+        vec!["first request".to_string(), "first response".to_string()],
+        "the turn's own messages persist once each, in order"
+    );
+    let appended = nodes
+        .iter()
+        .filter(|node| {
+            matches!(
+                &node.payload,
+                lash_core::SessionNodePayload::Plugin { plugin_type, .. }
+                    if plugin_type == "test.same-turn"
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(appended.len(), 1, "the appended node persists exactly once");
+    let appended = appended[0];
+    // The append was queued at `BeforeCompletion`; the next boundary the turn
+    // applies carries the assistant reply, so the append lands behind it. No
+    // boundary writes the graph on its own: the turn's commit is where the
+    // queue becomes durable, together with the messages it followed.
+    assert_eq!(
+        nodes.last().map(|node| node.node_id.as_str()),
+        Some(appended.node_id.as_str()),
+        "the in-turn append follows the messages the next boundary carried"
+    );
+    let (durable_leaf, max_generation) =
+        sqlite_head_and_max_generation(store_factory.as_ref(), session_id);
+    assert_eq!(
+        durable_leaf, appended.node_id,
+        "the durable head is the appended node"
+    );
+    // The id answered in-turn is a draft id; the turn's commit derives the
+    // durable id like it does for every other draft node.
+    assert_ne!(appended.node_id, draft_node_ids[0]);
+    assert!(
+        nodes.iter().all(|node| node.node_id != draft_node_ids[0]),
+        "draft ids never persist"
+    );
+
+    session
+        .turn(TurnInput::text("second request"))
+        .turn_id("same-turn-second")
+        .run()
+        .await?;
+    let next = sqlite_node_rows(store_factory.as_ref(), session_id)
+        .into_iter()
+        .find(|(_, _, generation)| *generation > max_generation)
+        .expect("turn two committed nodes");
+    assert_eq!(
+        next.1.as_deref(),
+        Some(durable_leaf.as_str()),
+        "the next turn extends the appended node, the durable head"
+    );
     Ok(())
 }

@@ -305,12 +305,13 @@ impl LashRuntime {
         &self,
         child_usage_event_relay: Option<ChildUsageEventRelay>,
         held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        turn_graph_appends: &TurnGraphAppendDraft,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
-        Ok(Arc::new(RuntimeSessionServices::new(
+        Ok(Arc::new(RuntimeSessionServices::for_turn(
             self,
-            false,
             child_usage_event_relay,
             held_session_execution_lease,
+            turn_graph_appends,
         )?))
     }
 

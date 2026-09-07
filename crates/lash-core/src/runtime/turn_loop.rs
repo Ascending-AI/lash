@@ -537,7 +537,7 @@ impl PreparedTurn {
                     turn_phase_probe,
                     "commit_admission.product_attempt",
                 );
-                self.commit_after_admission(
+                Box::pin(self.commit_after_admission(
                     session,
                     staged_usage,
                     commit_effects,
@@ -545,7 +545,7 @@ impl PreparedTurn {
                     release_session_execution_lease,
                     trace_turn_id,
                     recorded_attachment_intent_ids,
-                )
+                ))
                 .await
             },
         )
@@ -1660,7 +1660,11 @@ impl LashRuntime {
         };
 
         let plugins = Arc::clone(session.plugins());
-        let manager = match self.runtime_session_services_for_turn(None, session_execution_lease) {
+        let manager = match self.runtime_session_services_for_turn(
+            None,
+            session_execution_lease,
+            turn_pipeline.graph_appends(),
+        ) {
             Ok(manager) => manager,
             Err(err) => {
                 return Err(RuntimeError::new(
@@ -3381,8 +3385,15 @@ impl LashRuntime {
             .await;
         }
 
+        // One graph-append draft per physical turn: prepare-turn hooks, the
+        // turn driver's hooks, and finalize-turn hooks all record into it and
+        // the turn boundary commits it with the turn.
+        let turn_graph_appends = TurnGraphAppendDraft::from_resident_state(
+            &self.state,
+            Arc::clone(&self.host.core.clock),
+        );
         let manager = self
-            .runtime_session_services_for_turn(None, session_execution_lease)
+            .runtime_session_services_for_turn(None, session_execution_lease, &turn_graph_appends)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -3454,7 +3465,7 @@ impl LashRuntime {
         }
 
         self.state.last_prompt_usage = None;
-        Box::pin(self.stream_prepared_turn_inner(
+        Box::pin(self.stream_prepared_turn_inner_with_graph_appends(
             messages,
             previous_prompt_usage,
             input.protocol_turn_options.clone(),
@@ -3471,6 +3482,7 @@ impl LashRuntime {
             turn_input_claims,
             session_execution_lease,
             session_execution_lease_release_policy,
+            turn_graph_appends,
         ))
         .await
     }
@@ -3616,6 +3628,7 @@ impl LashRuntime {
         session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
         _session_execution_fence: Option<crate::SessionExecutionLeaseAuthority>,
         turn_control: &ActiveTurnControl,
+        turn_graph_appends: TurnGraphAppendDraft,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let Some(abort) = prepared.abort else {
             unreachable!("abort finisher requires a prepared plugin abort");
@@ -3624,12 +3637,14 @@ impl LashRuntime {
 
         // The preparation future and its SessionReadView are gone before this
         // state clone. That keeps the graph from being held twice while the
-        // turn boundary takes ownership of its working state.
-        let mut turn_pipeline = TurnBoundary::from_state_with_clock(
+        // turn boundary takes ownership of its working state. Appends the
+        // prepare-turn hooks recorded ride this abort commit.
+        let mut turn_pipeline = TurnBoundary::from_state_with_graph_appends(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
             self.state.turn_scope(&trace_turn_id),
             self.host.core.durability.commit_budget,
+            turn_graph_appends,
         );
         turn_pipeline.apply_prepared_messages(&prepared.messages);
         emit_terminal_sequence(
@@ -3669,6 +3684,54 @@ impl LashRuntime {
     pub(super) async fn stream_prepared_turn_inner(
         &mut self,
         messages: crate::MessageSequence,
+        previous_prompt_usage: Option<PromptUsage>,
+        protocol_turn_options: Option<crate::ProtocolTurnOptions>,
+        protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
+        turn_context: crate::TurnContext,
+        initial_turn_causes: Vec<crate::TurnCause>,
+        trace_turn_id: String,
+        turn_index: usize,
+        events: &dyn EventSink,
+        turn_events: &dyn TurnActivitySink,
+        scoped_effect_controller: ScopedEffectController<'_>,
+        cancel: CancellationToken,
+        initial_queue_claims: Vec<crate::QueuedWorkClaim>,
+        initial_turn_input_claims: Vec<super::turn_input_ingress::TurnInputDrive>,
+        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
+    ) -> Result<PhysicalTurnExecution, RuntimeError> {
+        // Host-prepared turns ran no prepare-turn hooks, so no in-turn graph
+        // append can predate this draft.
+        let turn_graph_appends = TurnGraphAppendDraft::from_resident_state(
+            &self.state,
+            Arc::clone(&self.host.core.clock),
+        );
+        self.stream_prepared_turn_inner_with_graph_appends(
+            messages,
+            previous_prompt_usage,
+            protocol_turn_options,
+            protocol_extension,
+            turn_context,
+            initial_turn_causes,
+            trace_turn_id,
+            turn_index,
+            events,
+            turn_events,
+            scoped_effect_controller,
+            cancel,
+            initial_queue_claims,
+            initial_turn_input_claims,
+            session_execution_lease,
+            session_execution_lease_release_policy,
+            turn_graph_appends,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn stream_prepared_turn_inner_with_graph_appends(
+        &mut self,
+        messages: crate::MessageSequence,
         _previous_prompt_usage: Option<PromptUsage>,
         protocol_turn_options: Option<crate::ProtocolTurnOptions>,
         protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
@@ -3684,6 +3747,7 @@ impl LashRuntime {
         initial_turn_input_claims: Vec<super::turn_input_ingress::TurnInputDrive>,
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
         session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
+        turn_graph_appends: TurnGraphAppendDraft,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let scoped_turn_events = TurnScopedActivitySink {
             turn_id: trace_turn_id.clone(),
@@ -3726,6 +3790,7 @@ impl LashRuntime {
             .runtime_session_services_for_turn(
                 Some(child_usage_event_relay.clone()),
                 session_execution_lease,
+                &turn_graph_appends,
             )
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
@@ -3778,16 +3843,18 @@ impl LashRuntime {
                 session_execution_lease_release_policy,
                 session_execution_fence,
                 turn_control.as_ref(),
+                turn_graph_appends,
             ))
             .await;
         }
         // `prepare_turn_preamble` has returned and dropped its read-view frame
         // before this clone, avoiding a transient second graph owner.
-        let mut turn_pipeline = TurnBoundary::from_state_with_clock(
+        let mut turn_pipeline = TurnBoundary::from_state_with_graph_appends(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
             self.state.turn_scope(&trace_turn_id),
             self.host.core.durability.commit_budget,
+            turn_graph_appends.clone(),
         );
         turn_pipeline
             .prepared_checkpoint(
@@ -3817,6 +3884,7 @@ impl LashRuntime {
             .runtime_session_services_for_turn(
                 Some(child_usage_event_relay.clone()),
                 session_execution_lease,
+                &turn_graph_appends,
             )
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
