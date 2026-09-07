@@ -163,6 +163,7 @@ async fn service_turn(
 
 fn adaptive_reasoning_capability() -> lash::provider::ModelCapability {
     lash::provider::ModelCapability {
+        google_dialect: Default::default(),
         reasoning: Some(lash::provider::ReasoningCapability {
             efforts: ["low", "medium", "high"]
                 .into_iter()

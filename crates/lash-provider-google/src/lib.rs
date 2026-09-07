@@ -487,6 +487,7 @@ mod tests {
         );
         let contents = provider.build_contents_with_attachment_parts(&req, &[]);
         GoogleOAuthProvider::build_request(&provider, &req, contents, None)
+            .expect("schema projection")
     }
 
     async fn streaming_reasoning_response(
@@ -717,6 +718,7 @@ mod tests {
 
     fn effort_capability(efforts: &[&str]) -> ModelCapability {
         ModelCapability {
+            google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: efforts.iter().copied().map(str::to_string).collect(),
                 default_effort: None,
@@ -733,6 +735,7 @@ mod tests {
 
     fn budget_capability(entries: &[(&str, u32)]) -> ModelCapability {
         ModelCapability {
+            google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: entries
                     .iter()
@@ -999,7 +1002,8 @@ mod tests {
             ),
             Vec::new(),
             None,
-        );
+        )
+        .expect("schema projection");
 
         assert_eq!(
             body["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
@@ -1031,7 +1035,8 @@ mod tests {
             ),
             Vec::new(),
             None,
-        );
+        )
+        .expect("schema projection");
 
         assert_eq!(
             body["request"]["generationConfig"]["thinkingConfig"]["thinkingBudget"],
@@ -1061,7 +1066,8 @@ mod tests {
         );
         req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
 
-        let body = GoogleOAuthProvider::build_request(&provider, &req, Vec::new(), None);
+        let body = GoogleOAuthProvider::build_request(&provider, &req, Vec::new(), None)
+            .expect("schema projection");
 
         assert_eq!(
             body["request"]["generationConfig"]["thinkingConfig"],
@@ -1085,7 +1091,8 @@ mod tests {
             &request_with_capability(Some("medium"), ModelCapability::default()),
             Vec::new(),
             None,
-        );
+        )
+        .expect("schema projection");
 
         assert!(
             body["request"]["generationConfig"]
@@ -1113,7 +1120,8 @@ mod tests {
             ),
             Vec::new(),
             None,
-        );
+        )
+        .expect("schema projection");
         assert_eq!(
             hidden["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
             "medium"
@@ -1145,7 +1153,8 @@ mod tests {
             ),
             Vec::new(),
             None,
-        );
+        )
+        .expect("schema projection");
         assert_eq!(
             exposed["request"]["generationConfig"]["thinkingConfig"]["includeThoughts"],
             true
@@ -1170,11 +1179,13 @@ mod tests {
 
         let mut req = request(None);
         req.generation.output_token_cap = NonZeroUsize::new(4096);
-        let body = GoogleOAuthProvider::build_request(&provider, &req, Vec::new(), None);
+        let body = GoogleOAuthProvider::build_request(&provider, &req, Vec::new(), None)
+            .expect("schema projection");
 
         assert_eq!(body["request"]["generationConfig"]["maxOutputTokens"], 4096);
         let provider_limited =
-            GoogleOAuthProvider::build_request(&provider, &request(None), Vec::new(), None);
+            GoogleOAuthProvider::build_request(&provider, &request(None), Vec::new(), None)
+                .expect("schema projection");
         assert_eq!(
             provider_limited["request"]["generationConfig"]["maxOutputTokens"],
             9999
@@ -1195,7 +1206,8 @@ mod tests {
         let mut req = request(None);
         req.generation.stop_sequences = vec!["</lashlang>".to_string()];
 
-        let body = GoogleOAuthProvider::build_request(&provider, &req, Vec::new(), None);
+        let body = GoogleOAuthProvider::build_request(&provider, &req, Vec::new(), None)
+            .expect("schema projection");
 
         assert_eq!(
             body["request"]["generationConfig"]["stopSequences"],
@@ -1219,7 +1231,8 @@ mod tests {
             },
         );
 
-        let defaulted = GoogleOAuthProvider::build_request(&provider, &request(None), vec![], None);
+        let defaulted = GoogleOAuthProvider::build_request(&provider, &request(None), vec![], None)
+            .expect("schema projection");
         assert_eq!(defaulted["request"]["generationConfig"]["temperature"], 0);
         // A seed is emitted only when one was asked for.
         assert!(
@@ -1232,7 +1245,8 @@ mod tests {
         req.generation.temperature =
             Some(lash_core::NonNegativeFiniteF64::new(0.8).expect("finite temperature"));
         req.generation.seed = Some(11);
-        let body = GoogleOAuthProvider::build_request(&provider, &req, vec![], None);
+        let body = GoogleOAuthProvider::build_request(&provider, &req, vec![], None)
+            .expect("schema projection");
         assert_eq!(body["request"]["generationConfig"]["temperature"], 0.8);
         assert_eq!(body["request"]["generationConfig"]["seed"], 11);
     }
@@ -1429,6 +1443,7 @@ mod tests {
         );
         let mut claude_on_vertex = request(None);
         claude_on_vertex.model = "claude-sonnet-4-6".to_string();
+        claude_on_vertex.model_capability.google_dialect = lash_core::GoogleDialect::ClaudeOnVertex;
         claude_on_vertex.tools = Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
@@ -1450,7 +1465,8 @@ mod tests {
             output_schema: json!({}).into(),
         }]);
         let claude_on_vertex_body =
-            GoogleOAuthProvider::build_request(&provider, &claude_on_vertex, Vec::new(), None);
+            GoogleOAuthProvider::build_request(&provider, &claude_on_vertex, Vec::new(), None)
+                .expect("schema projection");
         let parameters =
             &claude_on_vertex_body["request"]["tools"][0]["functionDeclarations"][0]["parameters"];
         assert!(parameters.get("$schema").is_none());
@@ -1466,7 +1482,9 @@ mod tests {
 
         let mut gemini = claude_on_vertex;
         gemini.model = "gemini-3.1-pro-preview".to_string();
-        let gemini_body = GoogleOAuthProvider::build_request(&provider, &gemini, Vec::new(), None);
+        gemini.model_capability.google_dialect = lash_core::GoogleDialect::Gemini3;
+        let gemini_body = GoogleOAuthProvider::build_request(&provider, &gemini, Vec::new(), None)
+            .expect("schema projection");
         assert!(
             gemini_body["request"]["tools"][0]["functionDeclarations"][0]["parametersJsonSchema"]
                 .get("$schema")
@@ -1491,4 +1509,5 @@ mod tests {
 
     #[cfg(feature = "testing")]
     mod conformance;
+    mod protocol53;
 }

@@ -23,64 +23,61 @@ pub(crate) use support::{ProcessEventAppendArm, ProcessEventWriteAuthorization, 
 use wake_delivery::{load_wake_delivery_conn, update_wake_delivery_state, wake_delivery_report};
 
 const LIST_PROCESSES_SQL: &str = "SELECT record_json FROM processes
-     WHERE (?1 IS NULL OR status = ?1)
-       AND (?2 IS NULL OR is_waiting = ?2)
-       AND (?3 IS NULL OR originator_id = ?3)
-       AND (?4 IS NULL OR identity_kind = ?4)
-       AND (?5 IS NULL OR identity_label = ?5)
-       AND (?6 IS NULL OR
+     WHERE (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
+       AND (?2 IS NULL OR originator_id = ?2)
+       AND (?3 IS NULL OR identity_kind = ?3)
+       AND (?4 IS NULL OR identity_label = ?4)
+       AND (?5 IS NULL OR
             (json_type(record_json, '$.identity.definition') IS NOT NULL
-             AND json_type(record_json, '$.identity.definition') = json_type(?6, '$')
-             AND (json_type(?6, '$') IN ('null', 'true', 'false')
-                  OR json_quote(json_extract(record_json, '$.identity.definition')) IS json(?6))))
+             AND json_type(record_json, '$.identity.definition') = json_type(?5, '$')
+             AND (json_type(?5, '$') IN ('null', 'true', 'false')
+                  OR json_quote(json_extract(record_json, '$.identity.definition')) IS json(?5))))
+       AND (?6 IS NULL OR
+            json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
        AND (?7 IS NULL OR
-            json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?7)
-       AND (?8 IS NULL OR
-            json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?8)
-       AND (?9 IS NULL OR created_at_ms >= ?9)
-       AND (?10 IS NULL OR created_at_ms < ?10)
+            json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
+       AND (?8 IS NULL OR created_at_ms >= ?8)
+       AND (?9 IS NULL OR created_at_ms < ?9)
      ORDER BY process_id ASC";
 
 const LIST_PROCESSES_RECENT_RETIRED_SQL: &str =
     "SELECT record_json FROM (
          SELECT process_id, record_json FROM processes
          WHERE status IN ('running', 'waiting')
-           AND (?1 IS NULL OR status = ?1)
-           AND (?2 IS NULL OR is_waiting = ?2)
-           AND (?3 IS NULL OR originator_id = ?3)
-           AND (?4 IS NULL OR identity_kind = ?4)
-           AND (?5 IS NULL OR identity_label = ?5)
-           AND (?6 IS NULL OR
+           AND (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
+           AND (?2 IS NULL OR originator_id = ?2)
+           AND (?3 IS NULL OR identity_kind = ?3)
+           AND (?4 IS NULL OR identity_label = ?4)
+           AND (?5 IS NULL OR
                 (json_type(record_json, '$.identity.definition') IS NOT NULL
-                 AND json_type(record_json, '$.identity.definition') = json_type(?6, '$')
-                 AND (json_type(?6, '$') IN ('null', 'true', 'false')
-                      OR json_quote(json_extract(record_json, '$.identity.definition')) IS json(?6))))
+                 AND json_type(record_json, '$.identity.definition') = json_type(?5, '$')
+                 AND (json_type(?5, '$') IN ('null', 'true', 'false')
+                      OR json_quote(json_extract(record_json, '$.identity.definition')) IS json(?5))))
+           AND (?6 IS NULL OR
+                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
            AND (?7 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?7)
-           AND (?8 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?8)
-           AND (?9 IS NULL OR created_at_ms >= ?9)
-           AND (?10 IS NULL OR created_at_ms < ?10)
+                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
+           AND (?8 IS NULL OR created_at_ms >= ?8)
+           AND (?9 IS NULL OR created_at_ms < ?9)
          UNION ALL
          SELECT process_id, record_json FROM processes
          WHERE status NOT IN ('running', 'waiting')
-           AND updated_at_ms >= ?11
-           AND (?1 IS NULL OR status = ?1)
-           AND (?2 IS NULL OR is_waiting = ?2)
-           AND (?3 IS NULL OR originator_id = ?3)
-           AND (?4 IS NULL OR identity_kind = ?4)
-           AND (?5 IS NULL OR identity_label = ?5)
-           AND (?6 IS NULL OR
+           AND updated_at_ms >= ?10
+           AND (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
+           AND (?2 IS NULL OR originator_id = ?2)
+           AND (?3 IS NULL OR identity_kind = ?3)
+           AND (?4 IS NULL OR identity_label = ?4)
+           AND (?5 IS NULL OR
                 (json_type(record_json, '$.identity.definition') IS NOT NULL
-                 AND json_type(record_json, '$.identity.definition') = json_type(?6, '$')
-                 AND (json_type(?6, '$') IN ('null', 'true', 'false')
-                      OR json_quote(json_extract(record_json, '$.identity.definition')) IS json(?6))))
+                 AND json_type(record_json, '$.identity.definition') = json_type(?5, '$')
+                 AND (json_type(?5, '$') IN ('null', 'true', 'false')
+                      OR json_quote(json_extract(record_json, '$.identity.definition')) IS json(?5))))
+           AND (?6 IS NULL OR
+                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
            AND (?7 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?7)
-           AND (?8 IS NULL OR
-                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?8)
-           AND (?9 IS NULL OR created_at_ms >= ?9)
-           AND (?10 IS NULL OR created_at_ms < ?10)
+                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
+           AND (?8 IS NULL OR created_at_ms >= ?8)
+           AND (?9 IS NULL OR created_at_ms < ?9)
      ) ORDER BY process_id ASC";
 
 #[async_trait::async_trait]
@@ -1126,7 +1123,12 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .map(serde_json::to_string)
             .transpose()
             .map_err(process_decode_error)?;
-        let status = filter.status.label().map(str::to_string);
+        let status = filter
+            .status
+            .labels()
+            .map(|labels| serde_json::to_string(&labels))
+            .transpose()
+            .map_err(process_decode_error)?;
         self.conn
             .call(move |conn| {
                 Ok((|| {
@@ -1136,13 +1138,11 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         LIST_PROCESSES_SQL
                     };
                     let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
-                    let waiting = filter.waiting.map(i64::from);
                     let created_at_start_ms = filter.created_at_start_ms.map(crate::clamp_epoch_ms);
                     let created_at_end_ms = filter.created_at_end_ms.map(crate::clamp_epoch_ms);
                     let retired_since_ms = filter.retired_since_ms.map(crate::clamp_epoch_ms);
                     let mut values: Vec<&dyn rusqlite::ToSql> = vec![
                         &status,
-                        &waiting,
                         &filter.originator_id,
                         &filter.identity_kind,
                         &filter.identity_label,

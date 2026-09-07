@@ -381,13 +381,11 @@ fn remote_turn_result_json_round_trips() {
     let result = RemoteTurnReport {
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
-        status: RemoteTurnStatus::Completed,
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
                 text: "done".to_string(),
             },
         },
-        cancellation: None,
         assistant_output: RemoteAssistantOutput {
             safe_text: "done".to_string(),
             raw_text: "done".to_string(),
@@ -503,13 +501,11 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
     let mut result = RemoteTurnReport {
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
-        status: RemoteTurnStatus::Completed,
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
                 text: "done".to_string(),
             },
         },
-        cancellation: None,
         assistant_output: RemoteAssistantOutput::default(),
         usage: RemoteTurnUsageReport::default(),
         execution: RemoteTurnExecutionMetrics::default(),
@@ -592,13 +588,11 @@ fn turn_result_rejects_conflicting_summary_and_activity_for_the_same_model_call(
     let result = RemoteTurnReport {
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
-        status: RemoteTurnStatus::Completed,
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
                 text: "done".to_string(),
             },
         },
-        cancellation: None,
         assistant_output: RemoteAssistantOutput::default(),
         usage: RemoteTurnUsageReport::default(),
         execution: RemoteTurnExecutionMetrics::default(),
@@ -647,13 +641,11 @@ fn turn_result_requires_one_summary_and_one_activity_per_model_call() {
         RemoteTurnReport {
             session_id: "session".to_string(),
             turn_id: "turn".to_string(),
-            status: RemoteTurnStatus::Completed,
             outcome: RemoteTurnOutcome::Finished {
                 finish: RemoteTurnFinish::AssistantMessage {
                     text: "done".to_string(),
                 },
             },
-            cancellation: None,
             assistant_output: RemoteAssistantOutput::default(),
             usage: RemoteTurnUsageReport::default(),
             execution: RemoteTurnExecutionMetrics::default(),
@@ -741,13 +733,11 @@ fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
         let result = RemoteTurnReport {
             session_id: "session".to_string(),
             turn_id: "turn".to_string(),
-            status: RemoteTurnStatus::Completed,
             outcome: RemoteTurnOutcome::Finished {
                 finish: RemoteTurnFinish::AssistantMessage {
                     text: "done".to_string(),
                 },
             },
-            cancellation: None,
             assistant_output: RemoteAssistantOutput::default(),
             usage: RemoteTurnUsageReport::default(),
             execution: RemoteTurnExecutionMetrics::default(),
@@ -822,13 +812,11 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
         RemoteTurnReport {
             session_id: "session".to_string(),
             turn_id: "turn".to_string(),
-            status: RemoteTurnStatus::Completed,
             outcome: RemoteTurnOutcome::Finished {
                 finish: RemoteTurnFinish::AssistantMessage {
                     text: "done".to_string(),
                 },
             },
-            cancellation: None,
             assistant_output: RemoteAssistantOutput::default(),
             usage: RemoteTurnUsageReport::default(),
             execution: RemoteTurnExecutionMetrics::default(),
@@ -969,15 +957,20 @@ fn model_attempt_reset_has_pinned_wire_shape() {
 }
 
 #[test]
-fn remote_turn_result_rejects_contradictory_status_and_outcome() {
+fn remote_turn_result_derives_status_from_its_outcome() {
     let mut result = RemoteTurnReport {
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
-        status: RemoteTurnStatus::Cancelled,
         outcome: RemoteTurnOutcome::Stopped {
-            stop: RemoteTurnStop::Cancelled,
+            stop: RemoteTurnStop::Cancelled {
+                evidence: RemoteTurnCancellationEvidence {
+                    request_id: "request-1".to_string(),
+                    origin: Some("workbench-user".to_string()),
+                    reason: Some("stop".to_string()),
+                    undelivered: RemoteTurnCancelDisposition::Defer,
+                },
+            },
         },
-        cancellation: None,
         assistant_output: RemoteAssistantOutput::default(),
         usage: RemoteTurnUsageReport::default(),
         execution: RemoteTurnExecutionMetrics::default(),
@@ -987,67 +980,50 @@ fn remote_turn_result_rejects_contradictory_status_and_outcome() {
         activities: Vec::new(),
         metadata: HashMap::new(),
     };
-    result.cancellation = Some(RemoteTurnCancellationEvidence {
-        request_id: "request-1".to_string(),
-        origin: Some("workbench-user".to_string()),
-        reason: Some("stop".to_string()),
-        undelivered: RemoteTurnCancelDisposition::Defer,
-    });
     result.validate().expect("cancelled result with evidence");
 
-    result.status = RemoteTurnStatus::Completed;
-    result.cancellation = None;
-    assert!(matches!(
-        result.validate(),
-        Err(RemoteProtocolError::InvalidEnvelope { type_name, message })
-            if type_name == "RemoteTurnReport" && message.contains("contradicts its outcome")
-    ));
+    assert_eq!(result.status(), RemoteTurnStatus::Cancelled);
+    let wire = serde_json::to_value(&result).unwrap();
+    assert!(wire.get("status").is_none());
+    assert!(wire.get("cancellation").is_none());
+    result.outcome = RemoteTurnOutcome::Stopped {
+        stop: RemoteTurnStop::RuntimeError,
+    };
+    assert_eq!(result.status(), RemoteTurnStatus::Failed);
+    result.outcome = RemoteTurnOutcome::Finished {
+        finish: RemoteTurnFinish::AssistantMessage {
+            text: "done".into(),
+        },
+    };
+    assert_eq!(result.status(), RemoteTurnStatus::Completed);
+    let wire = result.encode_json().unwrap();
+    assert_eq!(RemoteTurnReport::decode_json(&wire).unwrap(), result);
 }
 
 #[test]
-fn remote_turn_result_requires_cancellation_evidence_iff_cancelled() {
-    let mut result = RemoteTurnReport {
-        session_id: "session".to_string(),
-        turn_id: "turn".to_string(),
-        status: RemoteTurnStatus::Cancelled,
-        outcome: RemoteTurnOutcome::Stopped {
-            stop: RemoteTurnStop::Cancelled,
-        },
-        cancellation: None,
-        assistant_output: RemoteAssistantOutput::default(),
-        usage: RemoteTurnUsageReport::default(),
-        execution: RemoteTurnExecutionMetrics::default(),
-        tool_calls: Vec::new(),
-        llm_calls: Vec::new(),
-        issues: Vec::new(),
-        activities: Vec::new(),
-        metadata: HashMap::new(),
-    };
-    assert!(matches!(
-        result.validate(),
-        Err(RemoteProtocolError::InvalidEnvelope { message, .. })
-            if message.contains("cancellation evidence")
-    ));
-
-    result.cancellation = Some(RemoteTurnCancellationEvidence {
-        request_id: "request-1".to_string(),
-        origin: Some("workbench-user".to_string()),
-        reason: Some("stop".to_string()),
-        undelivered: RemoteTurnCancelDisposition::Defer,
-    });
-    result.validate().expect("cancelled result with evidence");
-
-    result.status = RemoteTurnStatus::Completed;
-    result.outcome = RemoteTurnOutcome::Finished {
-        finish: RemoteTurnFinish::AssistantMessage {
-            text: "done".to_string(),
+fn remote_cancelled_stop_requires_and_preserves_evidence() {
+    let stop = RemoteTurnStop::Cancelled {
+        evidence: RemoteTurnCancellationEvidence {
+            request_id: "request-1".to_string(),
+            origin: Some("workbench-user".to_string()),
+            reason: Some("stop".to_string()),
+            undelivered: RemoteTurnCancelDisposition::Drop,
         },
     };
-    assert!(matches!(
-        result.validate(),
-        Err(RemoteProtocolError::InvalidEnvelope { message, .. })
-            if message.contains("cancellation evidence")
-    ));
+    let wire = serde_json::to_value(&stop).unwrap();
+    assert_eq!(
+        wire,
+        serde_json::json!({"type":"cancelled","evidence": {
+            "request_id":"request-1", "origin":"workbench-user", "reason":"stop", "undelivered":"drop"
+        }})
+    );
+    assert_eq!(
+        serde_json::from_value::<RemoteTurnStop>(wire).unwrap(),
+        stop
+    );
+    assert!(
+        serde_json::from_value::<RemoteTurnStop>(serde_json::json!({"type":"cancelled"})).is_err()
+    );
 }
 
 #[test]
@@ -1599,8 +1575,14 @@ fn remote_process_dtos_json_round_trip() {
 
     let list_filter = RemoteProcessListFilter {
         definition: Some(remote_process_definition_identity()),
-        status: RemoteProcessStatusFilter::Any,
-        waiting: Some(false),
+        status: RemoteProcessStatusFilter::any_of([
+            RemoteProcessStatus::Running,
+            RemoteProcessStatus::Completed,
+            RemoteProcessStatus::Failed,
+            RemoteProcessStatus::Cancelled,
+            RemoteProcessStatus::Abandoned,
+            RemoteProcessStatus::CallerDeparted,
+        ]),
         ..RemoteProcessListFilter::default()
     };
     list_filter.validate().expect("valid process list filter");

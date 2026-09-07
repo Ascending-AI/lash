@@ -53,7 +53,7 @@ fn process_list_filter_matches_definition_and_status() {
     let other_ref = json!({ "component": "other", "pos": 1, "name": "other" });
     let filter = ProcessListFilter::decode(&json!({
         "definition": target_ref,
-        "status": "completed"
+        "status": {"in": ["completed"]}
     }))
     .expect("decode filter");
 

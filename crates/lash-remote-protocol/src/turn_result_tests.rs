@@ -41,13 +41,11 @@ fn in_progress_turn_report_is_refused_by_version_negotiation_before_body_decode(
     let mut payload = serde_json::to_value(RemoteTurnReport {
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
-        status: RemoteTurnStatus::Completed,
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
                 text: "done".to_string(),
             },
         },
-        cancellation: None,
         assistant_output: RemoteAssistantOutput::default(),
         usage: RemoteTurnUsageReport::default(),
         execution: RemoteTurnExecutionMetrics::default(),
@@ -78,4 +76,118 @@ fn in_progress_turn_report_is_refused_by_version_negotiation_before_body_decode(
             expected: REMOTE_PROTOCOL_VERSION,
         })
     ));
+}
+
+#[test]
+fn issue_severity_is_required_and_has_pinned_wire_values() {
+    for (severity, literal) in [
+        (RemoteTurnIssueSeverity::Advisory, "advisory"),
+        (RemoteTurnIssueSeverity::Blocking, "blocking"),
+    ] {
+        assert_eq!(
+            serde_json::to_value(severity).unwrap(),
+            serde_json::json!(literal)
+        );
+        let issue = RemoteTurnIssue {
+            severity,
+            kind: "runtime".into(),
+            code: None,
+            terminal_reason: None,
+            message: "evidence".into(),
+            raw: None,
+            retryable: None,
+            provider_failure_kind: None,
+        };
+        let mut wire = serde_json::to_value(&issue).unwrap();
+        assert_eq!(
+            serde_json::from_value::<RemoteTurnIssue>(wire.clone()).unwrap(),
+            issue
+        );
+        wire.as_object_mut().unwrap().remove("severity");
+        assert!(serde_json::from_value::<RemoteTurnIssue>(wire).is_err());
+    }
+    assert!(
+        serde_json::from_value::<RemoteTurnIssueSeverity>(serde_json::json!("future")).is_err()
+    );
+}
+
+#[test]
+fn process_status_sets_pin_vocabulary_and_refuse_removed_fields() {
+    use crate::{RemoteProcessListFilter, RemoteProcessStatus, RemoteProcessStatusFilter};
+    for (status, literal) in [
+        (RemoteProcessStatus::Running, "running"),
+        (RemoteProcessStatus::Waiting, "waiting"),
+        (RemoteProcessStatus::Completed, "completed"),
+        (RemoteProcessStatus::Failed, "failed"),
+        (RemoteProcessStatus::Cancelled, "cancelled"),
+        (RemoteProcessStatus::Abandoned, "abandoned"),
+        (RemoteProcessStatus::CallerDeparted, "caller_departed"),
+    ] {
+        let filter = RemoteProcessStatusFilter::any_of([status]);
+        let core: lash_core::ProcessStatusFilter = filter.clone().into();
+        assert_eq!(core.labels(), Some(vec![literal]));
+        assert_eq!(
+            serde_json::to_value(&filter).unwrap(),
+            serde_json::json!({"in":[literal]})
+        );
+        assert_eq!(
+            serde_json::from_value::<RemoteProcessStatusFilter>(
+                serde_json::json!({"in":[literal,literal]})
+            )
+            .unwrap(),
+            filter
+        );
+    }
+    assert_eq!(
+        serde_json::to_value(RemoteProcessStatusFilter::Any).unwrap(),
+        "any"
+    );
+    assert_eq!(
+        serde_json::from_value::<RemoteProcessListFilter>(serde_json::json!({}))
+            .unwrap()
+            .status,
+        RemoteProcessStatusFilter::any_of([RemoteProcessStatus::Running])
+    );
+    for bad in [
+        serde_json::json!({"waiting":true}),
+        serde_json::json!({"status":"running"}),
+        serde_json::json!({"status":{"in":["future"]}}),
+        serde_json::json!({"status":{"not":["waiting"]}}),
+    ] {
+        assert!(serde_json::from_value::<RemoteProcessListFilter>(bad).is_err());
+    }
+    let core = lash_core::ProcessStatusFilter::decode(Some(
+        &serde_json::json!({"in":["running","waiting"]}),
+    ))
+    .unwrap();
+    assert!(core.matches(lash_core::ProcessStatus::Running));
+    assert!(core.matches(lash_core::ProcessStatus::Waiting));
+    assert!(!core.matches(lash_core::ProcessStatus::Completed));
+    assert!(lash_core::ProcessListFilter::decode(&serde_json::json!({"waiting":false})).is_err());
+}
+
+#[test]
+fn remote_provider_failure_kind_refuses_future_literals() {
+    assert!(
+        serde_json::from_value::<RemoteProviderFailureKind>(serde_json::json!("future_kind"))
+            .is_err()
+    );
+    for (kind, literal) in [
+        (RemoteProviderFailureKind::Transport, "transport"),
+        (RemoteProviderFailureKind::Timeout, "timeout"),
+        (RemoteProviderFailureKind::Http, "http"),
+        (RemoteProviderFailureKind::Stream, "stream"),
+        (RemoteProviderFailureKind::Auth, "auth"),
+        (RemoteProviderFailureKind::Validation, "validation"),
+        (RemoteProviderFailureKind::Quota, "quota"),
+        (RemoteProviderFailureKind::Unsupported, "unsupported"),
+        (RemoteProviderFailureKind::Unknown, "unknown"),
+    ] {
+        assert_eq!(serde_json::to_value(kind).unwrap(), literal);
+        assert_eq!(
+            serde_json::from_value::<RemoteProviderFailureKind>(serde_json::json!(literal))
+                .unwrap(),
+            kind
+        );
+    }
 }

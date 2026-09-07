@@ -455,6 +455,7 @@ pub mod facade_support {
     pub use crate::runtime::TurnExecutionMetrics;
     pub use crate::runtime::TurnInputAcceptanceReceipt;
     pub use crate::runtime::TurnIssue;
+    pub use crate::runtime::TurnIssueSeverity;
     pub use crate::runtime::TurnOptions;
     pub use crate::runtime::TurnTerminal;
     pub use crate::runtime::TurnWorkDriver;
@@ -1075,8 +1076,9 @@ pub(crate) use plugin::{
 };
 
 pub use provider::{
-    CacheControlDialect, ModelCapability, ReasoningCapability, ReasoningDisableEncoding,
-    ReasoningEncoding, ReasoningSelection, SamplingCapability, StreamTermination,
+    CacheControlDialect, GoogleDialect, ModelCapability, ReasoningCapability,
+    ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
+    StreamTermination,
 };
 pub(crate) use provider::{
     EmptyProviderResolver, ProviderBinding, ProviderCompletion, ProviderCompletionError,

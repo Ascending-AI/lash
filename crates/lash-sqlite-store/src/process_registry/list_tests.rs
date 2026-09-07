@@ -14,7 +14,6 @@ fn recently_retired_query_uses_bounded_live_and_retired_indexes() {
         .query_map(
             params![
                 Option::<String>::None,
-                Option::<i64>::None,
                 Option::<String>::None,
                 Option::<String>::None,
                 Option::<String>::None,

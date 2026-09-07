@@ -653,6 +653,7 @@ impl TurnAssembler {
             SessionStreamEvent::Error { message, envelope } => {
                 let issue = if let Some(envelope) = envelope {
                     TurnIssue {
+                        severity: crate::runtime::TurnIssueSeverity::Blocking,
                         kind: envelope.kind.clone(),
                         code: envelope.code.clone(),
                         terminal_reason: envelope.terminal_reason,
@@ -663,6 +664,7 @@ impl TurnAssembler {
                     }
                 } else {
                     TurnIssue {
+                        severity: crate::runtime::TurnIssueSeverity::Blocking,
                         kind: "runtime".to_string(),
                         code: None,
                         terminal_reason: None,
@@ -725,6 +727,7 @@ impl TurnAssembler {
             let recovered = recovered_assistant_output_from_state(&state);
             if !recovered.is_empty() {
                 issues.push(TurnIssue {
+                    severity: crate::runtime::TurnIssueSeverity::Advisory,
                     kind: "runtime".to_string(),
                     code: Some(ASSISTANT_OUTPUT_RECOVERED_FROM_STATE_CODE.to_string()),
                     terminal_reason: None,
@@ -751,6 +754,7 @@ impl TurnAssembler {
             }
         } else if !self.saw_done && termination.treat_missing_done_as_failure {
             issues.push(TurnIssue {
+                severity: crate::runtime::TurnIssueSeverity::Blocking,
                 kind: "runtime".to_string(),
                 code: Some("missing_done".to_string()),
                 terminal_reason: None,
@@ -760,7 +764,10 @@ impl TurnAssembler {
                 provider_failure_kind: None,
             });
             TurnOutcome::Stopped(TurnStop::RuntimeError)
-        } else if has_blocking_turn_issue(&issues) {
+        } else if issues
+            .iter()
+            .any(|issue| issue.severity == crate::runtime::TurnIssueSeverity::Blocking)
+        {
             if self
                 .tool_calls
                 .iter()
@@ -921,21 +928,17 @@ pub(super) fn classify_output_state(
     if safe_text.is_empty() && contains_traceback_only(raw_text) {
         return OutputState::TracebackOnly;
     }
-    if has_blocking_turn_issue(issues) && !safe_text.is_empty() {
+    if issues
+        .iter()
+        .any(|issue| issue.severity == crate::runtime::TurnIssueSeverity::Blocking)
+        && !safe_text.is_empty()
+    {
         return OutputState::RecoveredFromError;
     }
     OutputState::Usable
 }
 
 const ASSISTANT_OUTPUT_RECOVERED_FROM_STATE_CODE: &str = "assistant_output_recovered_from_state";
-
-fn has_blocking_turn_issue(issues: &[TurnIssue]) -> bool {
-    issues.iter().any(turn_issue_blocks_completion)
-}
-
-fn turn_issue_blocks_completion(issue: &TurnIssue) -> bool {
-    issue.code.as_deref() != Some(ASSISTANT_OUTPUT_RECOVERED_FROM_STATE_CODE)
-}
 
 fn contains_traceback_only(raw_text: &str) -> bool {
     if raw_text.is_empty() {

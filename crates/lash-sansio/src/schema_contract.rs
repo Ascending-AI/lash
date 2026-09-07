@@ -334,6 +334,14 @@ pub fn resolve_schema(
                 dialect.as_str(),
                 format_purpose(request.purpose)
             )),
+            // Google's automatic projection is a permissive pass-through, not
+            // an exactness validator. Exact contracts need an explicit override.
+            ProjectionMode::Exact if dialect.as_str() == SchemaDialect::GOOGLE_SCHEMA => {
+                diagnostics.push(
+                    "google_schema: exact projection is unavailable without an explicit override"
+                        .to_string(),
+                );
+            }
             ProjectionMode::Exact => match project_for_dialect(&contract.canonical, dialect) {
                 Ok(projection)
                     if projection.schema == contract.canonical

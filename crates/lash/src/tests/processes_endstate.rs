@@ -374,7 +374,9 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
         .await
         .expect_err("a live retention filter must be refused");
     assert!(
-        refused.to_string().contains("live status `running`"),
+        refused
+            .to_string()
+            .contains("live status set `In({Running})`"),
         "unexpected refusal: {refused}"
     );
     assert!(
@@ -974,7 +976,7 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
     let all = core
         .processes()
         .list(&lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Completed,
+            status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Completed]),
             ..lash_core::ProcessListFilter::default()
         })
         .await?;
@@ -1049,7 +1051,7 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
     let completed = core
         .processes()
         .list(&lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Completed,
+            status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Completed]),
             ..lash_core::ProcessListFilter::default()
         })
         .await?;
@@ -1787,7 +1789,9 @@ async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
         .prune(
             u64::MAX,
             Some(&lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::CallerDeparted,
+                status: lash_core::ProcessStatusFilter::any_of([
+                    lash_core::ProcessStatus::CallerDeparted,
+                ]),
                 ..lash_core::ProcessListFilter::default()
             }),
             lash_core::ProjectionWatermark::NoProjector,

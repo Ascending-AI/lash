@@ -258,6 +258,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
         tool_choice: core_llm::LlmToolChoice::Auto,
         model_variant: core_llm::ReasoningSelection::Effort("fast".to_string()),
         model_capability: core_llm::ModelCapability {
+            google_dialect: Default::default(),
             reasoning: Some(core_llm::ReasoningCapability {
                 efforts: vec!["fast".to_string(), "slow".to_string()],
                 default_effort: Some("fast".to_string()),
@@ -851,8 +852,7 @@ fn process_await_wire_round_trip_preserves_failure_source_and_retry() {
 fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     let filter = lash_core::ProcessListFilter {
         definition: Some(process_definition_identity("main")),
-        status: lash_core::ProcessStatusFilter::Any,
-        waiting: Some(true),
+        status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Waiting]),
         originator_id: Some("test".to_string()),
         identity_kind: Some("engine".to_string()),
         identity_label: Some("Main".to_string()),
@@ -866,7 +866,6 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     remote.validate().expect("valid list filter");
     let core = lash_core::ProcessListFilter::try_from(remote).expect("core filter");
     assert_eq!(core.status, filter.status);
-    assert_eq!(core.waiting, filter.waiting);
     assert_eq!(core.originator_id, filter.originator_id);
     assert_eq!(core.identity_kind, filter.identity_kind);
     assert_eq!(core.identity_label, filter.identity_label);
@@ -1072,7 +1071,7 @@ fn remote_turn_result_maps_core_semantics() {
         ],
     );
     remote.validate().expect("valid turn result");
-    assert_eq!(remote.status, RemoteTurnStatus::Completed);
+    assert_eq!(remote.status(), RemoteTurnStatus::Completed);
     assert_eq!(remote.usage.total.input_tokens, 4);
     assert_eq!(remote.usage.total.output_tokens, 6);
     assert_eq!(remote.execution.started_at_ms, 1_700_000_000_000);
@@ -1356,7 +1355,7 @@ fn remote_tool_grants_convert_explicit_core_ids_without_binding_call_path() {
 }
 
 #[test]
-fn remote_activity_preserves_semantic_fields_and_collapses_runtime_diagnostics() {
+fn remote_activity_preserves_semantic_fields() {
     let output = lash_core::ToolCallOutput::success(serde_json::json!({ "ok": true }));
     let activity = lash_core::TurnActivity::new(
         lash_core::TurnActivityId::new("corr"),
@@ -1467,7 +1466,7 @@ fn remote_activity_exposes_typed_turn_input_application_without_display_text() {
     );
     assert!(
         json.get("kind").is_none() && !json.to_string().contains("queued_input_accepted"),
-        "application evidence must not use RuntimeDiagnostic: {json}"
+        "application evidence must not use an untyped diagnostic: {json}"
     );
     assert!(
         !json.to_string().contains("display") && !json.to_string().contains("text"),
@@ -2472,4 +2471,18 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
         }
         other => panic!("unexpected event: {other:?}"),
     }
+}
+
+#[test]
+fn cancelled_stop_conversion_keeps_every_evidence_field() {
+    let core = lash_core::facade_support::TurnCancellationEvidence {
+        request_id: "cancel-exact".into(),
+        origin: Some("host".into()),
+        reason: Some("stop now".into()),
+        undelivered: lash_core::facade_support::TurnCancelDisposition::Defer,
+    };
+    let expected = RemoteTurnCancellationEvidence::from(core.clone());
+    let stop =
+        RemoteTurnStop::from(lash_core::facade_support::TurnStop::Cancelled { evidence: core });
+    assert_eq!(stop, RemoteTurnStop::Cancelled { evidence: expected });
 }

@@ -21,6 +21,7 @@ fn process_execution_env_identity_golden_corpus() {
             .build()
             .expect("valid rich model limits")
             .with_capability(crate::ModelCapability {
+                google_dialect: Default::default(),
                 reasoning: Some(crate::ReasoningCapability {
                     efforts: vec!["low".to_string(), "high".to_string()],
                     default_effort: Some("low".to_string()),
@@ -126,13 +127,13 @@ fn engine_entry(
 }
 
 #[test]
-fn process_list_filter_matches_waiting_facet() {
+fn process_list_filter_matches_status_sets_and_the_non_waiting_complement() {
     let process_ref = process_value("target", 0, "target");
     let mut waiting_entry = engine_entry(
         "waiting",
         process_ref.clone(),
         "target",
-        ProcessStatus::Running,
+        ProcessStatus::Waiting,
     );
     waiting_entry.wait = Some(WaitState {
         since_ms: 42,
@@ -144,10 +145,10 @@ fn process_list_filter_matches_waiting_facet() {
         },
     });
     let idle_entry = engine_entry("idle", process_ref, "target", ProcessStatus::Running);
-    let waiting_filter =
-        ProcessListFilter::decode(&json!({ "waiting": true })).expect("decode waiting filter");
+    let waiting_filter = ProcessListFilter::decode(&json!({ "status": {"in": ["waiting"]} }))
+        .expect("decode waiting filter");
     let idle_filter =
-        ProcessListFilter::decode(&json!({ "waiting": false })).expect("decode idle filter");
+        ProcessListFilter::decode(&json!({ "status": {"in": ["running", "completed", "failed", "cancelled", "abandoned", "caller_departed"]} })).expect("decode idle filter");
 
     assert_eq!(waiting_filter.list_mode(), ProcessListMode::Live);
     assert!(waiting_filter.matches_record(&waiting_entry));
@@ -157,6 +158,6 @@ fn process_list_filter_matches_waiting_facet() {
     assert!(
         ProcessListFilter::decode(&json!({ "waiting": "yes" }))
             .expect_err("invalid waiting filter")
-            .contains("must be a boolean")
+            .contains("unknown filter")
     );
 }

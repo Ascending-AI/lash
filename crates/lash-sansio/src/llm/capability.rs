@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 /// Capability metadata for a single model on a route, supplied by the host.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelCapability {
+    /// Google wire dialect selected by the host for this route.
+    #[serde(default, skip_serializing_if = "GoogleDialect::is_legacy")]
+    pub google_dialect: GoogleDialect,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningCapability>,
     /// Cache-control wire dialect accepted by this model on its selected route.
@@ -24,6 +27,21 @@ pub struct ModelCapability {
     /// Whether this model lets a caller set the sampling temperature.
     #[serde(default, skip_serializing_if = "SamplingCapability::is_default")]
     pub sampling: SamplingCapability,
+}
+
+/// Host-supplied Google wire dialect; model identifiers never select it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GoogleDialect {
+    #[default]
+    Legacy,
+    Gemini3,
+    ClaudeOnVertex,
+}
+impl GoogleDialect {
+    pub fn is_legacy(&self) -> bool {
+        *self == Self::Legacy
+    }
 }
 
 /// Whether a model accepts a caller-set sampling temperature at all.
@@ -171,7 +189,8 @@ impl std::error::Error for ModelEffortValidationError {}
 
 impl ModelCapability {
     pub fn is_empty(&self) -> bool {
-        self.reasoning.is_none()
+        self.google_dialect.is_legacy()
+            && self.reasoning.is_none()
             && self.cache_control.is_none()
             && self.stream_termination.is_none()
             && self.sampling.is_default()
@@ -311,6 +330,7 @@ mod tests {
 
     fn capability(reasoning: Option<ReasoningCapability>) -> ModelCapability {
         ModelCapability {
+            google_dialect: Default::default(),
             reasoning,
             cache_control: None,
             stream_termination: None,

@@ -17,15 +17,7 @@ use crate::usage_activity::{RemoteTokenLedgerEntry, RemoteTurnActivity, RemoteUs
 pub struct RemoteTurnReport {
     pub session_id: String,
     pub turn_id: String,
-    /// Derived from `outcome` on encode and checked against it on decode.
-    /// Its removal awaits the next coordinated `REMOTE_PROTOCOL_VERSION`
-    /// window (FIG-2406).
-    pub status: RemoteTurnStatus,
     pub outcome: RemoteTurnOutcome,
-    /// Wire projection of the cancellation evidence carried by
-    /// `outcome`. Present exactly when `status == cancelled`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cancellation: Option<RemoteTurnCancellationEvidence>,
     pub assistant_output: RemoteAssistantOutput,
     #[serde(default)]
     pub usage: RemoteTurnUsageReport,
@@ -44,6 +36,11 @@ pub struct RemoteTurnReport {
 }
 
 impl RemoteTurnReport {
+    /// Computes the terminal status from the outcome's single source of truth.
+    pub fn status(&self) -> RemoteTurnStatus {
+        RemoteTurnStatus::from(&self.outcome)
+    }
+
     /// Encodes one report inside the shared remote-protocol envelope.
     pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         crate::Envelope::new(self).encode_json()
@@ -71,22 +68,11 @@ impl RemoteTurnReport {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty("RemoteTurnReport", "session_id", &self.session_id)?;
         require_non_empty("RemoteTurnReport", "turn_id", &self.turn_id)?;
-        if (self.status == RemoteTurnStatus::Cancelled) != self.cancellation.is_some() {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name: "RemoteTurnReport",
-                message: "cancellation evidence must be present if and only if status is cancelled"
-                    .to_string(),
-            });
-        }
-        let expected_status = RemoteTurnStatus::from(&self.outcome);
-        if self.status != expected_status {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name: "RemoteTurnReport",
-                message: format!("turn status `{:?}` contradicts its outcome", self.status),
-            });
-        }
-        if let Some(cancellation) = self.cancellation.as_ref() {
-            cancellation.validate()?;
+        if let RemoteTurnOutcome::Stopped {
+            stop: RemoteTurnStop::Cancelled { evidence },
+        } = &self.outcome
+        {
+            evidence.validate()?;
         }
         let mut summary_records = HashMap::new();
         for record in &self.llm_calls {
@@ -176,11 +162,7 @@ pub enum RemoteCausalRef {
     },
 }
 
-/// Derived projection of [`RemoteTurnOutcome`]. Producers compute it with
-/// `RemoteTurnStatus::from(&outcome)`; consumers get it checked against the
-/// outcome by [`RemoteTurnReport::validate`]. It never states a fact the
-/// outcome does not already carry, so there is no in-progress status: a turn
-/// report exists only once the turn has a terminal outcome.
+/// Terminal status derived from [`RemoteTurnOutcome`] by [`RemoteTurnReport::status`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteTurnStatus {
@@ -215,7 +197,9 @@ pub enum RemoteTurnFinish {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteTurnStop {
-    Cancelled,
+    Cancelled {
+        evidence: RemoteTurnCancellationEvidence,
+    },
     Incomplete,
     InvalidInput,
     MaxTurns,
@@ -239,7 +223,7 @@ impl From<&RemoteTurnOutcome> for RemoteTurnStatus {
                 Self::Completed
             }
             RemoteTurnOutcome::Stopped {
-                stop: RemoteTurnStop::Cancelled,
+                stop: RemoteTurnStop::Cancelled { .. },
             } => Self::Cancelled,
             RemoteTurnOutcome::Stopped { .. } => Self::Failed,
         }
@@ -399,8 +383,17 @@ pub enum RemoteToolCallOutcome {
     Cancelled(serde_json::Value),
 }
 
+/// Producer-selected effect of an issue on turn completion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteTurnIssueSeverity {
+    Advisory,
+    Blocking,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnIssue {
+    pub severity: RemoteTurnIssueSeverity,
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,

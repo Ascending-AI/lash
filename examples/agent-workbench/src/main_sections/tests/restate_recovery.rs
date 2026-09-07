@@ -1298,7 +1298,9 @@ async fn wait_for_running_process(state: &AppState, label: &str, timeout: Durati
         let processes = state
             .process_observer
             .list(&lash::process::ProcessListFilter {
-                status: lash::process::ProcessStatusFilter::Running,
+                status: lash::process::ProcessStatusFilter::any_of([
+                    lash::process::ProcessStatus::Running,
+                ]),
                 ..lash::process::ProcessListFilter::default()
             })
             .await
@@ -1327,7 +1329,9 @@ async fn wait_for_named_running_processes(
         let processes = state
             .process_observer
             .list(&lash::process::ProcessListFilter {
-                status: lash::process::ProcessStatusFilter::Running,
+                status: lash::process::ProcessStatusFilter::any_of([
+                    lash::process::ProcessStatus::Running,
+                ]),
                 ..lash::process::ProcessListFilter::default()
             })
             .await

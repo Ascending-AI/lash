@@ -33,7 +33,13 @@ fn encode_remote_tool_call_output(
     };
     let mut encoded = serde_json::Map::from_iter([(
         "outcome".to_string(),
-        serde_json::json!({ "status": status, "payload": payload }),
+        serde_json::Value::Object(serde_json::Map::from_iter([
+            (
+                "status".to_string(),
+                serde_json::Value::String(status.to_string()),
+            ),
+            ("payload".to_string(), payload),
+        ])),
     )]);
     if let Some(control) = control {
         let projected = match control {
@@ -41,10 +47,22 @@ fn encode_remote_tool_call_output(
                 encode_remote_json(control, "RemoteTurnEvent", "output.control")?
             }
             lash_core::ToolControl::Finish { value } => {
-                serde_json::json!({ "type": "finish", "value": value.to_json_value() })
+                serde_json::Value::Object(serde_json::Map::from_iter([
+                    (
+                        "type".to_string(),
+                        serde_json::Value::String("finish".to_string()),
+                    ),
+                    ("value".to_string(), value.to_json_value()),
+                ]))
             }
             lash_core::ToolControl::Fail { failure } => {
-                serde_json::json!({ "type": "fail", "failure": failure.to_json_value() })
+                serde_json::Value::Object(serde_json::Map::from_iter([
+                    (
+                        "type".to_string(),
+                        serde_json::Value::String("fail".to_string()),
+                    ),
+                    ("failure".to_string(), failure.to_json_value()),
+                ]))
             }
         };
         encoded.insert("control".to_string(), projected);
@@ -254,13 +272,10 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                 boundary,
                 batch_ids,
                 causes,
-            } => Ok(Self::RuntimeDiagnostic {
-                kind: "queued_work_started".to_string(),
-                data: serde_json::json!({
-                    "boundary": boundary,
-                    "batch_ids": batch_ids,
-                    "causes": causes,
-                }),
+            } => Ok(Self::QueuedWorkStarted {
+                boundary: boundary.into(),
+                batch_ids,
+                causes: causes.into_iter().map(Into::into).collect(),
             }),
             lash_core::TurnEvent::ModelRequestStarted { protocol_iteration } => {
                 Ok(Self::ModelRequestStarted { protocol_iteration })
@@ -388,15 +403,10 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                 max_attempts,
                 reason,
             }),
-            lash_core::TurnEvent::PluginRuntime { plugin_id, event } => {
-                Ok(Self::RuntimeDiagnostic {
-                    kind: "plugin_runtime".to_string(),
-                    data: serde_json::json!({
-                        "plugin_id": plugin_id,
-                        "event": event,
-                    }),
-                })
-            }
+            lash_core::TurnEvent::PluginRuntime { plugin_id, event } => Ok(Self::PluginRuntime {
+                plugin_id,
+                event: serde_json::to_value(event)?,
+            }),
             lash_core::TurnEvent::QueuedInputAccepted { applications } => {
                 Ok(Self::TurnInputApplied {
                     applications: applications.iter().map(Into::into).collect(),
@@ -405,12 +415,9 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
             lash_core::TurnEvent::QueuedMessagesCommitted {
                 messages,
                 checkpoint,
-            } => Ok(Self::RuntimeDiagnostic {
-                kind: "queued_messages_committed".to_string(),
-                data: serde_json::json!({
-                    "messages": messages,
-                    "checkpoint": checkpoint,
-                }),
+            } => Ok(Self::QueuedMessagesCommitted {
+                messages: messages.into_iter().map(Into::into).collect(),
+                checkpoint: checkpoint.into(),
             }),
             lash_core::TurnEvent::Error { message } => Ok(Self::Error { message }),
         }

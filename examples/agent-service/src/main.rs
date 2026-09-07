@@ -35,6 +35,7 @@ mod ui;
 
 fn default_openrouter_model_capability() -> lash::provider::ModelCapability {
     lash::provider::ModelCapability {
+        google_dialect: Default::default(),
         reasoning: Some(lash::provider::ReasoningCapability {
             efforts: ["low", "medium", "high"]
                 .into_iter()

@@ -70,20 +70,11 @@ impl RemoteTurnReport {
         for child in &children {
             total.add(&child.usage);
         }
-        // `status` and the top-level `cancellation` field are projections of
-        // the outcome; the outcome is the only place either fact is stated.
-        let cancellation = outcome
-            .cancellation()
-            .cloned()
-            .map(RemoteTurnCancellationEvidence::from);
         let outcome = RemoteTurnOutcome::from(outcome);
-        let status = RemoteTurnStatus::from(&outcome);
         Self {
             session_id: session_id.into(),
             turn_id: turn_id.into(),
-            status,
             outcome,
-            cancellation,
             assistant_output: assistant_output.into(),
             usage: RemoteTurnUsageReport {
                 parent,
@@ -144,7 +135,9 @@ impl From<lash_core::facade_support::TurnFinish> for RemoteTurnFinish {
 impl From<lash_core::facade_support::TurnStop> for RemoteTurnStop {
     fn from(value: lash_core::facade_support::TurnStop) -> Self {
         match value {
-            lash_core::facade_support::TurnStop::Cancelled { .. } => Self::Cancelled,
+            lash_core::facade_support::TurnStop::Cancelled { evidence } => Self::Cancelled {
+                evidence: evidence.into(),
+            },
             lash_core::facade_support::TurnStop::Incomplete => Self::Incomplete,
             lash_core::facade_support::TurnStop::InvalidInput => Self::InvalidInput,
             lash_core::facade_support::TurnStop::MaxTurns => Self::MaxTurns,
@@ -351,6 +344,7 @@ impl From<lash_core::ToolCallOutput> for RemoteToolCallOutcome {
 impl From<lash_core::facade_support::TurnIssue> for RemoteTurnIssue {
     fn from(value: lash_core::facade_support::TurnIssue) -> Self {
         let lash_core::facade_support::TurnIssue {
+            severity,
             kind,
             code,
             terminal_reason,
@@ -360,6 +354,7 @@ impl From<lash_core::facade_support::TurnIssue> for RemoteTurnIssue {
             provider_failure_kind,
         } = value;
         Self {
+            severity: severity.into(),
             kind,
             code,
             terminal_reason: terminal_reason.map(Into::into),
@@ -367,6 +362,15 @@ impl From<lash_core::facade_support::TurnIssue> for RemoteTurnIssue {
             raw,
             retryable,
             provider_failure_kind: provider_failure_kind.map(Into::into),
+        }
+    }
+}
+
+impl From<lash_core::facade_support::TurnIssueSeverity> for RemoteTurnIssueSeverity {
+    fn from(value: lash_core::facade_support::TurnIssueSeverity) -> Self {
+        match value {
+            lash_core::facade_support::TurnIssueSeverity::Advisory => Self::Advisory,
+            lash_core::facade_support::TurnIssueSeverity::Blocking => Self::Blocking,
         }
     }
 }

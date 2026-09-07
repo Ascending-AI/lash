@@ -102,7 +102,7 @@ fn assembler_uses_assistant_message_outcome_without_recovery_issue_when_no_strea
     assert!(
         out.errors
             .iter()
-            .all(|issue| issue.code.as_deref() != Some("assistant_output_recovered_from_state"))
+            .all(|issue| issue.severity != crate::runtime::TurnIssueSeverity::Advisory)
     );
 }
 
@@ -496,6 +496,7 @@ fn output_state_traceback_only() {
 #[test]
 fn output_state_recovered_from_error() {
     let issues = vec![TurnIssue {
+        severity: crate::runtime::TurnIssueSeverity::Blocking,
         kind: "runtime".to_string(),
         code: Some("example".to_string()),
         terminal_reason: None,
@@ -576,4 +577,88 @@ async fn attachment_source_policy_can_deny_borrowed_turn_ingress() {
 
     assert!(error.contains("TurnIngress"));
     assert!(error.contains("borrowed ingress disabled"));
+}
+
+#[test]
+fn producer_severity_controls_completion_independently_of_issue_code() {
+    use crate::runtime::TurnIssueSeverity;
+    for severity in [TurnIssueSeverity::Advisory, TurnIssueSeverity::Blocking] {
+        let mut assembler = TurnAssembler::default();
+        assembler.push(&SessionStreamEvent::Done);
+        let issue = TurnIssue {
+            severity,
+            kind: "runtime".into(),
+            code: Some("arbitrary-new-code".into()),
+            terminal_reason: None,
+            message: "evidence".into(),
+            raw: None,
+            retryable: None,
+            provider_failure_kind: None,
+        };
+        let out = assembler.finish(
+            default_state().to_snapshot(),
+            None,
+            Some(issue),
+            &TerminationPolicy::default(),
+        );
+        assert_eq!(out.errors[0].severity, severity);
+        assert_eq!(
+            matches!(out.outcome, TurnOutcome::Stopped(TurnStop::RuntimeError)),
+            severity == TurnIssueSeverity::Blocking
+        );
+    }
+}
+
+#[test]
+fn runtime_error_and_missing_done_producers_are_blocking() {
+    let mut assembler = TurnAssembler::default();
+    assembler.push(&SessionStreamEvent::Error {
+        message: "failed".into(),
+        envelope: None,
+    });
+    let out = assembler.finish(
+        default_state().to_snapshot(),
+        None,
+        None,
+        &TerminationPolicy::default(),
+    );
+    assert!(!out.errors.is_empty());
+    assert!(
+        out.errors
+            .iter()
+            .all(|issue| issue.severity == crate::runtime::TurnIssueSeverity::Blocking)
+    );
+}
+
+#[test]
+fn recovered_output_producer_emits_advisory_severity() {
+    let mut state = default_state();
+    append_message(
+        &mut state,
+        Message {
+            id: "recovered".into(),
+            role: MessageRole::Assistant,
+            parts: vec![Part::text(
+                "recovered.p0".into(),
+                "saved answer".into(),
+                None,
+            )]
+            .into(),
+            origin: None,
+        },
+    );
+    let mut assembler = TurnAssembler::default();
+    assembler.push(&SessionStreamEvent::Done);
+    let out = assembler.finish(
+        state.to_snapshot(),
+        None,
+        None,
+        &TerminationPolicy::default(),
+    );
+    assert_eq!(out.errors.len(), 1);
+    assert_eq!(
+        out.errors[0].severity,
+        crate::runtime::TurnIssueSeverity::Advisory
+    );
+    assert!(matches!(out.outcome, TurnOutcome::Finished(_)));
 }

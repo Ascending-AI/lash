@@ -532,13 +532,13 @@ pub mod remote {
             RemoteAttachmentRef, RemoteAttachmentSource, RemoteAttachmentTypeMetadata,
             RemoteAttemptOutcome, RemoteAttemptRecord, RemoteDiagnostic, RemoteExecutionEvidence,
             RemoteExecutionEvidenceCollectionInterruption, RemoteGenerationOptionOutcome,
-            RemoteGenerationOptions, RemoteGenerationReceipt, RemoteLlmCallRecord,
-            RemoteLlmContentBlock, RemoteLlmMessage, RemoteLlmOutputPart, RemoteLlmOutputSpec,
-            RemoteLlmRequest, RemoteLlmRequestScope, RemoteLlmResponse, RemoteLlmRole,
-            RemoteLlmTerminalReason, RemoteLlmToolChoice, RemoteLlmToolSpec, RemoteModelCapability,
-            RemoteModelIntent, RemoteNormalizedError, RemoteProtocolPosition,
-            RemoteProviderFailureKind, RemoteProviderFileScope, RemoteProviderMetadata,
-            RemoteProviderReasoningReplay, RemoteProviderReplayDrop,
+            RemoteGenerationOptions, RemoteGenerationReceipt, RemoteGoogleDialect,
+            RemoteLlmCallRecord, RemoteLlmContentBlock, RemoteLlmMessage, RemoteLlmOutputPart,
+            RemoteLlmOutputSpec, RemoteLlmRequest, RemoteLlmRequestScope, RemoteLlmResponse,
+            RemoteLlmRole, RemoteLlmTerminalReason, RemoteLlmToolChoice, RemoteLlmToolSpec,
+            RemoteModelCapability, RemoteModelIntent, RemoteNormalizedError,
+            RemoteProtocolPosition, RemoteProviderFailureKind, RemoteProviderFileScope,
+            RemoteProviderMetadata, RemoteProviderReasoningReplay, RemoteProviderReplayDrop,
             RemoteProviderReplayDropReason, RemoteProviderReplayKind, RemoteProviderReplayMeta,
             RemoteProviderRouteIdentity, RemoteReasoningCapability, RemoteReasoningDisableEncoding,
             RemoteReasoningEncoding, RemoteReasoningSelection, RemoteResponseTextMeta,
@@ -644,13 +644,18 @@ pub mod remote {
         pub use lash_remote_protocol::turn_result::{
             RemoteAssistantOutput, RemoteAssistantOutputState, RemoteCausalRef,
             RemoteToolCallOutcome, RemoteToolCallRecord, RemoteTurnExecutionMetrics,
-            RemoteTurnFinish, RemoteTurnIssue, RemoteTurnOutcome, RemoteTurnReport,
-            RemoteTurnStatus, RemoteTurnStop, RemoteTurnUsageReport,
+            RemoteTurnFinish, RemoteTurnIssue, RemoteTurnIssueSeverity, RemoteTurnOutcome,
+            RemoteTurnReport, RemoteTurnStatus, RemoteTurnStop, RemoteTurnUsageReport,
         };
     }
 
     /// Token usage accounting and the streaming turn-activity vocabulary.
     pub mod usage {
+        pub use lash_remote_protocol::queued_events::{
+            RemoteMessageOrigin, RemoteMessageRole, RemotePart, RemotePartAttachment,
+            RemotePartKind, RemotePluginMessage, RemotePruneState, RemoteQueuedWorkClaimBoundary,
+            RemoteTurnCause, RemoteTurnOutputSource,
+        };
         pub use lash_remote_protocol::usage_activity::{
             RemoteTokenLedgerEntry, RemoteTurnActivity, RemoteTurnEvent, RemoteUsage,
         };
@@ -868,9 +873,9 @@ pub mod provider {
         facade_support::LlmTransportError,
     };
     pub use lash_core::{
-        CacheControlDialect, ModelCapability, ReasoningCapability, ReasoningDisableEncoding,
-        ReasoningEncoding, ReasoningSelection, SamplingCapability, StreamTermination,
-        facade_support::GenerationRetryGuarantee, facade_support::LlmTimeouts,
+        CacheControlDialect, GoogleDialect, ModelCapability, ReasoningCapability,
+        ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
+        StreamTermination, facade_support::GenerationRetryGuarantee, facade_support::LlmTimeouts,
         facade_support::Provider, facade_support::ProviderComponents,
         facade_support::ProviderHandle, facade_support::ProviderOptions,
     };

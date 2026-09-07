@@ -17,7 +17,7 @@ use lash_core::facade_support::{
     SelectedQueuedWorkDrainError as CoreSelectedQueuedWorkDrainError, TurnContextFacadeOps,
 };
 
-pub use lash_core::{facade_support::AssistantOutput, facade_support::TurnIssue};
+pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverity};
 
 pub(crate) mod queued_drain;
 mod selected_drain;

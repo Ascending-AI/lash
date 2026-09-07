@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::{AttachmentRef, MediaType, SchemaContract};
 
 pub use crate::llm::capability::{
-    CacheControlDialect, ModelCapability, ModelEffortValidationCategory,
+    CacheControlDialect, GoogleDialect, ModelCapability, ModelEffortValidationCategory,
     ModelEffortValidationError, ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding,
     ReasoningSelection, SamplingCapability, StreamTermination,
 };
@@ -47,9 +47,8 @@ impl LlmTerminalReason {
 /// [`ErrorEnvelope`](crate::session_model::ErrorEnvelope), and hosts read it
 /// back from `TurnIssue`s without scraping traces.
 ///
-/// `Unknown` doubles as the forward-compatibility catch-all: envelopes
-/// persisted by a newer runtime with a kind this build does not know decode
-/// as `Unknown` instead of failing.
+/// `Unknown` is an explicit classification, never a decoder fallback.
+/// Persisted failure records reject unrecognized kind literals.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderFailureKind {
@@ -62,7 +61,6 @@ pub enum ProviderFailureKind {
     Quota,
     Unsupported,
     #[default]
-    #[serde(other)]
     Unknown,
 }
 

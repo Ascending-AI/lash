@@ -1,5 +1,8 @@
 //! Cross-backend conformance for the durable process registry.
 
+mod status_filters;
+use status_filters::list_filters_match_extracted_and_json_fields;
+
 use super::process_change_feed::process_change_feed_never_misses_concurrent_terminal_writers;
 use super::process_change_horizon::changes_after_full_relist_if_required;
 use super::process_event_append_arms::process_event_append_arms_are_ordered;
@@ -243,7 +246,7 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
         .prune_terminal_processes(
             u64::MAX,
             Some(ProcessListFilter {
-                status: ProcessStatusFilter::Failed,
+                status: ProcessStatusFilter::any_of([ProcessStatus::Failed]),
                 originator_id: Some(surviving.session_id.clone()),
                 ..ProcessListFilter::default()
             }),
@@ -1958,78 +1961,6 @@ async fn lifecycle_status_and_outcome_fold(registry: Arc<dyn ProcessRegistry>) {
     assert_eq!(terminal.outcome, Some(expected));
 }
 
-async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "filter-target";
-    let record = registry
-        .register_process(
-            ProcessRegistration::new(
-                process_id,
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                RecoveryContract::ExternallyOwned,
-                ProcessProvenance::session(SessionScope::new("filter-origin")).with_caused_by(
-                    Some(crate::CausalRef::TriggerOccurrence {
-                        occurrence_id: "indexed-occurrence-target".to_string(),
-                        subscription_id: Some("indexed-subscription-target".to_string()),
-                        subscription_incarnation: None,
-                        subscription_revision: None,
-                    }),
-                ),
-            )
-            .with_identity(
-                ProcessIdentity::new("indexed-filter-kind")
-                    .with_label(Some("filter-label"))
-                    .with_definition(Some(serde_json::json!({"definition": "target"}))),
-            ),
-        )
-        .await
-        .expect("register filter target");
-    registry
-        .set_process_wait(
-            process_id,
-            WaitState {
-                since_ms: record.created_at_ms,
-                kind: WaitKind::Signal {
-                    name: "ready".to_string(),
-                    event_type: "signal.ready".to_string(),
-                    key: "filter-target:signal.ready:1".to_string(),
-                    ordinal: 1,
-                },
-            },
-        )
-        .await
-        .expect("set filter target waiting");
-    registry
-        .register_process(registration("filter-decoy"))
-        .await
-        .expect("register filter decoy");
-
-    let matches = registry
-        .list_processes(&ProcessListFilter {
-            definition: Some(serde_json::json!({"definition": "target"})),
-            status: ProcessStatusFilter::Waiting,
-            waiting: Some(true),
-            originator_id: Some(record.originator_id()),
-            identity_kind: Some("indexed-filter-kind".to_string()),
-            identity_label: Some("filter-label".to_string()),
-            caused_by_occurrence_id: Some("indexed-occurrence-target".to_string()),
-            caused_by_subscription_id: Some("indexed-subscription-target".to_string()),
-            created_at_start_ms: Some(record.created_at_ms),
-            created_at_end_ms: Some(record.created_at_ms.saturating_add(1)),
-            retired_since_ms: None,
-        })
-        .await
-        .expect("list with all filters");
-    assert_eq!(
-        matches
-            .into_iter()
-            .map(|record| record.id)
-            .collect::<Vec<_>>(),
-        vec![process_id.to_string()]
-    );
-}
-
 async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessRegistry>) {
     let process_id = "session-delete-bytes";
     registry
@@ -2359,7 +2290,7 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
     );
     let live = registry
         .list_processes(&ProcessListFilter {
-            status: crate::ProcessStatusFilter::Running,
+            status: crate::ProcessStatusFilter::any_of([crate::ProcessStatus::Running]),
             ..ProcessListFilter::default()
         })
         .await
@@ -2387,7 +2318,7 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
     // ...but external reconciliation can enumerate it by name on any backend.
     let departed_rows = registry
         .list_processes(&ProcessListFilter {
-            status: crate::ProcessStatusFilter::CallerDeparted,
+            status: crate::ProcessStatusFilter::any_of([crate::ProcessStatus::CallerDeparted]),
             ..ProcessListFilter::default()
         })
         .await

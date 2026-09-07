@@ -338,7 +338,7 @@ commit was refused.
 `turn_input_applied` is the only application signal. The live path consumes
 its typed application objects; snapshot recovery uses
 `remote_turn_input_applications()`. The host does not inspect
-`RuntimeDiagnostic`, and it never infers application from
+an untyped diagnostic, and it never infers application from
 `pending_turn_inputs()`: pending input is admission state, not proof that a
 canonical message was committed.
 

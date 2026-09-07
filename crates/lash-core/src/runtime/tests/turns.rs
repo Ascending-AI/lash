@@ -10023,6 +10023,7 @@ async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
         .into_handle();
 
     let capability = crate::ModelCapability {
+        google_dialect: Default::default(),
         reasoning: Some(crate::ReasoningCapability {
             efforts: ["low", "medium", "high", "max"]
                 .into_iter()
@@ -10101,6 +10102,7 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() {
         .into_handle();
 
     let capability = crate::ModelCapability {
+        google_dialect: Default::default(),
         reasoning: Some(crate::ReasoningCapability {
             efforts: ["low", "medium", "high"]
                 .into_iter()

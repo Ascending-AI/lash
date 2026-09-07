@@ -12,6 +12,7 @@ pub mod llm;
 pub mod observations;
 pub mod processes;
 pub mod prompt;
+pub mod queued_events;
 pub mod registry_errors;
 pub mod tools;
 pub mod triggers;
@@ -24,6 +25,7 @@ pub use llm::*;
 pub use observations::*;
 pub use processes::*;
 pub use prompt::*;
+pub use queued_events::*;
 pub use registry_errors::*;
 pub use tools::*;
 pub use triggers::*;
@@ -121,11 +123,11 @@ pub use usage_activity::*;
 // final member types RLM cell failures and preserves minting replay identity.
 // The release freeze prevents publishing any partial version-52 shape; once
 // the final shape ships, exact-version negotiation refuses version-51 peers.
-// Window 53 OPEN: FIG-1989 cancellation evidence, FIG-1991 severity,
+// Window 53 CLOSED: FIG-1989 cancellation evidence, FIG-1991 severity,
 // FIG-1993 typed events, FIG-1996 status sets, FIG-2081 persisted and remote
 // failure kinds, FIG-2406 derived status, and FIG-1942 Google dialect capability.
-// Release freeze: do not publish any partial window-53 shape. Exact-match
-// negotiation refuses version-52 peers; no tolerant decoding.
+// All members are present: publish only this complete window-53 shape.
+// Exact-match negotiation refuses version-52 peers; no tolerant decoding.
 pub const REMOTE_PROTOCOL_VERSION: u32 = 53;
 
 /// One versioned remote-protocol message.
