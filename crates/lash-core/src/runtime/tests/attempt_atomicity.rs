@@ -404,6 +404,7 @@ impl crate::ToolProvider for PureLeafProbeProvider {
 /// crossing count while the attempt is open is zero.
 #[tokio::test]
 async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
+    capability_inventory::assert_capability_inventory_complete();
     let fixtures = fixtures().await;
     let tier = ControllerOwnedTier::ordinal_addressed();
     let ledger = NestedJournalLedger::new();
@@ -427,29 +428,7 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
         ),
         crate::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
             let attempt = crate::AttemptContext::__for_testing(&tool, TURN);
-            let _ = attempt.sessions().snapshot_current().await;
-            let _ = attempt
-                .processes()
-                .list_handles_filtered(&crate::ProcessListFilter::default())
-                .await;
-            let _ = attempt.session_id();
-            let _ = attempt.execution_scope_id();
-            // FIG-1486: the sealed leaf environment also owns a direct-completion
-            // capability. It carries the recorded attempt's invocation, so the
-            // completion runs locally; classified `Independent` it would journal
-            // a second entry inside the attempt and wedge the redrive.
-            assert_eq!(
-                attempt
-                    .direct_completions()
-                    .complete(
-                        crate::DirectRequest::text(DIRECT_MODEL, "attempt direct completion"),
-                        "attempt-atomicity",
-                    )
-                    .await
-                    .expect("attempt-context direct completion stays local")
-                    .text,
-                DIRECT_TEXT
-            );
+            capability_inventory::exercise_attempt_capabilities(&attempt).await;
             Ok(crate::RuntimeEffectOutcome::ToolAttempt {
                 launch: Box::new(crate::ToolAttemptLaunch::Done {
                     record: Box::new(crate::ToolCallRecord {
@@ -1512,3 +1491,6 @@ async fn prepared_attempt_runner_dispatch_binds_the_direct_client() {
         "the prepared-attempt runner must bind its direct client before entering the leaf"
     );
 }
+
+#[path = "attempt_atomicity/capability_inventory.rs"]
+mod capability_inventory;

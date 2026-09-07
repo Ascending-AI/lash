@@ -1365,7 +1365,9 @@ jobs:
       # database and reset() truncates all lash_* tables), so no --test-threads=1.
       # That guard is per-process, so this must stay `cargo test` — nextest's
       # process-per-test model would race the suites against each other.
-      - name: Test Postgres store (conformance)
+      # Keep this package-wide: tests/attempt_atomicity.rs is part of this gate;
+      # narrowing to --test conformance would silently drop attempt atomicity.
+      - name: Test Postgres store (conformance and attempt atomicity)
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: cargo test -p lash-internal-postgres-store --locked
         env:
