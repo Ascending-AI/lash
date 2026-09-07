@@ -876,7 +876,15 @@ impl RuntimeSessionState {
     /// Advances resident state to a store's committed head revision and realized timestamps, adopts
     /// durable artifact references, and clears transient snapshots so protocol and store
     /// implementors cannot reuse stale bytes.
+    ///
+    /// # Panics
+    /// Panics in every build profile if the receipt does not advance resident
+    /// state. Replay callers refresh state instead of adopting an old receipt.
     pub fn apply_persisted_commit_result(&mut self, result: crate::store::RuntimeCommitReceipt) {
+        assert!(
+            result.head_revision > self.head_revision,
+            "adopted head revision must advance"
+        );
         self.head_revision = result.head_revision;
         self.checkpoint_ref = Some(result.checkpoint_ref);
         self.session_graph

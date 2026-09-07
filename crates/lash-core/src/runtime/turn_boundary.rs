@@ -607,6 +607,22 @@ impl TurnBoundary {
                     .any(|generation| *generation < current)
             });
         let result = if can_retry_recovered_settlement {
+            // Each retry can remove one stale row. Permit at most one retry
+            // per original row, followed by the final commit attempt.
+            let mut retry_budget = RecoveredSettlementBudget(
+                commit
+                    .completed_queue_claims
+                    .iter()
+                    .map(|claim| claim.batch_ids.len())
+                    .sum::<usize>()
+                    .saturating_add(
+                        commit
+                            .completed_turn_input_claims
+                            .iter()
+                            .map(|claim| claim.input_ids.len())
+                            .sum::<usize>(),
+                    ),
+            );
             loop {
                 commit.validate_claim_settlement(
                     &originating_queue_claims,
@@ -615,6 +631,9 @@ impl TurnBoundary {
                 match crate::store::commit_runtime_state_verified(store, commit.clone()).await {
                     Ok(result) => break result,
                     Err(err) => {
+                        if !retry_budget.consume() {
+                            return Err(err);
+                        }
                         let dropped = drop_superseded_recovered_queue_settlement(
                             &err,
                             &queue_claim_generations,
@@ -654,6 +673,19 @@ impl TurnBoundary {
             committed_usage_delta_identities,
             turn_cancel_input_outcome,
         ))
+    }
+}
+
+/// A recovered settlement can retry once per originally claimed row.
+struct RecoveredSettlementBudget(usize);
+
+impl RecoveredSettlementBudget {
+    fn consume(&mut self) -> bool {
+        let Some(remaining) = self.0.checked_sub(1) else {
+            return false;
+        };
+        self.0 = remaining;
+        true
     }
 }
 

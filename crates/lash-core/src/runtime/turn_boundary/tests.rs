@@ -1071,3 +1071,16 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
     assert!(state.plugin_snapshot().is_none());
     assert!(state.execution_state_snapshot().is_none());
 }
+
+#[test]
+fn recovered_settlement_attempts_are_capped_by_original_rows() {
+    for rows in [0, 1, 2, 64] {
+        let mut budget = super::RecoveredSettlementBudget(rows);
+        let mut attempts = 1;
+        while budget.consume() {
+            attempts += 1;
+        }
+        assert_eq!(attempts, rows + 1);
+        assert!(!budget.consume(), "spent budget cannot reopen");
+    }
+}
