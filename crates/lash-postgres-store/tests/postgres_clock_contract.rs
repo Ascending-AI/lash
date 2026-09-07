@@ -112,6 +112,11 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         // that could read a host clock unnoticed is the one doing the work.
         (
             RUNTIME_PERSISTENCE_SOURCE,
+            "async fn claim_queued_work_rows_postgres(",
+            "async fn claim_ready_queued_work_postgres_tx(",
+        ),
+        (
+            RUNTIME_PERSISTENCE_SOURCE,
             "async fn claim_ready_queued_work_postgres_tx(",
             "async fn defer_orphaned_active_turn_inputs_tx(",
         ),
