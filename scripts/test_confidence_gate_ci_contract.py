@@ -385,10 +385,10 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertEqual(evaluate(needs, "pull_request"), [])
         self.assertEqual(evaluate(needs, "merge_group"), [])
         push_problems = evaluate(needs, "push")
-        self.assertEqual(len(push_problems), len(trunk_only) + 2)
+        self.assertEqual(len(push_problems), len(trunk_only) + 3)
         for problem in push_problems:
             self.assertTrue("although plan." in problem or "workers E2E job" in problem)
-        for job in ("restate-postgres-workers", "restate-postgres-workers-summary"):
+        for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
             needs[job] = {"result": "skipped", "outputs": {}}
         for job in trunk_only:
             needs[job] = {"result": "success", "outputs": {}}
@@ -471,7 +471,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for job in trunk_only:
             pr_needs[job] = {"result": "skipped", "outputs": {}}
         pr_needs["facade-gates"] = {"result": "skipped", "outputs": {}}
-        for job in ("restate-postgres-workers", "restate-postgres-workers-summary"):
+        for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
             pr_needs[job] = {"result": "success", "outputs": {}}
         pr_needs["postgres-store"] = {"result": "skipped", "outputs": {}}
         self.assertIn(
