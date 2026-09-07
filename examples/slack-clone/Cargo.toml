@@ -21,7 +21,7 @@ workspace = true
 e2e = ["lash/testing"]
 # Keeps the reference bot standard-only while allowing the manual live-model
 # acceptance binary to exercise the RLM protocol in the same package.
-live-e2e = ["lash/rlm", "lash-sqlite-store/lashlang"]
+live-e2e = ["lash/rlm"]
 
 # Two binaries, one crate. The split is the point of the example: the platform
 # binary is a plain product with no Lash dependency, and the bot binary is the
