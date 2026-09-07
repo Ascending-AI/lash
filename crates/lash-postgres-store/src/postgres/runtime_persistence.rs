@@ -74,6 +74,8 @@ macro_rules! transaction_epoch_sql {
     };
 }
 
+const PENDING_TURN_INPUT_COLUMNS: &str = "enqueue_seq, input_id, session_id, source_key, ingress_json, state, input_json, enqueued_at_ms, claim_id, claim_fencing_token, claim_owner_id, claim_owner_incarnation_id, claim_token, claim_session_lease_generation";
+
 const POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = concat!(
     "session_id = $1
        AND available_at_ms <= ",
@@ -1068,16 +1070,13 @@ impl SessionCommitStore for PostgresSessionStore {
                 .await?
                 .map(|record| record.request.undelivered)
                 .unwrap_or_default();
-            let rows = sqlx::query(
-                "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                        state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                        claim_owner_id, claim_owner_incarnation_id,
-                        claim_token, claim_session_lease_generation
+            let rows = sqlx::query(&format!(
+                "SELECT {PENDING_TURN_INPUT_COLUMNS}
                  FROM lash_pending_turn_inputs
                  WHERE session_id = $1 AND state = $2
                  ORDER BY enqueue_seq ASC
-                 FOR UPDATE",
-            )
+                 FOR UPDATE"
+            ))
             .bind(&commit.session_id)
             .bind(lash_core::TurnInputState::PendingActive.as_str())
             .fetch_all(&mut *tx)
@@ -2790,11 +2789,8 @@ impl TurnInputStore for PostgresSessionStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
-        let rows = sqlx::query(
-            "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                    claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
+        let rows = sqlx::query(&format!(
+            "SELECT {PENDING_TURN_INPUT_COLUMNS}
              FROM lash_pending_turn_inputs
              WHERE session_id = $1
                AND state IN ($2, $3)
@@ -2806,8 +2802,8 @@ impl TurnInputStore for PostgresSessionStore {
                       AND sel.lease_fencing_token
                           = lash_pending_turn_inputs.claim_session_lease_generation
                ))
-             ORDER BY enqueue_seq ASC",
-        )
+             ORDER BY enqueue_seq ASC"
+        ))
         .bind(session_id)
         .bind(lash_core::TurnInputState::PendingActive.as_str())
         .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
@@ -2902,16 +2898,13 @@ impl TurnInputStore for PostgresSessionStore {
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor });
         };
-        let rows = sqlx::query(
-            "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                    claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation
+        let rows = sqlx::query(&format!(
+            "SELECT {PENDING_TURN_INPUT_COLUMNS}
              FROM lash_pending_turn_inputs
              WHERE session_id = $1 AND enqueue_seq >= $2
              ORDER BY enqueue_seq ASC
-             FOR UPDATE",
-        )
+             FOR UPDATE"
+        ))
         .bind(session_id)
         .bind(anchor_row.enqueue_seq as i64)
         .fetch_all(&mut *tx)
@@ -3819,14 +3812,11 @@ async fn claim_pending_turn_inputs_postgres_tx(
         }
         lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
     };
-    let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
-        "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                claim_owner_id, claim_owner_incarnation_id,
-                claim_token, claim_session_lease_generation
+    let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(format!(
+        "SELECT {PENDING_TURN_INPUT_COLUMNS}
          FROM lash_pending_turn_inputs
-         WHERE session_id = ",
-    );
+         WHERE session_id = "
+    ));
     let accepted_state =
         lash_core::store_backend_support::state_sql_literal(lash_core::TurnInputState::Accepted);
     query
@@ -3965,143 +3955,25 @@ async fn claim_pending_turn_inputs_postgres(
     #[cfg(any(test, feature = "testing"))]
     super::test_support::set_transaction_lease_clock_for_testing(&mut tx, lease_clock).await?;
     ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
-    let generation = session_execution_lease.fencing_token;
-    let now = postgres_transaction_epoch_ms(&mut tx).await?;
-    let active_turn = matches!(mode, lash_core::TurnInputClaimMode::ActiveTurn { .. });
-    let wanted_state = match &mode {
-        lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
-            lash_core::TurnInputState::PendingActive
-        }
-        lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
-    };
-    let accepted_state =
-        lash_core::store_backend_support::state_sql_literal(lash_core::TurnInputState::Accepted);
-    let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
-        "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                claim_owner_id, claim_owner_incarnation_id,
-                claim_token, claim_session_lease_generation
-         FROM lash_pending_turn_inputs
-         WHERE session_id = ",
-    );
-    query
-        .push_bind(session_id)
-        .push(" AND (state = ")
-        .push_bind(wanted_state.as_str())
-        .push(" OR (")
-        .push_bind(active_turn)
-        .push(" AND state = ")
-        .push(accepted_state)
-        .push("))")
-        .push(
-            "
-           AND (
-                claim_token IS NULL
-                OR claim_session_lease_generation <> ",
-        )
-        .push_bind(sql_session_lease_generation(generation)?)
-        .push("\n           )");
-    if let lash_core::TurnInputClaimMode::ActiveTurn {
-        turn_id,
-        checkpoint,
-    } = &mode
+    match claim_pending_turn_inputs_postgres_tx(
+        &mut tx,
+        session_id,
+        session_execution_lease,
+        owner,
+        max_inputs,
+        mode,
+    )
+    .await?
     {
-        query
-            .push(" AND ingress_json::jsonb ->> 'scope' = 'active_turn'")
-            .push(" AND ingress_json::jsonb ->> 'turn_id' = ")
-            .push_bind(turn_id.as_str());
-        query.push(format!(
-            " AND {}",
-            lash_core::store_backend_support::admitted_min_boundary_sql(
-                "ingress_json::jsonb ->> 'min_boundary'",
-                *checkpoint,
-            )
-        ));
-    }
-    query
-        .push(" ORDER BY enqueue_seq ASC LIMIT ")
-        .push_bind(i64::try_from(max_inputs).unwrap_or(i64::MAX))
-        .push(" FOR UPDATE SKIP LOCKED");
-    let rows = query
-        .build()
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    let selected = rows
-        .into_iter()
-        .take(max_inputs)
-        .map(|row| {
-            let row = pending_turn_input_row(row)?;
-            Ok((row.clone(), pending_turn_input_from_row(row)?))
-        })
-        .collect::<Result<Vec<_>, StoreError>>()?;
-    let Some((head, _)) = selected.first() else {
-        tx.commit().await.map_err(store_sqlx_error)?;
-        return Ok(None);
-    };
-    let lease = TurnInputClaimLease::derive(head, session_id, owner, now, generation)?;
-    let sql_fencing_tokens = sql_claim_fencing_tokens(
-        "turn_input_claim_fencing_token",
-        selected.iter().map(|(row, _)| row.claim_fencing_token),
-    )?;
-    let state_after_claim = match &mode {
-        lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputState::Accepted,
-        lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
-    };
-    let mut inputs = Vec::new();
-    for ((row, mut input), sql_fencing_token) in selected.into_iter().zip(sql_fencing_tokens) {
-        let changed = sqlx::query(
-            "UPDATE lash_pending_turn_inputs
-             SET state = $3,
-                 claim_id = $4,
-                 claim_owner_id = $5,
-                 claim_owner_incarnation_id = $6,
-                 claim_token = $7,
-                 claim_fencing_token = $9,
-                 claim_session_lease_generation = $8
-             WHERE session_id = $1
-               AND input_id = $2
-               AND (
-                    claim_token IS NULL
-                    OR claim_session_lease_generation <> $8
-               )",
-        )
-        .bind(session_id)
-        .bind(&row.input_id)
-        .bind(state_after_claim.as_str())
-        .bind(&lease.claim_id)
-        .bind(&owner.owner_id)
-        .bind(&owner.incarnation_id)
-        .bind(&lease.lease_token)
-        .bind(sql_session_lease_generation(
-            lease.session_lease_generation,
-        )?)
-        .bind(sql_fencing_token)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?
-        .rows_affected();
-        if changed == 0 {
-            tx.rollback().await.map_err(store_sqlx_error)?;
-            return Ok(None);
+        ClaimTransactionOutcome::Commit(value) => {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            Ok(value)
         }
-        input.state = state_after_claim;
-        inputs.push(input);
+        ClaimTransactionOutcome::Rollback(value) => {
+            tx.rollback().await.map_err(store_sqlx_error)?;
+            Ok(value)
+        }
     }
-    tx.commit().await.map_err(store_sqlx_error)?;
-    Ok(Some(lash_core::TurnInputClaim {
-        session_id: session_id.to_string(),
-        claim_id: lease.claim_id,
-        owner: owner.clone(),
-        lease_token: lease.lease_token,
-        fencing_token: lease.fencing_token,
-        session_lease_generation: lease.session_lease_generation,
-        data: lash_core::runtime::TurnInputClaimData {
-            mode,
-            inputs,
-            applications: Vec::new(),
-        },
-    }))
 }
 
 /// Read the lease row without locking it, for diagnostics.

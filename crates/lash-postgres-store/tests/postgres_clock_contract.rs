@@ -131,7 +131,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "async fn defer_orphaned_active_turn_inputs_tx(",
             "async fn claim_pending_turn_inputs_postgres_tx(",
         ),
-        // The transaction-scoped pending-input claim copy. The public
+        // The single transaction-scoped pending-input claim body. The public
         // `claim_pending_turn_inputs_postgres` caller is fenced below, but
         // this helper is far below the impl block and reads `now` and
         // CAS-stamps claims directly — fence the body as well.
