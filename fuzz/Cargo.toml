@@ -1,0 +1,46 @@
+[package]
+name = "lash-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+lash-internal-remote-protocol = { path = "../crates/lash-remote-protocol" }
+lash-internal-sansio = { path = "../crates/lash-sansio" }
+lash-internal-lashlang = { path = "../crates/lashlang" }
+
+[[bin]]
+name = "remote_wire_dto"
+path = "fuzz_targets/remote_wire_dto.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "plugin_payload"
+path = "fuzz_targets/plugin_payload.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "attachment_metadata"
+path = "fuzz_targets/attachment_metadata.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lashlang_source"
+path = "fuzz_targets/lashlang_source.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1

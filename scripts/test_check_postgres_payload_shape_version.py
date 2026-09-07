@@ -115,6 +115,26 @@ new file mode 100644
         valid, _ = MODULE.validate_patch(patch)
         self.assertTrue(valid)
 
+    def test_binary_diff_bytes_do_not_crash_or_loosen_the_gate(self) -> None:
+        import argparse
+        import tempfile
+
+        binary_hunk = (
+            b"diff --git a/fuzz/corpus/remote_wire_dto/seed b/fuzz/corpus/remote_wire_dto/seed\n"
+            b"--- /dev/null\n"
+            b"+++ b/fuzz/corpus/remote_wire_dto/seed\n"
+            b"@@ -0,0 +1 @@\n"
+            b"+\xe2\x28\xa1\xff\x00 raw seed bytes\n"
+        )
+        with tempfile.NamedTemporaryFile(suffix=".diff", delete=False) as handle:
+            handle.write(binary_hunk + PAYLOAD_DIFF.encode("utf-8"))
+            diff_path = Path(handle.name)
+        self.addCleanup(diff_path.unlink)
+        args = argparse.Namespace(diff_file=diff_path, cached=False, revision_range=None)
+        patch = MODULE.load_patch(args)
+        valid, _ = MODULE.validate_patch(patch)
+        self.assertFalse(valid)
+
     def test_payload_change_without_component_bump_fails(self) -> None:
         valid, _ = MODULE.validate_patch(PAYLOAD_DIFF)
         self.assertFalse(valid)

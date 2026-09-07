@@ -112,6 +112,33 @@ class HygieneTests(unittest.TestCase):
                     )
                     self.assertCountEqual(expected, git("rev-list", f"{resolved_base}..HEAD").splitlines())
 
+    def test_fuzz_corpus_seeds_are_exempt_from_added_file_count_only(self):
+        corpus = self.repo / "fuzz/corpus/target_a"
+        corpus.mkdir(parents=True)
+        for i in range(201):
+            (corpus / f"seed-{i:04}").write_bytes(b"s")
+        self.commit()
+        result = subprocess.run(
+            ["bash", "scripts/ci/check-diff-hygiene.sh"], cwd=self.repo,
+            env={**os.environ, "BASE_SHA": self.base, "DIFF_HYGIENE_BYPASS": "0"},
+            text=True, capture_output=True,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_bulk_added_files_outside_fuzz_corpus_still_fail_check_c(self):
+        bulk = self.repo / "vendored"
+        bulk.mkdir()
+        for i in range(201):
+            (bulk / f"file-{i:04}.txt").write_text("x")
+        self.commit()
+        result = subprocess.run(
+            ["bash", "scripts/ci/check-diff-hygiene.sh"], cwd=self.repo,
+            env={**os.environ, "BASE_SHA": self.base, "DIFF_HYGIENE_BYPASS": "0"},
+            text=True, capture_output=True,
+        )
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Check C (added-file count) failed", result.stderr)
+
     @unittest.skipUnless(GITLEAKS, "pinned Gitleaks is supplied by the secret-scan job")
     def test_added_secret_is_refused(self):
         # Construct a fake token at runtime so the regression fixture is not a leak.

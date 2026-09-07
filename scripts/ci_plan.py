@@ -30,6 +30,7 @@ GATED_JOBS = {
     "s3-store": "stores",
     "functional-e2e": "functional_e2e",
     "functional-e2e-process-operations": "functional_e2e",
+    "fuzz-smoke": "rust",
 }
 
 # Jobs deferred entirely to trunk runs (push / workflow_dispatch): their
@@ -49,6 +50,9 @@ TRUNK_ONLY_JOBS = {
     "s3-store",
     "functional-e2e",
     "functional-e2e-process-operations",
+    # The fuzz smoke stays off the pull-request critical path by design: its
+    # bounded corpus run guards trunk without taxing every PR (FIG-878).
+    "fuzz-smoke",
 }
 
 DEFERRED_EVENTS = {"pull_request", "merge_group"}
@@ -162,7 +166,7 @@ def _is_known_path(path: str) -> bool:
     return (
         _is_global_invalidator(path)
         or _is_docs_path(path)
-        or path.startswith(("crates/", "examples/", "runbooks/", ".github/actions/", ".config/"))
+        or path.startswith(("crates/", "examples/", "runbooks/", ".github/actions/", ".config/", "fuzz/"))
         or path.startswith(("src/", "tests/", "benches/"))
         or suffix in {".rs", ".toml", ".json", ".yaml", ".yml", ".lock"}
     )

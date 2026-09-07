@@ -1,4 +1,5 @@
 [workspace]
+exclude = ["fuzz"]
 members = [
     "crates/lash-sansio",
     "crates/lash-trace",
