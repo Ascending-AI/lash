@@ -384,3 +384,7 @@ fn capability_name_from_args(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "outcome_tests.rs"]
+mod outcome_tests;
