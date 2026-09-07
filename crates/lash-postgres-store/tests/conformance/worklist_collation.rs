@@ -71,17 +71,34 @@ async fn punctuation_worklist_pagination_matches_all_three_backends() {
 }
 
 #[tokio::test]
-async fn worklist_column_and_partial_index_pin_c_collation() {
+async fn process_family_columns_and_worklist_index_pin_c_collation() {
     let Some((_database_lock, storage)) = storage().await else {
         return;
     };
-    let column: String = sqlx::query_scalar(
-        "SELECT c.collname FROM pg_attribute a JOIN pg_collation c ON c.oid = a.attcollation
-         WHERE a.attrelid = 'lash_processes'::regclass AND a.attname = 'process_id'",
-    )
-    .fetch_one(storage.pool())
-    .await
-    .expect("column collation");
+    for table in [
+        "lash_processes",
+        "lash_process_events",
+        "lash_wake_allocation_floors",
+        "lash_process_wake_deliveries",
+        "lash_process_observers",
+        "lash_process_tombstones",
+        "lash_process_leases",
+        "lash_process_segment_handovers",
+        "lash_process_parent_end_plans",
+    ] {
+        let collation: String = sqlx::query_scalar(
+            "SELECT c.collname FROM pg_attribute a JOIN pg_collation c ON c.oid = a.attcollation
+             WHERE a.attrelid = $1::regclass AND a.attname = 'process_id'",
+        )
+        .bind(table)
+        .fetch_one(storage.pool())
+        .await
+        .expect("process-family column collation");
+        assert_eq!(
+            collation, "C",
+            "{table} process identifiers require byte order"
+        );
+    }
     let index: String = sqlx::query_scalar(
         "SELECT c.collname FROM pg_index i JOIN pg_collation c ON c.oid = i.indcollation[0]
          WHERE i.indexrelid = 'idx_lash_processes_live_worklist'::regclass",
@@ -89,7 +106,6 @@ async fn worklist_column_and_partial_index_pin_c_collation() {
     .fetch_one(storage.pool())
     .await
     .expect("index collation");
-    assert_eq!(column, "C", "opaque process identifiers require byte order");
     assert_eq!(index, "C", "worklist index must inherit byte order");
 }
 

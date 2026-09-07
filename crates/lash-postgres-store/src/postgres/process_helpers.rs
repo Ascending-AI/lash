@@ -167,14 +167,13 @@ pub(crate) async fn save_process_tx(
     sqlx::query(
         "UPDATE lash_processes
          SET updated_at_ms = $2, change_seq = $3, status = $4,
-             is_waiting = $5, last_event_sequence = $6, record_json = $7
+             last_event_sequence = $5, record_json = $6
          WHERE process_id = $1",
     )
     .bind(&record.id)
     .bind(record.updated_at_ms as i64)
     .bind(change_seq as i64)
     .bind(process_status_label(record))
-    .bind(record.wait.is_some())
     .bind(record.last_event_sequence as i64)
     .bind(serde_json::to_string(record).map_err(process_decode_error)?)
     .execute(&mut **tx)

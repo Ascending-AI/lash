@@ -3,7 +3,7 @@
 --
 
 
--- Dumped from database version 16.15 (Debian 16.15-1.pgdg13+2)
+-- Dumped from database version 16.15
 -- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
@@ -238,7 +238,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_change_clock (
 --
 
 CREATE TABLE lash_durable_read_fixture.lash_process_events (
-    process_id text NOT NULL,
+    process_id text NOT NULL COLLATE pg_catalog."C",
     process_incarnation bigint NOT NULL,
     sequence bigint NOT NULL,
     event_type text NOT NULL,
@@ -252,7 +252,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_events (
 --
 
 CREATE TABLE lash_durable_read_fixture.lash_process_leases (
-    process_id text NOT NULL,
+    process_id text NOT NULL COLLATE pg_catalog."C",
     lease_owner_id text,
     lease_owner_incarnation_id text,
     lease_token text,
@@ -268,7 +268,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_leases (
 
 CREATE TABLE lash_durable_read_fixture.lash_process_observers (
     session_id text NOT NULL,
-    process_id text NOT NULL,
+    process_id text NOT NULL COLLATE pg_catalog."C",
     process_incarnation bigint NOT NULL
 );
 
@@ -278,7 +278,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_observers (
 --
 
 CREATE TABLE lash_durable_read_fixture.lash_process_parent_end_plans (
-    process_id text NOT NULL,
+    process_id text NOT NULL COLLATE pg_catalog."C",
     actions_json text NOT NULL
 );
 
@@ -288,7 +288,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_parent_end_plans (
 --
 
 CREATE TABLE lash_durable_read_fixture.lash_process_segment_handovers (
-    process_id text NOT NULL,
+    process_id text NOT NULL COLLATE pg_catalog."C",
     segment_ordinal bigint NOT NULL,
     handover_json text NOT NULL
 );
@@ -299,7 +299,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_segment_handovers (
 --
 
 CREATE TABLE lash_durable_read_fixture.lash_process_tombstones (
-    process_id text NOT NULL,
+    process_id text NOT NULL COLLATE pg_catalog."C",
     incarnation bigint NOT NULL,
     terminal_label text NOT NULL,
     pruned_at_ms bigint NOT NULL,
@@ -313,7 +313,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_tombstones (
 
 CREATE TABLE lash_durable_read_fixture.lash_process_wake_deliveries (
     delivery_id text NOT NULL,
-    process_id text NOT NULL,
+    process_id text NOT NULL COLLATE pg_catalog."C",
     process_incarnation bigint NOT NULL,
     target_session_id text NOT NULL,
     sequence bigint NOT NULL,
@@ -342,7 +342,6 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     wake_session_id text,
     identity_kind text NOT NULL,
     identity_label text,
-    is_waiting boolean NOT NULL,
     created_at_ms bigint NOT NULL,
     updated_at_ms bigint NOT NULL,
     last_event_sequence bigint NOT NULL,
@@ -708,7 +707,7 @@ ALTER SEQUENCE lash_durable_read_fixture.lash_usage_deltas_seq_seq OWNED BY lash
 
 CREATE TABLE lash_durable_read_fixture.lash_wake_allocation_floors (
     target_session_id text NOT NULL,
-    process_id text NOT NULL,
+    process_id text NOT NULL COLLATE pg_catalog."C",
     allocation_floor bigint NOT NULL
 );
 
@@ -938,7 +937,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 76);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 77);
 
 
 --
@@ -1024,7 +1023,6 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_subscriptions VALUES ('trigge
 -- Data for Name: lash_wake_allocation_floors; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_wake_allocation_floors VALUES ('durable-read-fixture', 'durable-read-wake-process', 1);
 
 
 --
@@ -1602,13 +1600,6 @@ CREATE INDEX idx_lash_processes_status ON lash_durable_read_fixture.lash_process
 --
 
 CREATE INDEX idx_lash_processes_updated ON lash_durable_read_fixture.lash_processes USING btree (updated_at_ms);
-
-
---
--- Name: idx_lash_processes_waiting; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_processes_waiting ON lash_durable_read_fixture.lash_processes USING btree (is_waiting);
 
 
 --

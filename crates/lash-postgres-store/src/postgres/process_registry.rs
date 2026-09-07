@@ -66,11 +66,11 @@ impl ProcessRegistry for PostgresProcessRegistry {
         sqlx::query(
             "INSERT INTO lash_processes (
                 process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
-                identity_kind, identity_label, is_waiting,
+                identity_kind, identity_label,
                 created_at_ms, updated_at_ms, last_event_sequence,
                 change_seq, status, record_json
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
         .bind(&record.id)
         .bind(record.incarnation.registration_sequence() as i64)
@@ -79,7 +79,6 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .bind(wake_session_id)
         .bind(&record.identity.kind)
         .bind(&record.identity.label)
-        .bind(record.wait.is_some())
         .bind(record.created_at_ms as i64)
         .bind(record.updated_at_ms as i64)
         .bind(record.last_event_sequence as i64)

@@ -414,14 +414,13 @@ impl SqliteProcessRegistry {
         conn.execute(
             "UPDATE processes
              SET updated_at_ms = ?2, change_seq = ?3, status = ?4,
-                 is_waiting = ?5, last_event_sequence = ?6, record_json = ?7
+                 last_event_sequence = ?5, record_json = ?6
              WHERE process_id = ?1",
             params![
                 record.id.as_str(),
                 record.updated_at_ms as i64,
                 change_seq as i64,
                 process_status_label(record),
-                i64::from(record.wait.is_some()),
                 record.last_event_sequence as i64,
                 process_encode_json(record)?
             ],
