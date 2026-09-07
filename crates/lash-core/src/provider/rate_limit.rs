@@ -271,6 +271,7 @@ mod tests {
 mod admission_tests {
     use super::*;
     use crate::Clock;
+    use crate::ClockWallTime as _;
     use futures_util::FutureExt as _;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -287,23 +288,22 @@ mod admission_tests {
                 elapsed_ms: AtomicU64::new(0),
             }
         }
+
+        fn elapsed_ms(&self) -> u64 {
+            self.elapsed_ms.load(Ordering::SeqCst)
+        }
     }
 
     #[async_trait]
     impl Clock for AdvancingClock {
         fn now(&self) -> std::time::Instant {
-            self.epoch + Duration::from_millis(self.timestamp_ms())
+            self.epoch + Duration::from_millis(self.elapsed_ms())
         }
-        fn timestamp_ms(&self) -> u64 {
-            self.elapsed_ms.load(Ordering::SeqCst)
-        }
-        fn timestamp_rfc3339(&self) -> String {
-            self.timestamp_datetime().to_rfc3339()
-        }
+        // `timestamp_ms`/`timestamp_rfc3339` derive through `ClockWallTime`
+        // from this single wall-clock instant, so the derived faces advance in
+        // lockstep with the test's elapsed counter.
         fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-            chrono::DateTime::from(
-                std::time::UNIX_EPOCH + Duration::from_millis(self.timestamp_ms()),
-            )
+            chrono::DateTime::from(std::time::UNIX_EPOCH + Duration::from_millis(self.elapsed_ms()))
         }
         async fn sleep(&self, duration: Duration) {
             self.elapsed_ms
