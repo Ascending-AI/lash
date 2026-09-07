@@ -155,22 +155,47 @@ impl TurnClaimOutcome {
 }
 
 /// Candidate indices one claim may take, or the refusal that took none.
-///
-/// `refusal` is `Some` exactly when `indices` is empty.
-#[derive(Clone, Debug)]
-pub struct TurnWorkClaimSelection {
-    pub indices: Vec<usize>,
-    pub refusal: Option<QueuedWorkClaimRefusal>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TurnWorkClaimSelection {
+    Selected { indices: Vec<usize> },
+    Refused { reason: QueuedWorkClaimRefusal },
 }
 
-/// The contiguous leading run one prefix-claiming backend may take, or the
-/// refusal that left it empty.
-///
-/// `refusal` is `Some` exactly when `len` is zero.
-#[derive(Clone, Copy, Debug)]
-pub struct TurnWorkClaimPrefix {
-    pub len: usize,
-    pub refusal: Option<QueuedWorkClaimRefusal>,
+/// The contiguous leading run one prefix-claiming backend may take, or its refusal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TurnWorkClaimPrefix {
+    Selected { len: usize },
+    Refused { reason: QueuedWorkClaimRefusal },
+}
+
+/// What a diagnostic probe observed after the claim's candidate scan was empty.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TurnWorkEmptyScanDiagnostic {
+    Refused {
+        reason: QueuedWorkClaimRefusal,
+    },
+    /// A later statement snapshot found selectable work. The probe does not admit it.
+    BecameSelectable,
+}
+
+impl From<TurnWorkClaimPrefix> for TurnWorkEmptyScanDiagnostic {
+    fn from(prefix: TurnWorkClaimPrefix) -> Self {
+        match prefix {
+            TurnWorkClaimPrefix::Selected { .. } => Self::BecameSelectable,
+            TurnWorkClaimPrefix::Refused { reason } => Self::Refused { reason },
+        }
+    }
+}
+
+impl TurnWorkEmptyScanDiagnostic {
+    /// Preserve the empty scan's outcome even if the diagnostic snapshot changed.
+    /// Admission belongs to a subsequent claim attempt, never to this probe.
+    pub fn into_refusal(self) -> QueuedWorkClaimRefusal {
+        match self {
+            Self::Refused { reason } => reason,
+            Self::BecameSelectable => QueuedWorkClaimRefusal::Empty,
+        }
+    }
 }
 
 /// Whether a claim acquired rows, or why it did not.
@@ -471,14 +496,16 @@ pub fn select_turn_work_claim_indices(
                 .collect::<Vec<_>>();
             let selected =
                 select_turn_work_claim_indices(&remaining, boundary, policy, now_epoch_ms)?;
-            if !selected.indices.is_empty() {
-                return Ok(select(
-                    selected
-                        .indices
-                        .into_iter()
-                        .map(|index| remaining_indices[index])
-                        .collect(),
-                ));
+            match selected {
+                TurnWorkClaimSelection::Selected { indices } => {
+                    return Ok(select(
+                        indices
+                            .into_iter()
+                            .map(|index| remaining_indices[index])
+                            .collect(),
+                    ));
+                }
+                TurnWorkClaimSelection::Refused { .. } => {}
             }
         }
         return Ok(refuse(
@@ -646,10 +673,7 @@ pub fn select_turn_work_claim_indices(
 /// A selection that acquired `indices`.
 fn select(indices: Vec<usize>) -> TurnWorkClaimSelection {
     debug_assert!(!indices.is_empty(), "a selection must acquire rows");
-    TurnWorkClaimSelection {
-        indices,
-        refusal: None,
-    }
+    TurnWorkClaimSelection::Selected { indices }
 }
 
 /// A selection that acquired nothing, recorded under `refusal`.
@@ -669,10 +693,7 @@ fn refuse(
         0,
         TurnClaimOutcome::Refused(refusal),
     );
-    TurnWorkClaimSelection {
-        indices: Vec::new(),
-        refusal: Some(refusal),
-    }
+    TurnWorkClaimSelection::Refused { reason: refusal }
 }
 
 /// Select the number of rows from a physically contiguous candidate set.
@@ -687,28 +708,24 @@ pub fn select_turn_work_claim_prefix(
     policy: &QueuedWorkClaimPolicy,
     now_epoch_ms: u64,
 ) -> Result<TurnWorkClaimPrefix, StoreError> {
-    let selected = select_turn_work_claim_indices(candidates, boundary, policy, now_epoch_ms)?;
-    let len = selected
-        .indices
-        .iter()
-        .copied()
-        .enumerate()
-        .take_while(|(prefix_index, selected_index)| prefix_index == selected_index)
-        .count();
-    // A selection whose physically earliest row is withheld leaves a
-    // prefix-claiming backend nothing to take. That is a refusal in its own
-    // right, distinct from the state machine's four, and it is named here
-    // because here is where the prefix is derived.
-    let refusal = if len == 0 {
-        Some(
-            selected
-                .refusal
-                .unwrap_or(QueuedWorkClaimRefusal::HeadWithheld),
-        )
-    } else {
-        None
-    };
-    Ok(TurnWorkClaimPrefix { len, refusal })
+    match select_turn_work_claim_indices(candidates, boundary, policy, now_epoch_ms)? {
+        TurnWorkClaimSelection::Refused { reason } => Ok(TurnWorkClaimPrefix::Refused { reason }),
+        TurnWorkClaimSelection::Selected { indices } => {
+            let len = indices
+                .into_iter()
+                .enumerate()
+                .take_while(|(prefix_index, selected_index)| prefix_index == selected_index)
+                .count();
+            // Withholding the physically earliest row leaves no contiguous prefix.
+            Ok(if len == 0 {
+                TurnWorkClaimPrefix::Refused {
+                    reason: QueuedWorkClaimRefusal::HeadWithheld,
+                }
+            } else {
+                TurnWorkClaimPrefix::Selected { len }
+            })
+        }
+    }
 }
 
 /// Size an exact, host-named drain composition.

@@ -1,4 +1,5 @@
 use crate::*;
+use lash_core::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
 
 pub(crate) const LOAD_TURN_FAILURE_SETTLEMENTS_SQL: &str = "SELECT turn_id, result_json
      FROM lash_runtime_turn_commits
@@ -1872,23 +1873,27 @@ impl QueuedWorkStore for PostgresSessionStore {
         )
         .await?;
         let prefix = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
-        let selected_len = prefix.len;
-        if selected_len == 0 {
-            let refusal = prefix.refusal.expect("an empty prefix names its refusal");
-            // The candidate query applies the boundary rule in SQL, so an empty
-            // scan reaches the claim state machine as a bare `Empty`. Re-ask it
-            // with the unfiltered ready head (and, failing that, look for
-            // deferred work) so this backend names the same fact every other one
-            // names.
-            let refusal = if refusal == QueuedWorkClaimRefusal::Empty {
-                postgres_refusal_for_empty_scan(&mut tx, session_id, generation, boundary, &policy)
+        let selected_len = match prefix {
+            TurnWorkClaimPrefix::Selected { len } => len,
+            TurnWorkClaimPrefix::Refused { reason: refusal } => {
+                // The candidate query applies the boundary rule in SQL, so an empty
+                // scan reaches the claim state machine as a bare `Empty`. Re-ask it
+                // with the unfiltered ready head (and, failing that, look for
+                // deferred work) so this backend names the same fact every other one
+                // names.
+                let refusal = if refusal == QueuedWorkClaimRefusal::Empty {
+                    postgres_refusal_for_empty_scan(
+                        &mut tx, session_id, generation, boundary, &policy,
+                    )
                     .await?
-            } else {
-                refusal
-            };
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(QueuedWorkClaimOutcome::Refused(refusal));
-        }
+                    .into_refusal()
+                } else {
+                    refusal
+                };
+                tx.commit().await.map_err(store_sqlx_error)?;
+                return Ok(QueuedWorkClaimOutcome::Refused(refusal));
+            }
+        };
 
         selected_batches.truncate(selected_len);
         match claim_queued_work_rows_postgres(
@@ -2196,14 +2201,16 @@ impl QueuedWorkStore for PostgresSessionStore {
             .map(|(row, batch)| claim_candidate_from_row(row, batch))
             .collect::<Vec<_>>();
         let selected_len =
-            select_exact_turn_work_claim_prefix(&candidates, boundary, &policy, now)?.len;
-        if selected_len == 0 {
-            tx.rollback().await.map_err(store_sqlx_error)?;
-            return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
-                None,
-                already_satisfied_batch_ids,
-            ));
-        }
+            match select_exact_turn_work_claim_prefix(&candidates, boundary, &policy, now)? {
+                TurnWorkClaimPrefix::Selected { len } => len,
+                TurnWorkClaimPrefix::Refused { .. } => {
+                    tx.rollback().await.map_err(store_sqlx_error)?;
+                    return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                        None,
+                        already_satisfied_batch_ids,
+                    ));
+                }
+            };
 
         selected_batches.truncate(selected_len);
         match claim_queued_work_rows_postgres(
@@ -3237,7 +3244,7 @@ async fn postgres_refusal_for_empty_scan(
     generation: u64,
     boundary: QueuedWorkClaimBoundary,
     policy: &QueuedWorkClaimPolicy,
-) -> Result<QueuedWorkClaimRefusal, StoreError> {
+) -> Result<TurnWorkEmptyScanDiagnostic, StoreError> {
     let now = postgres_transaction_epoch_ms(tx).await?;
     let head_rows = sqlx::query(&format!(
         "SELECT {QUEUED_WORK_COLUMNS}
@@ -3257,10 +3264,7 @@ async fn postgres_refusal_for_empty_scan(
         let head_batch = queued_work_batch_from_row(tx, head_row.clone()).await?;
         let head_candidates = vec![claim_candidate_from_row(&head_row, &head_batch)];
         let head_prefix = select_turn_work_claim_prefix(&head_candidates, boundary, policy, now)?;
-        // Under READ COMMITTED, concurrent enqueue can make this probe select
-        // a head after the initial empty scan. Preserve the existing Empty
-        // refusal for that changed observation (pinned by refusal_probe_tests).
-        return Ok(head_prefix.refusal.unwrap_or(QueuedWorkClaimRefusal::Empty));
+        return Ok(TurnWorkEmptyScanDiagnostic::from(head_prefix));
     }
     let epoch_ms = transaction_epoch_sql!();
     let deferred_row_pending: bool = sqlx::query_scalar(&format!(
@@ -3280,10 +3284,12 @@ async fn postgres_refusal_for_empty_scan(
     .fetch_one(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    Ok(if deferred_row_pending {
-        QueuedWorkClaimRefusal::NotYetAvailable
-    } else {
-        QueuedWorkClaimRefusal::Empty
+    Ok(TurnWorkEmptyScanDiagnostic::Refused {
+        reason: if deferred_row_pending {
+            QueuedWorkClaimRefusal::NotYetAvailable
+        } else {
+            QueuedWorkClaimRefusal::Empty
+        },
     })
 }
 
@@ -3406,10 +3412,12 @@ async fn claim_ready_queued_work_postgres_tx(
     let (mut selected_batches, candidates) =
         scan_queued_work_candidates_postgres(tx, session_id, generation, boundary, policy.max_rows)
             .await?;
-    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?.len;
-    if selected_len == 0 {
-        return Ok(ClaimTransactionOutcome::Commit(None));
-    }
+    let selected_len = match select_turn_work_claim_prefix(&candidates, boundary, &policy, now)? {
+        TurnWorkClaimPrefix::Selected { len } => len,
+        TurnWorkClaimPrefix::Refused { .. } => {
+            return Ok(ClaimTransactionOutcome::Commit(None));
+        }
+    };
 
     selected_batches.truncate(selected_len);
     claim_queued_work_rows_postgres(

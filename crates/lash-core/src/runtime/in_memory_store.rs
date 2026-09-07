@@ -603,45 +603,38 @@ impl InMemorySessionStore {
                 )
             })
             .collect::<Vec<_>>();
-        let (selected_indices, refusal): (Vec<usize>, Option<crate::QueuedWorkClaimRefusal>) =
-            match kind {
-                InMemoryQueuedWorkClaimKind::LeadingSessionCommand => {
-                    let selected_len =
-                        crate::store::queued_work::select_leading_session_command(&candidates);
-                    (
-                        claimable_indices
-                            .iter()
-                            .copied()
-                            .take(selected_len)
-                            .collect(),
-                        // Only the turn-work family's refusal reaches a host, and
-                        // a successful selection has no refusal to report, so
-                        // this family names one only when it took no rows.
-                        (selected_len == 0).then_some(crate::QueuedWorkClaimRefusal::Empty),
-                    )
+        let selected_indices: Vec<usize> = match kind {
+            InMemoryQueuedWorkClaimKind::LeadingSessionCommand => {
+                let selected_len =
+                    crate::store::queued_work::select_leading_session_command(&candidates);
+                if selected_len == 0 {
+                    return Ok(crate::QueuedWorkClaimOutcome::Refused(
+                        crate::QueuedWorkClaimRefusal::Empty,
+                    ));
                 }
-                InMemoryQueuedWorkClaimKind::TurnWork { boundary, policy } => {
-                    let selection = crate::store::queued_work::select_turn_work_claim_indices(
-                        &candidates,
-                        boundary,
-                        &policy,
-                        now,
-                    )?;
-                    (
-                        selection
-                            .indices
-                            .into_iter()
-                            .map(|candidate_index| claimable_indices[candidate_index])
-                            .collect(),
-                        selection.refusal,
-                    )
+                claimable_indices
+                    .iter()
+                    .copied()
+                    .take(selected_len)
+                    .collect()
+            }
+            InMemoryQueuedWorkClaimKind::TurnWork { boundary, policy } => {
+                match crate::store::queued_work::select_turn_work_claim_indices(
+                    &candidates,
+                    boundary,
+                    &policy,
+                    now,
+                )? {
+                    crate::store::TurnWorkClaimSelection::Selected { indices } => indices
+                        .into_iter()
+                        .map(|candidate_index| claimable_indices[candidate_index])
+                        .collect(),
+                    crate::store::TurnWorkClaimSelection::Refused { reason } => {
+                        return Ok(crate::QueuedWorkClaimOutcome::Refused(reason));
+                    }
                 }
-            };
-        if selected_indices.is_empty() {
-            return Ok(crate::QueuedWorkClaimOutcome::Refused(
-                refusal.unwrap_or(crate::QueuedWorkClaimRefusal::Empty),
-            ));
-        }
+            }
+        };
         let next_fencing_tokens = selected_indices
             .iter()
             .map(|index| {

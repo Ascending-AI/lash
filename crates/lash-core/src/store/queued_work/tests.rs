@@ -14,8 +14,12 @@ fn select_turn_work_claim_prefix(
     policy: &QueuedWorkClaimPolicy,
     now_epoch_ms: u64,
 ) -> Result<usize, StoreError> {
-    super::select_turn_work_claim_prefix(candidates, boundary, policy, now_epoch_ms)
-        .map(|prefix| prefix.len)
+    super::select_turn_work_claim_prefix(candidates, boundary, policy, now_epoch_ms).map(|prefix| {
+        match prefix {
+            TurnWorkClaimPrefix::Selected { len } => len,
+            TurnWorkClaimPrefix::Refused { .. } => 0,
+        }
+    })
 }
 
 fn select_exact_turn_work_claim_prefix(
@@ -24,8 +28,12 @@ fn select_exact_turn_work_claim_prefix(
     policy: &QueuedWorkClaimPolicy,
     now_epoch_ms: u64,
 ) -> Result<usize, StoreError> {
-    super::select_exact_turn_work_claim_prefix(candidates, boundary, policy, now_epoch_ms)
-        .map(|prefix| prefix.len)
+    super::select_exact_turn_work_claim_prefix(candidates, boundary, policy, now_epoch_ms).map(
+        |prefix| match prefix {
+            TurnWorkClaimPrefix::Selected { len } => len,
+            TurnWorkClaimPrefix::Refused { .. } => 0,
+        },
+    )
 }
 
 fn select_turn_work_claim_indices(
@@ -34,8 +42,12 @@ fn select_turn_work_claim_indices(
     policy: &QueuedWorkClaimPolicy,
     now_epoch_ms: u64,
 ) -> Result<Vec<usize>, StoreError> {
-    super::select_turn_work_claim_indices(candidates, boundary, policy, now_epoch_ms)
-        .map(|selection| selection.indices)
+    super::select_turn_work_claim_indices(candidates, boundary, policy, now_epoch_ms).map(
+        |selection| match selection {
+            TurnWorkClaimSelection::Selected { indices } => indices,
+            TurnWorkClaimSelection::Refused { .. } => Vec::new(),
+        },
+    )
 }
 
 #[test]
@@ -259,16 +271,19 @@ fn each_refusal_names_the_scenario_that_produces_it() {
         let selection =
             super::select_turn_work_claim_indices(&candidates, boundary, &claim_policy, 1_000)
                 .expect("claim laws hold");
-        assert!(
-            selection.indices.is_empty(),
-            "{scenario} must select nothing"
+        assert_eq!(
+            selection,
+            TurnWorkClaimSelection::Refused { reason: expected },
+            "{scenario}"
         );
-        assert_eq!(selection.refusal, Some(expected), "{scenario}");
         let prefix =
             super::select_turn_work_claim_prefix(&candidates, boundary, &claim_policy, 1_000)
                 .expect("claim laws hold");
-        assert_eq!(prefix.len, 0, "{scenario}");
-        assert_eq!(prefix.refusal, Some(expected), "{scenario}");
+        assert_eq!(
+            prefix,
+            TurnWorkClaimPrefix::Refused { reason: expected },
+            "{scenario}"
+        );
     }
 
     // A withheld head leaves a legal selection that no prefix-claiming
@@ -284,8 +299,10 @@ fn each_refusal_names_the_scenario_that_produces_it() {
         1_000,
     )
     .expect("claim laws hold");
-    assert_eq!(selection.indices, vec![1]);
-    assert_eq!(selection.refusal, None);
+    assert_eq!(
+        selection,
+        TurnWorkClaimSelection::Selected { indices: vec![1] }
+    );
     let prefix = super::select_turn_work_claim_prefix(
         &candidates,
         QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
@@ -293,8 +310,12 @@ fn each_refusal_names_the_scenario_that_produces_it() {
         1_000,
     )
     .expect("claim laws hold");
-    assert_eq!(prefix.len, 0);
-    assert_eq!(prefix.refusal, Some(QueuedWorkClaimRefusal::HeadWithheld));
+    assert_eq!(
+        prefix,
+        TurnWorkClaimPrefix::Refused {
+            reason: QueuedWorkClaimRefusal::HeadWithheld
+        }
+    );
 
     // `NotYetAvailable` has no scenario here on purpose: only a backend can see
     // that a lane still holds a row whose availability has not arrived, so the
@@ -395,10 +416,11 @@ fn control_kind_is_a_command_barrier() {
         1_000,
     )
     .unwrap();
-    assert_eq!(selection.len, 0);
     assert_eq!(
-        selection.refusal,
-        Some(QueuedWorkClaimRefusal::CommandAtHead)
+        selection,
+        TurnWorkClaimPrefix::Refused {
+            reason: QueuedWorkClaimRefusal::CommandAtHead
+        }
     );
 }
 
@@ -872,4 +894,24 @@ fn pending_session_ordering_compares_timestamps_only() {
     assert!(!precedes(Some(key(10, 1)), Some(key(10, 1))));
     assert!(precedes(Some(key(10, 1)), None));
     assert!(!precedes(None, Some(key(10, 1))));
+}
+
+#[test]
+fn empty_scan_diagnostic_preserves_refusal_and_names_became_selectable() {
+    let selected = TurnWorkEmptyScanDiagnostic::from(TurnWorkClaimPrefix::Selected { len: 1 });
+    assert_eq!(selected, TurnWorkEmptyScanDiagnostic::BecameSelectable);
+    assert_eq!(selected.into_refusal(), QueuedWorkClaimRefusal::Empty);
+    for reason in [
+        QueuedWorkClaimRefusal::ZeroLimit,
+        QueuedWorkClaimRefusal::Empty,
+        QueuedWorkClaimRefusal::NotYetAvailable,
+        QueuedWorkClaimRefusal::CommandAtHead,
+        QueuedWorkClaimRefusal::DeliveryBoundaryBlocked,
+        QueuedWorkClaimRefusal::HeadWithheld,
+        QueuedWorkClaimRefusal::ClaimRaceLost,
+    ] {
+        let diagnostic = TurnWorkEmptyScanDiagnostic::from(TurnWorkClaimPrefix::Refused { reason });
+        assert_eq!(diagnostic, TurnWorkEmptyScanDiagnostic::Refused { reason });
+        assert_eq!(diagnostic.into_refusal(), reason);
+    }
 }

@@ -46,7 +46,7 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
         ))
         .await
         .unwrap();
-    let reason = postgres_refusal_for_empty_scan(
+    let diagnostic = postgres_refusal_for_empty_scan(
         &mut tx,
         "refusal-probe",
         lease.fencing_token,
@@ -56,9 +56,14 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
     .await
     .unwrap();
     assert_eq!(
-        reason,
+        diagnostic,
+        TurnWorkEmptyScanDiagnostic::BecameSelectable,
+        "the later statement snapshot observes selectable work"
+    );
+    assert_eq!(
+        diagnostic.into_refusal(),
         QueuedWorkClaimRefusal::Empty,
-        "the existing fallback is observable across statement snapshots"
+        "a diagnostic must preserve Empty without admitting the new head"
     );
     let ready: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_queued_work_batches WHERE session_id = 'refusal-probe' AND claim_token IS NULL")
         .fetch_one(&mut *tx).await.unwrap();
