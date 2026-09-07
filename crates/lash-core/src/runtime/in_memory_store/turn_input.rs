@@ -10,24 +10,18 @@ use lash_sansio::sync::MutexExt;
 
 impl InMemoryPendingTurnInput {
     fn claim_diagnostics(&self) -> Option<crate::PendingTurnInputClaimDiagnostics> {
-        (self.claim_id.is_some() || matches!(self.input.state, crate::TurnInputState::Accepted))
+        (self.claim.id().is_some() || matches!(self.input.state, crate::TurnInputState::Accepted))
             .then(|| crate::PendingTurnInputClaimDiagnostics {
                 state: self.input.state,
-                claim_id: self.claim_id.clone(),
-                claim_owner: self.claim_owner.clone(),
-                claim_session_lease_generation: self
-                    .claim_token
-                    .as_ref()
-                    .map(|_| self.claim_session_lease_generation),
-                claim_fencing_token: self.claim_fencing_token,
+                claim_id: self.claim.id(),
+                claim_owner: self.claim.owner(),
+                claim_session_lease_generation: self.claim.diagnostic_generation(),
+                claim_fencing_token: self.claim.fencing_token,
             })
     }
 
     pub(super) fn clear_claim(&mut self) {
-        self.claim_id = None;
-        self.claim_token = None;
-        self.claim_owner = None;
-        self.claim_session_lease_generation = 0;
+        self.claim.release();
     }
 
     fn cancel_outcome(&mut self, claim_is_live: bool) -> crate::PendingTurnInputCancelOutcome {
@@ -45,7 +39,7 @@ impl InMemoryPendingTurnInput {
                 }
             }
             crate::TurnInputState::PendingActive | crate::TurnInputState::DeferredNextTurn => {
-                if self.claim_token.is_some() && claim_is_live {
+                if self.claim.token().is_some() && claim_is_live {
                     crate::PendingTurnInputCancelOutcome::AlreadyClaimed {
                         input: self.input.clone(),
                         claim: self.claim_diagnostics(),
@@ -161,11 +155,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         };
         pending.push(InMemoryPendingTurnInput {
             input: stored.clone(),
-            claim_id: None,
-            claim_token: None,
-            claim_owner: None,
-            claim_fencing_token: 0,
-            claim_session_lease_generation: 0,
+            claim: super::ClaimHold::with_fencing_token(0),
         });
         pending.sort_by_key(|entry| entry.input.enqueue_seq);
         Ok(stored)
@@ -189,8 +179,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                         crate::TurnInputState::PendingActive
                             | crate::TurnInputState::DeferredNextTurn
                     )
-                    && (entry.claim_token.is_none()
-                        || live_generation != Some(entry.claim_session_lease_generation))
+                    && (!entry.claim.live_under(live_generation))
             })
             .map(|entry| entry.input.clone())
             .collect::<Vec<_>>();
@@ -235,8 +224,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         for target in targets {
             let outcome = match find_pending_turn_input_index(&pending, session_id, target) {
                 Some(index) => {
-                    let claim_is_live =
-                        live_generation == Some(pending[index].claim_session_lease_generation);
+                    let claim_is_live = pending[index].claim.live_under(live_generation);
                     pending[index].cancel_outcome(claim_is_live)
                 }
                 None => crate::PendingTurnInputCancelOutcome::NotFound,
@@ -271,7 +259,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             .filter(|entry| entry.input.session_id == session_id)
             .filter(|entry| entry.input.enqueue_seq >= anchor_seq)
             .map(|entry| {
-                let claim_is_live = live_generation == Some(entry.claim_session_lease_generation);
+                let claim_is_live = entry.claim.live_under(live_generation);
                 entry.cancel_outcome(claim_is_live)
             })
             .collect::<Vec<_>>();
@@ -325,8 +313,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         let mut pending = self.pending_turn_inputs.lock_recover();
         for entry in pending.iter_mut() {
             if entry.input.session_id == claim.session_id
-                && entry.claim_id.as_deref() == Some(claim.claim_id.as_str())
-                && entry.claim_token.as_deref() == Some(claim.lease_token.as_str())
+                && entry.claim.owned_by(&claim.claim_id, &claim.lease_token)
             {
                 #[cfg(test)]
                 self.abandoned_turn_input_claim_count
@@ -341,10 +328,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                         }
                     }
                 }
-                entry.claim_id = None;
-                entry.claim_token = None;
-                entry.claim_owner = None;
-                entry.claim_session_lease_generation = 0;
+                entry.claim.release();
             }
         }
         Ok(())
@@ -371,8 +355,8 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                     session_execution_lease.fencing_token,
                     entry.input.state,
                     &entry.input.ingress,
-                    entry.claim_token.is_some(),
-                    entry.claim_session_lease_generation,
+                    entry.claim.token().is_some(),
+                    entry.claim.generation().unwrap_or(0),
                 )
             {
                 continue;

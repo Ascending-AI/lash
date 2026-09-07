@@ -81,7 +81,7 @@ impl InMemorySessionStore {
                     .iter_mut()
                     .find(|row| row.batch.batch_id == record_id)
                     .expect("queued-work counter injection row");
-                row.claim_fencing_token = value;
+                row.claim.fencing_token = value;
             }
             "session_head_revision" => {
                 self.session_head_meta
@@ -118,10 +118,10 @@ impl InMemorySessionStore {
                     .expect("queued-work counter snapshot row");
                 format!(
                     "{}:{:?}:{:?}:{}",
-                    row.claim_fencing_token,
-                    row.claim_id,
-                    row.claim_token,
-                    row.claim_session_lease_generation
+                    row.claim.fencing_token,
+                    row.claim.id(),
+                    row.claim.token(),
+                    row.claim.generation().unwrap_or(0)
                 )
             }
             "session_head_revision" => {
@@ -523,11 +523,9 @@ mod tests {
                         ),
                     }],
                 },
-                claim_id: None,
-                claim_token: None,
-                claim_owner: None,
-                claim_fencing_token: i64::MAX as u64,
-                claim_session_lease_generation: 0,
+                claim: crate::runtime::in_memory_store::ClaimHold::with_fencing_token(
+                    i64::MAX as u64,
+                ),
             });
         let owner = crate::LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
         let authority = crate::SessionExecutionLeaseAuthority {
@@ -579,11 +577,17 @@ mod tests {
                     enqueued_at_ms: 0,
                     items: Vec::new(),
                 },
-                claim_id: Some("queue-claim".to_string()),
-                claim_token: Some("queue-token".to_string()),
-                claim_owner: None,
-                claim_fencing_token: 1,
-                claim_session_lease_generation: 1,
+                claim: {
+                    let mut hold = crate::runtime::in_memory_store::ClaimHold::default();
+                    hold.acquire(
+                        "queue-claim".into(),
+                        "queue-token".into(),
+                        crate::LeaseOwnerIdentity::opaque("queue-owner", "queue-incarnation"),
+                        1,
+                        1,
+                    );
+                    hold
+                },
             });
         let state = RuntimeSessionState {
             session_id: "session".to_string(),
