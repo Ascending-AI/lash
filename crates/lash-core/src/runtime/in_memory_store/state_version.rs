@@ -61,7 +61,7 @@ impl InMemorySessionStore {
                 session_id: binding.session_id.clone(),
             });
         }
-        self.bind_or_verify(&binding.session_id)?;
+        self.verify_binding_for_admission(&binding.session_id)?;
         let mut durable = self.session_meta.lock_recover();
         if durable.is_some() {
             return Ok(crate::SessionAdmission::Rebound);

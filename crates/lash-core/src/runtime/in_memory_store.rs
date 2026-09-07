@@ -1071,10 +1071,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         if let Some(error) = self.fail_next_runtime_commit.lock_recover().take() {
             return Err(error);
         }
+        let session_meta_before_commit = self.session_meta.lock_recover().clone();
+        // The binding adjudication takes the head-row lock itself, so it runs
+        // before this transaction pins that lock for the rest of the commit.
+        self.ensure_session_metadata_for_commit(commit)?;
         let mut meta = self.session_head_meta.lock_recover();
         let actual = meta.as_ref().map_or(0, |meta| meta.head_revision);
-        let session_meta_before_commit = self.session_meta.lock_recover().clone();
-        self.ensure_session_metadata_for_commit(commit)?;
         #[cfg(test)]
         self.fail_after_first_runtime_commit_mutation_if_requested(
             session_meta_before_commit.clone(),
