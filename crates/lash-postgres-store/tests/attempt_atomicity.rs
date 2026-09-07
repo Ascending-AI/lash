@@ -1242,9 +1242,8 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     let first_effect_host: Arc<dyn EffectHost> = Arc::new(storage.effect_host());
     let postgres_policy = fig1293_policy();
     let postgres_state = fig1293_state(&postgres_policy);
-    let (postgres_store, release) = release_rendezvous::ReleaseRendezvous::wrap(Arc::new(
-        lash_core::facade_support::InMemorySessionStore::new(),
-    ));
+    let postgres_store: Arc<dyn lash_core::RuntimePersistence> =
+        Arc::new(lash_core::facade_support::InMemorySessionStore::new());
     let mut first = fig1293_runtime(
         Arc::clone(&first_effect_host),
         Arc::clone(&postgres_registry),
@@ -1260,7 +1259,6 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
             .await
             .expect_err("FIG-1293 PostgreSQL turn must crash after ToolBatch commit");
     assert!(crashed.is_panic());
-    release.complete().await;
 
     let replay_effect_host: Arc<dyn EffectHost> = Arc::new(storage.effect_host());
     let mut replay = fig1293_runtime(
@@ -2505,6 +2503,3 @@ mod rerunnable_signal;
 
 #[path = "attempt_atomicity/host_ingress.rs"]
 mod host_ingress;
-
-#[path = "attempt_atomicity/release_rendezvous.rs"]
-mod release_rendezvous;

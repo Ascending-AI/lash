@@ -2755,8 +2755,40 @@ impl LashRuntime {
     /// directly; it is the one configuration with no durable ingress at all.
     pub async fn stream_turn_with_agent_frames(
         &mut self,
+        input: TurnInput,
+        opts: TurnOptions<'_>,
+    ) -> Result<AgentFrameRun, RuntimeError> {
+        use futures_util::FutureExt;
+
+        // Keep the guard outside the unwinding body. Both streamed facade turns
+        // and managed child turns pass here, so their task JoinError cannot
+        // surface before owner-side release has finished. Cancellation still
+        // drops the guard and uses its best-effort cleanup / TTL fallback.
+        let mut lease = None;
+        let result = std::panic::AssertUnwindSafe(
+            self.stream_turn_with_agent_frames_holding_lease(input, opts, &mut lease)
+                .boxed(),
+        )
+        .catch_unwind()
+        .await;
+        match result {
+            Ok(result) => result,
+            Err(payload) => {
+                if let Some(lease) = lease.as_ref()
+                    && let Err(error) = lease.release_if_live().await
+                {
+                    tracing::warn!(%error, "failed to release session execution lease after turn panic");
+                }
+                std::panic::resume_unwind(payload)
+            }
+        }
+    }
+
+    async fn stream_turn_with_agent_frames_holding_lease(
+        &mut self,
         mut input: TurnInput,
         opts: TurnOptions<'_>,
+        session_execution_lease: &mut Option<SessionExecutionLeaseGuard>,
     ) -> Result<AgentFrameRun, RuntimeError> {
         if let Some(hint) = opts.local_cancel_origin_hint() {
             input.turn_context.set_local_cancel_origin_hint(hint);
@@ -2768,7 +2800,7 @@ impl LashRuntime {
             .as_ref()
             .and_then(|session| session.history_store())
         else {
-            let mut session_execution_lease = self.claim_session_execution_lease().await?;
+            *session_execution_lease = self.claim_session_execution_lease().await?;
             let scoped_effect_controller = opts.scoped_effect_controller();
             let result = Box::pin(self.drive_logical_turn(
                 LogicalTurnStart::Input(input),
@@ -2777,7 +2809,7 @@ impl LashRuntime {
                 scoped_effect_controller,
                 cancel,
                 LogicalTurnClaims::new(Vec::new(), Vec::new()),
-                &mut session_execution_lease,
+                session_execution_lease,
                 stopwatch,
             ))
             .await;
@@ -2796,7 +2828,7 @@ impl LashRuntime {
         input.trace_turn_id = Some(trace_turn_id.clone());
         // Store-backed new turns acquire and admit the execution lane before
         // the acceptance effect writes mutable session payload (ADR 0077).
-        let mut session_execution_lease = self.claim_session_execution_lease().await?;
+        *session_execution_lease = self.claim_session_execution_lease().await?;
         // Acceptance is journaled, not written directly: it happens before the
         // turn runs, which puts it inside a durable engine's replay window, and
         // a replayed handler must re-derive this admission rather than mint a
@@ -3097,7 +3129,7 @@ impl LashRuntime {
             scoped_effect_controller,
             cancel,
             LogicalTurnClaims::new(Vec::new(), vec![drive]),
-            &mut session_execution_lease,
+            session_execution_lease,
             stopwatch,
         ))
         .await;
@@ -4679,3 +4711,7 @@ mod tests {
         assert_eq!(resolver.attempts.load(Ordering::SeqCst), 1);
     }
 }
+
+#[cfg(test)]
+#[path = "turn_loop/panic_tests.rs"]
+mod panic_tests;
