@@ -1,4 +1,6 @@
-async fn execute_restate_process_command<'ctx, C>(
+use super::*;
+
+pub(super) async fn execute_restate_process_command<'ctx, C>(
     context: &C,
     invocation: &RuntimeInvocation,
     command: ProcessCommand,
@@ -208,9 +210,14 @@ where
             reason,
             replay,
         } => {
-            let record = registry.get_process_ref(&process_ref).await?.ok_or_else(|| {
-                lash_core::runtime::registry_transitions::unknown_process(&process_ref.process_id)
-            })?;
+            let record = registry
+                .get_process_ref(&process_ref)
+                .await?
+                .ok_or_else(|| {
+                    lash_core::runtime::registry_transitions::unknown_process(
+                        &process_ref.process_id,
+                    )
+                })?;
             let mut request = lash_core::ProcessEventAppendRequest::cancel_requested(
                 &process_ref.process_id,
                 reason.clone(),

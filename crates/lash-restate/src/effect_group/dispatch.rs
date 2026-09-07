@@ -1,3 +1,5 @@
+use super::*;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EffectGroupDispatchRequest {
     pub group_key: String,
@@ -24,9 +26,9 @@ enum EffectGroupChildRunOutcome {
 
 #[derive(Clone)]
 pub struct EffectGroupDispatch {
-    executors: Arc<dyn GroupExecutors>,
-    ingress: RestateIngressClient,
-    infinite_retry_policy: RunRetryPolicy,
+    pub(super) executors: Arc<dyn GroupExecutors>,
+    pub(super) ingress: RestateIngressClient,
+    pub(super) infinite_retry_policy: RunRetryPolicy,
 }
 
 impl std::fmt::Debug for EffectGroupDispatch {

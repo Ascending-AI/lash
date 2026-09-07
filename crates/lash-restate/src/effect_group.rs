@@ -1523,7 +1523,11 @@ impl EffectGroupPayload {
     }
 }
 
-include!("effect_group/dispatch.rs");
+mod dispatch;
+#[cfg(test)]
+pub(crate) use dispatch::EffectGroupChildRequest;
+pub(crate) use dispatch::EffectGroupDispatchClient;
+pub use dispatch::{EffectGroupDispatch, EffectGroupDispatchRequest};
 pub(crate) fn payload_key(group_key: &str, position: usize) -> String {
     let digest = Sha256::digest(group_key.as_bytes());
     format!("{:x}:{position}", digest)

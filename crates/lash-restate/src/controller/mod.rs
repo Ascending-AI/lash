@@ -1246,7 +1246,8 @@ async fn execute_restate_journaled_effect(
     }
 }
 
-include!("process_command.rs");
+mod process_command;
+use process_command::execute_restate_process_command;
 async fn signal_ordinal_for_event(
     registry: &dyn ProcessRegistry,
     process_ref: &lash_core::ProcessRef,
