@@ -62,3 +62,43 @@ impl InMemorySessionStore {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+mod conformance_mapping_tests {
+    use super::*;
+    use crate::SessionStoreFactory;
+
+    #[tokio::test]
+    async fn invalid_active_path_is_typed_corruption() {
+        let factory = super::super::InMemorySessionStoreFactory::new();
+        factory
+            .create_store(&crate::testing::conformance::session_store_request(
+                "reader",
+                "mapping-test",
+                crate::SessionRelation::Root,
+            ))
+            .await
+            .unwrap();
+        let store = factory.raw_store_for_testing("reader").unwrap();
+        // A foreign-node read must walk the bound session's active path. A
+        // dangling head forces the path-validation error through reads.rs,
+        // rather than the separately classified load_session path.
+        store
+            .global_session_heads
+            .lock_recover()
+            .insert("reader".into(), Some("missing".into()));
+        let error = store
+            .node_visible_to_bound_session("foreign-node")
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                crate::StoreError::StoredDataCorrupt {
+                    record_kind: "SessionGraph",
+                    ..
+                }
+            ),
+            "invalid active path must retain StoredDataCorrupt: {error:?}"
+        );
+    }
+}
