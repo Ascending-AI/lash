@@ -1240,11 +1240,8 @@ mod tests {
         );
     }
 
-    mod cache_breakpoint_tests {
-        use super::*;
-
-        include!("cache_breakpoint_tests.rs");
-    }
+    #[cfg(test)]
+    mod cache_breakpoint_tests;
 
     #[test]
     fn cache_retention_none_removes_cache_control() {
