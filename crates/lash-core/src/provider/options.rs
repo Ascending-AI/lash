@@ -506,3 +506,50 @@ pub struct ProviderRateLimitPolicy {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_window_ms: Option<u64>,
 }
+
+/// Per-call retry accounting; courtesy calls never consume the counted ladder.
+#[derive(Debug, Default)]
+pub(super) struct RetryBudget {
+    pub(super) attempt: u32,
+    pub(super) throttle_waited: Duration,
+    courtesy_calls: usize,
+    pub(super) unsafe_retries: u8,
+}
+
+impl RetryBudget {
+    pub(super) fn throttle_wait(
+        &self,
+        policy: &ProviderRetryPolicy,
+        verdict: TransportRetryVerdict,
+    ) -> Option<Duration> {
+        let TransportRetryVerdict::RetryableThrottle {
+            retry_after: Some(wait),
+        } = verdict
+        else {
+            return None;
+        };
+        let wait = policy.retry_after_within_cap(wait)?;
+        (wait >= MIN_FREE_THROTTLE_WAIT
+            && self.courtesy_calls < MAX_COURTESY_THROTTLE_CALLS
+            && self.throttle_waited.saturating_add(wait)
+                <= Duration::from_millis(policy.throttle_wait_budget_ms))
+        .then_some(wait)
+    }
+
+    pub(super) fn charge_throttle(&mut self, wait: Duration, unsafe_retry: bool) {
+        self.throttle_waited += wait;
+        self.courtesy_calls += 1;
+        self.charge_generation(unsafe_retry);
+    }
+
+    pub(super) fn consume(&mut self, unsafe_retry: bool) {
+        self.attempt += 1;
+        self.charge_generation(unsafe_retry);
+    }
+
+    fn charge_generation(&mut self, unsafe_retry: bool) {
+        if unsafe_retry {
+            self.unsafe_retries = self.unsafe_retries.saturating_add(1);
+        }
+    }
+}

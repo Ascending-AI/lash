@@ -323,15 +323,9 @@ impl ProviderHandle {
         }
         let reliability = self.options().reliability;
         let attempts = reliability.retry.attempts();
-        let mut attempt = 0;
+        let mut budget = RetryBudget::default();
         let call_id = LlmCallId(uuid::Uuid::new_v4().to_string());
         let mut records = Vec::new();
-        // Cumulative time and calls already spent deferring to provider
-        // throttles without consuming attempts. Both dimensions are bounded.
-        let throttle_budget = Duration::from_millis(reliability.retry.throttle_wait_budget_ms);
-        let mut throttle_waited = Duration::ZERO;
-        let mut courtesy_throttle_calls = 0;
-        let mut unsafe_retries = 0u8;
         loop {
             let _permit = self.components.rate_limiter.admit(&request).await;
             let clock = self.components.rate_limiter.clock();
@@ -411,88 +405,20 @@ impl ProviderHandle {
                         .components
                         .provider
                         .generation_retry_guarantee(&request);
+                    let (verdict, charge_safety_decision) = retry_verdict(
+                        &failure,
+                        protocol_position,
+                        retry_guarantee,
+                        &reliability.retry,
+                        &charge_safety,
+                        &budget,
+                    );
                     let retry_class =
                         automatic_retry_class(&failure, protocol_position, retry_guarantee);
-                    let retry_after_exceeds_cap =
-                        failure.retry_after().is_some_and(|retry_after| {
-                            reliability
-                                .retry
-                                .retry_after_within_cap(retry_after)
-                                .is_none()
-                        });
-                    let throttle_wait = if let TransportRetryVerdict::RetryableThrottle {
-                        retry_after: Some(retry_after),
-                    } = failure.retry_verdict
-                    {
-                        reliability
-                            .retry
-                            .retry_after_within_cap(retry_after)
-                            .and_then(|wait| {
-                                let charge = wait;
-                                (wait >= MIN_FREE_THROTTLE_WAIT
-                                    && courtesy_throttle_calls < MAX_COURTESY_THROTTLE_CALLS
-                                    && throttle_waited.saturating_add(charge) <= throttle_budget)
-                                    .then_some((wait, charge))
-                            })
-                    } else {
-                        None
-                    };
-                    let counted_retry_available = attempt + 1 < attempts;
-                    let mut charge_safety_decision =
-                        if failure.is_retryable() && retry_class.is_none() {
-                            match charge_safety_decision(
-                                failure.retry_verdict,
-                                retry_guarantee,
-                                &charge_safety,
-                                failure
-                                    .partial_response
-                                    .as_deref()
-                                    .map(|response| &response.usage),
-                                unsafe_retries.saturating_add(1),
-                            ) {
-                                ChargeSafetyEvaluation::Evaluated(decision) => Some(decision),
-                                ChargeSafetyEvaluation::NotEvaluated(_) => None,
-                            }
-                        } else {
-                            None
-                        };
-                    if retry_after_exceeds_cap
-                        && let Some(ChargeSafetyDecision::Authorized {
-                            tokens_at_stake,
-                            attempt_number,
-                        }) = charge_safety_decision.clone()
-                    {
-                        charge_safety_decision = Some(ChargeSafetyDecision::Denied {
-                            tokens_at_stake,
-                            attempt_number,
-                            reason: ChargeSafetyDenialReason::RetryAfterExceedsCap,
-                        });
-                    }
-
-                    // A retryable transport classification is necessary but
-                    // not sufficient to buy another generation. These are the
-                    // only automatic retry classes:
-                    //
-                    // * `NoResponse`: no provider response was observed, so
-                    //   Lash has no output or response evidence to discard.
-                    // * `RejectedHttpResponse`: only HTTP 429 classified as a
-                    //   throttle and carrying `Retry-After`. That combination
-                    //   is the provider's explicit evidence that admission was
-                    //   rejected and says when resubmission is allowed. HTTP
-                    //   408/409/425/500/502/503/504 are intentionally excluded:
-                    //   none proves an upstream generation did not start.
-                    // * `EmptyStreamPartial`: a streaming adapter explicitly
-                    //   returned an empty partial response with no output or
-                    //   usage. This is intentionally narrower than blanket
-                    //   `ResponseObserved`; arbitrary response-observed
-                    //   failures may hide provider-side generation.
-                    // * `ProviderGuarantee`: the provider explicitly promises
-                    //   idempotent replay or partial-generation resume.
-                    //
-                    // In particular, `OutputStarted` never qualifies through
-                    // position or emptiness. It requires the provider guarantee
-                    // above; none of Lash's bundled providers declares one.
-                    if let Some(decision @ ChargeSafetyDecision::Denied { reason, .. }) =
+                    let throttle_wait =
+                        budget.throttle_wait(&reliability.retry, failure.retry_verdict);
+                    let counted_retry_available = budget.attempt + 1 < attempts;
+                    if let Some(ChargeSafetyDecision::Denied { reason, .. }) =
                         charge_safety_decision.clone()
                     {
                         let retry_after_header_present = failure
@@ -527,196 +453,130 @@ impl ProviderHandle {
                             reason = charge_safety_retry_reason(reason, protocol_position),
                             "provider retry denied because another generation is not proven charge-safe"
                         );
-                        records.push(failure_attempt_record(
-                            records.len() as u32 + 1,
-                            started_at,
-                            clock.now().saturating_duration_since(started),
-                            recorded_failure,
+                    }
+
+                    let (delay, reason, consumed) = match &verdict {
+                        RetryVerdict::Refusal(RetryRefusal::ChargeSafety(reason)) => (
+                            None,
+                            Some(
+                                charge_safety_retry_reason(*reason, protocol_position).to_string(),
+                            ),
                             true,
-                            protocol_position,
-                            Some(RetryDecision {
-                                scheduled: false,
-                                delay: None,
-                                reason: Some(
-                                    charge_safety_retry_reason(reason, protocol_position)
-                                        .to_string(),
-                                ),
-                                charge_safety: Some(decision),
-                            }),
-                        ));
-                        return Err(ProviderCompletionError {
-                            error: charge_safety_refusal(failure, protocol_position, reason),
-                            call_record: Box::new(LlmCallRecord {
-                                call_id,
-                                label: None,
-                                replay_drops: sideband.replay_drops(),
-                                attempts: records,
-                            }),
-                        });
-                    }
-                    if failure.is_retryable() && retry_after_exceeds_cap {
-                        records.push(failure_attempt_record(
-                            records.len() as u32 + 1,
-                            started_at,
-                            clock.now().saturating_duration_since(started),
-                            recorded_failure,
+                        ),
+                        RetryVerdict::Refusal(RetryRefusal::RetryAfterCap) => {
+                            (None, Some("retry_after_exceeds_cap".to_string()), true)
+                        }
+                        RetryVerdict::Throttle { wait, .. } => {
+                            (Some(*wait), Some("provider_retry_after".to_string()), false)
+                        }
+                        RetryVerdict::Exhaustion { reason } => {
+                            (None, Some((*reason).to_string()), true)
+                        }
+                        RetryVerdict::Backoff { class } => (
+                            Some(
+                                reliability
+                                    .retry
+                                    .delay_for_attempt(budget.attempt, failure.retry_after())
+                                    .expect(
+                                        "Retry-After was checked against the cap before scheduling",
+                                    ),
+                            ),
+                            class.reason(),
                             true,
-                            protocol_position,
-                            Some(RetryDecision {
-                                scheduled: false,
-                                delay: None,
-                                reason: Some("retry_after_exceeds_cap".to_string()),
-                                charge_safety: charge_safety_decision,
-                            }),
-                        ));
-                        return Err(ProviderCompletionError {
-                            error: failure,
-                            call_record: Box::new(LlmCallRecord {
-                                call_id,
-                                label: None,
-                                replay_drops: sideband.replay_drops(),
-                                attempts: records,
-                            }),
-                        });
-                    }
-                    // Throttle deference: when the adapter's typed throttle
-                    // verdict states how long to back off, honor the wait
-                    // without consuming a retry attempt — the provider is asking us to come back,
-                    // not failing. The courtesy is bounded: each deferred wait
-                    // requires at least `MIN_FREE_THROTTLE_WAIT`, charges the
-                    // actual delay against `throttle_wait_budget_ms`, and is
-                    // capped at `MAX_COURTESY_THROTTLE_CALLS`. Once either
-                    // bound is spent, a throttle counts as an ordinary
-                    // retryable failure. A missing or shorter `Retry-After`
-                    // never defers: there is no meaningful server-stated wait
-                    // to honor, so the normal backoff-and-count ladder applies.
-                    if let Some((wait, charge)) = throttle_wait {
-                        if charge_safety_decision.is_some() {
-                            unsafe_retries = unsafe_retries.saturating_add(1);
-                        }
-                        throttle_waited += charge;
-                        courtesy_throttle_calls += 1;
-                        crate::operational_metrics::record_provider_retry(self.kind(), "throttle");
-                        crate::operational_metrics::record_provider_throttle_wait(
-                            self.kind(),
-                            wait,
-                        );
-                        records.push(failure_attempt_record(
-                            records.len() as u32 + 1,
-                            started_at,
-                            clock.now().saturating_duration_since(started),
-                            recorded_failure,
-                            false,
-                            protocol_position,
-                            Some(RetryDecision {
-                                scheduled: true,
-                                delay: Some(wait),
-                                reason: Some("provider_retry_after".to_string()),
-                                charge_safety: charge_safety_decision,
-                            }),
-                        ));
-                        tracing::debug!(
-                            target: "lash_core::provider::reliability",
-                            provider = self.kind(),
-                            attempt = attempt + 1,
-                            max_attempts = attempts,
-                            wait_ms = wait.as_millis() as u64,
-                            throttle_waited_ms = throttle_waited.as_millis() as u64,
-                            err = %failure.message,
-                            "provider throttled with retry-after; waiting without consuming a retry attempt"
-                        );
-                        if let Some(events) = request.stream_events.as_ref() {
-                            if retry_class.is_some_and(AutomaticRetryClass::resets_stream) {
-                                events.send(crate::llm::types::LlmStreamEvent::AttemptReset);
-                            }
-                            events.send(crate::llm::types::LlmStreamEvent::RetryStatus {
-                                wait_seconds: wait.as_secs(),
-                                attempt: (attempt + 1) as usize,
-                                max_attempts: attempts as usize,
-                                reason: failure.message.clone(),
-                            });
-                        }
-                        self.components.rate_limiter.clock().sleep(wait).await;
-                        continue;
-                    }
-                    if attempt + 1 >= attempts || !failure.is_retryable() {
-                        let reason = if !failure.is_retryable() {
-                            "not_retryable"
-                        } else {
-                            "retry_budget_exhausted"
-                        };
-                        records.push(failure_attempt_record(
-                            records.len() as u32 + 1,
-                            started_at,
-                            clock.now().saturating_duration_since(started),
-                            recorded_failure,
-                            true,
-                            protocol_position,
-                            Some(RetryDecision {
-                                scheduled: false,
-                                delay: None,
-                                reason: Some(reason.to_string()),
-                                charge_safety: charge_safety_decision,
-                            }),
-                        ));
-                        let completion_error = ProviderCompletionError {
-                            error: failure,
-                            call_record: Box::new(LlmCallRecord {
-                                call_id,
-                                label: None,
-                                replay_drops: sideband.replay_drops(),
-                                attempts: records,
-                            }),
-                        };
-                        if let Some(payload) = panic_payload {
-                            crate::panic_containment::enforce_loudness(payload);
-                        }
-                        return Err(completion_error);
-                    }
-                    let delay = reliability
-                        .retry
-                        .delay_for_attempt(attempt, failure.retry_after())
-                        .expect("Retry-After was checked against the cap before scheduling");
-                    crate::operational_metrics::record_provider_retry(self.kind(), "backoff");
-                    if charge_safety_decision.is_some() {
-                        unsafe_retries = unsafe_retries.saturating_add(1);
-                    }
+                        ),
+                    };
+                    let unsafe_retry = charge_safety_decision.is_some();
                     records.push(failure_attempt_record(
                         records.len() as u32 + 1,
                         started_at,
                         clock.now().saturating_duration_since(started),
                         recorded_failure,
-                        true,
+                        consumed,
                         protocol_position,
                         Some(RetryDecision {
-                            scheduled: true,
-                            delay: Some(delay),
-                            reason: retry_class.map(|class| class.reason().to_string()),
+                            scheduled: delay.is_some(),
+                            delay,
+                            reason,
                             charge_safety: charge_safety_decision,
                         }),
                     ));
-                    tracing::debug!(
-                        target: "lash_core::provider::reliability",
-                        provider = self.kind(),
-                        attempt = attempt + 1,
-                        max_attempts = attempts,
-                        delay_ms = delay.as_millis() as u64,
-                        err = %failure.message,
-                        "provider call failed with retryable failure; sleeping before retry"
-                    );
-                    if let Some(events) = request.stream_events.as_ref() {
-                        if retry_class.is_some_and(AutomaticRetryClass::resets_stream) {
-                            events.send(crate::llm::types::LlmStreamEvent::AttemptReset);
+                    match verdict {
+                        RetryVerdict::Refusal(_) | RetryVerdict::Exhaustion { .. } => {
+                            let error = match verdict {
+                                RetryVerdict::Refusal(RetryRefusal::ChargeSafety(reason)) => {
+                                    charge_safety_refusal(failure, protocol_position, reason)
+                                }
+                                _ => failure,
+                            };
+                            let completion_error = ProviderCompletionError {
+                                error,
+                                call_record: Box::new(LlmCallRecord {
+                                    call_id,
+                                    label: None,
+                                    replay_drops: sideband.replay_drops(),
+                                    attempts: records,
+                                }),
+                            };
+                            if matches!(verdict, RetryVerdict::Exhaustion { .. })
+                                && let Some(payload) = panic_payload
+                            {
+                                crate::panic_containment::enforce_loudness(payload);
+                            }
+                            return Err(completion_error);
                         }
-                        events.send(crate::llm::types::LlmStreamEvent::RetryStatus {
-                            wait_seconds: delay.as_secs(),
-                            attempt: (attempt + 1) as usize,
-                            max_attempts: attempts as usize,
-                            reason: failure.message.clone(),
-                        });
+                        RetryVerdict::Throttle { wait, class } => {
+                            budget.charge_throttle(wait, unsafe_retry);
+                            crate::operational_metrics::record_provider_retry(
+                                self.kind(),
+                                "throttle",
+                            );
+                            crate::operational_metrics::record_provider_throttle_wait(
+                                self.kind(),
+                                wait,
+                            );
+                            tracing::debug!(
+                                target: "lash_core::provider::reliability",
+                                provider = self.kind(), attempt = budget.attempt + 1,
+                                max_attempts = attempts, wait_ms = wait.as_millis() as u64,
+                                throttle_waited_ms = budget.throttle_waited.as_millis() as u64,
+                                err = %failure.message,
+                                "provider throttled with retry-after; waiting without consuming a retry attempt"
+                            );
+                            announce_retry(
+                                &request,
+                                class,
+                                wait,
+                                budget.attempt,
+                                attempts,
+                                &failure,
+                            );
+                            self.components.rate_limiter.clock().sleep(wait).await;
+                        }
+                        RetryVerdict::Backoff { class } => {
+                            let delay = delay.expect("backoff delay was selected before sealing");
+                            crate::operational_metrics::record_provider_retry(
+                                self.kind(),
+                                "backoff",
+                            );
+                            tracing::debug!(
+                                target: "lash_core::provider::reliability",
+                                provider = self.kind(), attempt = budget.attempt + 1,
+                                max_attempts = attempts, delay_ms = delay.as_millis() as u64,
+                                err = %failure.message,
+                                "provider call failed with retryable failure; sleeping before retry"
+                            );
+                            announce_retry(
+                                &request,
+                                class,
+                                delay,
+                                budget.attempt,
+                                attempts,
+                                &failure,
+                            );
+                            self.components.rate_limiter.clock().sleep(delay).await;
+                            budget.consume(unsafe_retry);
+                        }
                     }
-                    self.components.rate_limiter.clock().sleep(delay).await;
-                    attempt += 1;
                 }
             }
         }
@@ -764,6 +624,135 @@ fn success_protocol_position(response: &LlmResponse, outcome: AttemptOutcome) ->
         ProtocolPosition::OutputStarted
     } else {
         ProtocolPosition::ResponseObserved
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RetryClass {
+    Automatic(AutomaticRetryClass),
+    ChargeAuthorized,
+}
+
+impl RetryClass {
+    fn reason(self) -> Option<String> {
+        match self {
+            Self::Automatic(class) => Some(class.reason().to_string()),
+            Self::ChargeAuthorized => None,
+        }
+    }
+
+    fn resets_stream(self) -> bool {
+        match self {
+            Self::Automatic(class) => class.resets_stream(),
+            Self::ChargeAuthorized => false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RetryRefusal {
+    ChargeSafety(ChargeSafetyDenialReason),
+    RetryAfterCap,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RetryVerdict {
+    Refusal(RetryRefusal),
+    Throttle { wait: Duration, class: RetryClass },
+    Exhaustion { reason: &'static str },
+    Backoff { class: RetryClass },
+}
+
+/// Policy only: no clocks, random jitter, provider calls, or attempt writes.
+fn retry_verdict(
+    failure: &LlmTransportError,
+    position: ProtocolPosition,
+    guarantee: GenerationRetryGuarantee,
+    policy: &ProviderRetryPolicy,
+    charge_safety: &crate::ChargeSafetyPolicy,
+    budget: &RetryBudget,
+) -> (RetryVerdict, Option<ChargeSafetyDecision>) {
+    let automatic = automatic_retry_class(failure, position, guarantee);
+    let exceeds_cap = failure
+        .retry_after()
+        .is_some_and(|wait| policy.retry_after_within_cap(wait).is_none());
+    let mut charge = if failure.is_retryable() && automatic.is_none() {
+        match charge_safety_decision(
+            failure.retry_verdict,
+            guarantee,
+            charge_safety,
+            failure
+                .partial_response
+                .as_deref()
+                .map(|response| &response.usage),
+            budget.unsafe_retries.saturating_add(1),
+        ) {
+            ChargeSafetyEvaluation::Evaluated(decision) => Some(decision),
+            ChargeSafetyEvaluation::NotEvaluated(_) => None,
+        }
+    } else {
+        None
+    };
+    if exceeds_cap
+        && let Some(ChargeSafetyDecision::Authorized {
+            tokens_at_stake,
+            attempt_number,
+        }) = charge
+    {
+        charge = Some(ChargeSafetyDecision::Denied {
+            tokens_at_stake,
+            attempt_number,
+            reason: ChargeSafetyDenialReason::RetryAfterExceedsCap,
+        });
+    }
+    if let Some(ChargeSafetyDecision::Denied { reason, .. }) = charge.as_ref() {
+        return (
+            RetryVerdict::Refusal(RetryRefusal::ChargeSafety(*reason)),
+            charge,
+        );
+    }
+    if failure.is_retryable() && exceeds_cap {
+        return (RetryVerdict::Refusal(RetryRefusal::RetryAfterCap), charge);
+    }
+    let class = automatic
+        .map(RetryClass::Automatic)
+        .unwrap_or(RetryClass::ChargeAuthorized);
+    if let Some(wait) = budget.throttle_wait(policy, failure.retry_verdict) {
+        return (RetryVerdict::Throttle { wait, class }, charge);
+    }
+    if budget.attempt + 1 >= policy.attempts() || !failure.is_retryable() {
+        return (
+            RetryVerdict::Exhaustion {
+                reason: if failure.is_retryable() {
+                    "retry_budget_exhausted"
+                } else {
+                    "not_retryable"
+                },
+            },
+            charge,
+        );
+    }
+    (RetryVerdict::Backoff { class }, charge)
+}
+
+fn announce_retry(
+    request: &LlmRequest,
+    class: RetryClass,
+    delay: Duration,
+    attempt: u32,
+    attempts: u32,
+    failure: &LlmTransportError,
+) {
+    if let Some(events) = request.stream_events.as_ref() {
+        if class.resets_stream() {
+            events.send(crate::llm::types::LlmStreamEvent::AttemptReset);
+        }
+        events.send(crate::llm::types::LlmStreamEvent::RetryStatus {
+            wait_seconds: delay.as_secs(),
+            attempt: (attempt + 1) as usize,
+            max_attempts: attempts as usize,
+            reason: failure.message.clone(),
+        });
     }
 }
 
@@ -1224,5 +1213,155 @@ impl Provider for UnconfiguredProvider {
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
         Box::new(self.clone())
+    }
+}
+#[cfg(test)]
+mod retry_verdict_tests {
+    use super::*;
+
+    #[test]
+    fn retry_verdict_table_needs_no_provider() {
+        let policy = ProviderRetryPolicy {
+            max_attempts: 2,
+            ..Default::default()
+        };
+        let failure = LlmTransportError::new("failure")
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient);
+        for position in [
+            ProtocolPosition::NoResponse,
+            ProtocolPosition::ResponseObserved,
+            ProtocolPosition::OutputStarted,
+            ProtocolPosition::TerminalObserved,
+        ] {
+            for guarantee in [
+                GenerationRetryGuarantee::None,
+                GenerationRetryGuarantee::Idempotent,
+                GenerationRetryGuarantee::Resumable,
+            ] {
+                for attempt in [0, 1] {
+                    let mut budget = RetryBudget::default();
+                    for _ in 0..attempt {
+                        budget.consume(false);
+                    }
+                    let (verdict, _) = retry_verdict(
+                        &failure,
+                        position,
+                        guarantee,
+                        &policy,
+                        &crate::ChargeSafetyPolicy::RequireGuarantee,
+                        &budget,
+                    );
+                    if position != ProtocolPosition::NoResponse
+                        && guarantee == GenerationRetryGuarantee::None
+                    {
+                        assert!(
+                            matches!(
+                                verdict,
+                                RetryVerdict::Refusal(RetryRefusal::ChargeSafety(_))
+                            ),
+                            "{position:?}/{guarantee:?}/{attempt}: {verdict:?}"
+                        );
+                    } else if attempt == 1 {
+                        assert_eq!(
+                            verdict,
+                            RetryVerdict::Exhaustion {
+                                reason: "retry_budget_exhausted"
+                            }
+                        );
+                    } else {
+                        assert!(matches!(
+                            verdict,
+                            RetryVerdict::Backoff {
+                                class: RetryClass::Automatic(_)
+                            }
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn retry_verdict_throttle_charges_courtesy_then_consumes_counted_budget() {
+        let wait = Duration::from_secs(1);
+        let policy = ProviderRetryPolicy {
+            max_attempts: 2,
+            throttle_wait_budget_ms: 1000,
+            ..Default::default()
+        };
+        let failure = LlmTransportError::new("throttle").with_retry_verdict(
+            TransportRetryVerdict::RetryableThrottle {
+                retry_after: Some(wait),
+            },
+        );
+        let mut budget = RetryBudget::default();
+        let verdict = |budget: &RetryBudget| {
+            retry_verdict(
+                &failure,
+                ProtocolPosition::NoResponse,
+                GenerationRetryGuarantee::None,
+                &policy,
+                &crate::ChargeSafetyPolicy::RequireGuarantee,
+                budget,
+            )
+            .0
+        };
+        assert!(matches!(verdict(&budget), RetryVerdict::Throttle { .. }));
+        budget.charge_throttle(wait, false);
+        assert_eq!(budget.attempt, 0);
+        assert_eq!(budget.throttle_waited, wait);
+        assert!(matches!(verdict(&budget), RetryVerdict::Backoff { .. }));
+        budget.consume(false);
+        assert_eq!(
+            verdict(&budget),
+            RetryVerdict::Exhaustion {
+                reason: "retry_budget_exhausted"
+            }
+        );
+    }
+
+    #[test]
+    fn retry_verdict_forbidden_and_retry_after_cap_never_schedule() {
+        let policy = ProviderRetryPolicy {
+            retry_after_cap_ms: Some(1000),
+            ..Default::default()
+        };
+        for transport in [
+            TransportRetryVerdict::Forbidden,
+            TransportRetryVerdict::NotRetryable,
+        ] {
+            let failure = LlmTransportError::new("refused").with_retry_verdict(transport);
+            assert_eq!(
+                retry_verdict(
+                    &failure,
+                    ProtocolPosition::NoResponse,
+                    GenerationRetryGuarantee::Idempotent,
+                    &policy,
+                    &crate::ChargeSafetyPolicy::RequireGuarantee,
+                    &RetryBudget::default()
+                )
+                .0,
+                RetryVerdict::Exhaustion {
+                    reason: "not_retryable"
+                }
+            );
+        }
+        let failure = LlmTransportError::new("cap").with_retry_verdict(
+            TransportRetryVerdict::RetryableThrottle {
+                retry_after: Some(Duration::from_secs(2)),
+            },
+        );
+        assert_eq!(
+            retry_verdict(
+                &failure,
+                ProtocolPosition::NoResponse,
+                GenerationRetryGuarantee::None,
+                &policy,
+                &crate::ChargeSafetyPolicy::RequireGuarantee,
+                &RetryBudget::default()
+            )
+            .0,
+            RetryVerdict::Refusal(RetryRefusal::RetryAfterCap)
+        );
     }
 }
