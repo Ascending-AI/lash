@@ -659,6 +659,7 @@ mod tests {
             .into_iter()
             .map(|bytes| String::from_utf8(bytes).expect("trace bytes are UTF-8"))
             .collect();
+        // Window 54 moves the trace contract to schema 18; keep these byte pins literal.
         let expected = [
                 r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace success"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":18,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
                     .to_string(),
