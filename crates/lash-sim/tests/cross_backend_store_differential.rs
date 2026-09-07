@@ -2143,18 +2143,11 @@ impl Clock for DifferentialClock {
         std::time::Instant::now()
     }
 
-    fn timestamp_ms(&self) -> u64 {
-        1_000
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        "2026-07-26T00:00:00+00:00".to_string()
-    }
-
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::parse_from_rfc3339("2026-07-26T00:00:00+00:00")
-            .expect("valid differential timestamp")
-            .with_timezone(&chrono::Utc)
+        let timestamp_ms = 1_000;
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
+        )
     }
 
     async fn sleep(&self, duration: Duration) {
@@ -2164,6 +2157,18 @@ impl Clock for DifferentialClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
+}
+
+#[test]
+fn differential_clock_wall_clock_faces_agree() {
+    let clock = DifferentialClock;
+    let clock: &dyn lash_core::Clock = &clock;
+    let milliseconds = clock.timestamp_ms();
+    let datetime = clock.timestamp_datetime();
+    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+        .expect("clock emits RFC 3339");
+    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 async fn runners_for_case(

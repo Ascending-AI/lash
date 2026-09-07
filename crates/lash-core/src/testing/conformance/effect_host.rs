@@ -1426,17 +1426,10 @@ impl crate::Clock for LeaseFencingClock {
         std::time::Instant::now()
     }
 
-    fn timestamp_ms(&self) -> u64 {
-        self.timestamp_ms.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        let timestamp_ms = self.timestamp_ms.load(std::sync::atomic::Ordering::SeqCst);
         chrono::DateTime::from(
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms()),
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
         )
     }
 
@@ -1452,6 +1445,18 @@ impl crate::Clock for LeaseFencingClock {
     async fn sleep_until(&self, _deadline: std::time::Instant) {
         self.sleep(std::time::Duration::ZERO).await;
     }
+}
+
+#[test]
+fn lease_fencing_clock_wall_clock_faces_agree() {
+    let clock = LeaseFencingClock::new(1_700_000_000_123);
+    let clock: &dyn crate::Clock = &clock;
+    let milliseconds = clock.timestamp_ms();
+    let datetime = clock.timestamp_datetime();
+    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+        .expect("clock emits RFC 3339");
+    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -1499,7 +1504,7 @@ async fn lease_fencing_renews_long_running_lease(backend: &EffectLeaseFencingBac
     let ttl = std::time::Duration::from_millis(300);
     let renew_interval = ttl / 3;
     let replay_key = format!("lease-renewal-{run}");
-    let initial_timestamp = crate::Clock::timestamp_ms(&crate::facade_support::SystemClock);
+    let initial_timestamp = crate::ClockWallTime::timestamp_ms(&crate::facade_support::SystemClock);
     let clock = Arc::new(LeaseFencingClock::new(initial_timestamp));
     let first = (backend.make_controller)(ttl, clock.clone()).await;
     let second = (backend.make_controller)(ttl, clock.clone()).await;

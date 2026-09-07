@@ -523,14 +523,6 @@ impl crate::Clock for CancelWatchTestClock {
         self.0.now()
     }
 
-    fn timestamp_ms(&self) -> u64 {
-        self.0.timestamp_ms()
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.0.timestamp_rfc3339()
-    }
-
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
         self.0.timestamp_datetime()
     }
@@ -542,6 +534,18 @@ impl crate::Clock for CancelWatchTestClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         self.0.sleep_until(deadline).await;
     }
+}
+
+#[test]
+fn cancel_watch_test_clock_wall_clock_faces_agree() {
+    let clock = CancelWatchTestClock(crate::testing::TestClock::new(1_700_000_000_123));
+    let clock: &dyn crate::Clock = &clock;
+    let milliseconds = clock.timestamp_ms();
+    let datetime = clock.timestamp_datetime();
+    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+        .expect("clock emits RFC 3339");
+    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 #[derive(Debug)]
@@ -568,18 +572,11 @@ impl crate::Clock for ManualClock {
         std::time::Instant::now()
     }
 
-    fn timestamp_ms(&self) -> u64 {
-        self.epoch_ms.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        let system_time =
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms());
-        chrono::DateTime::<chrono::Utc>::from(system_time)
+        let timestamp_ms = self.epoch_ms.load(std::sync::atomic::Ordering::SeqCst);
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
+        )
     }
 
     async fn sleep(&self, duration: std::time::Duration) {
@@ -589,6 +586,18 @@ impl crate::Clock for ManualClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
+}
+
+#[test]
+fn manual_clock_wall_clock_faces_agree() {
+    let clock = ManualClock::new(1_700_000_000_123);
+    let clock: &dyn crate::Clock = &clock;
+    let milliseconds = clock.timestamp_ms();
+    let datetime = clock.timestamp_datetime();
+    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+        .expect("clock emits RFC 3339");
+    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 #[tokio::test]
@@ -1575,34 +1584,27 @@ impl crate::Clock for StepExpiryClock {
         std::time::Instant::now()
     }
 
-    fn timestamp_ms(&self) -> u64 {
-        if !self.armed.load(Ordering::SeqCst) {
-            return self.epoch_ms;
-        }
-        let call = self
-            .timestamp_calls
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if call
-            < self
-                .live_timestamp_calls
-                .load(std::sync::atomic::Ordering::SeqCst)
-        {
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        let timestamp_ms = if !self.armed.load(Ordering::SeqCst) {
             self.epoch_ms
         } else {
-            self.epoch_ms
-                .saturating_add(crate::LeaseTimings::default().ttl_ms())
-                .saturating_add(1)
-        }
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
-    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        let system_time =
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms());
-        chrono::DateTime::<chrono::Utc>::from(system_time)
+            let call = self
+                .timestamp_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if call
+                < self
+                    .live_timestamp_calls
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                self.epoch_ms
+            } else {
+                self.epoch_ms
+                    .saturating_add(crate::LeaseTimings::default().ttl_ms())
+            }
+        };
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
+        )
     }
 
     async fn sleep(&self, duration: std::time::Duration) {
@@ -1612,6 +1614,18 @@ impl crate::Clock for StepExpiryClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
+}
+
+#[test]
+fn step_expiry_clock_wall_clock_faces_agree() {
+    let clock = StepExpiryClock::new(1_700_000_000_123);
+    let clock: &dyn crate::Clock = &clock;
+    let milliseconds = clock.timestamp_ms();
+    let datetime = clock.timestamp_datetime();
+    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+        .expect("clock emits RFC 3339");
+    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 struct FrameRotatingDynamicTool {

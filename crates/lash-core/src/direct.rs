@@ -457,21 +457,28 @@ mod tests {
             self.instant
         }
 
-        fn timestamp_ms(&self) -> u64 {
-            0
-        }
-
-        fn timestamp_rfc3339(&self) -> String {
-            self.timestamp_datetime().to_rfc3339()
-        }
-
         fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-            chrono::DateTime::from(std::time::UNIX_EPOCH)
+            let timestamp_ms = 0;
+            chrono::DateTime::from(
+                std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
+            )
         }
 
         async fn sleep(&self, _duration: Duration) {}
 
         async fn sleep_until(&self, _deadline: Instant) {}
+    }
+
+    #[test]
+    fn frozen_clock_wall_clock_faces_agree() {
+        let clock = FrozenClock::new();
+        let clock: &dyn crate::Clock = &clock;
+        let milliseconds = clock.timestamp_ms();
+        let datetime = clock.timestamp_datetime();
+        let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+            .expect("clock emits RFC 3339");
+        assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+        assert_eq!(text.timestamp_millis() as u64, milliseconds);
     }
 
     #[derive(Default)]

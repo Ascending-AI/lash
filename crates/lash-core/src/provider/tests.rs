@@ -649,16 +649,11 @@ impl crate::Clock for RecordingClock {
         std::time::Instant::now()
     }
 
-    fn timestamp_ms(&self) -> u64 {
-        0
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::<chrono::Utc>::from(std::time::UNIX_EPOCH)
+        let timestamp_ms = 0;
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
+        )
     }
 
     async fn sleep(&self, duration: Duration) {
@@ -668,6 +663,9 @@ impl crate::Clock for RecordingClock {
 
     async fn sleep_until(&self, _deadline: std::time::Instant) {}
 }
+
+#[path = "tests/clock.rs"]
+mod clock_contract;
 
 #[derive(Debug)]
 struct MetricsTransport {

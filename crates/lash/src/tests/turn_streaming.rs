@@ -9050,7 +9050,7 @@ async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_live_lane() 
     // itself lease-fenced, so a successor cannot hydrate the session at 14s
     // and merely wait to acquire the lane later; it must first cross the same
     // expiry boundary that makes the queued turn drainable.
-    clock.advance(dead_lane_expiry - lash_core::Clock::timestamp_ms(clock.as_ref()));
+    clock.advance(dead_lane_expiry - lash_core::ClockWallTime::timestamp_ms(clock.as_ref()));
     let second_core =
         explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
             .provider(
@@ -9076,7 +9076,7 @@ async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_live_lane() 
     for _attempt in 0..8 {
         if let Some(output) = second_session.queued_turn().run().await?.ran() {
             assert_eq!(output.assistant_message(), Some("the migration is green"));
-            claimed_at_ms = Some(lash_core::Clock::timestamp_ms(clock.as_ref()));
+            claimed_at_ms = Some(lash_core::ClockWallTime::timestamp_ms(clock.as_ref()));
             break;
         }
         clock.advance(30_000);

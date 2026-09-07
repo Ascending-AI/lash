@@ -871,7 +871,7 @@ pub async fn wake_delivery_crash_matrix(
         .next()
         .expect("deferred-first-attempt wake is claimable");
     assert_eq!(deferred.attempts, 1);
-    let retry_at = crate::Clock::timestamp_ms(clock.as_ref()).saturating_add(50);
+    let retry_at = crate::ClockWallTime::timestamp_ms(clock.as_ref()).saturating_add(50);
     assert_eq!(
         registry
             .defer_wake_delivery(
@@ -1069,7 +1069,7 @@ async fn missing_target_is_deferred_and_rearmed(
         .expect("deferred missing-target wake remains inspectable");
     assert_eq!(deferred.state(), crate::WakeDeliveryState::Pending);
     assert_eq!(deferred.attempts, 1);
-    assert!(deferred.next_attempt_at_ms > crate::Clock::timestamp_ms(clock.as_ref()));
+    assert!(deferred.next_attempt_at_ms > crate::ClockWallTime::timestamp_ms(clock.as_ref()));
 
     factory
         .create_store(&crate::SessionStoreCreateRequest {

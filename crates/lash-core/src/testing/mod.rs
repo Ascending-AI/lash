@@ -131,17 +131,10 @@ impl crate::Clock for TestClock {
         std::time::Instant::now()
     }
 
-    fn timestamp_ms(&self) -> u64 {
-        self.0.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        let timestamp_ms = self.0.load(std::sync::atomic::Ordering::SeqCst);
         chrono::DateTime::from(
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms()),
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
         )
     }
 
@@ -152,6 +145,18 @@ impl crate::Clock for TestClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         tokio::time::sleep_until(deadline.into()).await;
     }
+}
+
+#[test]
+fn test_clock_wall_clock_faces_agree() {
+    let clock = TestClock::new(1_700_000_000_123);
+    let clock: &dyn crate::Clock = &clock;
+    let milliseconds = clock.timestamp_ms();
+    let datetime = clock.timestamp_datetime();
+    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+        .expect("clock emits RFC 3339");
+    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 /// Production-equivalent logical payload accounting for one runtime commit.
@@ -725,22 +730,28 @@ impl crate::Clock for FrozenToolCoordinatorClock {
         self.0
     }
 
-    fn timestamp_ms(&self) -> u64 {
-        1_700_000_000_000
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::from_timestamp_millis(self.timestamp_ms() as i64)
-            .expect("frozen coordinator timestamp")
+        let timestamp_ms = 1_700_000_000_000;
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
+        )
     }
 
     async fn sleep(&self, _duration: std::time::Duration) {}
 
     async fn sleep_until(&self, _deadline: std::time::Instant) {}
+}
+
+#[test]
+fn frozen_tool_coordinator_clock_wall_clock_faces_agree() {
+    let clock = FrozenToolCoordinatorClock(std::time::Instant::now());
+    let clock: &dyn crate::Clock = &clock;
+    let milliseconds = clock.timestamp_ms();
+    let datetime = clock.timestamp_datetime();
+    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+        .expect("clock emits RFC 3339");
+    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 /// Execute one opted-in provider through the production attempt coordinator,

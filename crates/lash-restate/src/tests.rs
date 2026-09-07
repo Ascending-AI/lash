@@ -7482,17 +7482,11 @@ impl lash_core::Clock for ToolIntentCorpusClock {
         std::time::Instant::now()
     }
 
-    fn timestamp_ms(&self) -> u64 {
-        1_700_000_000_123
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        "2023-11-14T22:13:20.123Z".to_string()
-    }
-
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::from_timestamp_millis(self.timestamp_ms() as i64)
-            .expect("fixed corpus timestamp")
+        let timestamp_ms = 1_700_000_000_123;
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
+        )
     }
 
     async fn sleep(&self, duration: Duration) {
@@ -7502,6 +7496,18 @@ impl lash_core::Clock for ToolIntentCorpusClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
+}
+
+#[test]
+fn tool_intent_corpus_clock_wall_clock_faces_agree() {
+    let clock = ToolIntentCorpusClock;
+    let clock: &dyn lash_core::Clock = &clock;
+    let milliseconds = clock.timestamp_ms();
+    let datetime = clock.timestamp_datetime();
+    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+        .expect("clock emits RFC 3339");
+    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 async fn replay_tool_intent_corpus_fixture(

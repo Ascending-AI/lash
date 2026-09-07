@@ -239,17 +239,10 @@ impl crate::Clock for ConfigSettlementClock {
             )
     }
 
-    fn timestamp_ms(&self) -> u64 {
-        self.epoch_ms.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        let timestamp_ms = self.epoch_ms.load(std::sync::atomic::Ordering::SeqCst);
         chrono::DateTime::from(
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms()),
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
         )
     }
 
@@ -262,6 +255,18 @@ impl crate::Clock for ConfigSettlementClock {
         self.sleep(deadline.saturating_duration_since(self.now()))
             .await;
     }
+}
+
+#[test]
+fn config_settlement_clock_wall_clock_faces_agree() {
+    let clock = ConfigSettlementClock::new(1_700_000_000_123);
+    let clock: &dyn crate::Clock = &clock;
+    let milliseconds = clock.timestamp_ms();
+    let datetime = clock.timestamp_datetime();
+    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+        .expect("clock emits RFC 3339");
+    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 #[cfg(test)]
