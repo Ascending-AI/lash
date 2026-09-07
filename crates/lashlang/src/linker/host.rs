@@ -40,6 +40,7 @@ impl NamedDataType {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum NamedDataTypeError {
     #[error("host data type name `{name}` must be qualified")]
     InvalidName { name: String },
@@ -56,6 +57,7 @@ pub enum NamedDataTypeError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum LashlangHostCatalogError {
     #[error("conflicting host data type definition `{name}`")]
     ConflictingNamedDataType { name: String },

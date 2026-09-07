@@ -288,6 +288,7 @@ pub enum WorkflowEdgeKind {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum WorkflowGraphBuildError {
     #[error(transparent)]
     Parse(#[from] ParseError),
@@ -296,6 +297,7 @@ pub enum WorkflowGraphBuildError {
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
+#[non_exhaustive]
 pub enum GraphRenderError {
     #[error("unsupported workflow graph schema version {found}; expected {expected}")]
     UnsupportedSchemaVersion { found: u32, expected: u32 },

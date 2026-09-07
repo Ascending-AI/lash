@@ -36,6 +36,7 @@ pub struct LeaseTimings {
 
 /// Rejected [`LeaseTimings`] construction.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum LeaseTimingsError {
     #[error("lease ttl must be at least 1ms")]
     TtlTooSmall,

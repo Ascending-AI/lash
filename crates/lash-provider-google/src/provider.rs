@@ -508,6 +508,9 @@ impl Provider for GoogleOAuthProvider {
                 .map_err(|error| match error {
                     CredentialExecuteError::Credential(error) => credential_transport_error(error),
                     CredentialExecuteError::Call(error) => error,
+                    // Unknown failures cannot establish that replay is safe.
+                    _ => LlmTransportError::new(error.to_string())
+                        .with_retry_verdict(TransportRetryVerdict::Forbidden),
                 })?;
             self.project_id = project_id;
             return Ok(response);

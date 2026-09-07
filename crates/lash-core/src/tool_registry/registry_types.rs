@@ -166,6 +166,7 @@ pub struct ToolRestoreReport {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ReconfigureError {
     #[error("validation error: {0}")]
     Validation(String),

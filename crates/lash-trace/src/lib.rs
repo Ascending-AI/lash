@@ -1436,6 +1436,7 @@ pub struct TraceError {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum TraceSinkError {
     #[error("failed to serialize trace record: {0}")]
     Serialize(#[from] serde_json::Error),

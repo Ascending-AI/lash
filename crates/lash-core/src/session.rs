@@ -86,6 +86,7 @@ pub struct InjectedTurnInput {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum SessionError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

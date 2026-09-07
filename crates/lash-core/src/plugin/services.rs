@@ -3,6 +3,7 @@ use std::sync::Arc;
 use super::*;
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum PluginOperationInvokeError {
     #[error("unknown plugin operation `{0}`")]
     Unknown(String),

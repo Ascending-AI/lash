@@ -63,6 +63,7 @@ fn normalize_provider_endpoint(endpoint: &str) -> String {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ProviderEndpointError {
     UserinfoNotAllowed,
 }

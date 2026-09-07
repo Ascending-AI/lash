@@ -45,6 +45,7 @@ impl CredentialError {
 }
 
 #[derive(Clone, Copy, Debug, thiserror::Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CredentialErrorKind {
     #[error("credential refresh was rejected; sign in again")]
     InvalidGrant,
@@ -77,6 +78,7 @@ pub struct Lease<C: Credential> {
 
 /// A provider call failure annotated with whether replay is still safe.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum CredentialCallError<E> {
     /// Authentication was rejected before any output escaped.
     PreOutputAuth(E),
@@ -95,6 +97,7 @@ impl<E> CredentialCallError<E> {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum CredentialExecuteError<E> {
     #[error(transparent)]
     Credential(#[from] CredentialError),

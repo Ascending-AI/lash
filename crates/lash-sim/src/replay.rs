@@ -15,6 +15,7 @@ use crate::trace::{
 };
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ReplayError {
     TraceIo(TraceIoError),
     IncompatibleTrace(String),

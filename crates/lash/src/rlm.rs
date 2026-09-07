@@ -71,6 +71,7 @@ impl RlmSessionReadViewExt for lash_core::SessionReadView {
 /// A guarded write that a session refused, or that could not reach the session.
 #[cfg(feature = "rlm")]
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum RlmSessionConfigError {
     /// The session already recorded a different value for that fact.
     Conflict(lash_rlm_types::RlmSessionConfigConflict),

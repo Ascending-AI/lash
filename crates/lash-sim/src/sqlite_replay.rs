@@ -76,6 +76,7 @@ pub struct SqliteReopenedSessionEvidence {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SqliteReplayError {
     TraceIo(TraceIoError),
     Replay(ReplayError),

@@ -51,6 +51,7 @@ pub struct QueuedWorkExecutionConcurrencyError {
 /// Invalid configuration supplied to an explicit-cadence native queued-work
 /// constructor.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum NativeQueuedWorkConfigError {
     /// The requested native execution bound is outside Tokio's semaphore range.
     #[error("invalid queued-work execution configuration: {0}")]

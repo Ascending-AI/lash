@@ -100,6 +100,7 @@ impl ProcessDefinitionIdentity {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum ProcessDefinitionIdentityError {
     #[error("definition must be a process definition value")]
     NotProcessValue,

@@ -70,6 +70,7 @@ struct FailurePackageManifest {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum MinimizeError {
     TraceIo(TraceIoError),
     Replay(ReplayError),

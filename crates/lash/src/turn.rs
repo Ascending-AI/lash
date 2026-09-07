@@ -1404,6 +1404,14 @@ pub(crate) async fn stream_selected_queued_prepared_assembled(
                 cause: selected_drain_refusal_cause(cause),
             });
         }
+        // Future drain errors still fail the turn without claiming a known refusal cause.
+        Err(error) => {
+            return Err(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::QueuedWork,
+                error.to_string(),
+            )
+            .into());
+        }
     };
     runtime.publish_from(&writer);
     Ok(selected_drain_outcome(outcome))

@@ -102,6 +102,7 @@ pub(crate) fn hard_keyword_names() -> &'static [&'static str] {
 }
 
 #[derive(Debug, Error, PartialEq)]
+#[non_exhaustive]
 pub enum LexError {
     #[error("unexpected `{ch}`")]
     UnexpectedChar { ch: char, offset: usize },

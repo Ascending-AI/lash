@@ -185,6 +185,7 @@ impl<T> SelectedQueuedWorkDrainOutcome<T> {
 /// composition leave the selection unexecuted.
 #[doc(hidden)]
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum SelectedQueuedWorkDrainError {
     #[error(transparent)]
     Runtime(#[from] RuntimeError),

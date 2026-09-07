@@ -73,6 +73,8 @@ fn validate_canonical_root(data: &[u8]) -> Result<(), RlmSnapshotError> {
         | SnapshotDecodeError::HeaplessSnapshotContainsReference { .. }) => {
             RlmSnapshotError::Lashlang(error)
         }
+        // Preserve future decoder failures as typed Lashlang errors; never accept the envelope.
+        _ => RlmSnapshotError::Lashlang(error),
     })
 }
 

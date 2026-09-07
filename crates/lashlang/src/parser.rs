@@ -7,6 +7,7 @@ use crate::lexer::{LexError, Span, Token, TokenKind, lex};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
+#[non_exhaustive]
 pub enum ParseError {
     #[error(transparent)]
     Lex(#[from] LexError),

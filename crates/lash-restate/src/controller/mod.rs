@@ -158,6 +158,7 @@ pub(crate) struct RecordedRuntimeEffect {
 
 /// Error raised while bridging a Lash effect to Restate.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum RestateEffectError {
     #[error("Restate terminal error while running `{effect}`: {terminal}")]
     Terminal {

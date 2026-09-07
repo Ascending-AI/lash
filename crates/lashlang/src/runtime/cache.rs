@@ -192,6 +192,7 @@ impl Default for CompiledProcessCache {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum LinkedProgramCacheError {
     #[error(transparent)]
     Parse(#[from] crate::parser::ParseError),

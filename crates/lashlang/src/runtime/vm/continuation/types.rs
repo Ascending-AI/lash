@@ -165,6 +165,7 @@ pub struct VmProfileContinuation {
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ContinuationError {
     #[error("continuation format version {found} is incompatible with version {expected}")]
     FormatVersionMismatch { expected: u32, found: u32 },

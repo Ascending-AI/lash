@@ -371,6 +371,7 @@ impl Snapshot {
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SnapshotDecodeError {
     #[error("snapshot version {found} is incompatible with version {expected}")]
     VersionMismatch { expected: u32, found: u32 },

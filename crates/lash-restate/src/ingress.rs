@@ -119,6 +119,7 @@ impl From<&str> for RestateInvocationId {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum RestateHttpError {
     #[error("{operation} request failed for {url}: {source}")]
     Request {

@@ -81,6 +81,7 @@ pub struct ModuleCompileDiagnostic {
 
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
 #[serde(tag = "stage", content = "error", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ModuleCompileError {
     #[error("{0}")]
     Parse(ModuleCompileDiagnostic),
