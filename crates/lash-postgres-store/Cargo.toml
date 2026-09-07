@@ -64,6 +64,7 @@ tracing-subscriber = { workspace = true }
 [[bin]]
 name = "postgres-await-event-helper"
 path = "src/bin/postgres-await-event-helper.rs"
+required-features = ["testing"]
 test = false
 
 [[test]]
@@ -73,6 +74,7 @@ path = "tests/main.rs"
 [[test]]
 name = "conformance"
 path = "tests/conformance.rs"
+required-features = ["testing"]
 
 [[test]]
 name = "durable_read_fixture"
