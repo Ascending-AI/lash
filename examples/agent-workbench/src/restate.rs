@@ -410,7 +410,8 @@ pub(crate) struct WorkbenchCronJobImpl {
     state: AppState,
 }
 
-include!("restate_cron.rs");
+mod cron;
+use cron::*;
 
 impl WorkbenchCronJobImpl {
     pub(crate) fn new(state: AppState) -> Self {
@@ -1452,7 +1453,8 @@ async fn record_turn_output_for_model(
     Ok(())
 }
 
-include!("restate_cron_sync.rs");
+mod cron_sync;
+pub(crate) use cron_sync::*;
 
 fn cron_request_from_registration(
     session_id: &str,
@@ -1483,10 +1485,10 @@ fn cron_request_from_registration(
     Ok((cron_job_key(session_id, &registration.source_key), request))
 }
 
-include!("restate_error_helpers.rs");
+mod error_helpers;
+use error_helpers::*;
 
 #[cfg(test)]
-#[path = "restate_tests.rs"]
 mod tests;
 
 #[async_trait::async_trait]

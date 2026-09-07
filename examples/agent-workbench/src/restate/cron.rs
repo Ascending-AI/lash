@@ -1,12 +1,14 @@
+use super::*;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CronSessionDisposition {
+pub(super) enum CronSessionDisposition {
     Live,
     Retired,
     Unknown,
 }
 
 impl CronSessionDisposition {
-    fn journal_value(self) -> &'static str {
+    pub(super) fn journal_value(self) -> &'static str {
         match self {
             Self::Live => "live",
             Self::Retired => "retired",
@@ -14,7 +16,7 @@ impl CronSessionDisposition {
         }
     }
 
-    fn from_journal_value(value: &str) -> HandlerResult<Self> {
+    pub(super) fn from_journal_value(value: &str) -> HandlerResult<Self> {
         match value {
             "live" => Ok(Self::Live),
             "retired" => Ok(Self::Retired),
@@ -28,12 +30,12 @@ impl CronSessionDisposition {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum CronTick {
+pub(super) enum CronTick {
     Cancel { reason: &'static str, trace: Value },
     Run,
 }
 
-fn cron_tick_decision(
+pub(super) fn cron_tick_decision(
     disposition: CronSessionDisposition,
     state: &WorkbenchCronState,
     job_key: &str,
@@ -59,7 +61,7 @@ fn cron_tick_decision(
     }
 }
 
-async fn cron_session_disposition(
+pub(super) async fn cron_session_disposition(
     core: &lash::LashCore,
     session_id: &str,
 ) -> Result<CronSessionDisposition, HandlerError> {
@@ -110,12 +112,8 @@ async fn record_cron_tick_outcome(
 }
 
 #[async_trait::async_trait]
-trait CronTickCancelSurface: Sync {
-    async fn record_trace(
-        &self,
-        session_id: String,
-        trace: Value,
-    ) -> HandlerResult<()>;
+pub(super) trait CronTickCancelSurface: Sync {
+    async fn record_trace(&self, session_id: String, trace: Value) -> HandlerResult<()>;
 
     async fn record_outcome(
         &self,
@@ -127,13 +125,13 @@ trait CronTickCancelSurface: Sync {
     fn clear_cron_state(&self);
 }
 
-struct RestateCronTickCancelSurface<'run, 'ctx> {
+pub(super) struct RestateCronTickCancelSurface<'run, 'ctx> {
     app_state: AppState,
     controller: &'run lash_restate::RestateRuntimeEffectController<'ctx, ObjectContext<'ctx>>,
 }
 
 impl<'run, 'ctx> RestateCronTickCancelSurface<'run, 'ctx> {
-    fn new(
+    pub(crate) fn new(
         app_state: AppState,
         controller: &'run lash_restate::RestateRuntimeEffectController<'ctx, ObjectContext<'ctx>>,
     ) -> Self {
@@ -146,11 +144,7 @@ impl<'run, 'ctx> RestateCronTickCancelSurface<'run, 'ctx> {
 
 #[async_trait::async_trait]
 impl CronTickCancelSurface for RestateCronTickCancelSurface<'_, '_> {
-    async fn record_trace(
-        &self,
-        session_id: String,
-        trace: Value,
-    ) -> HandlerResult<()> {
+    async fn record_trace(&self, session_id: String, trace: Value) -> HandlerResult<()> {
         journaled_workbench_trace(
             self.controller.context(),
             self.app_state.clone(),
@@ -206,12 +200,12 @@ async fn cancel_observed_cron_tick(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CronTickHandling {
+pub(super) enum CronTickHandling {
     Cancelled,
     Run,
 }
 
-async fn handle_observed_cron_tick(
+pub(super) async fn handle_observed_cron_tick(
     surface: &impl CronTickCancelSurface,
     cron_state: &WorkbenchCronState,
     decision: CronTick,
@@ -225,7 +219,7 @@ async fn handle_observed_cron_tick(
     }
 }
 
-async fn record_cron_tick_outcome_with_effect_controller(
+pub(super) async fn record_cron_tick_outcome_with_effect_controller(
     state: AppState,
     request: WorkbenchCronRequest,
     scheduled_for: String,

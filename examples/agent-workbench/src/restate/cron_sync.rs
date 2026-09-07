@@ -1,4 +1,6 @@
-async fn sync_cron_jobs_with_context(
+use super::*;
+
+pub(super) async fn sync_cron_jobs_with_context(
     state: &AppState,
     ctx: &WorkflowContext<'_>,
     session_id: &str,
@@ -157,12 +159,12 @@ pub(crate) async fn cancel_cron_job_before_trigger_delete(
 }
 
 #[derive(Debug, PartialEq)]
-struct CronSyncPlan {
-    upserts: BTreeMap<String, WorkbenchCronRequest>,
-    cancels: BTreeSet<String>,
+pub(super) struct CronSyncPlan {
+    pub(super) upserts: BTreeMap<String, WorkbenchCronRequest>,
+    pub(super) cancels: BTreeSet<String>,
 }
 
-fn cron_sync_plan(
+pub(super) fn cron_sync_plan(
     session_id: &str,
     registrations: &[lash::triggers::TriggerRegistration],
     mut known: BTreeSet<String>,
@@ -273,11 +275,11 @@ where
 /// same tick dedupe while the next tick gets a fresh occurrence. (A key
 /// without the tick component kills the schedule: the second tick conflicts,
 /// the handler fails before re-arming, and the chain stops.)
-fn cron_occurrence_key(job_key: &str, fired_at: &str) -> String {
+pub(super) fn cron_occurrence_key(job_key: &str, fired_at: &str) -> String {
     format!("workbench-cron:{job_key}:{fired_at}")
 }
 
-async fn emit_cron_occurrence(
+pub(super) async fn emit_cron_occurrence(
     state: AppState,
     request: WorkbenchCronRequest,
     fired_at: String,
@@ -299,7 +301,7 @@ async fn emit_cron_occurrence(
     .await
 }
 
-async fn emit_cron_occurrence_with_effect_controller(
+pub(super) async fn emit_cron_occurrence_with_effect_controller(
     state: AppState,
     request: WorkbenchCronRequest,
     fired_at: String,
@@ -326,7 +328,7 @@ async fn emit_cron_occurrence_with_effect_controller(
     }))
 }
 
-async fn schedule_next(
+pub(super) async fn schedule_next(
     ctx: &ObjectContext<'_>,
     request: WorkbenchCronRequest,
     now: DateTime<Utc>,
@@ -353,14 +355,14 @@ async fn schedule_next(
     Ok(state)
 }
 
-async fn cancel_stored_execution(ctx: &ObjectContext<'_>) -> HandlerResult<()> {
+pub(super) async fn cancel_stored_execution(ctx: &ObjectContext<'_>) -> HandlerResult<()> {
     if let Some(Json(existing)) = ctx.get::<Json<WorkbenchCronState>>(CRON_STATE_KEY).await? {
         ctx.invocation_handle(existing.next_execution_id).cancel();
     }
     Ok(())
 }
 
-async fn journaled_now(
+pub(super) async fn journaled_now(
     ctx: &ObjectContext<'_>,
     name: &'static str,
 ) -> HandlerResult<DateTime<Utc>> {
@@ -373,7 +375,7 @@ async fn journaled_now(
         .map_err(|err| TerminalError::new(err.to_string()).into())
 }
 
-async fn journaled_workbench_trace(
+pub(super) async fn journaled_workbench_trace(
     ctx: &ObjectContext<'_>,
     state: AppState,
     session_id: String,
@@ -416,6 +418,6 @@ fn next_cron_time(
         .map_err(|err| format!("cron expression `{expr}` has no next occurrence: {err}"))
 }
 
-fn cron_job_key(session_id: &str, source_key: &str) -> String {
+pub(crate) fn cron_job_key(session_id: &str, source_key: &str) -> String {
     format!("{session_id}:{source_key}")
 }
