@@ -1,3 +1,5 @@
+use super::*;
+
 fn token_usage_from_llm_usage(usage: &crate::llm::types::LlmUsage) -> TokenUsage {
     TokenUsage {
         input_tokens: usage.input_tokens,
@@ -18,7 +20,7 @@ fn token_usage_from_llm_usage(usage: &crate::llm::types::LlmUsage) -> TokenUsage
 ///
 /// Returns the kernel's usage value together with the validated prompt-side
 /// subtotal.
-fn checked_turn_usage_from_llm_usage(
+pub(super) fn checked_turn_usage_from_llm_usage(
     usage: &crate::llm::types::LlmUsage,
 ) -> Result<(TokenUsage, i64), TokenUsageOverflow> {
     let usage = token_usage_from_llm_usage(usage);
@@ -36,7 +38,7 @@ fn checked_turn_usage_from_llm_usage(
 /// `None` window disables the refinement. `prompt_input_tokens` is the
 /// prompt-side subtotal already validated by
 /// [`checked_turn_usage_from_llm_usage`].
-fn refine_terminal_reason_for_context_window(
+pub(super) fn refine_terminal_reason_for_context_window(
     response: &mut LlmResponse,
     prompt_input_tokens: i64,
     max_context_tokens: Option<usize>,

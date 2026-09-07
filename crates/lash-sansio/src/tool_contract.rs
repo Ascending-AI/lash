@@ -826,4 +826,5 @@ mod schema_validation;
 #[cfg(feature = "schema-validation")]
 pub use schema_validation::validate_tool_input;
 
-include!("tool_contract/tests.rs");
+#[cfg(test)]
+mod tests;
