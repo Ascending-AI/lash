@@ -445,33 +445,85 @@ fn old_json_snapshot_is_typed_format_rejection_with_cutover_remedy() {
     assert!(message.contains("recreate development/test stores"));
 }
 
+fn canonical_path(keys: &[&str]) -> Vec<CanonicalPathSegment> {
+    keys.iter()
+        .map(|key| CanonicalPathSegment::Key((*key).to_string()))
+        .collect()
+}
+
 #[test]
-fn canonical_root_recognizes_quoted_global_keys_as_direct_children() {
-    assert!(is_global_location(r#"root.globals["x].y"]"#));
-    assert!(is_global_location("root.globals.ordinary"));
-    assert!(!is_global_location(r#"root.globals["x].y"].component"#));
+fn canonical_root_recognizes_global_keys_by_position() {
+    for key in ["x].y", "ordinary", "schema", "input_schema", "bindings"] {
+        assert_eq!(
+            root_node(&canonical_path(&["globals", key])),
+            RootNode::Global
+        );
+        assert_eq!(
+            root_node(&canonical_path(&["globals", key, "component"])),
+            RootNode::Other
+        );
+    }
 }
 
 #[test]
 fn root_classifier_prefers_envelope_entries_over_json_field_names() {
-    for location in [
-        "root.globals.schema",
-        "root.globals.input_schema",
-        "root.globals.bindings",
-    ] {
-        assert!(matches!(
-            root_map_order(location),
-            CanonicalMapOrder::Declared(fields) if fields == PERSISTED_VALUE_FIELDS
-        ));
-    }
-    assert!(matches!(
-        root_map_order("root.deferred_resolutions.resolutions.schema"),
-        CanonicalMapOrder::Declared(fields) if fields == RESOLUTION_FIELDS
-    ));
     assert_eq!(
-        root_map_order("root.deferred_resolutions.resolutions.tool.execution_binding.account"),
+        root_map_order(&canonical_path(&[
+            "deferred_resolutions",
+            "resolutions",
+            "schema"
+        ])),
+        CanonicalMapOrder::Declared(RESOLUTION_FIELDS)
+    );
+    assert_eq!(
+        root_map_order(&canonical_path(&[
+            "deferred_resolutions",
+            "resolutions",
+            "tool",
+            "execution_binding",
+            "account"
+        ])),
         CanonicalMapOrder::Sorted
     );
+}
+
+#[test]
+fn canonical_resolution_field_order_is_independent_of_key_shape() {
+    // Hand-written MessagePack pins ordering independently of serde's encoder.
+    fn string(bytes: &mut Vec<u8>, value: &str) {
+        assert!(value.len() < 32);
+        bytes.push(0xa0 | u8::try_from(value.len()).expect("fixstr length"));
+        bytes.extend_from_slice(value.as_bytes());
+    }
+    for key in ["module.operation", "bare", "x].y", "schema"] {
+        for reversed in [false, true] {
+            let mut bytes = vec![0x81];
+            string(&mut bytes, "deferred_resolutions");
+            bytes.push(0x81);
+            string(&mut bytes, "resolutions");
+            bytes.push(0x81);
+            string(&mut bytes, key);
+            bytes.push(0x82);
+            let fields = if reversed {
+                ["source_id", "kind"]
+            } else {
+                ["kind", "source_id"]
+            };
+            for field in fields {
+                string(&mut bytes, field);
+                string(&mut bytes, "value");
+            }
+            let result = validate_canonical_root(&bytes);
+            if reversed {
+                assert!(
+                    matches!(result, Err(RlmSnapshotError::NonCanonicalEnvelope { reason, .. }) if reason.contains("canonical declaration order")),
+                    "key {key}"
+                );
+            } else {
+                result.expect("declared resolution order must be accepted for every key shape");
+            }
+        }
+    }
 }
 
 #[test]

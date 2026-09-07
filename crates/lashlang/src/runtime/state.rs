@@ -13,7 +13,9 @@ mod wire;
 use wire::child_location;
 
 mod canonical_messagepack;
-pub use canonical_messagepack::{CanonicalMapOrder, validate_canonical_messagepack_structure};
+pub use canonical_messagepack::{
+    CanonicalMapOrder, CanonicalPathSegment, validate_canonical_messagepack_structure,
+};
 
 // v7 carries the substrate-minted `EffectError`/`RuntimeError` error brands.
 // `error_kind` serializes by name, so a v6 reader meets an unknown variant
@@ -839,35 +841,33 @@ fn validate_snapshot_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeError
         bytes,
         "snapshot",
         MAX_SNAPSHOT_MESSAGEPACK_DEPTH,
-        |location| match location {
-            "snapshot" => CanonicalMapOrder::Declared(SNAPSHOT_FIELDS),
-            "snapshot.heap" => CanonicalMapOrder::Declared(HEAP_FIELDS),
-            _ if location.ends_with(".object") => CanonicalMapOrder::Declared(TAGGED_VALUE_FIELDS),
-            _ if location.ends_with(".projection_ref") => CanonicalMapOrder::Unordered,
-            _ if is_collection_entry(location, "globals")
-                || is_collection_entry(location, "roots")
-                || is_collection_entry(location, "fields") =>
+        |path| match path {
+            [] => CanonicalMapOrder::Declared(SNAPSHOT_FIELDS),
+            [field] if field.key() == Some("heap") => CanonicalMapOrder::Declared(HEAP_FIELDS),
+            [.., field] if field.key() == Some("object") => {
+                CanonicalMapOrder::Declared(TAGGED_VALUE_FIELDS)
+            }
+            _ if is_collection_entry(path, "globals")
+                || is_collection_entry(path, "roots")
+                || is_collection_entry(path, "fields") =>
             {
                 CanonicalMapOrder::Declared(BINDING_FIELDS)
             }
-            _ if is_collection_entry(location, "objects") => {
+            _ if is_collection_entry(path, "objects") => {
                 CanonicalMapOrder::Declared(HEAP_ENTRY_FIELDS)
             }
-            _ if is_collection_entry(location, "entries") => {
+            _ if is_collection_entry(path, "entries") => {
                 CanonicalMapOrder::Declared(MAP_ENTRY_FIELDS)
             }
-            _ if location.ends_with(".value") => CanonicalMapOrder::Unordered,
             _ => CanonicalMapOrder::Unordered,
         },
-        |location| {
-            location == "snapshot"
-                || location == "snapshot.heap"
-                || location.ends_with(".object")
-                || is_collection_entry(location, "globals")
-                || is_collection_entry(location, "roots")
-                || is_collection_entry(location, "objects")
-                || is_collection_entry(location, "fields")
-                || is_collection_entry(location, "entries")
+        |path| {
+            path.is_empty()
+                || matches!(path, [field] if field.key() == Some("heap"))
+                || path.last().and_then(CanonicalPathSegment::key) == Some("object")
+                || ["globals", "roots", "objects", "fields", "entries"]
+                    .iter()
+                    .any(|collection| is_collection_entry(path, collection))
         },
     )?;
     globals_result
@@ -990,11 +990,8 @@ fn skip_messagepack_value(bytes: &[u8], cursor: &mut usize) -> Result<(), Snapsh
     }
 }
 
-fn is_collection_entry(location: &str, collection: &str) -> bool {
-    let Some((_, suffix)) = location.rsplit_once(&format!(".{collection}")) else {
-        return false;
-    };
-    suffix.starts_with('[') && suffix.ends_with(']') && !suffix.contains("].")
+fn is_collection_entry(path: &[CanonicalPathSegment], collection: &str) -> bool {
+    matches!(path, [.., field, CanonicalPathSegment::Index(_)] if field.key() == Some(collection))
 }
 
 fn validate_expected(
