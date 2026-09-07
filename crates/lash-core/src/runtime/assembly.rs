@@ -580,6 +580,7 @@ pub(super) struct TurnAssembler {
     pub(super) child_cumulatives: BTreeMap<(String, String, String), TokenUsage>,
     pub(super) issues: Vec<TurnIssue>,
     pub(super) saw_done: bool,
+    pub(super) turn_limit_final_scheduled: bool,
     pub(super) outcome: Option<TurnOutcome>,
 }
 
@@ -601,6 +602,7 @@ impl TurnAssembler {
             child_cumulatives: BTreeMap::new(),
             issues: Vec::new(),
             saw_done: false,
+            turn_limit_final_scheduled: false,
             outcome: None,
         }
     }
@@ -710,14 +712,6 @@ impl TurnAssembler {
         if let Some(issue) = force_runtime_error {
             issues.push(issue);
         }
-        let read_model = state.read_model();
-        let max_turn_reached = read_model.messages.iter().rev().take(8).any(|msg| {
-            msg.role == MessageRole::System
-                && msg
-                    .parts
-                    .iter()
-                    .any(|part| part.content.contains("Turn limit reached ("))
-        });
 
         let raw_output = if let Some(output) =
             self.outcome.as_ref().and_then(render_outcome_for_output)
@@ -781,7 +775,7 @@ impl TurnAssembler {
             } else {
                 TurnOutcome::Stopped(TurnStop::RuntimeError)
             }
-        } else if max_turn_reached {
+        } else if self.turn_limit_final_scheduled {
             TurnOutcome::Stopped(TurnStop::MaxTurns)
         } else {
             TurnOutcome::Finished(TurnFinish::AssistantMessage {

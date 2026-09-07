@@ -89,6 +89,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.messages.clone()
     }
 
+    /// Whether this machine scheduled its final turn-limit turn.
+    pub fn turn_limit_final_scheduled(&self) -> bool {
+        self.termination.should_force_exit_after_grace_turn()
+    }
+
     pub fn protocol_iteration(&self) -> usize {
         self.protocol_iteration
     }
