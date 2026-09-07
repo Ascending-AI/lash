@@ -7,7 +7,6 @@ pub(crate) enum RecordedTurnCancellation {
     AlreadyRequested(lash::TurnCancellationEvidence),
 }
 
-#[cfg(test)]
 impl RecordedTurnCancellation {
     pub(crate) fn evidence(&self) -> &lash::TurnCancellationEvidence {
         match self {

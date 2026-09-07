@@ -65,3 +65,12 @@ destroy an owner without a Lash result; turns-as-processes because ADR 0003 keep
 session-owned; and session-wide cancel-all because it needs an active-turn index and can touch the
 wrong or a future turn. A host that offers “stop all visible work” retains the exact active turn
 ids it submitted and fans out exact requests.
+
+## Terminal product-event ownership
+
+The turn execution publisher owns the observer-facing terminal event. A Stop
+handler attaches to terminal evidence and returns its receipt; it does not
+publish another terminal event, including for repeated requests or a completion
+that won the race. Removing a dangling route is not evidence of a failed turn.
+Cancellation traces use the request id in the recorded cancellation evidence,
+so a losing request attributes the stop to the same winner as the terminal.
