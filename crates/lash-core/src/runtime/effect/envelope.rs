@@ -1078,15 +1078,6 @@ const _: () = assert!(std::mem::size_of::<RuntimeEffectOutcome>() <= 128);
 // Request specs (serializable forms of LLM/Direct requests)
 // =============================================================================
 
-/// Serializable attachment data for runtime effect envelopes.
-///
-/// Inline sources are normalized to `Stored` before this durable shape is
-/// created. Borrowed sources round-trip without entering Lash storage.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LlmAttachmentSpec {
-    pub source: AttachmentSource,
-}
-
 /// Serializable LLM request data. Live stream and provider-trace callbacks are
 /// attached by the local executor, and attachment bytes are resolved locally
 /// from refs rather than persisted in the effect envelope.
@@ -1133,9 +1124,7 @@ impl LlmRequestSpec {
             }
             for block in Arc::make_mut(&mut message.blocks) {
                 if let crate::llm::types::LlmContentBlock::Attachment { source } = block {
-                    **source = attachment_spec_from_attachment(source, attachment_store)
-                        .await?
-                        .source;
+                    **source = durable_attachment_source(source, attachment_store).await?;
                 }
             }
         }
@@ -1174,10 +1163,10 @@ impl LlmRequestSpec {
     }
 }
 
-async fn attachment_spec_from_attachment(
+async fn durable_attachment_source(
     attachment: &AttachmentSource,
     attachment_store: &crate::SessionAttachmentStore,
-) -> Result<LlmAttachmentSpec, RuntimeEffectControllerError> {
+) -> Result<AttachmentSource, RuntimeEffectControllerError> {
     let source = match attachment {
         AttachmentSource::Inline { media_type, bytes } => {
             let attachment_ref = attachment_store
@@ -1198,7 +1187,7 @@ async fn attachment_spec_from_attachment(
         }
         durable => durable.clone(),
     };
-    Ok(LlmAttachmentSpec { source })
+    Ok(source)
 }
 
 impl RuntimeEffectOutcome {

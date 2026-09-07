@@ -7724,8 +7724,6 @@ lash::runtime::LashRuntime::unregister_plugin_session
 lash::runtime::LashRuntime::update_session_config
 lash::runtime::LashRuntime::usage_report
 lash::runtime::LashRuntime::validate_protocol_turn_extension
-lash::runtime::LlmAttachmentSpec
-lash::runtime::LlmAttachmentSpec::source
 lash::runtime::LlmRequestSpec
 lash::runtime::LlmRequestSpec::attachments
 lash::runtime::LlmRequestSpec::generation
