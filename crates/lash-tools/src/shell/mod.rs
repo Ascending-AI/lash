@@ -940,4 +940,5 @@ impl PluginFactory for StandardShellPluginFactory {
     }
 }
 
-include!("tests.rs");
+#[cfg(test)]
+mod tests;
