@@ -166,6 +166,78 @@ class ConclusionTests(unittest.TestCase):
         self.assertTrue(ci_plan.evaluate_conclusion(needs))
 
 
+class ProducerConclusionTests(unittest.TestCase):
+    def event_needs(self, event, enabled=True):
+        needs = successful_needs()
+        if event == "workflow_dispatch":
+            for job in ci_plan.FULL_PROFILE_JOBS:
+                needs[job]["result"] = "success"
+        if event in ci_plan.DEFERRED_EVENTS:
+            for job in ci_plan.TRUNK_ONLY_JOBS:
+                needs[job]["result"] = "skipped"
+        if not enabled:
+            for job in ci_plan.WORKERS_E2E_JOBS:
+                needs[job]["result"] = "skipped"
+        self.assertEqual([], self.evaluate(needs, event, enabled))
+        return needs
+
+    def evaluate(self, needs, event, enabled=True):
+        return ci_plan.evaluate_conclusion(needs, event, "refs/heads/main", enabled)
+
+    def assert_producer_rejected(self, event, result):
+        for producer in ("nextest-archive", "worker-artifacts"):
+            with self.subTest(producer=producer):
+                needs = self.event_needs(event)
+                needs[producer]["result"] = result
+                self.assertTrue(any(producer in p for p in self.evaluate(needs, event)))
+
+    def test_push_main_producer_failure_rejected(self):
+        self.assert_producer_rejected("push", "failure")
+
+    def test_push_main_producer_cancelled_rejected(self):
+        self.assert_producer_rejected("push", "cancelled")
+
+    def test_push_main_producer_skipped_rejected(self):
+        self.assert_producer_rejected("push", "skipped")
+
+    def test_dispatch_producer_failure_rejected(self):
+        self.assert_producer_rejected("workflow_dispatch", "failure")
+
+    def test_dispatch_producer_cancelled_rejected(self):
+        self.assert_producer_rejected("workflow_dispatch", "cancelled")
+
+    def test_dispatch_producer_skipped_rejected(self):
+        self.assert_producer_rejected("workflow_dispatch", "skipped")
+
+    def test_labeled_pr_producer_failure_rejected(self):
+        self.assert_producer_rejected("pull_request", "failure")
+
+    def test_labeled_pr_producer_cancelled_rejected(self):
+        self.assert_producer_rejected("pull_request", "cancelled")
+
+    def test_labeled_pr_producer_skipped_rejected(self):
+        self.assert_producer_rejected("pull_request", "skipped")
+
+    def test_skipped_consumer_cascade_rejected(self):
+        for event in ("push", "workflow_dispatch", "pull_request"):
+            for consumer in ("test-shard", "restate-postgres-workers", "restate-postgres-workers-summary"):
+                with self.subTest(event=event, consumer=consumer):
+                    needs = self.event_needs(event)
+                    needs[consumer]["result"] = "skipped"
+                    self.assertTrue(any(consumer in p for p in self.evaluate(needs, event)))
+
+    def test_unlabeled_pr_worker_producer_skipped_accepted(self):
+        needs = self.event_needs("pull_request", False)
+        self.assertEqual("skipped", needs["worker-artifacts"]["result"])
+        self.assertEqual([], self.evaluate(needs, "pull_request", False))
+
+    def test_merge_group_worker_producer_and_segments_skipped_accepted(self):
+        needs = self.event_needs("merge_group", False)
+        for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
+            self.assertEqual("skipped", needs[job]["result"])
+        self.assertEqual([], self.evaluate(needs, "merge_group", False))
+
+
 class WorkflowRegistrationTests(unittest.TestCase):
     def test_every_ci_job_is_registered_or_allowlisted(self) -> None:
         self.assertEqual(set(), unregistered_ci_jobs(CI_WORKFLOW.read_text(encoding="utf-8")))
