@@ -56,6 +56,7 @@ pub struct NestingTooDeep {
 /// parsed program gets for free are applied at the AST-construction entry
 /// points instead.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum InvalidAst {
     /// The tree nests deeper than [`MAX_AST_NESTING_DEPTH`].
     #[error(transparent)]
