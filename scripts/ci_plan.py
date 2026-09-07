@@ -77,6 +77,51 @@ WORKERS_E2E_JOBS = {
 }
 
 
+# Confidence is a separate scheduled/manual workflow. Pin its producer and
+# consumers here so its conclusion uses the same fail-closed entrypoint as CI.
+CONFIDENCE_JOB_POLICY = {
+    "confidence": "selector",
+    "confidence-build": "full-producer",
+    "confidence-harnesses": "full-consumer",
+    "confidence-generated": "full-consumer",
+    "confidence-minimizer": "full-consumer",
+    "confidence-backends": "full-consumer",
+    "confidence-workers": "full-consumer",
+    "confidence-coverage": "full-consumer",
+    "confidence-mutation-core": "full-consumer",
+    "confidence-mutation-sim": "full-consumer",
+    "confidence-mutation-packages": "full-consumer",
+    "sim-search": "full-consumer",
+}
+
+
+def evaluate_confidence_conclusion(needs: Mapping, event_name: str, selector: str) -> list[str]:
+    problems = []
+    expected = set(CONFIDENCE_JOB_POLICY)
+    for job in sorted(expected - set(needs)):
+        problems.append(f"aggregator is missing needed job: {job}")
+    for job in sorted(set(needs) - expected):
+        problems.append(f"aggregator has unmapped needed job: {job}")
+    active = event_name in {"schedule", "workflow_dispatch"}
+    if event_name not in {"schedule", "workflow_dispatch", "push", "pull_request", "merge_group"}:
+        problems.append(f"unknown Confidence event: {event_name!r}")
+    if event_name == "schedule" and selector != "full":
+        problems.append("scheduled Confidence must select full")
+    if not selector:
+        problems.append("Confidence selector is missing")
+    for job in sorted(expected & set(needs)):
+        policy = CONFIDENCE_JOB_POLICY[job]
+        if policy not in {"selector", "full-producer", "full-consumer"}:
+            problems.append(f"unknown Confidence policy for {job}: {policy!r}")
+            continue
+        required = active and ((selector != "full") if policy == "selector" else (selector == "full"))
+        result = needs[job].get("result")
+        wanted = "success" if required else "skipped"
+        if result != wanted:
+            problems.append(f"{job} ended with {result!r}, expected {wanted}")
+    return problems
+
+
 class PlanError(ValueError):
     """Raised when a path set cannot be classified exactly."""
 
@@ -325,6 +370,18 @@ def main() -> int:
     except (KeyError, json.JSONDecodeError) as error:
         print(f"Invalid needs JSON: {error}", file=sys.stderr)
         return 1
+    if os.environ.get("CONCLUSION_WORKFLOW") == "confidence":
+        problems = evaluate_confidence_conclusion(
+            needs, os.environ.get("GITHUB_EVENT_NAME", ""),
+            os.environ.get("CONFIDENCE_SELECTOR", ""),
+        )
+        print(json.dumps(needs, indent=2, sort_keys=True))
+        for problem in problems:
+            print(f"Confidence conclusion rejected: {problem}", file=sys.stderr)
+        if problems:
+            return 1
+        print("Confidence conclusion accepted: every stage satisfied its policy.")
+        return 0
     workers_e2e_enabled = os.environ.get("WORKERS_E2E_ENABLED")
     if workers_e2e_enabled not in {"true", "false"}:
         print(

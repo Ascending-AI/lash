@@ -127,6 +127,112 @@ def shell_logical_commands(script: str) -> list[str]:
 
 
 class ConfidenceGateCiContractTest(unittest.TestCase):
+    def test_full_stage_jobs_share_exactly_one_build_artifact(self):
+        jobs = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())["jobs"]
+        consumers = {"confidence-harnesses", "confidence-generated", "confidence-minimizer",
+                     "confidence-backends", "confidence-workers", "confidence-coverage",
+                     "confidence-mutation-core", "confidence-mutation-sim",
+                     "confidence-mutation-packages", "sim-search"}
+        self.assertEqual(consumers | {"confidence", "confidence-build", "confidence-conclusion"}, set(jobs))
+        artifact = "confidence-build-${{ github.sha }}-${{ github.run_attempt }}"
+        producer = jobs["confidence-build"]
+        uploads = [s for j in jobs.values() for s in j["steps"]
+                   if "upload-artifact@" in s.get("uses", "") and s["with"]["name"] == artifact]
+        self.assertEqual(1, len(uploads))
+        self.assertEqual("error", uploads[0]["with"]["if-no-files-found"])
+        self.assertIn("tar -cf", str(producer["steps"]))
+        for job in consumers:
+            with self.subTest(job=job):
+                self.assertEqual("confidence-build", jobs[job]["needs"])
+                downloads = [s for s in jobs[job]["steps"] if "download-artifact@" in s.get("uses", "")]
+                self.assertEqual([artifact], [s["with"]["name"] for s in downloads])
+                self.assertIn("tar -xf", str(jobs[job]["steps"]))
+                self.assertNotIn("rust-cache@", str(jobs[job]["steps"]))
+                self.assertNotIn("continue-on-error", jobs[job])
+        for job in jobs.values():
+            self.assertGreater(job["timeout-minutes"], 0)
+            self.assertLess(job["timeout-minutes"], 360)
+        for job in ("confidence-generated", "sim-search"):
+            self.assertEqual(list(range(1, 10)), jobs[job]["strategy"]["matrix"]["shard"])
+            self.assertIs(False, jobs[job]["strategy"]["fail-fast"])
+        self.assertIn("inputs.lane != 'full'", jobs["confidence"]["if"])
+        self.assertEqual("always()", jobs["confidence-conclusion"]["if"])
+        self.assertIn("scripts/ci/conclusion.py conclusion", str(jobs["confidence-conclusion"]["steps"]))
+
+    def test_full_stage_partition_calls_every_original_function_once(self):
+        functions = {
+            "harnesses": ["run_scenario_harnesses", "run_state_machine_and_fault_matrix", "run_sim_unit_suite",
+                          "write_provider_transport_exclusion_evidence", "write_sim_lane_declarations",
+                          "write_full_lane_prerequisites", "write_postgres_effect_history_status",
+                          "write_restate_postgres_workers_e2e_lane_status"],
+            "generated": ["run_sim_generated_lane"],
+            "minimizer": ["run_minimizer_fixture_suite", "run_focused_sqlite_seed_tail_repro"],
+            "backends": ["run_local_backend_conformance", "run_backend_contention_evidence",
+                         "run_current_postgres_trace_replay_evidence", "run_postgres_conformance"],
+            "workers": ["run_restate_postgres_workers_e2e"],
+            "coverage": ["run_coverage_blind_spots"],
+            "mutation-core": ["run_lash_core_direct_model_mutation_evidence"],
+            "mutation-sim": ["run_lash_sim_runtime_completion_mutation_evidence"],
+            "mutation-packages": ["run_mutation_smoke", "run_mutation_full", "finalize_mutation_gate"],
+        }
+        all_functions = {f for fs in functions.values() for f in fs}
+        stubs = "\n".join(f"{f}() {{ echo {f}; }}" for f in all_functions)
+        stage_script = ROOT / "scripts/ci/confidence-stage.sh"
+        with tempfile.TemporaryDirectory() as tmp:
+            for stage, expected in functions.items():
+                env = dict(os.environ, LASH_CONFIDENCE_STAGE=stage, LASH_CONFIDENCE_PACKAGE="lash-internal-core")
+                shell = stubs + '\nassert_no_panics_in_artifacts() { :; }\nrequested_selector=full\nmutation_commands_run=1\nmutation_failures=0\nout_dir="$1"\nsource "$2"'
+                result = subprocess.run(["bash", "-euc", shell, "stage-test", tmp, str(stage_script)],
+                                        env=env, capture_output=True, text=True)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(expected, result.stdout.splitlines(), stage)
+        generated = shell_function_definition(GATE.read_text(), "run_sim_generated_lane")
+        self.assertIn('cmd+=(--shard "${LASH_SIM_SHARD:?generated stage requires a shard}")', generated)
+        self.assertIn('if [ "${LASH_CONFIDENCE_STAGE:-}" != "generated" ]; then', generated)
+        self.assertIn('source "$repo/scripts/ci/confidence-stage.sh"', GATE.read_text())
+
+    def test_generated_stage_partitions_full_budget_without_search(self):
+        function = shell_function_definition(GATE.read_text(), "run_sim_generated_lane")
+        shell = 'step() { :; }\ncargo() { printf "%s\\n" "$@"; }\nrun_sim_search_lane() { echo SEARCH; }\n' + function + '\nlane=full\nout_dir=/tmp/evidence\nrun_sim_generated_lane'
+        for shard in range(1, 10):
+            env = {k: v for k, v in os.environ.items() if not k.startswith("LASH_SIM_")}
+            env.update(LASH_CONFIDENCE_STAGE="generated", LASH_SIM_SHARD=f"{shard}/9")
+            result = subprocess.run(["bash", "-euc", shell], env=env, capture_output=True, text=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(["run", "-p", "lash-sim", "--locked", "--", "run", "--out", "/tmp/evidence/sim",
+                              "--profile", "full-random", "--shard", f"{shard}/9"], result.stdout.splitlines())
+
+    def test_confidence_checkout_uses_trigger_sha_in_a_shallow_repository(self):
+        jobs = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())["jobs"]
+        scripts = {next(s["run"] for s in job["steps"] if s["name"] == "Check out repository")
+                   for job in jobs.values()}
+        # Every producer, consumer and conclusion uses the identical checkout.
+        self.assertEqual(1, len(scripts))
+        script = scripts.pop()
+        self.assertIn('git config gc.auto 0', script)
+        self.assertIn('git checkout --detach --force "${GITHUB_SHA}"', script)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            remote = root / "repo.git"
+            remote.mkdir()
+            def git(*args):
+                return subprocess.check_output(["git", "-C", str(remote), *args], text=True).strip()
+            git("init", "-q")
+            git("config", "user.name", "Samuel Galanakis")
+            git("config", "user.email", "47306720+SamGalanakis@users.noreply.github.com")
+            git("-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "Add fixture")
+            sha = git("rev-parse", "HEAD")
+            git("-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "Advance fixture")
+            clone = root / "checkout"
+            clone.mkdir()
+            env = dict(os.environ, GITHUB_SERVER_URL=root.as_uri(), GITHUB_REPOSITORY="repo",
+                       GITHUB_SHA=sha, CHECKOUT_TOKEN="fixture-token")
+            result = subprocess.run(["bash", "-euc", script], cwd=clone, env=env, capture_output=True, text=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+            head = subprocess.check_output(["git", "-C", str(clone), "rev-parse", "HEAD"], text=True).strip()
+            self.assertEqual(sha, head)
+            self.assertTrue((clone / ".git/shallow").exists())
+
     def test_worker_profiles_retain_workspace_outputs_without_changing_segments(self):
         jobs = yaml.safe_load(WORKFLOW.read_text())["jobs"]
         producer = jobs["worker-artifacts"]
@@ -630,6 +736,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 / "**"
             ),
         }
+        expected_consumed_paths.update(
+            f"target/confidence/stages/{stage}/**"
+            for stage in ("harnesses", "generated-${{ matrix.shard }}", "minimizer", "backends",
+                          "workers", "coverage", "mutation-core", "mutation-sim",
+                          "mutation-packages-${{ matrix.package }}")
+        )
         self.assertCountEqual(consumed_paths, expected_consumed_paths)
 
         self.assertIn("path: target/confidence/fast/${{ matrix.shard }}", workflow)
@@ -954,14 +1066,14 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertNotIn("scheduled-depth", gate)
         self.assertNotIn("BROAD_SCHEDULED_DEPTH", gate)
 
-        # Weekly full confidence partitions one search seed space: shard 1/9 on
-        # the main job, shards 2/9..9/9 as matrix jobs.
+        # Weekly full confidence partitions the complete search seed space in
+        # one matrix, including shard 1; generated simulation is separate.
         required_confidence_snippets = [
             "sim-search:",
             'bash scripts/confidence-gate.sh "sim-search:${{ matrix.shard }}/9"',
-            "shard: [2, 3, 4, 5, 6, 7, 8, 9]",
+            "shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]",
             "LASH_SIM_SHARD",
-            "'1/9'",
+            "${{ matrix.shard }}/9",
         ]
         for snippet in required_confidence_snippets:
             self.assertIn(snippet, confidence_workflow)
