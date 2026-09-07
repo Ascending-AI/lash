@@ -1,3 +1,29 @@
+//! # Completion epilogue ordering
+//!
+//! Adapters finish a completion in this order, using their protocol's own
+//! checks and builders:
+//!
+//! 1. Preserve HTTP/stream/parser errors first, attaching the accumulated
+//!    partial response and allowed metadata before returning. A later content
+//!    check must not replace an upstream error with an empty-response error.
+//! 2. Enforce the resolved stream-termination policy. When terminal evidence
+//!    is required but absent, return a stream failure with the partial response
+//!    (including an empty partial). Empty content cannot distinguish truncation
+//!    from a completed generation; checking it first hides retry evidence.
+//! 3. Derive the terminal reason from wire evidence, then validate content.
+//!    A terminal output limit, content filter, or cancellation may legitimately
+//!    produce no text and must retain that reason. Checking content before the
+//!    reason would turn a known terminal outcome into a generic empty failure.
+//!    Protocols may otherwise differ in whether an empty completion is valid.
+//! 4. Finish emission of parsed parts and retained usage/metadata, then return
+//!    the response. Parts already emitted while parsing stay observable on
+//!    failure; success-only finalization does not erase partial evidence.
+//!
+//! EOF-tolerant routes explicitly waive step 2; they do not waive upstream
+//! errors. Buffered SSE and streamed SSE obey the same order. This contract
+//! intentionally leaves the sequence local to each adapter: protocol-specific
+//! terminal predicates and emission rules are not hooks on a shared sequence.
+
 use lash_core::provider::ProviderOptions;
 use lash_core::{
     ProviderFailureKind, facade_support::LlmTransportError, llm::transport::TransportRetryVerdict,

@@ -7,13 +7,13 @@ impl RuntimeTurnDriver<'_> {
         event_tx: mpsc::Sender<RuntimeStreamEvent>,
         cancel: CancellationToken,
         run_offset: usize,
-    ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
+    ) -> Result<(crate::MessageSequence, usize, bool), RuntimeError> {
         let machine = match self
             .prepare_turn_machine(messages, &event_tx, run_offset)
             .await
         {
             Ok(prepared) => prepared,
-            Err(result) => return Ok(result),
+            Err((messages, iteration)) => return Ok((messages, iteration, false)),
         };
         self.run_machine(machine, event_tx, cancel, run_offset)
             .await
@@ -25,7 +25,7 @@ impl RuntimeTurnDriver<'_> {
         event_tx: mpsc::Sender<RuntimeStreamEvent>,
         cancel: CancellationToken,
         run_offset: usize,
-    ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
+    ) -> Result<(crate::MessageSequence, usize, bool), RuntimeError> {
         macro_rules! emit {
             ($event:expr) => {
                 send_session_event(&event_tx, $event).await
@@ -61,7 +61,11 @@ impl RuntimeTurnDriver<'_> {
                     protocol_iteration,
                 } => {
                     self.turn_pipeline.apply_event_delta(event_delta);
-                    return Ok((messages, protocol_iteration));
+                    return Ok((
+                        messages,
+                        protocol_iteration,
+                        machine.turn_limit_final_scheduled(),
+                    ));
                 }
                 Effect::LlmCall { id, request } => {
                     self.handle_llm_call_effect(&mut machine, id, request, &event_tx, &cancel)
@@ -103,7 +107,7 @@ impl RuntimeTurnDriver<'_> {
             }
         }
 
-        Ok((crate::MessageSequence::default(), run_offset))
+        Ok((crate::MessageSequence::default(), run_offset, false))
     }
 
     async fn apply_progress_boundary(

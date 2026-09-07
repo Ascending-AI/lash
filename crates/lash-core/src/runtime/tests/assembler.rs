@@ -449,7 +449,7 @@ fn assembler_marks_missing_done_as_failure() {
 }
 
 #[test]
-fn assembler_detects_max_turn_message() {
+fn assembler_ignores_stale_max_turn_message() {
     let mut state = default_state();
     append_message(
         &mut state,
@@ -466,6 +466,40 @@ fn assembler_detects_max_turn_message() {
         },
     );
     let mut assembler = TurnAssembler::default();
+    assembler.push(&SessionStreamEvent::Done);
+    let out = assembler.finish(
+        state.to_snapshot(),
+        None,
+        None,
+        &TerminationPolicy::default(),
+    );
+    assert!(matches!(
+        &out.outcome,
+        TurnOutcome::Finished(TurnFinish::AssistantMessage { .. })
+    ));
+}
+
+#[test]
+fn assembler_uses_typed_max_turn_fact_despite_reworded_message() {
+    let mut state = default_state();
+    append_message(
+        &mut state,
+        Message {
+            id: "m0".to_string(),
+            role: MessageRole::System,
+            parts: vec![Part::text(
+                "m0.p0".to_string(),
+                "Please finish now.".to_string(),
+                None,
+            )]
+            .into(),
+            origin: None,
+        },
+    );
+    let mut assembler = TurnAssembler {
+        turn_limit_final_scheduled: true,
+        ..Default::default()
+    };
     assembler.push(&SessionStreamEvent::Done);
     let out = assembler.finish(
         state.to_snapshot(),

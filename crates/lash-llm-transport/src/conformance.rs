@@ -16,6 +16,8 @@
 //! implementations; adapters put the real streaming path under test by
 //! implementing [`ProviderNormalizer::assemble_stream`].
 
+pub mod epilogue;
+
 use lash_sansio::llm::types::{
     LlmMessage, LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage,
 };

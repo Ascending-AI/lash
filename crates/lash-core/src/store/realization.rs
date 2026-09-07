@@ -1,6 +1,10 @@
 use super::{RuntimeCommit, RuntimeCommitReceipt, SessionCommitStore, StoreError};
 
 /// Commit through the production realization boundary.
+///
+/// # Panics
+/// Panics in every build profile if a newly committed receipt fails to advance
+/// the expected revision. Receipt replay performs no new commit and is exempt.
 pub async fn commit_runtime_state_verified(
     store: &(dyn SessionCommitStore + '_),
     commit: RuntimeCommit,
@@ -17,7 +21,13 @@ pub async fn commit_runtime_state_verified(
             attempted_session_id: commit.session_id,
         });
     }
-    store.commit_runtime_state(commit).await
+    let expected_revision = commit.expected_head_revision;
+    let receipt = store.commit_runtime_state(commit).await?;
+    assert!(
+        receipt.receipt_replayed || receipt.head_revision > expected_revision,
+        "committed head revision must advance"
+    );
+    Ok(receipt)
 }
 
 #[cfg(test)]
@@ -29,6 +39,8 @@ mod tests {
     #[derive(Default)]
     struct NonValidatingFacadeStore {
         commit_attempts: AtomicUsize,
+        materialized_session: Option<String>,
+        replayed: bool,
     }
 
     crate::impl_noop_attachment_manifest!(NonValidatingFacadeStore);
@@ -69,7 +81,7 @@ mod tests {
                 .collect();
             let manifest = commit.checkpoint.manifest()?;
             Ok(RuntimeCommitReceipt {
-                head_revision: commit.expected_head_revision + 1,
+                head_revision: commit.expected_head_revision,
                 checkpoint_ref: "empty-frame-facade".to_string().into(),
                 manifest,
                 committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
@@ -83,7 +95,7 @@ mod tests {
                 enqueued_queue_batches: Vec::new(),
                 turn_input_applications: Vec::new(),
                 turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
-                receipt_replayed: false,
+                receipt_replayed: self.replayed,
             })
         }
 
@@ -102,7 +114,14 @@ mod tests {
         }
 
         async fn load_session_meta(&self) -> Result<Option<super::super::SessionMeta>, StoreError> {
-            Ok(None)
+            Ok(self
+                .materialized_session
+                .as_ref()
+                .map(|session_id| super::super::SessionMeta {
+                    session_id: session_id.clone(),
+                    relation: crate::SessionRelation::Root,
+                    pending_observer_intents: Vec::new(),
+                }))
         }
     }
 
@@ -192,5 +211,43 @@ mod tests {
             0,
             "the non-validating store must not be called"
         );
+    }
+    #[tokio::test]
+    #[should_panic(expected = "committed head revision must advance")]
+    async fn verified_commit_rejects_nonadvancing_store_receipt() {
+        let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+        ));
+        state.ensure_agent_frame_initialized();
+        let store = NonValidatingFacadeStore {
+            materialized_session: Some(state.session_id.clone()),
+            ..Default::default()
+        };
+        let _ = commit_runtime_state_verified(
+            &store,
+            RuntimeCommit::persisted_state_for_test(&state, &[]),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn verified_commit_preserves_nonadvancing_receipt_replay() {
+        let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+        ));
+        state.ensure_agent_frame_initialized();
+        let store = NonValidatingFacadeStore {
+            materialized_session: Some(state.session_id.clone()),
+            replayed: true,
+            ..Default::default()
+        };
+        let receipt = commit_runtime_state_verified(
+            &store,
+            RuntimeCommit::persisted_state_for_test(&state, &[]),
+        )
+        .await
+        .unwrap();
+        assert!(receipt.receipt_replayed);
+        assert_eq!(receipt.head_revision, state.head_revision);
     }
 }

@@ -4,12 +4,13 @@ use lash_sansio::sync::MutexExt;
 #[derive(Debug)]
 pub struct ProviderRateLimiter {
     state: Mutex<ProviderRateLimiterState>,
-    clock: Arc<dyn crate::Clock>,
 }
 
 #[derive(Debug)]
 struct ProviderRateLimiterState {
-    policy: ProviderRateLimitPolicy,
+    // Capacity of the installed gate, not an admission-policy authority.
+    semaphore_capacity: Option<usize>,
+    clock: Arc<dyn crate::Clock>,
     semaphore: Option<Arc<tokio::sync::Semaphore>>,
     request_bucket: WindowBucket,
     token_bucket: WindowBucket,
@@ -32,64 +33,91 @@ pub struct ProviderRateLimitPermit {
     _concurrency: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
+impl Default for ProviderRateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProviderRateLimiter {
-    pub fn new(policy: ProviderRateLimitPolicy) -> Self {
-        Self::with_clock(policy, Arc::new(crate::SystemClock))
+    pub fn new() -> Self {
+        Self::with_clock(Arc::new(crate::SystemClock))
     }
 
-    pub fn with_clock(policy: ProviderRateLimitPolicy, clock: Arc<dyn crate::Clock>) -> Self {
-        let semaphore = policy
-            .max_concurrency
-            .filter(|limit| *limit > 0)
-            .map(tokio::sync::Semaphore::new)
-            .map(Arc::new);
+    pub fn with_clock(clock: Arc<dyn crate::Clock>) -> Self {
         let now = clock.now();
         Self {
             state: Mutex::new(ProviderRateLimiterState {
-                policy,
-                semaphore,
+                semaphore_capacity: None,
+                clock,
+                semaphore: None,
                 request_bucket: WindowBucket::new(now),
                 token_bucket: WindowBucket::new(now),
             }),
-            clock,
         }
     }
 
-    pub fn configure(&self, policy: ProviderRateLimitPolicy) {
+    pub(super) fn set_clock(&self, clock: Arc<dyn crate::Clock>) {
         let mut state = self.state.lock_recover();
-        if state.policy.max_concurrency != policy.max_concurrency {
-            state.semaphore = policy
-                .max_concurrency
-                .filter(|limit| *limit > 0)
-                .map(tokio::sync::Semaphore::new)
-                .map(Arc::new);
+        if Arc::ptr_eq(&state.clock, &clock) {
+            return;
         }
-        state.policy = policy;
+        let old_now = state.clock.now();
+        let now = clock.now();
+        // Preserve remaining windows even when the clocks use different epochs.
+        state.request_bucket.reset_at = now
+            + state
+                .request_bucket
+                .reset_at
+                .saturating_duration_since(old_now);
+        state.token_bucket.reset_at = now
+            + state
+                .token_bucket
+                .reset_at
+                .saturating_duration_since(old_now);
+        state.clock = clock;
+    }
+
+    fn concurrency_gate(
+        &self,
+        policy: &ProviderRateLimitPolicy,
+    ) -> Option<Arc<tokio::sync::Semaphore>> {
+        let mut state = self.state.lock_recover();
+        let limit = policy.max_concurrency.filter(|limit| *limit > 0);
+        if state.semaphore_capacity != limit {
+            state.semaphore = limit.map(tokio::sync::Semaphore::new).map(Arc::new);
+            state.semaphore_capacity = limit;
+        }
+        state.semaphore.clone()
     }
 
     pub fn clock(&self) -> Arc<dyn crate::Clock> {
-        Arc::clone(&self.clock)
+        Arc::clone(&self.state.lock_recover().clock)
     }
 
-    pub async fn admit(&self, request: &LlmRequest) -> ProviderRateLimitPermit {
-        let semaphore = self.state.lock_recover().semaphore.clone();
+    pub async fn admit(
+        &self,
+        provider: &dyn Provider,
+        request: &LlmRequest,
+    ) -> ProviderRateLimitPermit {
+        let semaphore = self.concurrency_gate(&provider.options().reliability.rate_limits);
         let concurrency = match semaphore {
             Some(semaphore) => Some(semaphore.acquire_owned().await.expect("semaphore open")),
             None => None,
         };
-        self.wait_for_buckets(1, estimate_request_tokens(request))
+        self.wait_for_buckets(provider, 1, estimate_request_tokens(request))
             .await;
         ProviderRateLimitPermit {
             _concurrency: concurrency,
         }
     }
 
-    async fn wait_for_buckets(&self, requests: u32, tokens: u32) {
+    async fn wait_for_buckets(&self, provider: &dyn Provider, requests: u32, tokens: u32) {
         loop {
+            let policy = provider.options().reliability.rate_limits;
             let wait = {
                 let mut state = self.state.lock_recover();
-                let now = self.clock.now();
-                let policy = state.policy.clone();
+                let now = state.clock.now();
                 let request_wait = bucket_wait(
                     &mut state.request_bucket,
                     now,
@@ -111,7 +139,7 @@ impl ProviderRateLimiter {
                 }
             };
             if let Some(wait) = wait {
-                self.clock.sleep(wait).await;
+                self.clock().sleep(wait).await;
             }
         }
     }
@@ -216,12 +244,13 @@ mod tests {
 
     #[test]
     fn concurrency_zero_is_unlimited_and_positive_values_install_a_gate() {
-        let limiter = ProviderRateLimiter::new(ProviderRateLimitPolicy {
+        let limiter = ProviderRateLimiter::new();
+        limiter.concurrency_gate(&ProviderRateLimitPolicy {
             max_concurrency: Some(0),
             ..Default::default()
         });
         assert!(limiter.state.lock_recover().semaphore.is_none());
-        limiter.configure(ProviderRateLimitPolicy {
+        limiter.concurrency_gate(&ProviderRateLimitPolicy {
             max_concurrency: Some(2),
             ..Default::default()
         });
@@ -235,5 +264,177 @@ mod tests {
                 .available_permits(),
             2
         );
+    }
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    use crate::Clock;
+    use crate::ClockWallTime as _;
+    use futures_util::FutureExt as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[derive(Debug)]
+    struct AdvancingClock {
+        epoch: std::time::Instant,
+        elapsed_ms: AtomicU64,
+    }
+
+    impl AdvancingClock {
+        fn new(epoch: std::time::Instant) -> Self {
+            Self {
+                epoch,
+                elapsed_ms: AtomicU64::new(0),
+            }
+        }
+
+        fn elapsed_ms(&self) -> u64 {
+            self.elapsed_ms.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl Clock for AdvancingClock {
+        fn now(&self) -> std::time::Instant {
+            self.epoch + Duration::from_millis(self.elapsed_ms())
+        }
+        // `timestamp_ms`/`timestamp_rfc3339` derive through `ClockWallTime`
+        // from this single wall-clock instant, so the derived faces advance in
+        // lockstep with the test's elapsed counter.
+        fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+            chrono::DateTime::from(std::time::UNIX_EPOCH + Duration::from_millis(self.elapsed_ms()))
+        }
+        async fn sleep(&self, duration: Duration) {
+            self.elapsed_ms
+                .fetch_add(duration.as_millis() as u64, Ordering::SeqCst);
+        }
+        async fn sleep_until(&self, deadline: std::time::Instant) {
+            self.sleep(deadline.saturating_duration_since(self.now()))
+                .await;
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct MutatingAdmissionProvider(ProviderOptions, bool);
+
+    #[async_trait]
+    impl Provider for MutatingAdmissionProvider {
+        fn kind(&self) -> &'static str {
+            "admission-test"
+        }
+        fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+            ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+        }
+        fn options(&self) -> ProviderOptions {
+            self.0.clone()
+        }
+        fn set_options(&mut self, options: ProviderOptions) {
+            self.0 = options;
+        }
+        fn serialize_config(&self) -> serde_json::Value {
+            serde_json::Value::Null
+        }
+        async fn complete(
+            &mut self,
+            _request: LlmRequest,
+        ) -> Result<LlmResponse, LlmTransportError> {
+            self.0.reliability.rate_limits.requests_per_window = Some(1);
+            if std::mem::take(&mut self.1) {
+                return Err(LlmTransportError::new("retry after option mutation")
+                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient));
+            }
+            Ok(LlmResponse::default())
+        }
+        fn clone_boxed(&self) -> Box<dyn Provider> {
+            Box::new(self.clone())
+        }
+    }
+
+    fn components(fail_first: bool) -> super::super::handle::ProviderComponents {
+        let options = ProviderOptions {
+            reliability: ProviderReliability {
+                retry: ProviderRetryPolicy {
+                    max_attempts: 2,
+                    base_delay_ms: 0,
+                    max_delay_ms: 0,
+                    jitter_ms: 0,
+                    ..Default::default()
+                },
+                rate_limits: ProviderRateLimitPolicy {
+                    requests_per_window: Some(2),
+                    request_window_ms: Some(1000),
+                    max_concurrency: Some(1),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        super::super::handle::ProviderComponents::new(Box::new(MutatingAdmissionProvider(
+            options, fail_first,
+        )))
+    }
+
+    #[tokio::test]
+    async fn admission_reads_options_mutated_inside_completion() {
+        let clock = Arc::new(AdvancingClock::new(std::time::Instant::now()));
+        let mut handle =
+            super::super::handle::ProviderHandle::new(components(true).with_clock(clock.clone()));
+        let completion = handle
+            .complete(super::super::tests::empty_request())
+            .await
+            .unwrap();
+        assert_eq!(completion.call_record.attempts.len(), 2);
+        assert_eq!(
+            handle.options().reliability.rate_limits.requests_per_window,
+            Some(1)
+        );
+        assert_eq!(
+            clock.timestamp_ms(),
+            1000,
+            "second admission must honor the provider's mutated one-request window"
+        );
+    }
+
+    #[tokio::test]
+    async fn cloned_bindings_and_clock_injection_preserve_limiter_and_usage() {
+        let epoch = std::time::Instant::now();
+        let clock = Arc::new(AdvancingClock::new(epoch));
+        let components = components(false).with_clock(clock);
+        let limiter = Arc::clone(&components.rate_limiter);
+        let mut first = super::super::handle::ProviderHandle::new(components.clone());
+        first
+            .complete(super::super::tests::empty_request())
+            .await
+            .unwrap();
+        let gate = limiter.state.lock_recover().semaphore.clone().unwrap();
+        let held = Arc::clone(&gate).acquire_owned().await.unwrap();
+        let replacement = Arc::new(AdvancingClock::new(epoch + Duration::from_secs(30)));
+        let second = components.clone().with_clock(replacement.clone());
+        assert!(Arc::ptr_eq(&limiter, &second.rate_limiter));
+        let mut second_handle = first.clone().with_clock(replacement.clone());
+        {
+            let state = limiter.state.lock_recover();
+            assert_eq!(state.request_bucket.used, 1);
+            assert_eq!(
+                state.request_bucket.reset_at,
+                replacement.now() + Duration::from_secs(1)
+            );
+            assert!(Arc::ptr_eq(&gate, state.semaphore.as_ref().unwrap()));
+            assert_eq!(gate.available_permits(), 0);
+        }
+        let request = super::super::tests::empty_request();
+        assert!(
+            second_handle
+                .complete(request.clone())
+                .now_or_never()
+                .is_none(),
+            "the cloned binding shares the outstanding concurrency permit"
+        );
+        drop(held);
+        second_handle.complete(request).await.unwrap();
+        assert_eq!(replacement.timestamp_ms(), 1000);
+        assert_eq!(gate.available_permits(), 1);
     }
 }

@@ -726,7 +726,14 @@ fn complete_buffered_chat(
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(chat_response_from_state(state, &url)));
     }
-    if !has_response_content(&parts) {
+    if !has_response_content(&parts)
+        && !matches!(
+            state.terminal_reason,
+            LlmTerminalReason::OutputLimit
+                | LlmTerminalReason::ContentFilter
+                | LlmTerminalReason::Cancelled
+        )
+    {
         return Err(empty_response_error(text));
     }
     if let Some(tx) = &stream_events {
@@ -1055,7 +1062,14 @@ async fn drive_streaming_chat(
             .with_partial_response(chat_response_from_state(state, &url)));
     }
     let parts = state.parts();
-    if !has_response_content(&parts) {
+    if !has_response_content(&parts)
+        && !matches!(
+            state.terminal_reason,
+            LlmTerminalReason::OutputLimit
+                | LlmTerminalReason::ContentFilter
+                | LlmTerminalReason::Cancelled
+        )
+    {
         return Err(empty_response_error(
             state.final_response_raw.clone().unwrap_or_default(),
         ));

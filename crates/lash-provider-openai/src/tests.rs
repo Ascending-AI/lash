@@ -2487,3 +2487,5 @@ fn generation_disposition_reports_what_each_dialect_carried() {
         "OpenAI Responses carries prompt-cache intent via prompt_cache_key"
     );
 }
+
+mod epilogue;
