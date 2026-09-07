@@ -537,9 +537,8 @@ async fn run_high_traffic_operation(
             .allow_process_lifetime_completion_keys();
         let drain = session
             .queued_turn()
-            .effects(&controller)
             .drain_id(format!("runtime-perf-load-drain-{ordinal}"))
-            .run()
+            .run_with_effects(&controller)
             .await?;
         if drain.ran().is_none() {
             anyhow::bail!("queued high-traffic operation {ordinal} did not run a turn");
@@ -632,8 +631,7 @@ async fn run_high_traffic_direct_turn(
             session.session_id()
         )))
         .turn_id(format!("runtime-perf-load-turn-{ordinal}"))
-        .effects(&controller)
-        .run()
+        .run_with_effects(&controller)
         .await?
         .result;
     if !matches!(report.outcome, lash::TurnOutcome::Finished(_)) {

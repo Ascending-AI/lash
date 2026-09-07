@@ -131,7 +131,7 @@ reconstructed from the SQLite durable-core catalog instead of running in the rou
 process. `AgentServiceTurnWorkflowRequest` carries only stable turn, chat, text,
 model, and model-variant data; board state stays in the app database. The
 workflow creates a `RestateRuntimeEffectController` and calls
-`session.turn(...).turn_id(...).effects(&controller).stream_to(...)`.
+`session.turn(...).turn_id(...).stream_to_with_effects(..., &controller)`.
 The stable chat/session id and turn id keep Restate replay and Lash final
 commit addressed to the same operation.
 

@@ -181,6 +181,20 @@ impl Drop for TurnCancelGuard {
     }
 }
 
+enum EffectBinding<'run> {
+    Host(&'run dyn EffectHost),
+    Borrowed(&'run dyn RuntimeEffectController),
+}
+
+impl<'run> EffectBinding<'run> {
+    fn scoped(self, scope: lash_core::ExecutionScope) -> Result<ScopedEffectController<'run>> {
+        match self {
+            Self::Host(host) => Ok(host.scoped(scope)?),
+            Self::Borrowed(controller) => Ok(ScopedEffectController::borrowed(controller, scope)?),
+        }
+    }
+}
+
 /// Builder for configuring turn.
 pub struct TurnBuilder {
     pub(crate) runtime: RuntimeHandle,
@@ -291,14 +305,6 @@ impl TurnBuilder {
         self
     }
 
-    /// Returns the configured effect receiver.
-    pub fn effects(self, controller: &dyn RuntimeEffectController) -> ScopedTurnBuilder<'_> {
-        ScopedTurnBuilder {
-            builder: self,
-            controller,
-        }
-    }
-
     /// Accept this turn's input durably, drive it, and collect its activity.
     ///
     /// Convenience over [`stream_to`](Self::stream_to), which documents what one
@@ -306,6 +312,19 @@ impl TurnBuilder {
     pub async fn run(self) -> Result<TurnOutput> {
         let collector = RunActivityCollector::default();
         let result = self.stream_to(&collector).await?;
+        Ok(TurnOutput {
+            result,
+            activities: collector.into_activities(),
+        })
+    }
+
+    /// Runs and collects activity using a borrowed effect controller.
+    pub async fn run_with_effects(
+        self,
+        controller: &dyn RuntimeEffectController,
+    ) -> Result<TurnOutput> {
+        let collector = RunActivityCollector::default();
+        let result = self.stream_to_with_effects(&collector, controller).await?;
         Ok(TurnOutput {
             result,
             activities: collector.into_activities(),
@@ -331,7 +350,7 @@ impl TurnBuilder {
     ///   [`EnqueueTurnBuilder::id`](crate::EnqueueTurnBuilder::id).
     pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<TurnReport> {
         let effect_host = Arc::clone(&self.effect_host);
-        self.stream_to_with_effect_host(events, effect_host.as_ref())
+        self.stream_to_with_binding(events, EffectBinding::Host(effect_host.as_ref()))
             .await
     }
 
@@ -386,25 +405,23 @@ impl TurnBuilder {
         Ok((self.runtime, self.input, self.cancel, cancel_guard))
     }
 
-    async fn stream_to_with_effect_host(
-        self,
-        events: &dyn TurnActivitySink,
-        effect_host: &dyn EffectHost,
-    ) -> Result<TurnReport> {
-        let turn_id = self.resolved_turn_id(None).unwrap_or_else(fresh_turn_id);
-        let scoped_effect_controller = effect_host.scoped(self.turn_scope(&turn_id))?;
-        self.stream_to_with_scope(events, scoped_effect_controller, Some(turn_id))
-            .await
-    }
-
-    async fn stream_to_with_effect_controller(
+    /// Runs and streams activity using a borrowed effect controller.
+    pub async fn stream_to_with_effects(
         self,
         events: &dyn TurnActivitySink,
         controller: &dyn RuntimeEffectController,
     ) -> Result<TurnReport> {
+        self.stream_to_with_binding(events, EffectBinding::Borrowed(controller))
+            .await
+    }
+
+    async fn stream_to_with_binding(
+        self,
+        events: &dyn TurnActivitySink,
+        binding: EffectBinding<'_>,
+    ) -> Result<TurnReport> {
         let turn_id = self.resolved_turn_id(None).unwrap_or_else(fresh_turn_id);
-        let scoped_effect_controller =
-            ScopedEffectController::borrowed(controller, self.turn_scope(&turn_id))?;
+        let scoped_effect_controller = binding.scoped(self.turn_scope(&turn_id))?;
         self.stream_to_with_scope(events, scoped_effect_controller, Some(turn_id))
             .await
     }
@@ -457,101 +474,6 @@ impl TurnBuilder {
             activities: rx,
             completion,
         })
-    }
-}
-
-/// Builder for configuring scoped turn.
-pub struct ScopedTurnBuilder<'run> {
-    builder: TurnBuilder,
-    controller: &'run dyn RuntimeEffectController,
-}
-
-impl<'run> ScopedTurnBuilder<'run> {
-    /// Install a low-level process-local cancellation token.
-    pub fn cancel(mut self, cancel: CancellationToken) -> Self {
-        self.builder = self.builder.cancel(cancel);
-        self
-    }
-
-    /// Installs a cancellation token with an optional host-defined origin.
-    pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
-        self.builder = self.builder.cancel_with_origin(cancel, origin);
-        self
-    }
-
-    /// Configures the protocol turn options and returns the updated builder.
-    pub fn protocol_turn_options(mut self, options: ProtocolTurnOptions) -> Self {
-        self.builder = self.builder.protocol_turn_options(options);
-        self
-    }
-
-    /// Configures the provider and returns the updated builder.
-    pub fn provider(mut self, provider: ProviderHandle) -> Self {
-        self.builder = self.builder.provider(provider);
-        self
-    }
-
-    /// Configures the turn id and returns the updated builder.
-    pub fn turn_id(mut self, id: impl Into<String>) -> Self {
-        self.builder = self.builder.turn_id(id);
-        self
-    }
-
-    /// Configures the prompt template and returns the updated builder.
-    pub fn prompt_template(mut self, template: PromptTemplate) -> Self {
-        self.builder = self.builder.prompt_template(template);
-        self
-    }
-
-    /// Configures the prompt contribution and returns the updated builder.
-    pub fn prompt_contribution(mut self, contribution: PromptContribution) -> Self {
-        self.builder = self.builder.prompt_contribution(contribution);
-        self
-    }
-
-    /// Replaces prompt slot.
-    pub fn replace_prompt_slot(
-        mut self,
-        slot: PromptSlot,
-        contributions: impl IntoIterator<Item = PromptContribution>,
-    ) -> Self {
-        self.builder = self.builder.replace_prompt_slot(slot, contributions);
-        self
-    }
-
-    /// Clears prompt slot.
-    pub fn clear_prompt_slot(mut self, slot: PromptSlot) -> Self {
-        self.builder = self.builder.clear_prompt_slot(slot);
-        self
-    }
-
-    /// Configures the prompt layer and returns the updated builder.
-    pub fn prompt_layer(mut self, layer: PromptLayer) -> Self {
-        self.builder = self.builder.prompt_layer(layer);
-        self
-    }
-
-    /// Supplies typed turn input for a bound plugin.
-    pub fn with_plugin_input<P: PluginBinding>(mut self, input: P::Input) -> Self {
-        self.builder = self.builder.with_plugin_input::<P>(input);
-        self
-    }
-
-    /// Runs the turn and collects its activity and final report.
-    pub async fn run(self) -> Result<TurnOutput> {
-        let collector = RunActivityCollector::default();
-        let result = self.stream_to(&collector).await?;
-        Ok(TurnOutput {
-            result,
-            activities: collector.into_activities(),
-        })
-    }
-
-    /// Runs the turn while sending semantic activity to the supplied sink.
-    pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<TurnReport> {
-        self.builder
-            .stream_to_with_effect_controller(events, self.controller)
-            .await
     }
 }
 
@@ -765,14 +687,6 @@ impl QueuedTurnBuilder {
         self
     }
 
-    /// Binds the queued turn to a borrowed effect controller.
-    pub fn effects(self, controller: &dyn RuntimeEffectController) -> ScopedQueuedTurnBuilder<'_> {
-        ScopedQueuedTurnBuilder {
-            builder: self,
-            controller,
-        }
-    }
-
     /// Drains the next claimable queued work and runs it as one turn.
     ///
     /// A drain that runs no turn returns [`QueuedTurnDrain::Empty`] carrying the
@@ -785,13 +699,28 @@ impl QueuedTurnBuilder {
         }))
     }
 
+    /// Runs and collects activity using a borrowed effect controller.
+    pub async fn run_with_effects(
+        self,
+        controller: &dyn RuntimeEffectController,
+    ) -> Result<QueuedTurnDrain<TurnOutput>> {
+        let collector = RunActivityCollector::default();
+        Ok(self
+            .stream_to_with_effects(&collector, controller)
+            .await?
+            .map(|result| TurnOutput {
+                result,
+                activities: collector.into_activities(),
+            }))
+    }
+
     /// Drains queued work while sending semantic activity to the supplied sink.
     pub async fn stream_to(
         self,
         events: &dyn TurnActivitySink,
     ) -> Result<QueuedTurnDrain<TurnReport>> {
         let effect_host = Arc::clone(&self.effect_host);
-        self.stream_to_with_effect_host(events, effect_host.as_ref())
+        self.stream_to_with_binding(events, EffectBinding::Host(effect_host.as_ref()))
             .await
     }
 
@@ -843,26 +772,24 @@ impl QueuedTurnBuilder {
         ))
     }
 
-    async fn stream_to_with_effect_host(
-        self,
-        events: &dyn TurnActivitySink,
-        effect_host: &dyn EffectHost,
-    ) -> Result<QueuedTurnDrain<TurnReport>> {
-        let drain_id = self.resolved_drain_id();
-        let scope = self.execution_scope(drain_id)?;
-        let scoped_effect_controller = effect_host.scoped(scope)?;
-        self.stream_to_with_scope(events, scoped_effect_controller)
-            .await
-    }
-
-    async fn stream_to_with_effect_controller(
+    /// Runs and streams activity using a borrowed effect controller.
+    pub async fn stream_to_with_effects(
         self,
         events: &dyn TurnActivitySink,
         controller: &dyn RuntimeEffectController,
     ) -> Result<QueuedTurnDrain<TurnReport>> {
+        self.stream_to_with_binding(events, EffectBinding::Borrowed(controller))
+            .await
+    }
+
+    async fn stream_to_with_binding(
+        self,
+        events: &dyn TurnActivitySink,
+        binding: EffectBinding<'_>,
+    ) -> Result<QueuedTurnDrain<TurnReport>> {
         let drain_id = self.resolved_drain_id();
         let scope = self.execution_scope(drain_id)?;
-        let scoped_effect_controller = ScopedEffectController::borrowed(controller, scope)?;
+        let scoped_effect_controller = binding.scoped(scope)?;
         self.stream_to_with_scope(events, scoped_effect_controller)
             .await
     }
@@ -971,24 +898,28 @@ impl SelectedQueuedTurnBuilder {
         self
     }
 
-    /// Uses a borrowed controller when replay authority belongs to the host
-    /// handler rather than the session's configured effect host.
-    pub fn effects(
-        self,
-        controller: &dyn RuntimeEffectController,
-    ) -> ScopedSelectedQueuedTurnBuilder<'_> {
-        ScopedSelectedQueuedTurnBuilder {
-            builder: self,
-            controller,
-        }
-    }
-
     /// Drains exactly and collects any turn activity. Fully satisfied means
     /// [`SelectedQueuedWorkDrainOutcome::settled_without_selected_turn`] is `true`; unclaimable means
     /// a typed refusal before provider or tool execution.
     pub async fn run(self) -> Result<SelectedQueuedWorkDrainOutcome<TurnOutput>> {
         let collector = RunActivityCollector::default();
         let outcome = self.stream_to(&collector).await?;
+        Ok(SelectedQueuedWorkDrainOutcome {
+            turn: outcome.turn.map(|result| TurnOutput {
+                result,
+                activities: collector.into_activities(),
+            }),
+            satisfied: outcome.satisfied,
+        })
+    }
+
+    /// Runs and collects activity using a borrowed effect controller.
+    pub async fn run_with_effects(
+        self,
+        controller: &dyn RuntimeEffectController,
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnOutput>> {
+        let collector = RunActivityCollector::default();
+        let outcome = self.stream_to_with_effects(&collector, controller).await?;
         Ok(SelectedQueuedWorkDrainOutcome {
             turn: outcome.turn.map(|result| TurnOutput {
                 result,
@@ -1005,7 +936,7 @@ impl SelectedQueuedTurnBuilder {
         events: &dyn TurnActivitySink,
     ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
         let effect_host = Arc::clone(&self.builder.effect_host);
-        self.stream_to_with_effect_host(events, effect_host.as_ref())
+        self.stream_to_with_binding(events, EffectBinding::Host(effect_host.as_ref()))
             .await
     }
 
@@ -1023,26 +954,24 @@ impl SelectedQueuedTurnBuilder {
             .unwrap_or_else(fresh_queue_drain_id)
     }
 
-    async fn stream_to_with_effect_host(
-        self,
-        events: &dyn TurnActivitySink,
-        effect_host: &dyn EffectHost,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
-        let drain_id = self.resolved_drain_id();
-        let scope = self.builder.execution_scope(drain_id)?;
-        let scoped_effect_controller = effect_host.scoped(scope)?;
-        self.stream_to_with_scope(events, scoped_effect_controller)
-            .await
-    }
-
-    async fn stream_to_with_effect_controller(
+    /// Runs and streams activity using a borrowed effect controller.
+    pub async fn stream_to_with_effects(
         self,
         events: &dyn TurnActivitySink,
         controller: &dyn RuntimeEffectController,
     ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
+        self.stream_to_with_binding(events, EffectBinding::Borrowed(controller))
+            .await
+    }
+
+    async fn stream_to_with_binding(
+        self,
+        events: &dyn TurnActivitySink,
+        binding: EffectBinding<'_>,
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
         let drain_id = self.resolved_drain_id();
         let scope = self.builder.execution_scope(drain_id)?;
-        let scoped_effect_controller = ScopedEffectController::borrowed(controller, scope)?;
+        let scoped_effect_controller = binding.scoped(scope)?;
         self.stream_to_with_scope(events, scoped_effect_controller)
             .await
     }
@@ -1115,144 +1044,6 @@ impl SelectedQueuedTurnBuilder {
             &batch_ids,
         )
         .await
-    }
-}
-
-/// Builder for configuring scoped queued turn.
-pub struct ScopedQueuedTurnBuilder<'run> {
-    builder: QueuedTurnBuilder,
-    controller: &'run dyn RuntimeEffectController,
-}
-
-impl<'run> ScopedQueuedTurnBuilder<'run> {
-    /// Installs the cancellation token for this scoped queued turn.
-    pub fn cancel(mut self, cancel: CancellationToken) -> Self {
-        self.builder = self.builder.cancel(cancel);
-        self
-    }
-
-    /// Installs a cancellation token with an optional host-defined origin.
-    pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
-        self.builder = self.builder.cancel_with_origin(cancel, origin);
-        self
-    }
-
-    /// Configures the physical id of the queued turn.
-    ///
-    /// Mutually exclusive with [`Self::drain_id`]. See
-    /// [`QueuedTurnBuilder::turn_id`] for the identity contracts.
-    pub fn turn_id(mut self, id: impl Into<String>) -> Self {
-        self.builder = self.builder.turn_id(id);
-        self
-    }
-
-    /// Replaces automatic queue selection with one exact, idempotent batch-ID set.
-    ///
-    /// The returned builder keeps this borrowed effect controller. Missing
-    /// rows are already satisfied, while present rows must be claimable
-    /// together or the drain is refused before execution.
-    pub fn batch_ids(
-        self,
-        batch_ids: impl IntoIterator<Item = impl Into<String>>,
-    ) -> ScopedSelectedQueuedTurnBuilder<'run> {
-        ScopedSelectedQueuedTurnBuilder {
-            builder: self.builder.batch_ids(batch_ids),
-            controller: self.controller,
-        }
-    }
-
-    /// Sets the queued-work drain's durable idempotency key.
-    ///
-    /// Mutually exclusive with [`Self::turn_id`]. See
-    /// [`QueuedTurnBuilder::drain_id`] for the identity contracts.
-    pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
-        self.builder = self.builder.drain_id(drain_id);
-        self
-    }
-
-    /// Drains queued work and collects its activity and final report.
-    pub async fn run(self) -> Result<QueuedTurnDrain<TurnOutput>> {
-        let collector = RunActivityCollector::default();
-        Ok(self.stream_to(&collector).await?.map(|result| TurnOutput {
-            result,
-            activities: collector.into_activities(),
-        }))
-    }
-
-    /// Drains queued work while sending semantic activity to the supplied sink.
-    pub async fn stream_to(
-        self,
-        events: &dyn TurnActivitySink,
-    ) -> Result<QueuedTurnDrain<TurnReport>> {
-        self.builder
-            .stream_to_with_effect_controller(events, self.controller)
-            .await
-    }
-}
-
-/// Exact selected-drain builder bound to a borrowed effect controller.
-///
-/// It preserves [`SelectedQueuedTurnBuilder`]'s satisfied-or-refused contract;
-/// binding changes only where selected effects run.
-pub struct ScopedSelectedQueuedTurnBuilder<'run> {
-    builder: SelectedQueuedTurnBuilder,
-    controller: &'run dyn RuntimeEffectController,
-}
-
-impl<'run> ScopedSelectedQueuedTurnBuilder<'run> {
-    /// Replaces the process-local cancellation token for any selected turn.
-    pub fn cancel(mut self, cancel: CancellationToken) -> Self {
-        self.builder = self.builder.cancel(cancel);
-        self
-    }
-
-    /// Replaces the cancellation token and opaque origin for any selected turn.
-    pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
-        self.builder = self.builder.cancel_with_origin(cancel, origin);
-        self
-    }
-
-    /// Configures the physical id of any selected turn.
-    ///
-    /// Mutually exclusive with [`Self::drain_id`]. See
-    /// [`QueuedTurnBuilder::turn_id`] for the identity contracts.
-    pub fn turn_id(mut self, id: impl Into<String>) -> Self {
-        self.builder = self.builder.turn_id(id);
-        self
-    }
-
-    /// Sets the durable idempotency key for a retried selected drain.
-    ///
-    /// Mutually exclusive with [`Self::turn_id`]. See
-    /// [`QueuedTurnBuilder::drain_id`] for the identity contracts.
-    pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
-        self.builder = self.builder.drain_id(drain_id);
-        self
-    }
-
-    /// Drains the exact selection and collects activity for any selected turn.
-    ///
-    /// Successful `None` is fully satisfied; busy or partial claims are errors.
-    pub async fn run(self) -> Result<SelectedQueuedWorkDrainOutcome<TurnOutput>> {
-        let collector = RunActivityCollector::default();
-        let outcome = self.stream_to(&collector).await?;
-        Ok(SelectedQueuedWorkDrainOutcome {
-            turn: outcome.turn.map(|result| TurnOutput {
-                result,
-                activities: collector.into_activities(),
-            }),
-            satisfied: outcome.satisfied,
-        })
-    }
-
-    /// Drains exactly through the bound controller, sending activity to `events`.
-    pub async fn stream_to(
-        self,
-        events: &dyn TurnActivitySink,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
-        self.builder
-            .stream_to_with_effect_controller(events, self.controller)
-            .await
     }
 }
 

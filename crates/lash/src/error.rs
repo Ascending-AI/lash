@@ -191,7 +191,7 @@ pub enum EmbedError {
     /// Wraps the trace flush failure.
     TraceFlush(#[from] lash_trace::TraceSinkError),
     #[error(
-        "pull-style turn streams require an effect host that can create a static scoped controller; use stream_to(...) inside the handler context"
+        "pull-style turn streams require an effect host that can create a static scoped controller; use stream_to_with_effects(..., &controller) inside the handler context"
     )]
     /// Returned when a pull-style turn stream cannot obtain a static effect host.
     StaticTurnStreamRequiresStaticEffectHost,
