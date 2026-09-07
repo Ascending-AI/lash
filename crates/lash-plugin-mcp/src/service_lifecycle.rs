@@ -285,6 +285,12 @@ thread_local! {
 fn child_signal_stream() -> Option<tokio::signal::unix::Signal> {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
+    // `catch_unwind` cannot contain a panic under `panic = "abort"`; the
+    // probe below would abort the host, so poll on the runtime clock instead.
+    if cfg!(panic = "abort") {
+        return None;
+    }
+
     static HOOK: std::sync::Once = std::sync::Once::new();
     HOOK.call_once(|| {
         let previous = std::panic::take_hook();
