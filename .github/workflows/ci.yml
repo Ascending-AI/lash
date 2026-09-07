@@ -86,12 +86,11 @@ env:
   # a job that restores `linux-debug` under a different RUSTFLAGS than the job
   # that wrote it logs "cache restored" and then cold-builds the whole graph —
   # which is exactly what the five container/E2E readers did while the flag
-  # was appended by the sccache action they never ran. Setting it here makes
+  # was appended by a setup action they never ran. Setting it here makes
   # every job in this workflow resolve the same value by default; the one
   # cache that must stay mold-free (`linux-release`, restored by perf.yml and
   # release.yml, which do not link through mold) overrides it at job scope.
-  # Linking is what sccache cannot help with: a compilation cache hit still
-  # pays full link cost, and this workspace links a lot of test binaries.
+  # Mold reduces link cost across the workspace test binaries.
   RUSTFLAGS: -C link-arg=-fuse-ld=mold
   # Preserve the pre-worktree-isolation artifact tree consumed below.
   LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence
@@ -285,8 +284,8 @@ jobs:
         with:
           tool: protoc
 
-      - name: Setup sccache
-        uses: ./.github/actions/setup-sccache
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
 
       - name: Check workspace (all targets)
         if: matrix.lane == 'workspace'
@@ -309,7 +308,7 @@ jobs:
           # shellcheck disable=SC2086
           cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
 
-      - name: Report sccache stats
+      - name: Report cache disk capacity
         if: always()
         run: bash scripts/ci/report-cache.sh
 
@@ -430,8 +429,8 @@ jobs:
         with:
           tool: protoc
 
-      - name: Setup sccache
-        uses: ./.github/actions/setup-sccache
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
 
       - name: Check facade external types
         run: python3 scripts/check_facade_external_types.py
@@ -441,7 +440,7 @@ jobs:
       - name: Check public API surface snapshot
         run: python3 scripts/api_surface.py check
 
-      - name: Report sccache stats
+      - name: Report cache disk capacity
         if: always()
         run: bash scripts/ci/report-cache.sh
 
@@ -550,13 +549,13 @@ jobs:
           shared-key: linux-debug
           save-if: false
 
-      - name: Setup sccache
-        uses: ./.github/actions/setup-sccache
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
 
       - name: Check lashlang Git consumer without patch mirror
         run: bash scripts/check-lashlang-git-consumer.sh "${GITHUB_SHA}"
 
-      - name: Report sccache stats
+      - name: Report cache disk capacity
         if: always()
         run: bash scripts/ci/report-cache.sh
 
@@ -608,8 +607,8 @@ jobs:
         with:
           tool: protoc
 
-      - name: Setup sccache
-        uses: ./.github/actions/setup-sccache
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
 
       # The workspace check unifies testing features through dev-dependencies.
       # Keep these package-scoped consumers honest about feature forwarding.
@@ -654,7 +653,7 @@ jobs:
           cargo test -p lash-internal-provider-anthropic --features testing --locked conformance
           cargo test -p lash-internal-provider-google --features testing --locked conformance
 
-      - name: Report sccache stats
+      - name: Report cache disk capacity
         if: always()
         run: bash scripts/ci/report-cache.sh
 
@@ -706,8 +705,8 @@ jobs:
         with:
           tool: protoc
 
-      - name: Setup sccache
-        uses: ./.github/actions/setup-sccache
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
 
       - name: Check lash-runtime feature boundary
         run: |
@@ -732,7 +731,7 @@ jobs:
             exit 1
           fi
 
-      - name: Report sccache stats
+      - name: Report cache disk capacity
         if: always()
         run: bash scripts/ci/report-cache.sh
 
@@ -779,8 +778,8 @@ jobs:
         with:
           tool: protoc,nextest
 
-      - name: Setup sccache
-        uses: ./.github/actions/setup-sccache
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
 
       - name: Archive workspace tests
         run: |
@@ -797,7 +796,7 @@ jobs:
           compression-level: 0
           retention-days: 1
 
-      - name: Report sccache stats
+      - name: Report cache disk capacity
         if: always()
         run: bash scripts/ci/report-cache.sh
 
@@ -854,8 +853,8 @@ jobs:
         with:
           tool: protoc,nextest
 
-      - name: Setup compilation environment
-        uses: ./.github/actions/setup-sccache
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
 
       # Workspace-wide: every crate's tests run, not a hand-maintained crate
       # list. Live tests (Restate e2e, Postgres conformance without a database
@@ -875,10 +874,6 @@ jobs:
       # Some tests embed CARGO_BIN_EXE paths at compile time. Keep archived
       # non-test executables at the producer's workspace/target path too.
       - name: Test workspace shard
-        env:
-          # The archive is already compiled; runtime cargo subprocesses use
-          # the restored target cache directly, without a compiler wrapper.
-          RUSTC_WRAPPER: ""
         run: |
           cargo nextest run --profile ci --workspace-remap "$GITHUB_WORKSPACE" \
             --archive-file "${RUNNER_TEMP}/nextest-download/lash-nextest.tar.zst" \
@@ -940,8 +935,8 @@ jobs:
         with:
           tool: protoc,nextest
 
-      - name: Setup sccache
-        uses: ./.github/actions/setup-sccache
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
 
       - name: Test heavy suites
         run: |
@@ -949,7 +944,7 @@ jobs:
           cargo nextest run --profile ci-heavy --workspace --locked ${LASH_CI_FEATURES} \
             --no-fail-fast
 
-      - name: Report sccache stats
+      - name: Report cache disk capacity
         if: always()
         run: bash scripts/ci/report-cache.sh
 
@@ -1059,8 +1054,8 @@ jobs:
         with:
           tool: protoc
 
-      - name: Setup sccache
-        uses: ./.github/actions/setup-sccache
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
 
       # `cargo fmt --all --check` and the same `--all-targets` clippy the local
       # push gate runs, plus the two boundary guards that otherwise gate nothing.
@@ -1232,8 +1227,8 @@ jobs:
         with:
           tool: protoc,nextest
 
-      - name: Setup sccache
-        uses: ./.github/actions/setup-sccache
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
 
       - name: Run confidence fast shard
         run: bash scripts/confidence-gate.sh "fast:${{ matrix.shard }}"
@@ -1246,7 +1241,7 @@ jobs:
           path: target/confidence/fast/${{ matrix.shard }}
           if-no-files-found: warn
 
-      - name: Report sccache stats
+      - name: Report cache disk capacity
         if: always()
         run: bash scripts/ci/report-cache.sh
 
@@ -1382,9 +1377,7 @@ jobs:
           tool: protoc,nextest
 
       # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache without routing through the sccache
-      # action, so it installs mold directly rather than taking on a
-      # compilation cache it does not otherwise use.
+      # restores the `linux-debug` cache and installs its linker directly.
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
@@ -1485,9 +1478,7 @@ jobs:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache without routing through the sccache
-      # action, so it installs mold directly rather than taking on a
-      # compilation cache it does not otherwise use.
+      # restores the `linux-debug` cache and installs its linker directly.
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
@@ -1573,9 +1564,7 @@ jobs:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache without routing through the sccache
-      # action, so it installs mold directly rather than taking on a
-      # compilation cache it does not otherwise use.
+      # restores the `linux-debug` cache and installs its linker directly.
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
@@ -1606,7 +1595,7 @@ jobs:
     # fail open so the cache can always be recovered manually. A floating
     # `stable` toolchain release is not itself a repository change, so it
     # re-warms only on the next inspected-path push or manual dispatch. Skipped
-    # pushes can also leave sccache's workspace release objects stale, so a
+    # pushes can also leave cached workspace release objects stale, so a
     # manual release may need to recompile changed workspace crates. Those
     # trade-offs are accepted because releases are rare and manually dispatched.
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
@@ -1715,15 +1704,15 @@ jobs:
         with:
           tool: protoc
 
-      - name: Setup sccache
+      - name: Install mold
         if: steps.detect.outputs.run == 'true'
-        uses: ./.github/actions/setup-sccache
+        uses: ./.github/actions/setup-mold
 
       - name: Build release workspace
         if: steps.detect.outputs.run == 'true'
         run: cargo build --locked --release --workspace
 
-      - name: Report sccache stats
+      - name: Report cache disk capacity
         if: always() && steps.detect.outputs.run == 'true'
         run: bash scripts/ci/report-cache.sh
 
@@ -1898,9 +1887,7 @@ jobs:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache without routing through the sccache
-      # action, so it installs mold directly rather than taking on a
-      # compilation cache it does not otherwise use.
+      # restores the `linux-debug` cache and installs its linker directly.
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
@@ -2011,9 +1998,7 @@ jobs:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache without routing through the sccache
-      # action, so it installs mold directly rather than taking on a
-      # compilation cache it does not otherwise use.
+      # restores the `linux-debug` cache and installs its linker directly.
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
@@ -2130,9 +2115,7 @@ jobs:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache without routing through the sccache
-      # action, so it installs mold directly rather than taking on a
-      # compilation cache it does not otherwise use.
+      # restores the `linux-debug` cache and installs its linker directly.
       - name: Install mold
         if: env.RUN_WORKERS_E2E == 'true'
         uses: ./.github/actions/setup-mold
