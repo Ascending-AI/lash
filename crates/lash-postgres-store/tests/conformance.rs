@@ -25,6 +25,8 @@ mod cold_process_turn_parent;
 mod session_delete_blob_reclaim;
 #[path = "conformance/wake_delivery.rs"]
 mod wake_delivery;
+#[path = "conformance/worklist_collation.rs"]
+mod worklist_collation;
 
 use injectors::{
     PostgresFenceIntegrityInjector, PostgresLegacyTriggerMutationReceiptInjector,
@@ -1505,10 +1507,10 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 75, "Postgres component schema pin");
+    assert_eq!(current_version, 76, "Postgres component schema pin");
     assert_eq!(
         current_version - 1,
-        74,
+        75,
         "immediate predecessor adjacency pin"
     );
     let payload_hash_nullable: String = sqlx::query_scalar(
@@ -2222,19 +2224,6 @@ async fn postgres_process_registry_satisfies_conformance_when_configured() {
         })
     })
     .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_process_registry_pagination_satisfies_conformance_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres pagination conformance: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(&storage).await;
-    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-    lash_core::testing::conformance::process_registry_pagination(registry).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 75.
+-- lash-postgres-store schema, component version 76.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -300,8 +300,10 @@ CREATE TABLE IF NOT EXISTS lash_process_change_clock (
     tombstone_compaction_horizon BIGINT NOT NULL DEFAULT 0,
     CHECK (singleton)
 );
+-- Opaque process identifiers use byte order on every host locale. The primary
+-- key, live-worklist index, MAX, and keyset bounds inherit this collation.
 CREATE TABLE IF NOT EXISTS lash_processes (
-    process_id TEXT PRIMARY KEY,
+    process_id TEXT COLLATE "C" PRIMARY KEY,
     incarnation BIGINT NOT NULL,
     registration_fingerprint TEXT NOT NULL,
     originator_id TEXT NOT NULL,
@@ -594,7 +596,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 75)
+VALUES ('lash-postgres-store', 76)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (
