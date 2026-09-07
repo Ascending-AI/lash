@@ -1186,8 +1186,7 @@ async fn explicit_effect_controller_creates_turn_scope_internally() -> Result<()
     session
         .turn(TurnInput::text("handler"))
         .turn_id("handler-turn")
-        .effects(&recorder)
-        .run()
+        .run_with_effects(&recorder)
         .await?;
 
     let llm_invocation = recorder
@@ -1362,8 +1361,7 @@ async fn all_queued_builder_families_begin_with_turn_started() -> Result<()> {
     let scoped_automatic = session
         .queued_turn()
         .turn_id("scoped-automatic-queued-turn")
-        .effects(&controller)
-        .run()
+        .run_with_effects(&controller)
         .await?
         .expect("scoped automatic queued turn");
     assert_turn_started_first(&scoped_automatic.activities, "scoped-automatic-queued-turn");
@@ -1411,10 +1409,9 @@ async fn all_queued_builder_families_begin_with_turn_started() -> Result<()> {
         .await?;
     let scoped_selected_output = session
         .queued_turn()
-        .effects(&controller)
         .batch_ids([scoped_selected.batch_id])
         .turn_id("scoped-selected-queued-turn")
-        .run()
+        .run_with_effects(&controller)
         .await?
         .turn
         .expect("scoped selected queued turn");
@@ -2794,8 +2791,7 @@ async fn queued_turn_explicit_effects_create_queue_drain_scope_internally() -> R
     let output = session
         .queued_turn()
         .drain_id("handler-drain")
-        .effects(&recorder)
-        .run()
+        .run_with_effects(&recorder)
         .await?
         .expect("queued turn should run");
 
@@ -2806,6 +2802,78 @@ async fn queued_turn_explicit_effects_create_queue_drain_scope_internally() -> R
         .find(|record| record.kind == lash_core::RuntimeEffectKind::LlmCall)
         .expect("llm effect");
     assert_eq!(llm_invocation.turn_id.as_deref(), Some("handler-drain"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn selected_queued_turn_with_effects_preserves_batch_ids_and_scope() -> Result<()> {
+    let recorder = RecordingNativeEffectController::default();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session_id = "selected-explicit-effects";
+    let session = core.session(session_id).open().await?;
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("session store");
+    let receipt = store
+        .enqueue_queued_work(
+            crate::persistence::QueuedWorkBatchDraft::new(
+                session_id,
+                crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
+                crate::persistence::TurnWorkPayload::agent_frame_task(
+                    lash_core::facade_support::frame_node_id(session_id, "selected-handler"),
+                    "selected handler",
+                    None,
+                ),
+            )
+            .with_source_key("selected-handler-batch"),
+        )
+        .await?;
+
+    let outcome = session
+        .queued_turn()
+        .batch_ids([
+            receipt.batch_id.as_str(),
+            receipt.batch_id.as_str(),
+            "absent-batch",
+        ])
+        .drain_id("selected-handler-drain")
+        .run_with_effects(&recorder)
+        .await?;
+    assert_turn_started_first(
+        &outcome.turn.expect("selected turn").activities,
+        "selected-handler-drain",
+    );
+    assert_eq!(
+        outcome.satisfied,
+        vec![
+            crate::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {
+                batch_id: receipt.batch_id.clone()
+            },
+            crate::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+                batch_id: "absent-batch".into()
+            },
+        ]
+    );
+    let invocations = recorder.invocations();
+    let llm = invocations
+        .iter()
+        .find(|record| record.kind == lash_core::RuntimeEffectKind::LlmCall)
+        .expect("borrowed controller executes llm effect");
+    assert_eq!(llm.turn_id.as_deref(), Some("selected-handler-drain"));
+    let events = crate::turn::RunActivityCollector::default();
+    let retry = session
+        .queued_turn()
+        .batch_ids([receipt.batch_id])
+        .drain_id("selected-handler-drain")
+        .stream_to_with_effects(&events, &recorder)
+        .await?;
+    assert!(retry.settled_without_selected_turn());
+    assert_eq!(recorder.invocations().len(), invocations.len());
     Ok(())
 }
 

@@ -1,14 +1,8 @@
-error[E0425]: cannot find type `AdvancedTurn` in crate `lash`
- --> tests/ui/scoped_turn_builders_are_not_prelude.rs:2:25
+error[E0425]: cannot find type `ScopedTurnBuilder` in module `lash::turn`
+ --> tests/ui/scoped_turn_builders_are_not_prelude.rs:2:31
   |
-2 |     let _: Option<lash::AdvancedTurn> = None;
-  |                         ^^^^^^^^^^^^ not found in `lash`
-
-error[E0425]: cannot find type `ScopedTurnBuilder` in crate `lash`
- --> tests/ui/scoped_turn_builders_are_not_prelude.rs:3:25
-  |
-3 |     let _: Option<lash::ScopedTurnBuilder<'static>> = None;
-  |                         ^^^^^^^^^^^^^^^^^
+2 |     let _: Option<lash::turn::ScopedTurnBuilder<'static>> = None;
+  |                               ^^^^^^^^^^^^^^^^^
   |
  ::: src/turn.rs
   |
@@ -17,15 +11,15 @@ error[E0425]: cannot find type `ScopedTurnBuilder` in crate `lash`
   |
 help: a struct with a similar name exists
   |
-3 -     let _: Option<lash::ScopedTurnBuilder<'static>> = None;
-3 +     let _: Option<lash::QueuedTurnBuilder<'static>> = None;
+2 -     let _: Option<lash::turn::ScopedTurnBuilder<'static>> = None;
+2 +     let _: Option<lash::turn::QueuedTurnBuilder<'static>> = None;
   |
 
-error[E0425]: cannot find type `ScopedQueuedTurnBuilder` in crate `lash`
- --> tests/ui/scoped_turn_builders_are_not_prelude.rs:4:25
+error[E0425]: cannot find type `ScopedQueuedTurnBuilder` in module `lash::turn`
+ --> tests/ui/scoped_turn_builders_are_not_prelude.rs:3:31
   |
-4 |     let _: Option<lash::ScopedQueuedTurnBuilder<'static>> = None;
-  |                         ^^^^^^^^^^^^^^^^^^^^^^^
+3 |     let _: Option<lash::turn::ScopedQueuedTurnBuilder<'static>> = None;
+  |                               ^^^^^^^^^^^^^^^^^^^^^^^
   |
  ::: src/turn.rs
   |
@@ -34,40 +28,23 @@ error[E0425]: cannot find type `ScopedQueuedTurnBuilder` in crate `lash`
   |
 help: a struct with a similar name exists
   |
-4 -     let _: Option<lash::ScopedQueuedTurnBuilder<'static>> = None;
-4 +     let _: Option<lash::SelectedQueuedTurnBuilder<'static>> = None;
+3 -     let _: Option<lash::turn::ScopedQueuedTurnBuilder<'static>> = None;
+3 +     let _: Option<lash::turn::SelectedQueuedTurnBuilder<'static>> = None;
   |
 
-error[E0425]: cannot find type `ScopedTurnBuilder` in module `lash::prelude`
- --> tests/ui/scoped_turn_builders_are_not_prelude.rs:5:34
+error[E0425]: cannot find type `ScopedSelectedQueuedTurnBuilder` in module `lash::turn`
+ --> tests/ui/scoped_turn_builders_are_not_prelude.rs:4:31
   |
-5 |     let _: Option<lash::prelude::ScopedTurnBuilder<'static>> = None;
-  |                                  ^^^^^^^^^^^^^^^^^
+4 |     let _: Option<lash::turn::ScopedSelectedQueuedTurnBuilder<'static>> = None;
+  |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   |
  ::: src/turn.rs
   |
-  | pub struct QueuedTurnBuilder {
-  | ---------------------------- similarly named struct `QueuedTurnBuilder` defined here
+  | pub struct SelectedQueuedTurnBuilder {
+  | ------------------------------------ similarly named struct `SelectedQueuedTurnBuilder` defined here
   |
 help: a struct with a similar name exists
   |
-5 -     let _: Option<lash::prelude::ScopedTurnBuilder<'static>> = None;
-5 +     let _: Option<lash::prelude::QueuedTurnBuilder<'static>> = None;
-  |
-
-error[E0425]: cannot find type `ScopedQueuedTurnBuilder` in module `lash::prelude`
- --> tests/ui/scoped_turn_builders_are_not_prelude.rs:6:34
-  |
-6 |     let _: Option<lash::prelude::ScopedQueuedTurnBuilder<'static>> = None;
-  |                                  ^^^^^^^^^^^^^^^^^^^^^^^
-  |
- ::: src/turn.rs
-  |
-  | pub struct QueuedTurnBuilder {
-  | ---------------------------- similarly named struct `QueuedTurnBuilder` defined here
-  |
-help: a struct with a similar name exists
-  |
-6 -     let _: Option<lash::prelude::ScopedQueuedTurnBuilder<'static>> = None;
-6 +     let _: Option<lash::prelude::QueuedTurnBuilder<'static>> = None;
+4 -     let _: Option<lash::turn::ScopedSelectedQueuedTurnBuilder<'static>> = None;
+4 +     let _: Option<lash::turn::SelectedQueuedTurnBuilder<'static>> = None;
   |

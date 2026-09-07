@@ -640,8 +640,7 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
         let output = session
             .turn(lash::TurnInput::text("finish the in-flight effect"))
             .turn_id("graceful-drain-in-flight")
-            .effects(task_journal.as_ref())
-            .run()
+            .run_with_effects(task_journal.as_ref())
             .await;
         (session, output)
     });

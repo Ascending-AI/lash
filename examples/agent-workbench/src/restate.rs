@@ -785,8 +785,7 @@ async fn run_user_turn(
         .require_finish()
         // Audited: require_finish only validates local turn-builder configuration and performs no session-store I/O.
         .map_err(AppError::internal)?
-        .effects(controller)
-        .stream_to(&ui_events)
+        .stream_to_with_effects(&ui_events, controller)
         .await
         .map_err(AppError::runtime)?;
     record_turn_output_for_model(
@@ -1096,16 +1095,14 @@ async fn run_queued_turn(
     let output = if request.batch_ids.is_empty() {
         request
             .queued_turn(&session)
-            .effects(controller)
-            .stream_to(&ui_events)
+            .stream_to_with_effects(&ui_events, controller)
             .await
             .map_err(AppError::runtime)?
             .ran()
     } else {
         request
             .selected_queued_turn(&session)
-            .effects(controller)
-            .stream_to(&ui_events)
+            .stream_to_with_effects(&ui_events, controller)
             .await
             .map_err(AppError::runtime)?
             .turn

@@ -32,7 +32,7 @@ impl AgentTurnWorkflow for AgentTurnWorkflowImpl {
 
 The application owns `run_lash_turn`: open the `LashSession` from stable
 request data and call
-`session.turn(input).turn_id(turn_id).effects(&controller).run()`
+`session.turn(input).turn_id(turn_id).run_with_effects(&controller)`
 for the Restate-backed turn. Restate recovery is handler replay with the same turn id
 and request data, not a Lash-owned in-flight checkpoint reload.
 

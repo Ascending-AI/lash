@@ -194,8 +194,7 @@ impl AppState {
         let turn = session
             .queued_turn()
             .drain_id(request.workflow_id.clone())
-            .effects(controller)
-            .stream_to(&sink)
+            .stream_to_with_effects(&sink, controller)
             .await
             .map_err(turn_error)?;
         let turn = turn.ran();
@@ -239,8 +238,7 @@ impl AppState {
         let turn = session
             .turn(input)
             .turn_id(request.workflow_id.clone())
-            .effects(controller)
-            .stream_to(&sink)
+            .stream_to_with_effects(&sink, controller)
             .await
             .map_err(turn_error)?;
         let final_value = if matches!(
@@ -346,8 +344,7 @@ impl AppState {
         let first_turn = session
             .queued_turn()
             .drain_id(format!("{}:first-drain", request.workflow_id))
-            .effects(controller)
-            .run()
+            .run_with_effects(controller)
             .await
             .map_err(terminal_error)?
             .ran()
@@ -372,8 +369,7 @@ impl AppState {
         let second_turn = session
             .queued_turn()
             .drain_id(format!("{}:second-drain", request.workflow_id))
-            .effects(controller)
-            .run()
+            .run_with_effects(controller)
             .await
             .map_err(terminal_error)?
             .ran()
@@ -440,8 +436,7 @@ impl AppState {
         let cancelled = session
             .queued_turn()
             .drain_id(format!("{}:cancel-drain", request.workflow_id))
-            .effects(controller)
-            .run()
+            .run_with_effects(controller)
             .await
             .map_err(terminal_error)?
             .ran()
@@ -470,8 +465,7 @@ impl AppState {
                 request.workflow_id
             )))
             .turn_id(format!("{}:post-cancel", request.workflow_id))
-            .effects(controller)
-            .run()
+            .run_with_effects(controller)
             .await
             .map_err(terminal_error)?;
         let usable_value = usable

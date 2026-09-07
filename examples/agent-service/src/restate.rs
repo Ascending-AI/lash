@@ -285,8 +285,7 @@ async fn run_restate_chat_turn_and_persist(
         .require_finish()?
         // Durable in-flight work crosses the EffectHost boundary; the terminal
         // product row below is derived from Lash's TurnOutput.
-        .effects(controller)
-        .stream_to(&ui_events)
+        .stream_to_with_effects(&ui_events, controller)
         .await;
 
     match output {
