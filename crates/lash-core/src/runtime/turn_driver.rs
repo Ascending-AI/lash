@@ -54,4 +54,7 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     pub(super) turn_control: Arc<ActiveTurnControl>,
     pub(super) observes_durable_cancel_after_llm: bool,
+    /// Names the reply the protocol driver materialized, for the boundary's
+    /// terminal materialization to recognize by identity.
+    pub(super) protocol_reply: machine::ProtocolReplyTracker,
 }
