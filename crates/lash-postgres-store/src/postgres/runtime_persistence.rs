@@ -4376,3 +4376,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "runtime_persistence/refusal_probe_tests.rs"]
+mod refusal_probe_tests;
