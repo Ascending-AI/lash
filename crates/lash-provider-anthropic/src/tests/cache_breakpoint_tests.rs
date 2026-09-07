@@ -1,3 +1,5 @@
+use super::*;
+
 use crate::request::BreakpointAddress;
 
 #[test]
