@@ -4,8 +4,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::TimeZone as _;
-
 const SIM_EPOCH_MS: u64 = 1_700_000_000_000;
 const UNSCHEDULED_STEP_MS: u64 = 5_000;
 const UNSCHEDULED_STEP_YIELDS: usize = 32;
@@ -92,19 +90,11 @@ impl lash_core::Clock for SimClock {
         self.monotonic_origin + Duration::from_millis(self.logical_ms())
     }
 
-    fn timestamp_ms(&self) -> u64 {
-        SIM_EPOCH_MS.saturating_add(self.logical_ms())
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::Utc
-            .timestamp_millis_opt(self.timestamp_ms() as i64)
-            .single()
-            .expect("sim clock timestamp is representable")
+        let timestamp_ms = SIM_EPOCH_MS.saturating_add(self.logical_ms());
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
+        )
     }
 
     async fn sleep(&self, duration: Duration) {
@@ -121,4 +111,16 @@ impl lash_core::Clock for SimClock {
             .as_millis() as u64;
         self.wait_until_ms(deadline_ms).await;
     }
+}
+
+#[test]
+fn sim_clock_wall_clock_faces_agree() {
+    let clock = SimClock::new();
+    let clock: &dyn lash_core::Clock = clock.as_ref();
+    let milliseconds = clock.timestamp_ms();
+    let datetime = clock.timestamp_datetime();
+    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+        .expect("clock emits RFC 3339");
+    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }

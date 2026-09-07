@@ -1340,7 +1340,7 @@ fn attachment_uri(attachment_id: &AttachmentId) -> String {
 }
 
 fn now_epoch_ms() -> u64 {
-    <crate::SystemClock as crate::Clock>::timestamp_ms(&crate::SystemClock)
+    <crate::SystemClock as crate::ClockWallTime>::timestamp_ms(&crate::SystemClock)
 }
 
 /// Adapter that exposes the [`AttachmentManifest`] supertrait of an

@@ -272,17 +272,11 @@ impl crate::Clock for FrozenIntentLawClock {
         self.now
     }
 
-    fn timestamp_ms(&self) -> u64 {
-        1_700_000_000_000
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::from_timestamp_millis(self.timestamp_ms() as i64)
-            .expect("fixed intent-law timestamp")
+        let timestamp_ms = 1_700_000_000_000;
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
+        )
     }
 
     async fn sleep(&self, duration: std::time::Duration) {
@@ -292,6 +286,18 @@ impl crate::Clock for FrozenIntentLawClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
+}
+
+#[test]
+fn frozen_intent_law_clock_wall_clock_faces_agree() {
+    let clock = FrozenIntentLawClock::new();
+    let clock: &dyn crate::Clock = &clock;
+    let milliseconds = clock.timestamp_ms();
+    let datetime = clock.timestamp_datetime();
+    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+        .expect("clock emits RFC 3339");
+    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 impl IntentReplayController {

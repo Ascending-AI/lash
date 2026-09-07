@@ -1181,7 +1181,7 @@ async fn sqlite_store_uses_injected_clock_for_expiry() {
         .expect("read SQLite session-lease diagnostics");
     assert_eq!(
         observation.observed_at_epoch_ms,
-        lash_core::Clock::timestamp_ms(clock.as_ref()),
+        lash_core::ClockWallTime::timestamp_ms(clock.as_ref()),
         "SQLite diagnostics must return the same injected clock that authors lease timestamps"
     );
 }

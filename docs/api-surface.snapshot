@@ -7515,8 +7515,9 @@ lash::runtime::Clock::now
 lash::runtime::Clock::sleep
 lash::runtime::Clock::sleep_until
 lash::runtime::Clock::timestamp_datetime
-lash::runtime::Clock::timestamp_ms
-lash::runtime::Clock::timestamp_rfc3339
+lash::runtime::ClockWallTime
+lash::runtime::ClockWallTime::timestamp_ms
+lash::runtime::ClockWallTime::timestamp_rfc3339
 lash::runtime::CompletionKeyPreparation
 lash::runtime::CompletionKeyPreparation::Issued
 lash::runtime::CompletionKeyPreparation::Issued::0

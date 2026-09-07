@@ -217,7 +217,7 @@ async fn run_attachment_usage_gate(
     );
     assert_retrieved_attachment(&state, &uploaded.attachment.id, &png_bytes).await;
 
-    let runtime_window_start_ms = lash::runtime::Clock::timestamp_ms(system_clock.as_ref());
+    let runtime_window_start_ms = lash::runtime::ClockWallTime::timestamp_ms(system_clock.as_ref());
     let turn_id = format!("attachment-usage-gate-{}", uuid::Uuid::new_v4());
     let request = restate::WorkbenchTurnWorkflowRequest {
         turn_id: turn_id.clone(),
@@ -247,7 +247,7 @@ async fn run_attachment_usage_gate(
         .await
         .expect("run deterministic attachment turn");
     assert_eq!(output.final_value(), Some(&json!("attachment accounted")));
-    let runtime_window_end_ms = lash::runtime::Clock::timestamp_ms(system_clock.as_ref());
+    let runtime_window_end_ms = lash::runtime::ClockWallTime::timestamp_ms(system_clock.as_ref());
     let read_view = session.read_view();
     let graph = read_view.session_graph();
     let latest_node_ms = graph

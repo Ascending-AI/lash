@@ -20,17 +20,10 @@ impl Clock for AdvancingDifferentialClock {
         std::time::Instant::now()
     }
 
-    fn timestamp_ms(&self) -> u64 {
-        self.0.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        let timestamp_ms = self.0.load(std::sync::atomic::Ordering::SeqCst);
         chrono::DateTime::from(
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms()),
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
         )
     }
 
@@ -41,6 +34,18 @@ impl Clock for AdvancingDifferentialClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
+}
+
+#[test]
+fn advancing_differential_clock_wall_clock_faces_agree() {
+    let clock = AdvancingDifferentialClock::new(1_700_000_000_123);
+    let clock: &dyn lash_core::Clock = &clock;
+    let milliseconds = clock.timestamp_ms();
+    let datetime = clock.timestamp_datetime();
+    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+        .expect("clock emits RFC 3339");
+    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+    assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
 #[derive(Clone, Copy)]

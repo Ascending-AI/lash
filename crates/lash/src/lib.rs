@@ -794,7 +794,7 @@ pub mod runtime {
     /// runtime sleeps and embedded
     /// store timestamps. [`SystemClock`] is the wall-clock default; tests supply
     /// their own to make expiry deterministic.
-    pub use lash_core::{Clock, facade_support::SystemClock};
+    pub use lash_core::{Clock, ClockWallTime, facade_support::SystemClock};
     /// Session and turn extension handles exposed to runtime integrators.
     pub use lash_core::{
         ProtocolSessionExtensionHandle, ProtocolTurnExtensionHandle, ProtocolTurnOptions,

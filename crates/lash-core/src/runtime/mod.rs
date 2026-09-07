@@ -144,7 +144,7 @@ use assembly::{classify_output_state, sanitize_assistant_output};
 pub use builder::EmbeddedRuntimeBuilder;
 pub use causal::process_event_invocation;
 pub(crate) use causal::tool_retry_sleep_invocation;
-pub use clock::{Clock, SystemClock};
+pub use clock::{Clock, ClockWallTime, SystemClock};
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
     AssistantResponseHookEvents, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,

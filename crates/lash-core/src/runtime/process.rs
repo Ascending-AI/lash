@@ -83,7 +83,7 @@ pub use validation::{
 };
 
 pub fn current_epoch_ms() -> u64 {
-    <crate::SystemClock as crate::Clock>::timestamp_ms(&crate::SystemClock)
+    <crate::SystemClock as crate::ClockWallTime>::timestamp_ms(&crate::SystemClock)
 }
 pub use wake::{
     ProcessWakeDeliveryRequest, process_wake_delivery, process_wake_input_from_event_payload,

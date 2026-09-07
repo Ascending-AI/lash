@@ -892,7 +892,8 @@ pub(crate) async fn list_work(
             .items
     } else {
         let retired_since_ms =
-            lash::runtime::Clock::timestamp_ms(&lash::runtime::SystemClock).saturating_sub(10_000);
+            lash::runtime::ClockWallTime::timestamp_ms(&lash::runtime::SystemClock)
+                .saturating_sub(10_000);
         state
             .process_observer
             .snapshot_all(&lash::process::ProcessListFilter {

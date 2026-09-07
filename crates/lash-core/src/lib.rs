@@ -1103,7 +1103,7 @@ pub use runtime::drive_with_event_pump;
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AssistantResponseHookEvents, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef,
-    ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock,
+    ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime,
     CompletionKeyPreparation, DeliveryPolicy, DrainMode, DrainModePolicy, DrainedChild,
     EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalRetirement, ExecutionScope,
     ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupDrainReport, GroupExecutors,
