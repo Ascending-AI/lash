@@ -2239,4 +2239,5 @@ fn render_kind(kind: &TokenKind) -> String {
     }
 }
 
-include!("parser/tests.rs");
+#[cfg(test)]
+mod tests;

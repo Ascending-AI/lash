@@ -1,3 +1,5 @@
+use super::*;
+
 // Continuation wire and equivalence cases: what the decoder accepts, what an
 // authored wire must encode back to, and whether parking is observationally
 // invisible.

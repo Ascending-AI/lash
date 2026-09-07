@@ -1,4 +1,6 @@
-fn expr_supports_forced_effect_site(expr: &Expr) -> bool {
+use super::*;
+
+pub(super) fn expr_supports_forced_effect_site(expr: &Expr) -> bool {
     matches!(expr, Expr::ReceiverCall { .. } | Expr::Await(_))
         || matches!(
             expr,
@@ -12,7 +14,7 @@ fn expr_supports_forced_effect_site(expr: &Expr) -> bool {
 /// builtins (the caller decides whether that is an `Unknown` op or a const-fold
 /// miss). This is the single name -> op authority shared by `resolve_intrinsic`
 /// and the const folder.
-fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<IntrinsicOp> {
+pub(super) fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<IntrinsicOp> {
     Some(match name {
         "len" => IntrinsicOp::Len,
         "empty" => IntrinsicOp::Empty,
@@ -69,18 +71,18 @@ fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<IntrinsicOp> {
     })
 }
 
-fn expr_key(expr: &Expr) -> usize {
+pub(super) fn expr_key(expr: &Expr) -> usize {
     expr as *const Expr as usize
 }
 
-fn lashlang_execution_paths(program: &Program) -> FxHashMap<usize, LashlangAstPath> {
+pub(super) fn lashlang_execution_paths(program: &Program) -> FxHashMap<usize, LashlangAstPath> {
     let mut paths = FxHashMap::default();
     let mut path = Vec::new();
     collect_lashlang_execution_paths(&program.main, &mut path, &mut paths);
     paths
 }
 
-fn expression_source_spans(program: &Program) -> FxHashMap<usize, Span> {
+pub(crate) fn expression_source_spans(program: &Program) -> FxHashMap<usize, Span> {
     let spans_by_path = program
         .expression_source_spans
         .iter()
@@ -125,7 +127,7 @@ fn collect_lashlang_execution_paths(
     }
 }
 
-fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
+pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
     match expr {
         Expr::LabelAnnotated { .. } => false,
         Expr::Assign { expr, .. } => label_attaches_to_assignment_value(expr),
@@ -276,7 +278,7 @@ pub(crate) fn is_pure_expr(expr: &Expr) -> bool {
     }
 }
 
-fn contains_type_literal(expr: &Expr) -> bool {
+pub(super) fn contains_type_literal(expr: &Expr) -> bool {
     // `TypeLiteral` is the only node that introduces a type literal directly;
     // every other node contains one only via a child expression. `children()`
     // already yields an `Assign` target's dynamic index steps, so the generic
@@ -288,14 +290,14 @@ fn contains_type_literal(expr: &Expr) -> bool {
 /// type names live in [`SchemaScalarKind`]; these keys are shared by the
 /// compile-time builder ([`fold_type`]) and runtime instruction builder
 /// ([`Compiler::compile_type_expr`]).
-mod schema_keys {
-    pub(super) const TYPE: &str = "type";
-    pub(super) const ITEMS: &str = "items";
-    pub(super) const PROPERTIES: &str = "properties";
-    pub(super) const REQUIRED: &str = "required";
-    pub(super) const ADDITIONAL_PROPERTIES: &str = "additionalProperties";
-    pub(super) const ANY_OF: &str = "anyOf";
-    pub(super) const ENUM: &str = "enum";
+pub(super) mod schema_keys {
+    pub(crate) const TYPE: &str = "type";
+    pub(crate) const ITEMS: &str = "items";
+    pub(crate) const PROPERTIES: &str = "properties";
+    pub(crate) const REQUIRED: &str = "required";
+    pub(crate) const ADDITIONAL_PROPERTIES: &str = "additionalProperties";
+    pub(crate) const ANY_OF: &str = "anyOf";
+    pub(crate) const ENUM: &str = "enum";
 }
 
 /// Best-effort compile-time construction of a JSON-Schema Value for a
@@ -306,7 +308,7 @@ mod schema_keys {
 /// Returns `None` when the expression contains a [`TypeExpr::Ref`] (or a nested
 /// composite that contains one) — those must be resolved at runtime via
 /// [`Instruction::ResolveTypeRef`].
-fn fold_type(ty: &TypeExpr) -> Option<Value> {
+pub(super) fn fold_type(ty: &TypeExpr) -> Option<Value> {
     use schema_keys::*;
     match ty {
         TypeExpr::Any => Some(interned_scalar_schema(None)),
@@ -368,13 +370,13 @@ fn fold_type(ty: &TypeExpr) -> Option<Value> {
     }
 }
 
-fn wrap_type_schema_value(schema: Value) -> Value {
+pub(super) fn wrap_type_schema_value(schema: Value) -> Value {
     let mut wrapper = record_with_capacity(1);
     wrapper.insert(LASH_TYPE_KEY.to_string(), schema);
     Value::Record(Arc::new(wrapper))
 }
 
-fn is_terminal_expr(expr: &Expr) -> bool {
+pub(super) fn is_terminal_expr(expr: &Expr) -> bool {
     match expr {
         Expr::LabelAnnotated { expr, .. } => is_terminal_expr(expr),
         Expr::Finish(_) | Expr::Fail(_) => true,
@@ -391,7 +393,7 @@ fn is_terminal_expr(expr: &Expr) -> bool {
 /// Returns an `Arc`-shared schema for a scalar. All sites referencing `str`
 /// point at the same `Arc<Record>`, so emitting a Type literal with N string
 /// fields allocates one record, not N.
-fn interned_scalar_schema(kind: Option<SchemaScalarKind>) -> Value {
+pub(super) fn interned_scalar_schema(kind: Option<SchemaScalarKind>) -> Value {
     static CACHE: OnceLock<[Value; 8]> = OnceLock::new();
     let cache = CACHE.get_or_init(|| {
         let build = |kind: SchemaScalarKind| {

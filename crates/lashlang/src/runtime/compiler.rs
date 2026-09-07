@@ -127,7 +127,8 @@ struct SlotTable {
     lookup: FxHashMap<Symbol, usize>,
 }
 
-include!("compiler/entry.rs");
-include!("compiler/expr.rs");
-include!("compiler/effects.rs");
-include!("compiler/helpers.rs");
+mod effects;
+mod entry;
+mod expr;
+mod helpers;
+pub(crate) use helpers::*;

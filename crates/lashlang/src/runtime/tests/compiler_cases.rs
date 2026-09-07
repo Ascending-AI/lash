@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn label_on_await_assignment_attaches_to_await_instruction() {
     let program = crate::parse(

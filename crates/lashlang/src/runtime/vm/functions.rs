@@ -1,42 +1,44 @@
+use super::*;
+
 #[derive(Clone)]
-struct CallFrame {
-    return_ip: usize,
-    function: Option<usize>,
-    operand_stack_base: usize,
-    slots: SlotState,
-    iter_stack: Vec<IterState>,
-    extras_heapified: bool,
-    return_target: ReturnTarget,
+pub(super) struct CallFrame {
+    pub(super) return_ip: usize,
+    pub(super) function: Option<usize>,
+    pub(super) operand_stack_base: usize,
+    pub(super) slots: SlotState,
+    pub(super) iter_stack: Vec<IterState>,
+    pub(super) extras_heapified: bool,
+    pub(super) return_target: ReturnTarget,
 }
 
 #[derive(Clone)]
-enum ReturnTarget {
+pub(super) enum ReturnTarget {
     Direct,
     Callback(CallbackDriver),
 }
 
 #[derive(Clone)]
-struct CallbackDriver {
-    function: Value,
+pub(super) struct CallbackDriver {
+    pub(super) function: Value,
     /// Each item is an inline tuple of arguments for one callback invocation.
-    calls: Vec<Value>,
-    next_index: usize,
-    results: Vec<Value>,
-    completion: CallbackCompletion,
-    allow_effects: bool,
+    pub(super) calls: Vec<Value>,
+    pub(super) next_index: usize,
+    pub(super) results: Vec<Value>,
+    pub(super) completion: CallbackCompletion,
+    pub(super) allow_effects: bool,
     /// `calls[0]` is the rooted URLSearchParams receiver and `next_index` is
     /// the next live list index. The list is re-read after every callback so
     /// appends and deletions follow WHATWG iteration semantics.
-    live_url_search_params: bool,
+    pub(super) live_url_search_params: bool,
 }
 
 #[derive(Clone, Copy)]
-enum CallbackCompletion {
+pub(super) enum CallbackCompletion {
     Collect,
     Discard,
 }
 
-fn slot_names_for(chunk: &Chunk, active_function: Option<usize>) -> &[Name] {
+pub(super) fn slot_names_for(chunk: &Chunk, active_function: Option<usize>) -> &[Name] {
     active_function
         .and_then(|index| chunk.functions.get(index))
         .map_or(chunk.slot_names.as_slice(), |function| {
@@ -170,7 +172,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.begin_function_call(closure, args, ReturnTarget::Direct)
     }
 
-    fn begin_function_call(
+    pub(super) fn begin_function_call(
         &mut self,
         closure: Value,
         mut args: Vec<Value>,
@@ -182,7 +184,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         let Value::Ref(id) = closure else {
             return Err(RuntimeError::NonFunctionCall {
-                actual: super::value_type_name(&closure).to_string(),
+                actual: crate::runtime::value_type_name(&closure).to_string(),
             });
         };
         let (function_index, captures) = match self.heap.get(id)? {
@@ -269,7 +271,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
-    fn return_from_function(&mut self) -> Result<(), RuntimeError> {
+    pub(super) fn return_from_function(&mut self) -> Result<(), RuntimeError> {
         let result = self.pop_stack()?;
         let frame = self.frames.pop().ok_or(RuntimeError::VmStackUnderflow)?;
         self.stack.truncate(frame.operand_stack_base);

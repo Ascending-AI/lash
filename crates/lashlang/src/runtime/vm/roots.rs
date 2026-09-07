@@ -1,4 +1,6 @@
-trait IteratorRootView {
+use super::*;
+
+pub(super) trait IteratorRootView {
     fn restore_value(&self) -> Option<&Value>;
     fn cursor_values(&self) -> Option<&[Value]>;
 }
@@ -29,7 +31,7 @@ impl IteratorRootView for VmIteratorContinuation {
     }
 }
 
-trait FrameRootView {
+pub(super) trait FrameRootView {
     type Iterator: IteratorRootView;
 
     fn caller_is_root(&self) -> bool;
@@ -39,7 +41,7 @@ trait FrameRootView {
     fn callback_roots(&self) -> Option<(&Value, &[Value], &[Value])>;
 }
 
-trait FinallyRootView {
+pub(super) trait FinallyRootView {
     fn thrown_value(&self) -> Option<&Value>;
 }
 
@@ -122,7 +124,7 @@ impl FrameRootView for VmFrameContinuation {
     }
 }
 
-trait VmRootView {
+pub(super) trait VmRootView {
     type Iterator: IteratorRootView;
     type Frame: FrameRootView;
     type Finally: FinallyRootView;
@@ -220,7 +222,7 @@ impl VmRootView for VmContinuation {
 /// saved function frames are transient borrowers. This deliberately permits a
 /// named function's `self_slot` to alias the closure still owned by its caller.
 /// GC uses the same walk but treats both classes as reachability roots.
-trait VmRootVisitor<'a> {
+pub(super) trait VmRootVisitor<'a> {
     fn durable(&mut self, name: String, value: &'a Value);
     fn transient(&mut self, value: &'a Value);
 }
@@ -245,7 +247,7 @@ impl<'a> VmRootVisitor<'a> for PersistedRoots<'a> {
     }
 }
 
-fn visit_vm_roots<'a, V: VmRootView>(view: &'a V, visitor: &mut impl VmRootVisitor<'a>) {
+pub(super) fn visit_vm_roots<'a, V: VmRootView>(view: &'a V, visitor: &mut impl VmRootVisitor<'a>) {
     if view.has_active_function() {
         if let Some(root_frame) = view.frames().iter().find(|frame| frame.caller_is_root()) {
             for (index, value) in root_frame.slots().iter().enumerate() {

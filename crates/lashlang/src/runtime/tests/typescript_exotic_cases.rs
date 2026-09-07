@@ -1,4 +1,6 @@
-fn private_builtin(name: &str, args: Vec<Expr>) -> Expr {
+use super::*;
+
+pub(crate) fn private_builtin(name: &str, args: Vec<Expr>) -> Expr {
     Expr::BuiltinCall {
         name: name.into(),
         args,
@@ -31,7 +33,7 @@ fn heap_method(method: &str, receiver: &str, args: Vec<Expr>) -> Expr {
     )
 }
 
-fn field(target: &str, name: &str) -> Expr {
+pub(crate) fn field(target: &str, name: &str) -> Expr {
     Expr::Field {
         target: Box::new(Expr::Variable(target.into())),
         field: name.into(),

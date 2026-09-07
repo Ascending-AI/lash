@@ -1,5 +1,11 @@
+use super::*;
+
 impl<'a, H: ExecutionHost> Vm<'a, H> {
-    fn record_instruction_profile(&mut self, tag: InstructionProfileTag, elapsed_ns: u128) {
+    pub(super) fn record_instruction_profile(
+        &mut self,
+        tag: InstructionProfileTag,
+        elapsed_ns: u128,
+    ) {
         let Some(profile) = &mut self.profile else {
             return;
         };
@@ -8,7 +14,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         profile.instruction_times[index] += elapsed_ns;
     }
 
-    fn record_builtin_profile(&mut self, builtin: IntrinsicOp, elapsed_ns: u128) {
+    pub(super) fn record_builtin_profile(&mut self, builtin: IntrinsicOp, elapsed_ns: u128) {
         let Some(profile) = &mut self.profile else {
             return;
         };
@@ -31,7 +37,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             .and_then(Option::as_ref)
     }
 
-    fn begin_lashlang_execution(
+    pub(super) fn begin_lashlang_execution(
         &mut self,
         instruction_ip: usize,
     ) -> Option<ActiveLashlangExecutionNode> {
@@ -91,7 +97,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             });
     }
 
-    fn observe_branch_selection(
+    pub(super) fn observe_branch_selection(
         &mut self,
         instruction_ip: usize,
         selected: ProcessBranchSelection,

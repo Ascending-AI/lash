@@ -1,4 +1,9 @@
-fn continuation_test_vm<'a>(program: &'a CompiledProgram, host: &'a Host) -> Vm<'a, Host> {
+use super::*;
+
+pub(super) fn continuation_test_vm<'a>(
+    program: &'a CompiledProgram,
+    host: &'a Host,
+) -> Vm<'a, Host> {
     let slots = SlotState::from_globals(
         Record::new(),
         &program.chunk.slot_names,
@@ -7,7 +12,9 @@ fn continuation_test_vm<'a>(program: &'a CompiledProgram, host: &'a Host) -> Vm<
     Vm::new_with_mode(&program.chunk, slots, host, ExecutionMode::Foreground)
 }
 
-async fn uninterrupted_continuation_result(program: &CompiledProgram) -> ExecutionOutcome {
+pub(super) async fn uninterrupted_continuation_result(
+    program: &CompiledProgram,
+) -> ExecutionOutcome {
     execute_compiled(program, &mut State::new(), &Host)
         .await
         .expect("uninterrupted execution should succeed")
@@ -27,7 +34,7 @@ async fn suspend_after_instruction_budget(
     vm.suspend().expect("VM state should be capturable")
 }
 
-async fn round_trip_and_resume(
+pub(super) async fn round_trip_and_resume(
     program: &CompiledProgram,
     continuation: VmContinuation,
 ) -> ExecutionOutcome {
@@ -38,7 +45,7 @@ async fn round_trip_and_resume(
     vm.run_for_mode().await.expect("resumed VM should finish")
 }
 
-async fn find_instruction_continuation(
+pub(super) async fn find_instruction_continuation(
     program: &CompiledProgram,
     predicate: impl Fn(&VmContinuation) -> bool,
 ) -> VmContinuation {
@@ -576,9 +583,9 @@ async fn continuation_resume_accounts_for_pre_park_instruction_and_time_meters()
 }
 
 #[derive(Clone, Copy)]
-struct HeapConformanceHost {
-    stress_gc: bool,
-    memory_limit: ExecutionBound<std::num::NonZeroU64>,
+pub(super) struct HeapConformanceHost {
+    pub(super) stress_gc: bool,
+    pub(super) memory_limit: ExecutionBound<std::num::NonZeroU64>,
 }
 
 impl ExecutionHost for HeapConformanceHost {
@@ -595,18 +602,18 @@ impl ExecutionHost for HeapConformanceHost {
     }
 }
 
-struct DynamicMemoryHost {
+pub(super) struct DynamicMemoryHost {
     limit: std::sync::atomic::AtomicU64,
 }
 
 impl DynamicMemoryHost {
-    fn unbounded() -> Self {
+    pub(super) fn unbounded() -> Self {
         Self {
             limit: std::sync::atomic::AtomicU64::new(u64::MAX),
         }
     }
 
-    fn set_limit(&self, limit: u64) {
+    pub(super) fn set_limit(&self, limit: u64) {
         self.limit.store(limit, std::sync::atomic::Ordering::SeqCst);
     }
 }
@@ -942,7 +949,7 @@ fn independent_os_processes_emit_byte_identical_snapshot_and_continuation_dumps(
         let output = std::process::Command::new(&executable)
             .args([
                 "--exact",
-                "runtime::tests::determinism_process_probe",
+                "runtime::tests::continuation_cases::determinism_process_probe",
                 "--nocapture",
                 "--test-threads=1",
             ])
@@ -1038,7 +1045,7 @@ fn heap_meters_continue_after_restore_in_a_new_os_process() {
         command
             .args([
                 "--exact",
-                "runtime::tests::meter_persistence_process_probe",
+                "runtime::tests::continuation_cases::meter_persistence_process_probe",
                 "--nocapture",
                 "--test-threads=1",
             ])

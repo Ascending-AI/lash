@@ -1,3 +1,5 @@
+use super::*;
+
 // Laws that keep declared `fn` invisible to durability.
 //
 // A declared function is the one construct that adds a call frame to programs
@@ -6,9 +8,7 @@
 // load-bearing for exactly-once replay, so they are pinned here rather than
 // left to follow from the linker's effect ban by argument alone.
 
-use crate::ast::{Declaration, FunctionDecl, FunctionParam, TypeExpr};
-
-fn declared(
+pub(crate) fn declared(
     name: &str,
     params: &[(&str, TypeExpr)],
     return_ty: TypeExpr,

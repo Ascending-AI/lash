@@ -1,4 +1,10 @@
-fn exception_try(body: Expr, catch: Option<(&str, Expr)>, finally: Option<Expr>) -> Expr {
+use super::*;
+
+pub(super) fn exception_try(
+    body: Expr,
+    catch: Option<(&str, Expr)>,
+    finally: Option<Expr>,
+) -> Expr {
     Expr::Try(Box::new(crate::TryExpr {
         body: Box::new(body),
         catch: catch.map(|(binding, body)| crate::CatchClause {
@@ -9,11 +15,11 @@ fn exception_try(body: Expr, catch: Option<(&str, Expr)>, finally: Option<Expr>)
     }))
 }
 
-fn exception_finish(value: Expr) -> Program {
+pub(super) fn exception_finish(value: Expr) -> Program {
     Program::block(vec![Expr::Finish(Box::new(value))])
 }
 
-async fn run_exception_program<H: ExecutionHost>(
+pub(super) async fn run_exception_program<H: ExecutionHost>(
     program: Program,
     host: &H,
 ) -> Result<ExecutionOutcome, RuntimeError> {
@@ -313,7 +319,7 @@ async fn execution_terminals_bypass_a_surrounding_catch() {
     ));
 }
 
-fn exception_resource_call(operation: &str, value: Expr) -> Expr {
+pub(super) fn exception_resource_call(operation: &str, value: Expr) -> Expr {
     Expr::ResultUnwrap(Box::new(Expr::ReceiverCall {
         receiver: Box::new(Expr::ResourceRef(crate::ResourceRefExpr::resolved(
             vec!["tools".into()],
@@ -325,7 +331,7 @@ fn exception_resource_call(operation: &str, value: Expr) -> Expr {
     }))
 }
 
-fn exception_function(body: Expr, captures: &[&str]) -> Expr {
+pub(super) fn exception_function(body: Expr, captures: &[&str]) -> Expr {
     Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
         params: Vec::new(),
@@ -335,8 +341,8 @@ fn exception_function(body: Expr, captures: &[&str]) -> Expr {
 }
 
 #[derive(Default)]
-struct ExceptionRecordingHost {
-    operations: Mutex<Vec<(String, Value, Option<u64>)>>,
+pub(super) struct ExceptionRecordingHost {
+    pub(super) operations: Mutex<Vec<(String, Value, Option<u64>)>>,
 }
 
 impl ExecutionHost for ExceptionRecordingHost {
@@ -499,7 +505,7 @@ async fn effect_failure_catch_retry_is_a_new_occurrence() {
     assert_eq!(calls[1].2, Some(2));
 }
 
-struct StressExceptionHost;
+pub(super) struct StressExceptionHost;
 
 impl ExecutionHost for StressExceptionHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
@@ -718,7 +724,7 @@ fn independent_processes_dump_identical_exception_continuations() {
         let output = std::process::Command::new(&executable)
             .args([
                 "--exact",
-                "runtime::tests::exception_determinism_process_probe",
+                "runtime::tests::exception_cases::exception_determinism_process_probe",
                 "--nocapture",
                 "--test-threads=1",
             ])

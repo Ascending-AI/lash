@@ -1,3 +1,5 @@
+use super::*;
+
 impl Compiler {
     fn emit_function(&mut self, function: &FunctionExpr, parameter_model: ClosureParameterModel) {
         let function_index = self.pending_functions.len();
@@ -191,7 +193,7 @@ impl Compiler {
         }
     }
 
-    fn compile_expr(&mut self, expr: &Expr) {
+    pub(super) fn compile_expr(&mut self, expr: &Expr) {
         if self.dialect == CompilationDialect::Lashlang
             && !contains_type_literal(expr)
             && let Some(value) = self.fold_compile_time_expr(expr)
@@ -317,7 +319,7 @@ impl Compiler {
                 self.code.push(Instruction::WrapHostDescriptor(type_name));
             }
             Expr::ResourceRef(resource) => {
-                self.emit_push_value(Value::Resource(super::ResourceHandle::new(
+                self.emit_push_value(Value::Resource(crate::runtime::ResourceHandle::new(
                     resource.resource_type.to_string(),
                     resource.alias.to_string(),
                 )));

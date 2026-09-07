@@ -1,3 +1,5 @@
+use super::*;
+
 // Cases folded in from the FIG-1303 adversarial review round. Each one covers
 // an interaction the layer's own suite left open: unwinding across a builtin
 // callback frame, the aliasing of a thrown durable slot, terminals raised from

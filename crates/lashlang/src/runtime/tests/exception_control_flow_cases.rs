@@ -1,3 +1,5 @@
+use super::*;
+
 // Loop control flow (`break` / `continue`) crossing structured exception
 // scopes. Every case here pins ECMA-262 completion semantics: leaving a
 // protected region by a jump pops its handler and runs the pending `finally`

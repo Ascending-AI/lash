@@ -1,6 +1,10 @@
 use super::vm::{VM_CONTINUATION_FORMAT_VERSION, VmFrameContinuation, VmFrameReturnContinuation};
 use super::*;
-use crate::ast::{Expr, Program};
+use crate::ast::{
+    AssignTarget, BinaryOp, Declaration, Expr, FunctionDecl, FunctionExpr, FunctionParam, Program,
+    TypeExpr,
+};
+use crate::runtime::entry_points::compile_program_internal;
 use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::fmt::Write as _;
 use std::sync::{
@@ -1294,15 +1298,18 @@ async fn compiler_keeps_assignment_hot_paths_specialized() {
     );
 }
 
-include!("tests/compiler_cases.rs");
-include!("tests/projection_cases.rs");
-include!("tests/async_and_cache_cases.rs");
-include!("tests/continuation_cases.rs");
-include!("tests/continuation_wire_cases.rs");
-include!("tests/function_cases.rs");
-include!("tests/declared_function_cases.rs");
-include!("tests/exception_cases.rs");
-include!("tests/exception_control_flow_cases.rs");
-include!("tests/exception_wire_cases.rs");
-include!("tests/exception_review_cases.rs");
-include!("tests/typescript_exotic_cases.rs");
+mod compiler_cases;
+mod projection_cases;
+use projection_cases::*;
+mod async_and_cache_cases;
+mod continuation_cases;
+use continuation_cases::*;
+mod continuation_wire_cases;
+mod declared_function_cases;
+mod exception_cases;
+mod function_cases;
+use exception_cases::*;
+mod exception_control_flow_cases;
+mod exception_review_cases;
+mod exception_wire_cases;
+mod typescript_exotic_cases;
