@@ -540,11 +540,9 @@ impl RuntimeQueueIngress {
             Self::RefreshToolCatalog { reason } => QueuedWorkBatchDraft::new(
                 session_id,
                 DeliveryPolicy::EarliestSafeBoundary,
-                vec![QueuedWorkPayload::session_command(
-                    SessionCommand::RefreshToolCatalog {
-                        reason: (*reason).to_string(),
-                    },
-                )],
+                SessionCommand::RefreshToolCatalog {
+                    reason: (*reason).to_string(),
+                },
             ),
             Self::ProcessWake { text } => crate::process_wake_batch_draft(ProcessWakeDelivery {
                 version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,

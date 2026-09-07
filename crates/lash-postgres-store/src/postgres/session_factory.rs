@@ -1,5 +1,22 @@
 use crate::*;
 
+pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
+    "enqueue_seq",
+    "batch_id",
+    "session_id",
+    "source_key",
+    "delivery_policy",
+    "work_kind",
+    "authority_json",
+    "merge_key",
+    "available_at_ms",
+    "enqueued_at_ms",
+    "claim_fencing_token",
+    "claim_token",
+    "claim_session_lease_generation",
+    "claim_id",
+];
+
 impl PostgresSessionStoreFactory {
     fn store_for(&self, session_id: String) -> PostgresSessionStore {
         PostgresSessionStore {
@@ -1165,60 +1182,58 @@ pub(crate) struct QueuedBatchRow {
 pub(crate) fn claim_candidate_from_row(
     row: &QueuedBatchRow,
     batch: &QueuedWorkBatch,
-) -> Result<ClaimCandidate, StoreError> {
-    batch.work_class().ok_or_else(|| {
-        StoreError::Backend(format!(
-            "queued-work batch `{}` has mixed or empty payload classes",
-            batch.batch_id
-        ))
-    })?;
-    Ok(ClaimCandidate::from_batch(
+) -> ClaimCandidate {
+    ClaimCandidate::from_batch(
         batch,
         row.claim_fencing_token,
         row.claim_id.clone(),
         row.claim_token.clone(),
-    ))
+    )
 }
 
 pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError> {
     let delivery_policy =
-        DeliveryPolicy::from_wire_str(row.get::<String, _>("delivery_policy").as_str())
+        DeliveryPolicy::from_wire_str(row.get::<String, _>(QUEUED_WORK_COLUMNS[4]).as_str())
             .ok_or_else(|| {
                 StoreError::Backend("invalid queued work delivery policy".to_string())
             })?;
-    let kind = QueuedWorkKind::from_wire_str(row.get::<String, _>("work_kind").as_str())
+    let kind = QueuedWorkKind::from_wire_str(row.get::<String, _>(QUEUED_WORK_COLUMNS[5]).as_str())
         .ok_or_else(|| StoreError::Backend("invalid queued work kind".to_string()))?;
-    let authority_json: String = row.get("authority_json");
+    let authority_json: String = row.get(QUEUED_WORK_COLUMNS[6]);
     Ok(QueuedBatchRow {
-        enqueue_seq: u64_from_sql("QueuedWorkBatch", "enqueue_seq", row.get("enqueue_seq"))?,
-        batch_id: row.get("batch_id"),
-        session_id: row.get("session_id"),
-        source_key: row.get("source_key"),
+        enqueue_seq: u64_from_sql(
+            "QueuedWorkBatch",
+            "enqueue_seq",
+            row.get(QUEUED_WORK_COLUMNS[0]),
+        )?,
+        batch_id: row.get(QUEUED_WORK_COLUMNS[1]),
+        session_id: row.get(QUEUED_WORK_COLUMNS[2]),
+        source_key: row.get(QUEUED_WORK_COLUMNS[3]),
         delivery_policy,
         kind,
         authority: store_decode_json(&authority_json, "queued work authority")?,
-        merge_key: row.get("merge_key"),
+        merge_key: row.get(QUEUED_WORK_COLUMNS[7]),
         available_at_ms: u64_from_sql(
             "QueuedWorkBatch",
             "available_at_ms",
-            row.get("available_at_ms"),
+            row.get(QUEUED_WORK_COLUMNS[8]),
         )?,
         enqueued_at_ms: u64_from_sql(
             "QueuedWorkBatch",
             "enqueued_at_ms",
-            row.get("enqueued_at_ms"),
+            row.get(QUEUED_WORK_COLUMNS[9]),
         )?,
         claim_fencing_token: u64_from_sql(
             "QueuedWorkBatch",
             "claim_fencing_token",
-            row.get("claim_fencing_token"),
+            row.get(QUEUED_WORK_COLUMNS[10]),
         )?,
-        claim_id: row.get("claim_id"),
-        claim_token: row.get("claim_token"),
+        claim_id: row.get(QUEUED_WORK_COLUMNS[13]),
+        claim_token: row.get(QUEUED_WORK_COLUMNS[11]),
         claim_session_lease_generation: u64_from_sql(
             "QueuedWorkBatch",
             "claim_session_lease_generation",
-            row.get("claim_session_lease_generation"),
+            row.get(QUEUED_WORK_COLUMNS[12]),
         )?,
     })
 }
@@ -1227,13 +1242,12 @@ pub(crate) async fn load_queued_batch(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     batch_id: &str,
 ) -> Result<Option<QueuedWorkBatch>, StoreError> {
-    let row = sqlx::query(
-        "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
+    let row = sqlx::query(&format!(
+        "SELECT {QUEUED_WORK_COLUMNS}
          FROM lash_queued_work_batches
          WHERE batch_id = $1",
-    )
+        QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
+    ))
     .bind(batch_id)
     .fetch_optional(&mut **tx)
     .await
@@ -1267,7 +1281,7 @@ pub(crate) async fn queued_work_batch_from_row(
             payload: store_decode_json(&payload_json, "queued work payload")?,
         });
     }
-    Ok(QueuedWorkBatch {
+    let batch = QueuedWorkBatch {
         batch_id: row.batch_id,
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
@@ -1279,7 +1293,9 @@ pub(crate) async fn queued_work_batch_from_row(
         available_at_ms: row.available_at_ms,
         enqueued_at_ms: row.enqueued_at_ms,
         items,
-    })
+    };
+    batch.validate_payload_family()?;
+    Ok(batch)
 }
 
 pub(crate) async fn ensure_queued_work_completion_tx(

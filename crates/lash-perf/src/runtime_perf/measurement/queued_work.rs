@@ -35,11 +35,9 @@ pub(super) async fn run_once_queued_work_claim_stress(
                 QueuedWorkBatchDraft::new(
                     other_session_id,
                     DeliveryPolicy::EarliestSafeBoundary,
-                    vec![QueuedWorkPayload::session_command(
-                        SessionCommand::RefreshToolCatalog {
-                            reason: format!("other queued work {index}"),
-                        },
-                    )],
+                    SessionCommand::RefreshToolCatalog {
+                        reason: format!("other queued work {index}"),
+                    },
                 )
                 .with_source_key(format!("other:{index}")),
             )
@@ -387,11 +385,9 @@ async fn enqueue_queued_work_stress_turn(
             QueuedWorkBatchDraft::new(
                 session_id,
                 DeliveryPolicy::EarliestSafeBoundary,
-                vec![QueuedWorkPayload::session_command(
-                    SessionCommand::RefreshToolCatalog {
-                        reason: format!("queued-work-stress-{turn_index}"),
-                    },
-                )],
+                SessionCommand::RefreshToolCatalog {
+                    reason: format!("queued-work-stress-{turn_index}"),
+                },
             )
             .with_source_key(format!("command:{turn_index}")),
         )

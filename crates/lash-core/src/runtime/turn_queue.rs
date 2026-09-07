@@ -123,6 +123,14 @@ pub enum QueuedWorkKind {
 }
 
 impl QueuedWorkKind {
+    /// Project the ingress family to its work class.
+    pub fn work_class(self) -> QueuedWorkClass {
+        match self {
+            Self::Control => QueuedWorkClass::SessionCommand,
+            Self::Turn => QueuedWorkClass::TurnWork,
+        }
+    }
+
     /// Reports whether rows of this kind may join an adjacent compatible turn claim.
     ///
     /// Only [`Self::Turn`] is batchable. Control rows remain single-row claims
@@ -460,16 +468,26 @@ pub struct QueuedWorkBatch {
 }
 
 impl QueuedWorkBatch {
-    pub fn work_class(&self) -> Option<QueuedWorkClass> {
-        work_class_for_payloads(self.items.iter().map(|item| &item.payload))
+    /// Validate persisted item families once when a backend hydrates a batch.
+    pub fn validate_payload_family(&self) -> Result<(), crate::StoreError> {
+        validate_payload_family(self.kind, self.items.iter().map(|item| &item.payload)).map_err(
+            |message| crate::StoreError::StoredDataCorrupt {
+                record_kind: "QueuedWorkBatch",
+                message,
+            },
+        )
+    }
+
+    pub fn work_class(&self) -> QueuedWorkClass {
+        self.kind.work_class()
     }
 
     pub fn is_session_command_work(&self) -> bool {
-        self.work_class() == Some(QueuedWorkClass::SessionCommand)
+        self.work_class() == QueuedWorkClass::SessionCommand
     }
 
     pub fn is_turn_work(&self) -> bool {
-        self.work_class() == Some(QueuedWorkClass::TurnWork)
+        self.work_class() == QueuedWorkClass::TurnWork
     }
 }
 
@@ -498,7 +516,8 @@ impl QueuedWorkEnqueueOutcome {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(try_from = "QueuedWorkDraftWire")]
 pub struct QueuedWorkBatchDraft {
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -511,40 +530,25 @@ pub struct QueuedWorkBatchDraft {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_wake_source: Option<ProcessWakeSource>,
     pub delivery_policy: DeliveryPolicy,
-    /// Derived ingress family of this draft, never producer-assigned.
-    ///
-    /// [`QueuedWorkKind::Control`] means "this batch carries session commands",
-    /// so the durable `work_kind` column is the ingress-family discriminator a
-    /// store's ordering projection reads. Keeping the field unwritable is what
-    /// makes a `Control` row with non-session-command payloads unrepresentable
-    /// rather than merely rejected.
-    kind: QueuedWorkKind,
     pub authority: QueuedWorkAuthority,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_key: Option<String>,
     pub available_at_ms: u64,
-    pub payloads: Vec<QueuedWorkPayload>,
+    pub payloads: QueuedWorkBatchPayloads,
 }
 
 impl QueuedWorkBatchDraft {
     pub fn new(
         session_id: impl Into<String>,
         delivery_policy: DeliveryPolicy,
-        payloads: impl Into<Vec<QueuedWorkPayload>>,
+        payloads: impl Into<QueuedWorkBatchPayloads>,
     ) -> Self {
         let payloads = payloads.into();
-        let kind =
-            if work_class_for_payloads(payloads.iter()) == Some(QueuedWorkClass::SessionCommand) {
-                QueuedWorkKind::Control
-            } else {
-                QueuedWorkKind::Turn
-            };
         Self {
             session_id: session_id.into(),
             source_key: None,
             process_wake_source: None,
             delivery_policy,
-            kind,
             authority: QueuedWorkAuthority::default(),
             merge_key: None,
             available_at_ms: 0,
@@ -579,7 +583,7 @@ impl QueuedWorkBatchDraft {
     /// There is deliberately no setter: the kind is a function of the payloads,
     /// so a producer cannot assert [`QueuedWorkKind::Control`] over turn work.
     pub fn kind(&self) -> QueuedWorkKind {
-        self.kind
+        self.payloads.kind()
     }
 
     pub fn with_authority(mut self, authority: QueuedWorkAuthority) -> Self {
@@ -602,19 +606,22 @@ impl QueuedWorkBatchDraft {
         self
     }
 
-    pub fn work_class(&self) -> Option<QueuedWorkClass> {
-        work_class_for_payloads(self.payloads.iter())
+    pub fn work_class(&self) -> QueuedWorkClass {
+        self.kind().work_class()
     }
 
     #[doc(hidden)]
     pub fn validate_process_wake_source(&self) -> Result<(), String> {
+        let mut payloads = self.payloads.iter();
         match (
             self.process_wake_source.as_ref(),
-            self.payloads.as_slice(),
+            payloads.next(),
+            payloads.next(),
         ) {
             (
                 Some(source),
-                [QueuedWorkPayload::ProcessWake { wake }],
+                Some(QueuedWorkPayload::ProcessWake { wake }),
+                None,
             ) if wake.target_session_id == self.session_id
                 && wake.process_id == source.process_id
                 && wake.sequence == source.sequence
@@ -624,8 +631,8 @@ impl QueuedWorkBatchDraft {
             {
                 Ok(())
             }
-            (None, payloads)
-                if !payloads
+            (None, _, _)
+                if !self.payloads
                     .iter()
                     .any(|payload| matches!(payload, QueuedWorkPayload::ProcessWake { .. })) =>
             {
@@ -643,16 +650,6 @@ impl QueuedWorkBatchDraft {
 pub struct ProcessWakeSource {
     pub process_id: String,
     pub sequence: u64,
-}
-
-fn work_class_for_payloads<'a>(
-    payloads: impl IntoIterator<Item = &'a QueuedWorkPayload>,
-) -> Option<QueuedWorkClass> {
-    let mut payloads = payloads.into_iter();
-    let first = payloads.next()?.work_class();
-    payloads
-        .all(|payload| payload.work_class() == first)
-        .then_some(first)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -857,7 +854,7 @@ pub fn process_wake_batch_draft_with_delivery_policy(
     QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         delivery_policy,
-        vec![QueuedWorkPayload::process_wake(wake)],
+        crate::TurnWorkPayload::process_wake(wake),
     )
     .with_source_key(source_key)
     .with_process_wake_source(process_id, sequence)
@@ -898,5 +895,337 @@ mod wire_tests {
             DeliveryPolicy::AfterCurrentTurnCommit.as_str(),
             "after_current_turn_commit"
         );
+    }
+}
+
+/// A turn-work item; session commands cannot be constructed through this type.
+#[derive(Clone, Debug)]
+pub struct TurnWorkPayload(QueuedWorkPayload);
+
+impl TurnWorkPayload {
+    /// Wrap one durable process wake as turn work.
+    pub fn process_wake(wake: ProcessWakeDelivery) -> Self {
+        Self(QueuedWorkPayload::process_wake(wake))
+    }
+
+    /// Construct an internal agent-frame task item.
+    pub fn agent_frame_task(
+        frame_id: crate::FrameNodeId,
+        task: impl Into<String>,
+        protocol_turn_options: Option<crate::ProtocolTurnOptions>,
+    ) -> Self {
+        Self(QueuedWorkPayload::agent_frame_task(
+            frame_id,
+            task,
+            protocol_turn_options,
+        ))
+    }
+}
+
+/// Exactly one session command, validated by construction.
+#[derive(Clone, Debug)]
+pub struct SessionCommandPayload(QueuedWorkPayload);
+
+impl From<SessionCommand> for SessionCommandPayload {
+    fn from(command: SessionCommand) -> Self {
+        Self(QueuedWorkPayload::session_command(command))
+    }
+}
+
+/// One command or a nonempty sequence of turn work, in the existing item order.
+#[derive(Clone, Debug)]
+pub enum QueuedWorkBatchPayloads {
+    /// Exactly one session command.
+    SessionCommand(SessionCommandPayload),
+    /// A nonempty sequence whose item order is preserved.
+    TurnWork {
+        /// The required first item.
+        first: TurnWorkPayload,
+        /// Remaining items in delivery order.
+        rest: Vec<TurnWorkPayload>,
+    },
+}
+
+impl From<SessionCommand> for QueuedWorkBatchPayloads {
+    fn from(command: SessionCommand) -> Self {
+        Self::SessionCommand(command.into())
+    }
+}
+
+impl From<TurnWorkPayload> for QueuedWorkBatchPayloads {
+    fn from(first: TurnWorkPayload) -> Self {
+        Self::TurnWork {
+            first,
+            rest: Vec::new(),
+        }
+    }
+}
+
+impl QueuedWorkBatchPayloads {
+    /// Return the ingress family encoded by this value.
+    pub fn kind(&self) -> QueuedWorkKind {
+        match self {
+            Self::SessionCommand(_) => QueuedWorkKind::Control,
+            Self::TurnWork { .. } => QueuedWorkKind::Turn,
+        }
+    }
+
+    /// Visit the durable items in delivery order.
+    pub fn iter(&self) -> impl Iterator<Item = &QueuedWorkPayload> {
+        let (first, rest): (&QueuedWorkPayload, &[TurnWorkPayload]) = match self {
+            Self::SessionCommand(command) => (&command.0, &[]),
+            Self::TurnWork { first, rest } => (&first.0, rest),
+        };
+        std::iter::once(first).chain(rest.iter().map(|payload| &payload.0))
+    }
+}
+
+impl IntoIterator for QueuedWorkBatchPayloads {
+    type Item = QueuedWorkPayload;
+    type IntoIter = std::vec::IntoIter<QueuedWorkPayload>;
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            Self::SessionCommand(command) => vec![command.0],
+            Self::TurnWork { first, rest } => std::iter::once(first.0)
+                .chain(rest.into_iter().map(|payload| payload.0))
+                .collect(),
+        }
+        .into_iter()
+    }
+}
+
+impl serde::Serialize for QueuedWorkBatchPayloads {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.iter())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for QueuedWorkBatchPayloads {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let payloads = <Vec<QueuedWorkPayload> as serde::Deserialize>::deserialize(deserializer)?;
+        let kind = match payloads.first() {
+            Some(QueuedWorkPayload::SessionCommand { .. }) => QueuedWorkKind::Control,
+            Some(_) => QueuedWorkKind::Turn,
+            None => {
+                return Err(serde::de::Error::custom(
+                    "queued work requires at least one payload",
+                ));
+            }
+        };
+        validate_payload_family(kind, payloads.iter()).map_err(serde::de::Error::custom)?;
+        let mut payloads = payloads.into_iter();
+        let first = payloads
+            .next()
+            .ok_or_else(|| serde::de::Error::custom("queued work requires at least one payload"))?;
+        Ok(match first {
+            first @ QueuedWorkPayload::SessionCommand { .. } => {
+                Self::SessionCommand(SessionCommandPayload(first))
+            }
+            first => Self::TurnWork {
+                first: TurnWorkPayload(first),
+                rest: payloads.map(TurnWorkPayload).collect(),
+            },
+        })
+    }
+}
+
+// Keep the established draft encoding while deriving kind from the typed body.
+impl serde::Serialize for QueuedWorkBatchDraft {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct(
+            "QueuedWorkBatchDraft",
+            6 + usize::from(self.source_key.is_some())
+                + usize::from(self.process_wake_source.is_some())
+                + usize::from(self.merge_key.is_some()),
+        )?;
+        state.serialize_field("session_id", &self.session_id)?;
+        if let Some(source) = &self.source_key {
+            state.serialize_field("source_key", source)?;
+        }
+        if let Some(source) = &self.process_wake_source {
+            state.serialize_field("process_wake_source", source)?;
+        }
+        state.serialize_field("delivery_policy", &self.delivery_policy)?;
+        state.serialize_field("kind", &self.kind())?;
+        state.serialize_field("authority", &self.authority)?;
+        if let Some(key) = &self.merge_key {
+            state.serialize_field("merge_key", key)?;
+        }
+        state.serialize_field("available_at_ms", &self.available_at_ms)?;
+        state.serialize_field("payloads", &self.payloads)?;
+        state.end()
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct QueuedWorkDraftWire {
+    session_id: String,
+    source_key: Option<String>,
+    process_wake_source: Option<ProcessWakeSource>,
+    delivery_policy: DeliveryPolicy,
+    kind: QueuedWorkKind,
+    authority: QueuedWorkAuthority,
+    merge_key: Option<String>,
+    available_at_ms: u64,
+    payloads: QueuedWorkBatchPayloads,
+}
+
+impl TryFrom<QueuedWorkDraftWire> for QueuedWorkBatchDraft {
+    type Error = String;
+    fn try_from(wire: QueuedWorkDraftWire) -> Result<Self, Self::Error> {
+        if wire.kind != wire.payloads.kind() {
+            return Err("queued-work kind contradicts its payload family".into());
+        }
+        Ok(Self {
+            session_id: wire.session_id,
+            source_key: wire.source_key,
+            process_wake_source: wire.process_wake_source,
+            delivery_policy: wire.delivery_policy,
+            authority: wire.authority,
+            merge_key: wire.merge_key,
+            available_at_ms: wire.available_at_ms,
+            payloads: wire.payloads,
+        })
+    }
+}
+
+fn validate_payload_family<'a>(
+    kind: QueuedWorkKind,
+    mut payloads: impl Iterator<Item = &'a QueuedWorkPayload>,
+) -> Result<(), String> {
+    let first = payloads
+        .next()
+        .ok_or_else(|| "queued work requires at least one payload".to_string())?;
+    match kind {
+        QueuedWorkKind::Control
+            if matches!(first, QueuedWorkPayload::SessionCommand { .. })
+                && payloads.next().is_none() =>
+        {
+            Ok(())
+        }
+        QueuedWorkKind::Turn
+            if !matches!(first, QueuedWorkPayload::SessionCommand { .. })
+                && payloads.all(|payload| {
+                    !matches!(payload, QueuedWorkPayload::SessionCommand { .. })
+                }) =>
+        {
+            Ok(())
+        }
+        _ => Err("queued-work kind contradicts its payload family".into()),
+    }
+}
+
+#[cfg(test)]
+mod typed_payload_tests {
+    use super::*;
+
+    #[test]
+    fn queued_work_typed_payloads_preserve_command_wire_shape() {
+        let draft = QueuedWorkBatchDraft::new(
+            "s",
+            DeliveryPolicy::EarliestSafeBoundary,
+            SessionCommand::RefreshToolCatalog {
+                reason: "refresh".into(),
+            },
+        );
+        let expected = serde_json::json!({
+            "session_id": "s", "delivery_policy": "earliest_safe_boundary", "kind": "control",
+            "authority": {}, "available_at_ms": 0,
+            "payloads": [{"type": "session_command", "command": {"kind": "refresh_tool_catalog", "reason": "refresh"}}]
+        });
+        assert_eq!(serde_json::to_value(&draft).unwrap(), expected);
+        let restored: QueuedWorkBatchDraft = serde_json::from_value(expected).unwrap();
+        assert_eq!(restored.kind(), QueuedWorkKind::Control);
+    }
+
+    #[test]
+    fn queued_work_typed_payloads_reject_empty_mixed_and_multiple_commands() {
+        let command = serde_json::json!({"type": "session_command", "command": {"kind": "refresh_tool_catalog", "reason": "refresh"}});
+        let turn = serde_json::to_value(QueuedWorkPayload::agent_frame_task(
+            crate::facade_support::frame_node_id("s", "f"),
+            "task",
+            None,
+        ))
+        .unwrap();
+        for payloads in [
+            serde_json::json!([]),
+            serde_json::json!([command.clone(), turn.clone()]),
+            serde_json::json!([turn, command.clone()]),
+            serde_json::json!([command.clone(), command]),
+        ] {
+            assert!(serde_json::from_value::<QueuedWorkBatchPayloads>(payloads).is_err());
+        }
+    }
+    #[test]
+    fn queued_work_typed_draft_preserves_json_and_messagepack_bytes() {
+        // Independent pin of the pre-cutover draft envelope and raw item array.
+        #[derive(serde::Serialize)]
+        struct WireDraft<'a> {
+            session_id: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            source_key: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            process_wake_source: Option<&'a ProcessWakeSource>,
+            delivery_policy: DeliveryPolicy,
+            kind: QueuedWorkKind,
+            authority: &'a QueuedWorkAuthority,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            merge_key: Option<&'a str>,
+            available_at_ms: u64,
+            payloads: Vec<QueuedWorkPayload>,
+        }
+        let command = SessionCommand::RefreshToolCatalog {
+            reason: "wire-pin".into(),
+        };
+        let turn = QueuedWorkPayload::agent_frame_task(
+            crate::facade_support::frame_node_id("s", "f"),
+            "task",
+            None,
+        );
+        let mut command_draft =
+            QueuedWorkBatchDraft::new("s", DeliveryPolicy::EarliestSafeBoundary, command.clone());
+        command_draft.source_key = Some("source".into());
+        command_draft.merge_key = Some("merge".into());
+        let turn_draft = QueuedWorkBatchDraft::new(
+            "s",
+            DeliveryPolicy::EarliestSafeBoundary,
+            QueuedWorkBatchPayloads::TurnWork {
+                first: TurnWorkPayload(turn.clone()),
+                rest: vec![TurnWorkPayload(turn.clone())],
+            },
+        );
+        for (draft, kind, payloads) in [
+            (
+                command_draft,
+                QueuedWorkKind::Control,
+                vec![QueuedWorkPayload::session_command(command)],
+            ),
+            (turn_draft, QueuedWorkKind::Turn, vec![turn.clone(), turn]),
+        ] {
+            let wire = WireDraft {
+                session_id: &draft.session_id,
+                source_key: draft.source_key.as_deref(),
+                process_wake_source: draft.process_wake_source.as_ref(),
+                delivery_policy: draft.delivery_policy,
+                kind,
+                authority: &draft.authority,
+                merge_key: draft.merge_key.as_deref(),
+                available_at_ms: draft.available_at_ms,
+                payloads,
+            };
+            assert_eq!(
+                serde_json::to_vec(&draft).unwrap(),
+                serde_json::to_vec(&wire).unwrap()
+            );
+            assert_eq!(
+                rmp_serde::to_vec(&draft).unwrap(),
+                rmp_serde::to_vec(&wire).unwrap()
+            );
+            let bytes = rmp_serde::to_vec_named(&wire).unwrap();
+            assert_eq!(rmp_serde::to_vec_named(&draft).unwrap(), bytes);
+            let restored: QueuedWorkBatchDraft = rmp_serde::from_slice(&bytes).unwrap();
+            assert_eq!(restored.kind(), kind);
+        }
     }
 }

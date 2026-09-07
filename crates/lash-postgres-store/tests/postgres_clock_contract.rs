@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use lash_core::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkPayload};
+use lash_core::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary};
 use lash_core::testing::TestClock;
 use lash_core::{
     CheckpointKind, Clock, DeliveryPolicy, LeaseOwnerIdentity, PendingTurnInputCancelOutcome,
@@ -112,6 +112,11 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         // that could read a host clock unnoticed is the one doing the work.
         (
             RUNTIME_PERSISTENCE_SOURCE,
+            "async fn claim_queued_work_rows_postgres(",
+            "async fn claim_ready_queued_work_postgres_tx(",
+        ),
+        (
+            RUNTIME_PERSISTENCE_SOURCE,
             "async fn claim_ready_queued_work_postgres_tx(",
             "async fn defer_orphaned_active_turn_inputs_tx(",
         ),
@@ -131,7 +136,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "async fn defer_orphaned_active_turn_inputs_tx(",
             "async fn claim_pending_turn_inputs_postgres_tx(",
         ),
-        // The transaction-scoped pending-input claim copy. The public
+        // The single transaction-scoped pending-input claim body. The public
         // `claim_pending_turn_inputs_postgres` caller is fenced below, but
         // this helper is far below the impl block and reads `now` and
         // CAS-stamps claims directly — fence the body as well.
@@ -368,11 +373,9 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
             &session_id,
             DeliveryPolicy::EarliestSafeBoundary,
-            vec![QueuedWorkPayload::session_command(
-                SessionCommand::RefreshToolCatalog {
-                    reason: "clock-contract command".to_string(),
-                },
-            )],
+            SessionCommand::RefreshToolCatalog {
+                reason: "clock-contract command".to_string(),
+            },
         ))
         .await
         .expect("enqueue session command under skewed client clock");
@@ -380,11 +383,11 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
             &session_id,
             DeliveryPolicy::EarliestSafeBoundary,
-            vec![QueuedWorkPayload::agent_frame_task(
+            lash_core::runtime::TurnWorkPayload::agent_frame_task(
                 lash_core::facade_support::frame_node_id(&session_id, "clock-contract-frame"),
                 "clock-contract queued work",
                 None,
-            )],
+            ),
         ))
         .await
         .expect("enqueue queued work under skewed client clock");

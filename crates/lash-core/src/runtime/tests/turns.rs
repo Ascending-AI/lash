@@ -2361,11 +2361,9 @@ async fn enqueue_session_command(
         crate::QueuedWorkBatchDraft::new(
             session_id.to_string(),
             crate::DeliveryPolicy::EarliestSafeBoundary,
-            vec![crate::QueuedWorkPayload::session_command(
-                crate::SessionCommand::RefreshToolCatalog {
-                    reason: reason.to_string(),
-                },
-            )],
+            crate::SessionCommand::RefreshToolCatalog {
+                reason: reason.to_string(),
+            },
         ),
     )
     .await
@@ -2382,11 +2380,9 @@ async fn enqueue_config_patch_command(
         crate::QueuedWorkBatchDraft::new(
             session_id.to_string(),
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
-            vec![crate::QueuedWorkPayload::session_command(
-                crate::SessionCommand::ApplyConfigPatch {
-                    patch: Box::new(patch),
-                },
-            )],
+            crate::SessionCommand::ApplyConfigPatch {
+                patch: Box::new(patch),
+            },
         ),
     )
     .await

@@ -2137,6 +2137,7 @@ lash::persistence::QueuedWorkBatch::kind
 lash::persistence::QueuedWorkBatch::merge_key
 lash::persistence::QueuedWorkBatch::session_id
 lash::persistence::QueuedWorkBatch::source_key
+lash::persistence::QueuedWorkBatch::validate_payload_family
 lash::persistence::QueuedWorkBatch::work_class
 lash::persistence::QueuedWorkBatchDraft
 lash::persistence::QueuedWorkBatchDraft::authority
@@ -2156,6 +2157,14 @@ lash::persistence::QueuedWorkBatchDraft::with_merge_key
 lash::persistence::QueuedWorkBatchDraft::with_process_wake_source
 lash::persistence::QueuedWorkBatchDraft::with_source_key
 lash::persistence::QueuedWorkBatchDraft::work_class
+lash::persistence::QueuedWorkBatchPayloads
+lash::persistence::QueuedWorkBatchPayloads::SessionCommand
+lash::persistence::QueuedWorkBatchPayloads::SessionCommand::0
+lash::persistence::QueuedWorkBatchPayloads::TurnWork
+lash::persistence::QueuedWorkBatchPayloads::TurnWork::first
+lash::persistence::QueuedWorkBatchPayloads::TurnWork::rest
+lash::persistence::QueuedWorkBatchPayloads::iter
+lash::persistence::QueuedWorkBatchPayloads::kind
 lash::persistence::QueuedWorkClaim
 lash::persistence::QueuedWorkClaimBoundary
 lash::persistence::QueuedWorkClaimBoundary::ActiveTurnCheckpoint
@@ -2195,6 +2204,7 @@ lash::persistence::QueuedWorkKind::Turn
 lash::persistence::QueuedWorkKind::as_str
 lash::persistence::QueuedWorkKind::from_wire_str
 lash::persistence::QueuedWorkKind::is_batchable
+lash::persistence::QueuedWorkKind::work_class
 lash::persistence::QueuedWorkPayload
 lash::persistence::QueuedWorkPayload::AgentFrameTask
 lash::persistence::QueuedWorkPayload::AgentFrameTask::frame_id
@@ -2436,6 +2446,7 @@ lash::persistence::SessionCheckpoint::plugin_snapshot_revision
 lash::persistence::SessionCheckpoint::schema_version
 lash::persistence::SessionCheckpoint::turn_state
 lash::persistence::SessionCheckpoint::validate_component_encoding_versions
+lash::persistence::SessionCommandPayload
 lash::persistence::SessionCommitStore
 lash::persistence::SessionCommitStore::admit_and_bind_session
 lash::persistence::SessionCommitStore::admit_session_state
@@ -2935,6 +2946,9 @@ lash::persistence::TurnInputStore::list_pending_turn_inputs
 lash::persistence::TurnInputStore::list_turn_input_applications
 lash::persistence::TurnInputStore::record_turn_cancel_request
 lash::persistence::TurnInputStore::turn_cancel_request
+lash::persistence::TurnWorkPayload
+lash::persistence::TurnWorkPayload::agent_frame_task
+lash::persistence::TurnWorkPayload::process_wake
 lash::persistence::UnclaimedTurnInputs
 lash::persistence::UnclaimedTurnInputs::applications
 lash::persistence::UnclaimedTurnInputs::completion

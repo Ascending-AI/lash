@@ -1,5 +1,8 @@
 //! Runs the shared `ProcessRegistry` conformance suite against SQLite.
 
+#[path = "conformance/claim_atomicity.rs"]
+mod claim_atomicity;
+
 use lash_sansio::sync::MutexExt;
 use std::future::Future;
 use std::path::{Path, PathBuf};

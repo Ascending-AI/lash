@@ -866,11 +866,11 @@ async fn commit_rejects_queue_batch_bytes_over_budget(store: Arc<dyn RuntimePers
     commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(
         "root",
         DeliveryPolicy::AfterCurrentTurnCommit,
-        vec![QueuedWorkPayload::agent_frame_task(
+        crate::TurnWorkPayload::agent_frame_task(
             crate::session_graph::frame_node_id("root", "oversized-queue-batch"),
             "q".repeat(BYTE_LIMIT * 2),
             None,
-        )],
+        ),
     )];
 
     let error = store
@@ -995,11 +995,11 @@ async fn commit_with_every_payload_family_inside_budget_succeeds(
     commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(
         "root",
         DeliveryPolicy::AfterCurrentTurnCommit,
-        vec![QueuedWorkPayload::agent_frame_task(
+        crate::TurnWorkPayload::agent_frame_task(
             crate::session_graph::frame_node_id("root", "all-families-follow-up"),
             "follow-up",
             None,
-        )],
+        ),
     )];
 
     store
@@ -1024,13 +1024,11 @@ async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
     let same_leaf_plan = same_leaf_planner
         .plan(crate::store::FreshRuntimeCommitFacts {
             actual_head_revision: same_leaf_commit.expected_head_revision,
-            old_leaf_node_id: Some(old_leaf.clone()),
             requested_ancestor_is_active: true,
             occupied_node_ids: std::collections::HashSet::new(),
             selected_leaf_is_live: true,
             has_live_nodes: true,
-            old_leaf_is_live: true,
-            parent_node_facts: Some(crate::store::ParentNodeFacts {
+            published_leaf: crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,
                 frame_node_id: seed_frame_node_id.to_string(),
@@ -1066,13 +1064,11 @@ async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
     let changed_plan = changed_planner
         .plan(crate::store::FreshRuntimeCommitFacts {
             actual_head_revision: changed_commit.expected_head_revision,
-            old_leaf_node_id: Some(old_leaf.clone()),
             requested_ancestor_is_active: true,
             occupied_node_ids: std::collections::HashSet::new(),
             selected_leaf_is_live: false,
             has_live_nodes: true,
-            old_leaf_is_live: true,
-            parent_node_facts: Some(crate::store::ParentNodeFacts {
+            published_leaf: crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,
                 frame_node_id: seed_frame_node_id.into_inner(),
@@ -1967,11 +1963,11 @@ async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimePersis
         .push(QueuedWorkBatchDraft::new(
             "different-session",
             DeliveryPolicy::AfterCurrentTurnCommit,
-            vec![QueuedWorkPayload::agent_frame_task(
+            crate::TurnWorkPayload::agent_frame_task(
                 crate::session_graph::frame_node_id("different-session", "atomic-frame"),
                 "must roll back",
                 None,
-            )],
+            ),
         ));
     let failing_lease =
         claim_session_execution_lease_for_test(&store, "root", "atomic-append-failing").await;
@@ -2909,7 +2905,7 @@ pub fn queued_process_wake_draft(
     QueuedWorkBatchDraft::new(
         session_id,
         delivery_policy,
-        vec![QueuedWorkPayload::process_wake(wake)],
+        crate::TurnWorkPayload::process_wake(wake),
     )
     .with_source_key(crate::process_wake_source_key(
         &format!("process:{text}"),
@@ -2926,11 +2922,11 @@ fn queued_draft(
     QueuedWorkBatchDraft::new(
         session_id,
         delivery_policy,
-        vec![QueuedWorkPayload::agent_frame_task(
+        crate::TurnWorkPayload::agent_frame_task(
             crate::session_graph::frame_node_id(session_id, &format!("frame:{text}")),
             text,
             None,
-        )],
+        ),
     )
 }
 
@@ -2938,11 +2934,9 @@ fn queued_session_command_draft(session_id: &str, reason: &str) -> QueuedWorkBat
     QueuedWorkBatchDraft::new(
         session_id,
         DeliveryPolicy::EarliestSafeBoundary,
-        vec![QueuedWorkPayload::session_command(
-            crate::SessionCommand::RefreshToolCatalog {
-                reason: reason.to_string(),
-            },
-        )],
+        crate::SessionCommand::RefreshToolCatalog {
+            reason: reason.to_string(),
+        },
     )
 }
 
@@ -7807,11 +7801,11 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
         QueuedWorkBatchDraft::new(
             "root",
             DeliveryPolicy::AfterCurrentTurnCommit,
-            vec![QueuedWorkPayload::agent_frame_task(
+            crate::TurnWorkPayload::agent_frame_task(
                 crate::session_graph::frame_node_id("root", "follow-frame"),
                 "follow-on task",
                 None,
-            )],
+            ),
         )
         .with_source_key("agent-frame-handoff:turn-atomic"),
     ];
@@ -9578,7 +9572,7 @@ async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     let malformed = QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         DeliveryPolicy::EarliestSafeBoundary,
-        vec![QueuedWorkPayload::process_wake(wake.clone())],
+        crate::TurnWorkPayload::process_wake(wake.clone()),
     )
     .with_source_key(crate::process_wake_source_key(
         &wake.process_id,

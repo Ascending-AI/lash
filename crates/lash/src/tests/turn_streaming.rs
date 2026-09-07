@@ -1376,11 +1376,11 @@ async fn all_queued_builder_families_begin_with_turn_started() -> Result<()> {
             crate::persistence::QueuedWorkBatchDraft::new(
                 session_id,
                 crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
-                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                crate::persistence::TurnWorkPayload::agent_frame_task(
                     lash_core::facade_support::frame_node_id(session_id, "selected-start"),
                     "selected queued builder",
                     None,
-                )],
+                ),
             )
             .with_source_key("selected-turn-start"),
         )
@@ -1400,11 +1400,11 @@ async fn all_queued_builder_families_begin_with_turn_started() -> Result<()> {
             crate::persistence::QueuedWorkBatchDraft::new(
                 session_id,
                 crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
-                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                crate::persistence::TurnWorkPayload::agent_frame_task(
                     lash_core::facade_support::frame_node_id(session_id, "scoped-selected-start"),
                     "scoped selected queued builder",
                     None,
-                )],
+                ),
             )
             .with_source_key("scoped-selected-turn-start"),
         )
@@ -1690,14 +1690,14 @@ async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -> Result<()
             .enqueue_queued_work(crate::persistence::QueuedWorkBatchDraft::new(
                 session.session_id(),
                 crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
-                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                crate::persistence::TurnWorkPayload::agent_frame_task(
                     lash_core::facade_support::frame_node_id(
                         &session.session_id(),
                         "oversized-frame",
                     ),
                     "w".repeat(64 * 1024),
                     None,
-                )],
+                ),
             ))
             .await?;
     }
@@ -1795,14 +1795,14 @@ async fn selected_queued_turn_refuses_partial_key_break_without_settling_rows() 
                     crate::persistence::QueuedWorkBatchDraft::new(
                         session_id,
                         lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                        vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                        crate::persistence::TurnWorkPayload::agent_frame_task(
                             lash_core::facade_support::frame_node_id(
                                 session_id,
                                 "selected-refusal-frame",
                             ),
                             source_key,
                             None,
-                        )],
+                        ),
                     )
                     .with_source_key(source_key)
                     .with_merge_key(merge_key),
@@ -1881,11 +1881,11 @@ async fn selected_queued_turn_redrives_an_interrupted_composition_exactly_or_not
                 crate::persistence::QueuedWorkBatchDraft::new(
                     session_id,
                     lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                    vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                    crate::persistence::TurnWorkPayload::agent_frame_task(
                         lash_core::facade_support::frame_node_id(session_id, "interrupted-frame"),
                         source_key,
                         None,
-                    )],
+                    ),
                 )
                 .with_source_key(source_key)
                 .with_merge_key("interrupted-key"),
@@ -2014,11 +2014,11 @@ async fn selected_queued_turn_reports_claimed_now_and_already_satisfied_ids() ->
             crate::persistence::QueuedWorkBatchDraft::new(
                 session_id,
                 lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                crate::persistence::TurnWorkPayload::agent_frame_task(
                     lash_core::facade_support::frame_node_id(session_id, "selected-outcome-frame"),
                     "selected-outcome-task",
                     None,
-                )],
+                ),
             )
             .with_source_key("selected-outcome-source"),
         )
@@ -2153,14 +2153,14 @@ async fn selected_queued_turn_deduplicates_present_claimable_id() -> Result<()> 
             crate::persistence::QueuedWorkBatchDraft::new(
                 session_id,
                 lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                crate::persistence::TurnWorkPayload::agent_frame_task(
                     lash_core::facade_support::frame_node_id(
                         session_id,
                         "selected-duplicate-present-frame",
                     ),
                     "selected-duplicate-present-task",
                     None,
-                )],
+                ),
             )
             .with_source_key("selected-duplicate-present-source"),
         )
@@ -2262,11 +2262,11 @@ async fn selected_queued_turn_validates_every_interrupted_composition_before_mut
                 crate::persistence::QueuedWorkBatchDraft::new(
                     session_id,
                     lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                    vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                    crate::persistence::TurnWorkPayload::agent_frame_task(
                         lash_core::facade_support::frame_node_id(session_id, "two-claims-frame"),
                         source_key,
                         None,
-                    )],
+                    ),
                 )
                 .with_source_key(source_key)
                 .with_merge_key("two-claims-key"),
@@ -2471,14 +2471,14 @@ async fn selected_queued_turn_redrive_ignores_successor_max_rows() -> Result<()>
                 crate::persistence::QueuedWorkBatchDraft::new(
                     session_id,
                     lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                    vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                    crate::persistence::TurnWorkPayload::agent_frame_task(
                         lash_core::facade_support::frame_node_id(
                             session_id,
                             "selected-limit-frame",
                         ),
                         source_key,
                         None,
-                    )],
+                    ),
                 )
                 .with_source_key(source_key)
                 .with_merge_key("selected-limit-key"),
@@ -2582,11 +2582,11 @@ async fn selected_queued_turn_reports_execution_lane_contention() -> Result<()> 
             crate::persistence::QueuedWorkBatchDraft::new(
                 session_id,
                 lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                crate::persistence::TurnWorkPayload::agent_frame_task(
                     lash_core::facade_support::frame_node_id(session_id, "busy-frame"),
                     "busy-w1",
                     None,
-                )],
+                ),
             )
             .with_source_key("busy-w1"),
         )

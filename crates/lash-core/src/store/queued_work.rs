@@ -307,7 +307,6 @@ pub struct ClaimCandidate {
     /// Durable token paired with `prior_claim_id` by the queued-work claim
     /// correlation invariant.
     pub prior_claim_token: Option<String>,
-    pub work_class: QueuedWorkClass,
     /// Whether this row is exactly one `ApplyConfigPatch` command and can
     /// therefore share a drain commit with adjacent config patches.
     pub config_patch_command: bool,
@@ -351,7 +350,6 @@ impl ClaimCandidate {
             claim_fencing_token,
             prior_claim_id,
             prior_claim_token,
-            work_class: batch.work_class().unwrap_or(QueuedWorkClass::TurnWork),
             config_patch_command,
             delivery_policy: batch.delivery_policy,
             kind: batch.kind,
@@ -390,7 +388,7 @@ pub fn select_leading_session_command(candidates: &[ClaimCandidate]) -> usize {
     let Some(first) = candidates.first() else {
         return 0;
     };
-    if first.work_class != QueuedWorkClass::SessionCommand {
+    if first.kind.work_class() != QueuedWorkClass::SessionCommand {
         return 0;
     }
     if !first.config_patch_command {
@@ -400,7 +398,7 @@ pub fn select_leading_session_command(candidates: &[ClaimCandidate]) -> usize {
         .iter()
         .take(MAX_SESSION_COMMAND_BATCHES_PER_CLAIM)
         .take_while(|candidate| {
-            candidate.work_class == QueuedWorkClass::SessionCommand
+            candidate.kind.work_class() == QueuedWorkClass::SessionCommand
                 && candidate.config_patch_command
         })
         .count()
@@ -446,7 +444,7 @@ pub fn select_turn_work_claim_indices(
             QueuedWorkClaimRefusal::Empty,
         ));
     };
-    if first.work_class != QueuedWorkClass::TurnWork {
+    if first.kind.work_class() != QueuedWorkClass::TurnWork {
         return Ok(refuse(
             candidates,
             boundary,
@@ -562,7 +560,7 @@ pub fn select_turn_work_claim_indices(
     let mut compatible_prefix_len = 1;
     for candidate in &candidates[1..] {
         if compatible_prefix_len >= policy.max_rows
-            || candidate.work_class != QueuedWorkClass::TurnWork
+            || candidate.kind.work_class() != QueuedWorkClass::TurnWork
             || !candidate.kind.is_batchable()
             || candidate.delivery_policy != first.delivery_policy
             || candidate.merge_key != first.merge_key

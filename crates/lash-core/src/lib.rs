@@ -1164,7 +1164,7 @@ pub(crate) use runtime::{
     LlmAttachmentSpec, ProcessEventSemantics, QueuedCheckpointTurnInput, QueuedCheckpointWork,
     QueuedTurnWork, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
     QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkCompletion, QueuedWorkCompletionData,
-    QueuedWorkItem, QueuedWorkPayload, RuntimeSubject, load_process_execution_env,
+    QueuedWorkItem, QueuedWorkPayload, RuntimeSubject, TurnWorkPayload, load_process_execution_env,
     materialize_process_event_semantics, persist_process_execution_env,
     prepare_process_event_append, prepare_process_registration, prepare_process_start,
     prepare_process_transition, process_event_invocation, process_registration_fingerprint,

@@ -1,4 +1,7 @@
 use std::future::Future;
+#[path = "conformance/claim_atomicity.rs"]
+mod claim_atomicity;
+
 use std::sync::Arc;
 
 use lash_core::testing::conformance::{
@@ -337,77 +340,6 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
         }),
     )
     .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres fence corruption test: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    reset(&storage).await;
-    let session_id = "postgres-fence-corrupt";
-    let store = storage.session_store(session_id);
-    let owner = lash_core::LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
-    let lease = store
-        .try_claim_session_execution_lease_with_token(
-            session_id,
-            &owner,
-            "postgres-conformance-executor",
-            &lash_core::LeaseClaimNonce::new(),
-            120_000,
-        )
-        .await
-        .expect("claim session lease")
-        .acquired()
-        .expect("session lease acquired");
-    let batch = store
-        .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
-            session_id,
-            lash_core::DeliveryPolicy::EarliestSafeBoundary,
-            vec![lash_core::runtime::QueuedWorkPayload::session_command(
-                lash_core::runtime::SessionCommand::RefreshToolCatalog {
-                    reason: "fence test".to_string(),
-                },
-            )],
-        ))
-        .await
-        .expect("enqueue queued work");
-
-    sqlx::query("UPDATE lash_queued_work_batches SET claim_fencing_token = -1 WHERE batch_id = $1")
-        .bind(&batch.batch_id)
-        .execute(storage.pool())
-        .await
-        .expect("inject negative fence");
-    let corrupt = store
-        .list_queued_work(session_id)
-        .await
-        .expect_err("negative fence must refuse");
-    assert!(matches!(
-        corrupt,
-        StoreError::StoredDataCorrupt {
-            record_kind: "QueuedWorkBatch",
-            ..
-        }
-    ));
-
-    sqlx::query("UPDATE lash_queued_work_batches SET claim_fencing_token = $1 WHERE batch_id = $2")
-        .bind(i64::MAX)
-        .bind(&batch.batch_id)
-        .execute(storage.pool())
-        .await
-        .expect("seed exhausted fence");
-    let exhausted = store
-        .claim_leading_ready_session_command(session_id, &lease.authority(), &owner)
-        .await
-        .expect_err("exhausted SQL fence must refuse");
-    assert!(matches!(
-        exhausted,
-        StoreError::MonotonicCounterOverflow {
-            counter: "queued_work_claim_fencing_token",
-            current,
-        } if current == i64::MAX as u64
-    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

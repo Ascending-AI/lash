@@ -1,5 +1,22 @@
 use super::*;
 
+pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
+    "enqueue_seq",
+    "batch_id",
+    "session_id",
+    "source_key",
+    "delivery_policy",
+    "work_kind",
+    "authority_json",
+    "merge_key",
+    "available_at_ms",
+    "enqueued_at_ms",
+    "claim_fencing_token",
+    "claim_token",
+    "claim_session_lease_generation",
+    "claim_id",
+];
+
 pub(crate) fn decode_delivery_policy(value: String) -> Result<DeliveryPolicy, StoreError> {
     DeliveryPolicy::from_wire_str(&value).ok_or_else(|| {
         StoreError::Backend(format!("unknown queued-work delivery policy `{value}`"))
@@ -47,7 +64,7 @@ pub(crate) fn queued_work_batch_from_conn(
             payload: decode_queued_payload(payload_json)?,
         });
     }
-    Ok(QueuedWorkBatch {
+    let batch = QueuedWorkBatch {
         batch_id: row.batch_id,
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
@@ -59,7 +76,9 @@ pub(crate) fn queued_work_batch_from_conn(
         available_at_ms: row.available_at_ms,
         enqueued_at_ms: row.enqueued_at_ms,
         items,
-    })
+    };
+    batch.validate_payload_family()?;
+    Ok(batch)
 }
 
 pub(crate) fn queued_work_batches_from_conn(
@@ -108,7 +127,7 @@ pub(crate) fn queued_work_batches_from_conn(
         .cloned()
         .map(|row| {
             let items = items_by_batch.remove(&row.batch_id).unwrap_or_default();
-            Ok(QueuedWorkBatch {
+            let batch = QueuedWorkBatch {
                 batch_id: row.batch_id,
                 session_id: row.session_id,
                 enqueue_seq: row.enqueue_seq,
@@ -120,7 +139,9 @@ pub(crate) fn queued_work_batches_from_conn(
                 available_at_ms: row.available_at_ms,
                 enqueued_at_ms: row.enqueued_at_ms,
                 items,
-            })
+            };
+            batch.validate_payload_family()?;
+            Ok(batch)
         })
         .collect()
 }
@@ -146,42 +167,52 @@ pub(crate) struct QueuedBatchRow {
 pub(crate) fn claim_candidate_from_row(
     row: &QueuedBatchRow,
     batch: &QueuedWorkBatch,
-) -> Result<ClaimCandidate, StoreError> {
-    batch.work_class().ok_or_else(|| {
-        StoreError::Backend(format!(
-            "queued-work batch `{}` has mixed or empty payload classes",
-            batch.batch_id
-        ))
-    })?;
-    Ok(ClaimCandidate::from_batch(
+) -> ClaimCandidate {
+    ClaimCandidate::from_batch(
         batch,
         row.claim_fencing_token,
         row.claim_id.clone(),
         row.claim_token.clone(),
-    ))
+    )
 }
 
 pub(crate) fn queued_batch_row_from_sql(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<QueuedBatchRow> {
     Ok(QueuedBatchRow {
-        enqueue_seq: u64_from_sql("QueuedWorkBatch", "enqueue_seq", row.get(0)?)?,
-        batch_id: row.get(1)?,
-        session_id: row.get(2)?,
-        source_key: row.get(3)?,
-        delivery_policy: row.get(4)?,
-        work_kind: row.get(5)?,
-        authority_json: row.get(6)?,
-        merge_key: row.get(7)?,
-        available_at_ms: u64_from_sql("QueuedWorkBatch", "available_at_ms", row.get(8)?)?,
-        enqueued_at_ms: u64_from_sql("QueuedWorkBatch", "enqueued_at_ms", row.get(9)?)?,
-        claim_fencing_token: u64_from_sql("QueuedWorkBatch", "claim_fencing_token", row.get(10)?)?,
-        claim_id: row.get(13)?,
-        claim_token: row.get(11)?,
+        enqueue_seq: u64_from_sql(
+            "QueuedWorkBatch",
+            "enqueue_seq",
+            row.get(QUEUED_WORK_COLUMNS[0])?,
+        )?,
+        batch_id: row.get(QUEUED_WORK_COLUMNS[1])?,
+        session_id: row.get(QUEUED_WORK_COLUMNS[2])?,
+        source_key: row.get(QUEUED_WORK_COLUMNS[3])?,
+        delivery_policy: row.get(QUEUED_WORK_COLUMNS[4])?,
+        work_kind: row.get(QUEUED_WORK_COLUMNS[5])?,
+        authority_json: row.get(QUEUED_WORK_COLUMNS[6])?,
+        merge_key: row.get(QUEUED_WORK_COLUMNS[7])?,
+        available_at_ms: u64_from_sql(
+            "QueuedWorkBatch",
+            "available_at_ms",
+            row.get(QUEUED_WORK_COLUMNS[8])?,
+        )?,
+        enqueued_at_ms: u64_from_sql(
+            "QueuedWorkBatch",
+            "enqueued_at_ms",
+            row.get(QUEUED_WORK_COLUMNS[9])?,
+        )?,
+        claim_fencing_token: u64_from_sql(
+            "QueuedWorkBatch",
+            "claim_fencing_token",
+            row.get(QUEUED_WORK_COLUMNS[10])?,
+        )?,
+        claim_id: row.get(QUEUED_WORK_COLUMNS[13])?,
+        claim_token: row.get(QUEUED_WORK_COLUMNS[11])?,
         claim_session_lease_generation: u64_from_sql(
             "QueuedWorkBatch",
             "claim_session_lease_generation",
-            row.get(12)?,
+            row.get(QUEUED_WORK_COLUMNS[12])?,
         )?,
     })
 }
@@ -192,11 +223,12 @@ pub(crate) fn load_queued_batch_by_id_conn(
 ) -> Result<Option<QueuedWorkBatch>, StoreError> {
     let row = conn
         .query_row(
-            "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
+            &format!(
+                "SELECT {QUEUED_WORK_COLUMNS}
              FROM queued_work_batches
              WHERE batch_id = ?1",
+                QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
+            ),
             params![batch_id],
             queued_batch_row_from_sql,
         )

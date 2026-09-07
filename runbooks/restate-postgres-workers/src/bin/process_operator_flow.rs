@@ -420,14 +420,14 @@ fn queued_batch_draft(
     lash::persistence::QueuedWorkBatchDraft::new(
         session_id,
         lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
-        vec![lash::persistence::QueuedWorkPayload::agent_frame_task(
+        lash::persistence::TurnWorkPayload::agent_frame_task(
             lash_core::facade_support::frame_node_id(
                 session_id,
                 "process-operations-selected-drain-frame",
             ),
             source_key,
             None,
-        )],
+        ),
     )
     .with_source_key(source_key)
     .with_merge_key(merge_key)

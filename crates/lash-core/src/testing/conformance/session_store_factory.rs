@@ -292,11 +292,9 @@ async fn session_store_factory_claimable_queued_work_peek(
             crate::QueuedWorkBatchDraft::new(
                 &request.session_id,
                 crate::DeliveryPolicy::EarliestSafeBoundary,
-                vec![crate::QueuedWorkPayload::session_command(
-                    crate::SessionCommand::RefreshToolCatalog {
-                        reason: "future".to_string(),
-                    },
-                )],
+                crate::SessionCommand::RefreshToolCatalog {
+                    reason: "future".to_string(),
+                },
             )
             .with_available_at_ms(NOW_MS + 1),
         )
@@ -316,11 +314,9 @@ async fn session_store_factory_claimable_queued_work_peek(
             crate::QueuedWorkBatchDraft::new(
                 &request.session_id,
                 crate::DeliveryPolicy::EarliestSafeBoundary,
-                vec![crate::QueuedWorkPayload::session_command(
-                    crate::SessionCommand::RefreshToolCatalog {
-                        reason: "ready".to_string(),
-                    },
-                )],
+                crate::SessionCommand::RefreshToolCatalog {
+                    reason: "ready".to_string(),
+                },
             )
             .with_available_at_ms(NOW_MS),
         )
@@ -378,14 +374,14 @@ async fn session_store_factory_claimable_queued_work_peek(
         .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
             &fenced_request.session_id,
             crate::DeliveryPolicy::EarliestSafeBoundary,
-            vec![crate::QueuedWorkPayload::agent_frame_task(
+            crate::TurnWorkPayload::agent_frame_task(
                 crate::session_graph::frame_node_id(
                     &fenced_request.session_id,
                     "claim-fence-frame",
                 ),
                 "claim fence",
                 None,
-            )],
+            ),
         ))
         .await
         .expect("enqueue claim-fenced queued work");
@@ -574,11 +570,9 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
             &request.session_id,
             crate::DeliveryPolicy::EarliestSafeBoundary,
-            vec![crate::QueuedWorkPayload::session_command(
-                crate::SessionCommand::RefreshToolCatalog {
-                    reason: "queued work on the handle that will go stale".to_string(),
-                },
-            )],
+            crate::SessionCommand::RefreshToolCatalog {
+                reason: "queued work on the handle that will go stale".to_string(),
+            },
         ))
         .await
         .expect("seed queued work on the handle that will go stale");
@@ -1238,11 +1232,9 @@ async fn session_store_factory_rejects_writes_after_delete(
             .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
                 &request.session_id,
                 crate::DeliveryPolicy::EarliestSafeBoundary,
-                vec![crate::QueuedWorkPayload::session_command(
-                    crate::SessionCommand::RefreshToolCatalog {
-                        reason: "must not persist".to_string(),
-                    },
-                )],
+                crate::SessionCommand::RefreshToolCatalog {
+                    reason: "must not persist".to_string(),
+                },
             ))
             .await,
         &request.session_id,

@@ -680,7 +680,7 @@ impl RuntimeBoundaryHarness {
             "runtime_process_wake": wake,
             "runtime_queued_work": {
                 "source_key": batch.source_key,
-                "work_class": batch.work_class().map(|class| format!("{class:?}")),
+                "work_class": format!("{:?}", batch.work_class()),
                 "enqueued": true,
                 "claimed": claimed_once,
                 "claimed_batch_count": claim.as_ref().map_or(0, |claim| claim.batches.len()),

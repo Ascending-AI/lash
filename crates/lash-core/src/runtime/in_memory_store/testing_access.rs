@@ -144,12 +144,9 @@ impl InMemorySessionStore {
                     entry.input.input_id.clone(),
                     entry.input.enqueue_seq,
                     entry.input.state,
-                    entry.claim_id.clone(),
-                    entry.claim_fencing_token,
-                    entry
-                        .claim_token
-                        .as_ref()
-                        .map(|_| entry.claim_session_lease_generation),
+                    entry.claim.id(),
+                    entry.claim.fencing_token,
+                    entry.claim.diagnostic_generation(),
                 )
             })
             .collect()
@@ -174,14 +171,11 @@ impl InMemorySessionStore {
             .map(|entry| {
                 (
                     entry.batch.clone(),
-                    entry.claim_id.clone(),
-                    entry.claim_owner.clone(),
-                    entry.claim_token.is_some(),
-                    entry.claim_fencing_token,
-                    entry
-                        .claim_token
-                        .as_ref()
-                        .map(|_| entry.claim_session_lease_generation),
+                    entry.claim.id(),
+                    entry.claim.owner(),
+                    entry.claim.token().is_some(),
+                    entry.claim.fencing_token,
+                    entry.claim.diagnostic_generation(),
                 )
             })
             .collect()
@@ -383,9 +377,7 @@ impl crate::store::ConformanceSessionStoreFactory for super::InMemorySessionStor
 #[cfg(test)]
 mod tests {
     use crate::store::StoreMaintenance;
-    use crate::{
-        DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkPayload, QueuedWorkStore, StoreError,
-    };
+    use crate::{DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkStore, StoreError};
 
     #[tokio::test]
     async fn in_memory_unbound_vacuum_returns_typed_error() {
@@ -410,11 +402,9 @@ mod tests {
             .enqueue_queued_work(QueuedWorkBatchDraft::new(
                 "deleted-session",
                 DeliveryPolicy::EarliestSafeBoundary,
-                vec![QueuedWorkPayload::session_command(
-                    crate::SessionCommand::RefreshToolCatalog {
-                        reason: "prove post-delete diagnostics are non-vacuous".to_string(),
-                    },
-                )],
+                crate::SessionCommand::RefreshToolCatalog {
+                    reason: "prove post-delete diagnostics are non-vacuous".to_string(),
+                },
             ))
             .await
             .expect("seed queued work without session metadata");

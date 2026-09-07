@@ -1414,11 +1414,11 @@ async fn seed_reference_ingress(
             QueuedWorkBatchDraft::new(
                 &identity.session_id,
                 crate::DeliveryPolicy::EarliestSafeBoundary,
-                vec![crate::QueuedWorkPayload::agent_frame_task(
+                crate::TurnWorkPayload::agent_frame_task(
                     crate::session_graph::frame_node_id(&identity.session_id, "trace-frame"),
                     "trace-source",
                     None,
-                )],
+                ),
             )
             .with_source_key("trace-derived-queued-work"),
         )

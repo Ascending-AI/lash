@@ -33,28 +33,44 @@ pub(crate) mod test_support;
 mod testing_access;
 #[cfg(any(test, feature = "testing"))]
 pub use testing_access::RawSessionExecutionLeaseRow;
+mod claim_hold;
 mod turn_input;
+use claim_hold::ClaimHold;
 
 use receipts::{RuntimeTurnCommitMap, RuntimeTurnCommitRecord};
 
 #[derive(Clone)]
 struct InMemoryQueuedBatch {
     batch: crate::QueuedWorkBatch,
-    claim_id: Option<String>,
-    claim_token: Option<String>,
-    claim_owner: Option<crate::LeaseOwnerIdentity>,
-    claim_fencing_token: u64,
-    claim_session_lease_generation: u64,
+    claim: ClaimHold,
 }
 
 #[derive(Clone)]
 struct InMemoryPendingTurnInput {
     input: crate::PendingTurnInput,
-    claim_id: Option<String>,
-    claim_token: Option<String>,
-    claim_owner: Option<crate::LeaseOwnerIdentity>,
-    claim_fencing_token: u64,
-    claim_session_lease_generation: u64,
+    claim: ClaimHold,
+}
+
+fn settlement_mismatch<'a, R>(
+    rows: &'a [R],
+    row_ids: &'a [String],
+    session_id: &str,
+    identity: impl Fn(&R) -> (&str, &str),
+    matches: impl Fn(&R) -> bool,
+) -> Option<(Option<&'a String>, Option<&'a R>)> {
+    if rows.iter().filter(|row| matches(row)).count() == row_ids.len() {
+        return None;
+    }
+    let row_id = row_ids.iter().find(|id| {
+        !rows
+            .iter()
+            .any(|row| identity(row).1 == id.as_str() && matches(row))
+    });
+    let current = row_id.and_then(|id| {
+        rows.iter()
+            .find(|row| identity(row) == (session_id, id.as_str()))
+    });
+    Some((row_id, current))
 }
 
 /// The in-memory store's turn-input settlement predicate.
@@ -70,12 +86,9 @@ fn turn_input_settlement_matches(
     entry.input.session_id == completed.session_id
         && completed.input_ids.contains(&entry.input.input_id)
         && match completed.claim.as_ref() {
-            Some(claim) => {
-                entry.claim_id.as_deref() == Some(claim.claim_id.as_str())
-                    && entry.claim_token.as_deref() == Some(claim.lease_token.as_str())
-            }
+            Some(claim) => entry.claim.owned_by(&claim.claim_id, &claim.lease_token),
             None => {
-                entry.claim_id.is_none()
+                entry.claim.id().is_none()
                     && !matches!(
                         entry.input.state,
                         crate::TurnInputState::Completed | crate::TurnInputState::Cancelled
@@ -486,17 +499,6 @@ impl InMemorySessionStore {
         Ok(Self::in_memory_session_execution_lease(session_id, current))
     }
 
-    fn queued_batch_work_class(
-        batch: &crate::QueuedWorkBatch,
-    ) -> Result<crate::store::QueuedWorkClass, crate::store::StoreError> {
-        batch.work_class().ok_or_else(|| {
-            crate::store::StoreError::Backend(format!(
-                "queued-work batch `{}` has mixed or empty payload classes",
-                batch.batch_id
-            ))
-        })
-    }
-
     fn claim_ready_queued_work_in_memory(
         &self,
         session_id: &str,
@@ -560,9 +562,7 @@ impl InMemorySessionStore {
         // therefore unrepresentable (ADR 0029).
         let generation = session_execution_lease.fencing_token;
         queued.sort_by_key(|entry| entry.batch.enqueue_seq);
-        let claim_available = |entry: &InMemoryQueuedBatch| {
-            entry.claim_token.is_none() || entry.claim_session_lease_generation != generation
-        };
+        let claim_available = |entry: &InMemoryQueuedBatch| entry.claim.claimable_by(generation);
         let claimable_indices = queued
             .iter()
             .enumerate()
@@ -595,15 +595,14 @@ impl InMemorySessionStore {
             .iter()
             .map(|index| {
                 let batch = &queued[*index].batch;
-                Self::queued_batch_work_class(batch)?;
-                Ok(crate::store::queued_work::ClaimCandidate::from_batch(
+                crate::store::queued_work::ClaimCandidate::from_batch(
                     batch,
-                    queued[*index].claim_fencing_token,
-                    queued[*index].claim_id.clone(),
-                    queued[*index].claim_token.clone(),
-                ))
+                    queued[*index].claim.fencing_token,
+                    queued[*index].claim.id(),
+                    queued[*index].claim.token(),
+                )
             })
-            .collect::<Result<Vec<_>, crate::store::StoreError>>()?;
+            .collect::<Vec<_>>();
         let (selected_indices, refusal): (Vec<usize>, Option<crate::QueuedWorkClaimRefusal>) =
             match kind {
                 InMemoryQueuedWorkClaimKind::LeadingSessionCommand => {
@@ -648,14 +647,14 @@ impl InMemorySessionStore {
             .map(|index| {
                 crate::StoreError::checked_monotonic_increment(
                     "queued_work_claim_fencing_token",
-                    queued[*index].claim_fencing_token,
+                    queued[*index].claim.fencing_token,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
         let first_index = selected_indices[0];
         let first = queued[first_index].batch.clone();
-        let abandon_restore_claim_id = queued[first_index].claim_id.clone();
-        let abandon_restore_claim_token = queued[first_index].claim_token.clone();
+        let abandon_restore_claim_id = queued[first_index].claim.id();
+        let abandon_restore_claim_token = queued[first_index].claim.token();
         let fencing_token = next_fencing_tokens[0];
         let claim_id = crate::store::queued_work::derive_claim_id(
             crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
@@ -669,11 +668,13 @@ impl InMemorySessionStore {
         let mut batches = Vec::new();
         for (index, next_fencing_token) in selected_indices.into_iter().zip(next_fencing_tokens) {
             let entry = &mut queued[index];
-            entry.claim_id = Some(claim_id.clone());
-            entry.claim_token = Some(lease_token.clone());
-            entry.claim_owner = Some(owner.clone());
-            entry.claim_fencing_token = next_fencing_token;
-            entry.claim_session_lease_generation = generation;
+            entry.claim.acquire(
+                claim_id.clone(),
+                lease_token.clone(),
+                owner.clone(),
+                generation,
+                next_fencing_token,
+            );
             batches.push(entry.batch.clone());
         }
         Ok(crate::QueuedWorkClaimOutcome::Claimed(
@@ -756,9 +757,8 @@ impl InMemorySessionStore {
         // (ADR 0029).
         let generation = session_execution_lease.fencing_token;
         pending.sort_by_key(|entry| entry.input.enqueue_seq);
-        let claim_available = |entry: &InMemoryPendingTurnInput| {
-            entry.claim_token.is_none() || entry.claim_session_lease_generation != generation
-        };
+        let claim_available =
+            |entry: &InMemoryPendingTurnInput| entry.claim.claimable_by(generation);
         let selected_indices = pending
             .iter()
             .enumerate()
@@ -797,7 +797,7 @@ impl InMemorySessionStore {
             .map(|index| {
                 crate::StoreError::checked_monotonic_increment(
                     "turn_input_claim_fencing_token",
-                    pending[*index].claim_fencing_token,
+                    pending[*index].claim.fencing_token,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -814,11 +814,13 @@ impl InMemorySessionStore {
         let mut inputs = Vec::new();
         for (index, next_fencing_token) in selected_indices.into_iter().zip(next_fencing_tokens) {
             let entry = &mut pending[index];
-            entry.claim_id = Some(claim_id.clone());
-            entry.claim_token = Some(lease_token.clone());
-            entry.claim_owner = Some(owner.clone());
-            entry.claim_fencing_token = next_fencing_token;
-            entry.claim_session_lease_generation = generation;
+            entry.claim.acquire(
+                claim_id.clone(),
+                lease_token.clone(),
+                owner.clone(),
+                generation,
+                next_fencing_token,
+            );
             if matches!(mode, crate::TurnInputClaimMode::ActiveTurn { .. }) {
                 entry.input.state = crate::TurnInputState::Accepted;
             }
@@ -855,8 +857,7 @@ impl InMemorySessionStore {
                         entry.input.state,
                         crate::TurnInputState::PendingActive | crate::TurnInputState::Accepted
                     )
-                    && (entry.claim_token.is_none()
-                        || entry.claim_session_lease_generation != generation)
+                    && (entry.claim.claimable_by(generation))
                     && entry
                         .input
                         .ingress
@@ -875,20 +876,13 @@ impl InMemorySessionStore {
             .filter(|entry| {
                 entry.batch.session_id == session_id
                     && entry.batch.available_at_ms <= now
-                    && (entry.claim_token.is_none()
-                        || entry.claim_session_lease_generation != generation)
+                    && (entry.claim.claimable_by(generation))
             })
             .min_by_key(|entry| entry.batch.enqueue_seq);
-        first_ready
-            .map(|entry| {
-                Self::queued_batch_work_class(&entry.batch).map(|class| {
-                    class == crate::store::QueuedWorkClass::TurnWork
-                        && entry.batch.delivery_policy
-                            == crate::DeliveryPolicy::EarliestSafeBoundary
-                })
-            })
-            .transpose()
-            .map(Option::unwrap_or_default)
+        Ok(first_ready.is_some_and(|entry| {
+            entry.batch.work_class() == crate::store::QueuedWorkClass::TurnWork
+                && entry.batch.delivery_policy == crate::DeliveryPolicy::EarliestSafeBoundary
+        }))
     }
 }
 
@@ -1116,7 +1110,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .collect();
         drop(graph);
         drop(tombstoned);
-        let (has_existing_live_nodes, selected_leaf_is_live, old_leaf_is_live) = {
+        let (has_existing_live_nodes, selected_leaf_is_live, published_leaf) = {
             let graph = self.global_session_graph.lock_recover();
             let tombstoned = self.tombstoned_node_ids.lock_recover();
             let has_existing_live_nodes = global_node_owners.iter().any(|(node_id, owner)| {
@@ -1125,19 +1119,44 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             let selected_leaf_is_live = commit.graph.leaf_node_id().is_some_and(|leaf_node_id| {
                 !tombstoned.contains(leaf_node_id) && graph.find_node(leaf_node_id).is_some()
             });
-            let old_leaf_is_live = meta
-                .as_ref()
-                .and_then(|head| head.leaf_node_id.as_deref())
-                .is_none_or(|leaf_node_id| {
-                    !tombstoned.contains(leaf_node_id) && graph.find_node(leaf_node_id).is_some()
-                });
+            let published_leaf = match meta.as_ref().and_then(|head| head.leaf_node_id.as_ref()) {
+                None => crate::store::PublishedLeafFacts::Absent,
+                Some(leaf_node_id)
+                    if tombstoned.contains(leaf_node_id)
+                        || graph.find_node(leaf_node_id).is_none() =>
+                {
+                    crate::store::PublishedLeafFacts::Retired {
+                        node_id: leaf_node_id.clone(),
+                    }
+                }
+                Some(leaf_node_id) => {
+                    let resident = self.session_graph.lock_recover();
+                    let active_path = resident.active_path_nodes();
+                    let generation = active_path.len().checked_sub(1).ok_or_else(|| {
+                        crate::StoreError::StoredDataCorrupt {
+                            record_kind: "SessionGraph",
+                            message: "published leaf has an empty active path".to_string(),
+                        }
+                    })? as u64;
+                    let frame_node_id = resident
+                        .nearest_frame_node_id(Some(leaf_node_id))
+                        .map(ToOwned::to_owned)
+                        .ok_or_else(|| crate::StoreError::MissingFrameOpenAncestor {
+                            leaf_node_id: leaf_node_id.to_string(),
+                        })?;
+                    crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
+                        node_id: leaf_node_id.to_string(),
+                        generation,
+                        frame_node_id,
+                    })
+                }
+            };
             (
                 has_existing_live_nodes,
                 selected_leaf_is_live,
-                old_leaf_is_live,
+                published_leaf,
             )
         };
-        let old_leaf_node_id = meta.as_ref().and_then(|head| head.leaf_node_id.clone());
         let requested_ancestor_is_active = match &commit.turn_commit.append_request_identity {
             crate::AppendRequestIdentity::Append {
                 requested_ancestor_node_id: Some(required),
@@ -1152,42 +1171,16 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 ..
             } => true,
         };
-        let parent_node_facts = old_leaf_node_id
-            .as_deref()
-            .map(|leaf_node_id| {
-                let resident = self.session_graph.lock_recover();
-                let active_path = resident.active_path_nodes();
-                let generation = active_path.len().checked_sub(1).ok_or_else(|| {
-                    crate::StoreError::StoredDataCorrupt {
-                        record_kind: "SessionGraph",
-                        message: "published leaf has an empty active path".to_string(),
-                    }
-                })? as u64;
-                let frame_node_id = resident
-                    .nearest_frame_node_id(Some(leaf_node_id))
-                    .map(ToOwned::to_owned)
-                    .ok_or_else(|| crate::StoreError::MissingFrameOpenAncestor {
-                        leaf_node_id: leaf_node_id.to_string(),
-                    })?;
-                Ok(crate::store::ParentNodeFacts {
-                    node_id: leaf_node_id.to_string(),
-                    generation,
-                    frame_node_id,
-                })
-            })
-            .transpose()?;
         let mut proposed = self.global_session_graph.lock_recover().clone();
         proposed.extend_node_records(commit.graph.nodes.iter().cloned());
         proposed.set_leaf_node_id(commit.graph.leaf_node_id().cloned());
         let plan = planner.plan(crate::store::FreshRuntimeCommitFacts {
             actual_head_revision: actual,
-            old_leaf_node_id,
+            published_leaf,
             requested_ancestor_is_active,
             occupied_node_ids,
             selected_leaf_is_live,
             has_live_nodes: has_existing_live_nodes,
-            old_leaf_is_live,
-            parent_node_facts,
         })?;
         let (staged_tombstoned_node_ids, staged_session_heads) = {
             let new_leaf_node_id = commit.graph.leaf_node_id().cloned();
@@ -1218,44 +1211,28 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         {
             let queued = self.queued_work.lock_recover();
             for completed in &commit.completed_queue_claims {
-                let matches = queued
-                    .iter()
-                    .filter(|entry| {
+                if let Some((row_id, current)) = settlement_mismatch(
+                    &queued,
+                    &completed.batch_ids,
+                    &completed.session_id,
+                    |entry| (&entry.batch.session_id, &entry.batch.batch_id),
+                    |entry| {
                         entry.batch.session_id == completed.session_id
-                            && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
-                            && entry.claim_token.as_deref() == Some(completed.lease_token.as_str())
+                            && entry
+                                .claim
+                                .owned_by(&completed.claim_id, &completed.lease_token)
                             && completed.batch_ids.contains(&entry.batch.batch_id)
-                    })
-                    .count();
-                if matches != completed.batch_ids.len() {
-                    let row_id = completed.batch_ids.iter().find(|batch_id| {
-                        !queued.iter().any(|entry| {
-                            entry.batch.session_id == completed.session_id
-                                && entry.batch.batch_id == **batch_id
-                                && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
-                                && entry.claim_token.as_deref()
-                                    == Some(completed.lease_token.as_str())
-                        })
-                    });
-                    let current = row_id.and_then(|batch_id| {
-                        queued.iter().find(|entry| {
-                            entry.batch.session_id == completed.session_id
-                                && entry.batch.batch_id == *batch_id
-                        })
-                    });
+                    },
+                ) {
                     return Err(crate::store::StoreError::QueuedWorkClaimSuperseded {
                         session_id: completed.session_id.clone(),
                         claim_id: completed.claim_id.clone(),
                         row_id: row_id.cloned().map(String::into_boxed_str),
                         superseding_claim_id: current
-                            .and_then(|entry| entry.claim_id.clone())
+                            .and_then(|entry| entry.claim.id())
                             .map(String::into_boxed_str),
-                        superseding_session_lease_generation: current.and_then(|entry| {
-                            entry
-                                .claim_token
-                                .as_ref()
-                                .map(|_| Box::new(entry.claim_session_lease_generation))
-                        }),
+                        superseding_session_lease_generation: current
+                            .and_then(|entry| entry.claim.diagnostic_generation().map(Box::new)),
                     });
                 }
             }
@@ -1263,36 +1240,23 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         {
             let pending = self.pending_turn_inputs.lock_recover();
             for completed in &commit.completed_turn_input_claims {
-                let matches = pending
-                    .iter()
-                    .filter(|entry| turn_input_settlement_matches(entry, completed))
-                    .count();
-                if matches != completed.input_ids.len() {
-                    let row_id = completed.input_ids.iter().find(|input_id| {
-                        !pending.iter().any(|entry| {
-                            entry.input.input_id == **input_id
-                                && turn_input_settlement_matches(entry, completed)
-                        })
-                    });
-                    let current = row_id.and_then(|input_id| {
-                        pending.iter().find(|entry| {
-                            entry.input.session_id == completed.session_id
-                                && entry.input.input_id == *input_id
-                        })
-                    });
+                if let Some((row_id, current)) = settlement_mismatch(
+                    &pending,
+                    &completed.input_ids,
+                    &completed.session_id,
+                    |entry| (&entry.input.session_id, &entry.input.input_id),
+                    |entry| turn_input_settlement_matches(entry, completed),
+                ) {
                     return Err(match completed.claim.as_ref() {
                         Some(claim) => crate::store::StoreError::TurnInputClaimSuperseded {
                             session_id: completed.session_id.clone(),
                             claim_id: claim.claim_id.clone(),
                             row_id: row_id.cloned().map(String::into_boxed_str),
                             superseding_claim_id: current
-                                .and_then(|entry| entry.claim_id.clone())
+                                .and_then(|entry| entry.claim.id())
                                 .map(String::into_boxed_str),
                             superseding_session_lease_generation: current.and_then(|entry| {
-                                entry
-                                    .claim_token
-                                    .as_ref()
-                                    .map(|_| Box::new(entry.claim_session_lease_generation))
+                                entry.claim.diagnostic_generation().map(Box::new)
                             }),
                         },
                         None => crate::store::StoreError::UnclaimedTurnInputSettlementSuperseded {
@@ -1304,7 +1268,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                                 entry.input.state.as_str().to_string().into_boxed_str()
                             }),
                             superseding_claim_id: current
-                                .and_then(|entry| entry.claim_id.clone())
+                                .and_then(|entry| entry.claim.id())
                                 .map(String::into_boxed_str),
                         },
                     });
@@ -1331,8 +1295,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             for completed in &commit.completed_queue_claims {
                 for entry in queued.iter().filter(|entry| {
                     entry.batch.session_id == completed.session_id
-                        && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
-                        && entry.claim_token.as_deref() == Some(completed.lease_token.as_str())
+                        && entry
+                            .claim
+                            .owned_by(&completed.claim_id, &completed.lease_token)
                         && completed.batch_ids.contains(&entry.batch.batch_id)
                 }) {
                     if let Some((process_id, sequence)) =
@@ -1357,8 +1322,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 }
                 queued.retain(|entry| {
                     !(entry.batch.session_id == completed.session_id
-                        && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
-                        && entry.claim_token.as_deref() == Some(completed.lease_token.as_str())
+                        && entry
+                            .claim
+                            .owned_by(&completed.claim_id, &completed.lease_token)
                         && completed.batch_ids.contains(&entry.batch.batch_id))
                 });
             }
@@ -1420,10 +1386,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                                 entry.input.state = crate::TurnInputState::Cancelled;
                             }
                         }
-                        entry.claim_id = None;
-                        entry.claim_token = None;
-                        entry.claim_owner = None;
-                        entry.claim_session_lease_generation = 0;
+                        entry.claim.release();
                         if let Some(record) = requests.get_mut(turn_id) {
                             record
                                 .outcome

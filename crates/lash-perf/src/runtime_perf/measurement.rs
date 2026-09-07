@@ -9,8 +9,7 @@ use lash_core::TestProcessRegistryWriteExt;
 use lash_core::llm::types::{LlmResponse, LlmUsage};
 use lash_core::runtime::{
     DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkCompletion,
-    QueuedWorkPayload, RuntimeScope, RuntimeSubject, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
-    SessionCommand,
+    RuntimeScope, RuntimeSubject, RuntimeTurnPhase, RuntimeTurnPhaseProbe, SessionCommand,
 };
 use lash_core::sansio::{
     ChatContextProjector, CompletedToolCall, PendingToolCall, ProtocolDriverHandle,

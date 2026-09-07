@@ -573,12 +573,7 @@ impl PreparedTurn {
                 &mut self.turn,
                 session,
                 staged_usage.deltas(),
-                commit_effects.originating_queue_claims,
-                commit_effects.originating_turn_input_claims,
-                commit_effects.completed_queue_claims,
-                commit_effects.completed_turn_input_claims,
-                commit_effects.queue_claim_generations,
-                commit_effects.turn_input_claim_generations,
+                commit_effects.claim_settlement,
                 session_execution_lease.map(|lease| lease.fence().fencing_token),
                 commit_effects.enqueued_queue_batches,
                 // Any active-turn input that missed the turn's final
@@ -1713,8 +1708,13 @@ impl LashRuntime {
             &trace_turn_id,
             Some(self.state.effective_protocol_turn_options().clone()),
         );
-        let queued_work_completion_trace = commit_effects.completed_queue_claims.clone();
-        let turn_input_completion_trace = commit_effects.completed_turn_input_claims.clone();
+        let queued_work_completion_trace =
+            commit_effects.claim_settlement.queued.completions.clone();
+        let turn_input_completion_trace = commit_effects
+            .claim_settlement
+            .turn_inputs
+            .completions
+            .clone();
         let staged_usage = match session_manager::stage_token_ledger_shared(
             &self.shared_token_ledger,
             &prepared.final_operation(),

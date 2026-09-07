@@ -216,11 +216,11 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             QueuedWorkBatchDraft::new(
                 SESSION_ID,
                 DeliveryPolicy::EarliestSafeBoundary,
-                vec![QueuedWorkPayload::agent_frame_task(
+                lash_core::runtime::TurnWorkPayload::agent_frame_task(
                     lash_core::facade_support::frame_node_id(SESSION_ID, "durable-read-frame"),
                     "durable read queued task",
                     None,
-                )],
+                ),
             )
             .with_source_key(QUEUE_SOURCE_KEY),
         )

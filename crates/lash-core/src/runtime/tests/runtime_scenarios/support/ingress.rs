@@ -14,7 +14,7 @@ impl RuntimeScenarioContext {
         assert_eq!(
             enqueued
                 .iter()
-                .filter_map(|batch| batch.work_class())
+                .map(|batch| batch.work_class())
                 .collect::<Vec<_>>(),
             phase.enqueued_classes,
             "{} queued-work classes changed",

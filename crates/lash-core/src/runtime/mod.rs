@@ -14,6 +14,7 @@ pub use effect::await_event_coordinator;
 #[doc(hidden)]
 pub use effect::effect_replay_driver;
 pub use effect::promise_semantics;
+mod claim_settlement;
 mod environment;
 mod error;
 mod event_pump;
@@ -21,6 +22,7 @@ mod host;
 mod in_memory_store;
 mod io;
 mod lifecycle;
+use claim_settlement::TurnClaimSettlement;
 mod logical_turn;
 pub(crate) mod native_substrate;
 mod observation;
@@ -292,11 +294,11 @@ pub use turn_loop::ensure_durable_effect_input;
 pub use turn_queue::{
     DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork,
     QueuedTurnWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
-    QueuedWorkBatchingConfig, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData,
-    QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
+    QueuedWorkBatchPayloads, QueuedWorkBatchingConfig, QueuedWorkClaim, QueuedWorkClaimBoundary,
+    QueuedWorkClaimData, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
     QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
-    SessionCommandReceipt, process_wake_batch_draft, process_wake_batch_draft_with_delivery_policy,
-    process_wake_source_key,
+    SessionCommandPayload, SessionCommandReceipt, TurnWorkPayload, process_wake_batch_draft,
+    process_wake_batch_draft_with_delivery_policy, process_wake_source_key,
 };
 pub(crate) use turn_queue::{SessionCommandSettlement, SessionCommandSettlementHandle};
 pub use usage::{
