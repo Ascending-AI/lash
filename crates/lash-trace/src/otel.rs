@@ -341,6 +341,7 @@ where
                     .expect("typed diagnostic has an OTel span name"),
                 None,
             ),
+            TraceEvent::RlmStep { .. } => self.emit_instant(record, "lash.rlm.step", None),
             TraceEvent::ProtocolStep { .. } => {
                 self.emit_instant(record, format!("lash.{}", record.event.kind()), None)
             }
@@ -988,6 +989,21 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             attrs.push(KeyValue::new(attr::ERROR_TYPE, error_class.clone()));
             attrs.push(KeyValue::new(attr::ERROR_MESSAGE, message.clone()));
         }
+        TraceEvent::RlmStep {
+            step_index,
+            outcome,
+        } => {
+            attrs.push(KeyValue::new(attr::LASH_RLM_STEP_INDEX, *step_index as i64));
+            match outcome {
+                crate::TraceRlmStepOutcome::Ok => {
+                    attrs.push(KeyValue::new(attr::LASH_RLM_STEP_OUTCOME, "ok"));
+                }
+                crate::TraceRlmStepOutcome::Failure { diagnostic } => {
+                    attrs.push(KeyValue::new(attr::LASH_RLM_STEP_OUTCOME, "failure"));
+                    attrs.push(KeyValue::new(attr::ERROR_MESSAGE, diagnostic.clone()));
+                }
+            }
+        }
         TraceEvent::ProtocolStep { plugin_id, payload } => {
             attrs.push(KeyValue::new(
                 attr::LASH_PROTOCOL_PLUGIN_ID,
@@ -1413,6 +1429,10 @@ fn event_type(event: &TraceEvent) -> &'static str {
 
 fn error_status(record: &TraceRecord) -> Status {
     match &record.event {
+        TraceEvent::RlmStep {
+            outcome: crate::TraceRlmStepOutcome::Failure { diagnostic },
+            ..
+        } => Status::error(diagnostic.clone()),
         TraceEvent::LlmCallFailed { error, .. } => Status::error(error.message.clone()),
         TraceEvent::ToolCallCompleted { name, .. } => {
             Status::error(format!("tool call failed: {name}"))

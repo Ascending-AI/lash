@@ -9987,6 +9987,9 @@ lash::tracing::TraceEvent::ProviderRequest
 lash::tracing::TraceEvent::ProviderRequest::event
 lash::tracing::TraceEvent::ProviderStreamEvent
 lash::tracing::TraceEvent::ProviderStreamEvent::event
+lash::tracing::TraceEvent::RlmStep
+lash::tracing::TraceEvent::RlmStep::outcome
+lash::tracing::TraceEvent::RlmStep::step_index
 lash::tracing::TraceEvent::RollingHistoryCompactionCompleted
 lash::tracing::TraceEvent::RollingHistoryCompactionCompleted::summary_nodes
 lash::tracing::TraceEvent::RollingHistoryCompactionNeeded

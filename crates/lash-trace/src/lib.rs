@@ -88,7 +88,8 @@ pub use lashlang_graph::{
 /// carrying its policy, program, or host kind.
 /// Version 16 removes the two unemitted lifecycle and standalone usage events;
 /// turn starts and completed LLM calls retain lifecycle and per-call usage evidence.
-pub const TRACE_SCHEMA_VERSION: u32 = 16;
+/// Version 17 adds compile/link outcomes for every RLM program step.
+pub const TRACE_SCHEMA_VERSION: u32 = 17;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -442,6 +443,13 @@ pub enum TraceEvent {
         error_class: String,
         message: String,
     },
+    /// Compile/link evidence emitted before executing an RLM program step.
+    RlmStep {
+        /// Protocol iteration of the submitted program within its turn.
+        step_index: usize,
+        #[serde(flatten)]
+        outcome: TraceRlmStepOutcome,
+    },
     ProtocolStep {
         plugin_id: String,
         payload: Value,
@@ -456,6 +464,19 @@ pub enum TraceEvent {
     Custom {
         name: String,
         payload: Value,
+    },
+}
+
+/// The compile/link result, independent of the program's later runtime outcome.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum TraceRlmStepOutcome {
+    /// The program compiled and linked successfully.
+    Ok,
+    /// Setup, parsing, or linking rejected the program before execution.
+    Failure {
+        /// Bounded compiler or linker feedback, using the raw-error trace limit.
+        diagnostic: String,
     },
 }
 
@@ -582,6 +603,7 @@ impl TraceEvent {
     ///   [`TraceTurnFailureReason`] (`Incomplete`, `InvalidInput`, `MaxTurns`,
     ///   `ToolFailure`, `ProviderError`, `PluginAbort`, `RuntimeError`,
     ///   `SubmittedError`, or `ToolError`); and
+    /// - [`Self::RlmStep`] when compile/link failed; and
     /// - [`Self::LanguageExecution`] for
     ///   [`TraceLanguageExecutionPayload::NodeFailed`] or
     ///   [`TraceLanguageExecutionPayload::ExecutionFinished`] with
@@ -595,6 +617,10 @@ impl TraceEvent {
             Self::LlmCallFailed { .. }
             | Self::EffectEnvelopeDiff { .. }
             | Self::StoreErrorObserved { .. } => true,
+            Self::RlmStep { outcome, .. } => match outcome {
+                TraceRlmStepOutcome::Ok => false,
+                TraceRlmStepOutcome::Failure { .. } => true,
+            },
             Self::JournaledEffectSettled { status, .. } => status.is_failed(),
             Self::DurableTimerResolved { status, .. } => status.is_failed(),
             Self::DurableWaitResolved { resolution, .. } => resolution.is_failed(),
@@ -675,6 +701,7 @@ impl TraceEvent {
             Self::ExecCodeStarted { .. } => "exec_code_started",
             Self::ExecCodeCompleted { .. } => "exec_code_completed",
             Self::ExecCodeFailed { .. } => "exec_code_failed",
+            Self::RlmStep { .. } => "rlm_step",
             Self::ObservationProjection { .. } => "observation_projection",
             Self::JournaledEffectStarted { .. } => "journaled_effect_started",
             Self::JournaledEffectSettled { .. } => "journaled_effect_settled",

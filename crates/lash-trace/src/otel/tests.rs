@@ -387,3 +387,124 @@ fn cancelled_turn_is_not_exported_as_failed() {
         OtelValue::String("provider_error".into())
     );
 }
+
+#[test]
+fn rlm_step_spans_keep_diagnostics_and_existing_llm_span() {
+    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor};
+
+    let exporter = InMemorySpanExporter::default();
+    let provider = SdkTracerProvider::builder()
+        .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
+        .build();
+    // Default options deliberately omit payload JSON: the diagnostic must
+    // remain visible to ordinary production collectors.
+    let sink = OtelTraceSink::new(provider.tracer("test"));
+    let context = TraceContext::default().for_session("s1").for_turn("t1");
+    sink.append(&TraceRecord::new(
+        context.clone(),
+        TraceEvent::TurnStarted {
+            metadata: Default::default(),
+        },
+    ))
+    .unwrap();
+    let llm_context = context.clone().for_llm_call("llm-1");
+    sink.append(&TraceRecord::new(
+        llm_context.clone(),
+        TraceEvent::LlmCallStarted {
+            request: TraceLlmRequest {
+                model: "test-model".into(),
+                model_variant: None,
+                messages: vec![],
+                attachments: vec![],
+                tools: vec![],
+                tool_choice: "auto".into(),
+                output_spec: None,
+                stream: true,
+            },
+        },
+    ))
+    .unwrap();
+    sink.append(&TraceRecord::new(
+        llm_context,
+        TraceEvent::LlmCallCompleted {
+            response: crate::TraceLlmResponse {
+                text: "inbox.send_item({})".into(),
+                duration_ms: 5,
+                request_model: "test-model".into(),
+                terminal_reason: None,
+                parts: None,
+                generation_disposition: None,
+            },
+            usage: None,
+            provider_usage: None,
+            stream_summary: None,
+            attempts: None,
+        },
+    ))
+    .unwrap();
+    for (step_index, outcome) in [
+        (
+            1,
+            crate::TraceRlmStepOutcome::Failure {
+                diagnostic: "operation send_item expects { body: str }, got {}".into(),
+            },
+        ),
+        (2, crate::TraceRlmStepOutcome::Ok),
+    ] {
+        sink.append(&TraceRecord::new(
+            context.clone(),
+            TraceEvent::RlmStep {
+                step_index,
+                outcome,
+            },
+        ))
+        .unwrap();
+    }
+    sink.append(&TraceRecord::new(
+        context,
+        TraceEvent::TurnCompleted {
+            outcome: crate::TraceTurnOutcome::Failed {
+                done_reason: crate::TraceTurnFailureReason::MaxTurns,
+            },
+        },
+    ))
+    .unwrap();
+    provider.force_flush().unwrap();
+    let spans = exporter.get_finished_spans().unwrap();
+    let turn = spans.iter().find(|s| s.name == "lash.turn").unwrap();
+    // The current exporter names the existing LLM span `lash.llm`.
+    let llm: Vec<_> = spans.iter().filter(|s| s.name == "lash.llm").collect();
+    assert_eq!(llm.len(), 1);
+    assert_eq!(llm[0].parent_span_id, turn.span_context.span_id());
+    assert!(!matches!(llm[0].status, Status::Error { .. }));
+    let steps: Vec<_> = spans.iter().filter(|s| s.name == "lash.rlm.step").collect();
+    assert_eq!(steps.len(), 2);
+    for (index, step) in steps.iter().enumerate() {
+        assert_eq!(step.parent_span_id, turn.span_context.span_id());
+        let attribute = |key: &str| {
+            &step
+                .attributes
+                .iter()
+                .find(|a| a.key.as_str() == key)
+                .unwrap()
+                .value
+        };
+        assert_eq!(
+            attribute("lash.rlm.step.index"),
+            &OtelValue::I64(index as i64 + 1)
+        );
+        assert_eq!(
+            attribute("lash.rlm.step.outcome").to_string(),
+            if index == 0 { "failure" } else { "ok" }
+        );
+        if index == 0 {
+            assert_eq!(
+                attribute("error.message").to_string(),
+                "operation send_item expects { body: str }, got {}"
+            );
+            assert!(matches!(step.status, Status::Error { .. }));
+        } else {
+            assert!(!matches!(step.status, Status::Error { .. }));
+        }
+    }
+}

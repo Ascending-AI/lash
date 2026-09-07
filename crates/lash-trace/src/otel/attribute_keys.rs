@@ -171,3 +171,6 @@ pub(super) const GEN_AI_REQUEST_MODEL: &str = "gen_ai.request.model";
 pub(super) const GEN_AI_REQUEST_MODEL_VARIANT: &str = "gen_ai.request.model_variant";
 pub(super) const GEN_AI_RESPONSE_TEXT_CHARS: &str = "gen_ai.response.text_chars";
 pub(super) const GEN_AI_USAGE: &str = "gen_ai.usage";
+
+pub(super) const LASH_RLM_STEP_INDEX: &str = "lash.rlm.step.index";
+pub(super) const LASH_RLM_STEP_OUTCOME: &str = "lash.rlm.step.outcome";
