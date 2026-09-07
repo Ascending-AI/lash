@@ -1,4 +1,6 @@
-fn validate_unique_manifests<'a>(
+use super::*;
+
+pub(super) fn validate_unique_manifests<'a>(
     manifests: impl IntoIterator<Item = &'a ToolManifest>,
 ) -> Result<(), ReconfigureError> {
     let mut names = BTreeSet::new();
@@ -30,7 +32,7 @@ fn validate_unique_manifests<'a>(
     Ok(())
 }
 
-fn manifest_with_compact_contract(
+pub(super) fn manifest_with_compact_contract(
     source: &dyn ToolSourceExecutor,
     mut manifest: ToolManifest,
 ) -> ToolManifest {
@@ -42,9 +44,7 @@ fn manifest_with_compact_contract(
     manifest
 }
 
-fn export_tool_state_entries(
-    surface: &ToolSurface,
-) -> BTreeMap<ToolId, ToolStateEntry> {
+pub(super) fn export_tool_state_entries(surface: &ToolSurface) -> BTreeMap<ToolId, ToolStateEntry> {
     surface
         .by_id
         .iter()
@@ -54,7 +54,7 @@ fn export_tool_state_entries(
 
 /// Which side defines the set of ids at the registry's reconciliation seam.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ReconcileMode {
+pub(super) enum ReconcileMode {
     /// Automatic rebuilds: live advertisements define the surface and the
     /// snapshot overlays per-id curation. Snapshot-only ids are resolved
     /// lazily or retained as orphans.
@@ -64,10 +64,10 @@ enum ReconcileMode {
     SnapshotSurface,
 }
 
-struct ReconciledTools {
-    surface: ToolSurface,
-    orphaned: Vec<ToolId>,
-    changed: bool,
+pub(super) struct ReconciledTools {
+    pub(super) surface: ToolSurface,
+    pub(super) orphaned: Vec<ToolId>,
+    pub(super) changed: bool,
 }
 
 /// Reconcile live sources with persisted per-id state at the one registry seam.
@@ -75,7 +75,7 @@ struct ReconciledTools {
 /// `preferred_source_key` is used only by the context-catalog adapter, whose
 /// documented semantics replace base tools that collide by id or model-facing
 /// name. All ordinary live-source collisions are rejected.
-fn reconcile_tool_state_entries(
+pub(super) fn reconcile_tool_state_entries(
     entries: &BTreeMap<ToolId, ToolStateEntry>,
     sources: &BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>,
     mode: ReconcileMode,
@@ -84,9 +84,7 @@ fn reconcile_tool_state_entries(
     validate_snapshot_entries(entries)?;
 
     let mut surface = match mode {
-        ReconcileMode::LiveSurface => {
-            advertised_tool_entries(sources, preferred_source_key)?
-        }
+        ReconcileMode::LiveSurface => advertised_tool_entries(sources, preferred_source_key)?,
         ReconcileMode::SnapshotSurface => ToolSurface::default(),
     };
     let mut orphaned = Vec::new();
@@ -119,10 +117,8 @@ fn reconcile_tool_state_entries(
                     continue;
                 }
                 orphaned.push(id.clone());
-                let mut orphan = ToolRegistryEntry::orphaned(
-                    stored.manifest.clone(),
-                    stored.registration_kind,
-                );
+                let mut orphan =
+                    ToolRegistryEntry::orphaned(stored.manifest.clone(), stored.registration_kind);
                 orphan.member = stored.member;
                 insert_result_entry(&mut surface, id.clone(), orphan)?;
             }
@@ -162,7 +158,7 @@ fn advertised_tool_entries(
     Ok(advertised)
 }
 
-fn insert_advertised_entry(
+pub(super) fn insert_advertised_entry(
     advertised: &mut ToolSurface,
     source_key: &ToolSourceKey,
     kind: ToolRegistrationKind,
@@ -210,9 +206,9 @@ fn insert_advertised_entry(
         id_conflict.as_ref().map(|(id, _owner, _)| id.clone()),
         name_conflict.as_ref().map(|(id, _owner)| id.clone()),
     ]
-        .into_iter()
-        .flatten()
-        .collect::<BTreeSet<_>>();
+    .into_iter()
+    .flatten()
+    .collect::<BTreeSet<_>>();
     if !conflicts.is_empty() {
         if preferred_source_key == Some(source_key) {
             for id in conflicts {
@@ -311,7 +307,7 @@ fn resolve_snapshot_id(
     )))
 }
 
-fn insert_result_entry(
+pub(super) fn insert_result_entry(
     surface: &mut ToolSurface,
     id: ToolId,
     entry: ToolRegistryEntry,
@@ -333,9 +329,9 @@ fn insert_result_entry(
     }
     match surface.insert(entry) {
         Ok(()) => Ok(()),
-        Err(ToolSurfaceInsertError::DuplicateId) => Err(ReconfigureError::Validation(
-            format!("duplicate tool id `{id}` in reconciled surface"),
-        )),
+        Err(ToolSurfaceInsertError::DuplicateId) => Err(ReconfigureError::Validation(format!(
+            "duplicate tool id `{id}` in reconciled surface"
+        ))),
         Err(ToolSurfaceInsertError::DuplicateName { .. }) => {
             unreachable!("surface name conflicts were checked before insertion")
         }

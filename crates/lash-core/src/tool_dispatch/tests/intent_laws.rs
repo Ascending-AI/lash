@@ -1,3 +1,5 @@
+use super::*;
+
 fn recorded_event_intents(event_types: &[&str]) -> crate::ToolIntents {
     crate::ToolIntents::v1(
         event_types

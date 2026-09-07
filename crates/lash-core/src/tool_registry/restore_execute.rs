@@ -1,3 +1,5 @@
+use super::*;
+
 impl ToolRegistry {
     pub(crate) fn resolve_catalog_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
         let manifest = self.resolve_manifest(name)?;
@@ -24,9 +26,7 @@ impl ToolRegistry {
             )));
         };
         let is_member = {
-            let state = self
-                .state
-                .read_recover();
+            let state = self.state.read_recover();
             state
                 .surface
                 .get(tool_id)
@@ -39,10 +39,11 @@ impl ToolRegistry {
             )));
         }
         let binding = {
-            let state = self
-                .state
-                .read_recover();
-            state.surface.get(tool_id).map(|entry| entry.binding.clone())
+            let state = self.state.read_recover();
+            state
+                .surface
+                .get(tool_id)
+                .map(|entry| entry.binding.clone())
         };
         let source_key = match binding {
             Some(ToolBinding::Bound { source_key }) => source_key,
@@ -52,19 +53,16 @@ impl ToolRegistry {
                      but its source is not currently registered"
                 )));
             }
-            None => return Err(ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"))),
+            None => {
+                return Err(ToolOutcome::err_fmt(format_args!(
+                    "Unknown tool id: {tool_id}"
+                )));
+            }
         };
-        let source = {
-            self.sources
-                .read_recover()
-                .get(&source_key)
-                .cloned()
-        };
-        source
-            .map(|source| (source, manifest))
-            .ok_or_else(|| {
-                ToolOutcome::err_fmt(format_args!("Tool source missing for tool id `{tool_id}`"))
-            })
+        let source = { self.sources.read_recover().get(&source_key).cloned() };
+        source.map(|source| (source, manifest)).ok_or_else(|| {
+            ToolOutcome::err_fmt(format_args!("Tool source missing for tool id `{tool_id}`"))
+        })
     }
 
     fn resolve_granted_execution_source(
@@ -135,9 +133,7 @@ impl ToolRegistry {
 #[async_trait::async_trait]
 impl ToolProvider for ToolRegistry {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
-        let state = self
-            .state
-            .read_recover();
+        let state = self.state.read_recover();
         state
             .surface
             .by_id
@@ -171,9 +167,7 @@ impl ToolProvider for ToolRegistry {
     fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
         let manifest = self.resolve_manifest_by_id(id)?;
         let source_key = {
-            let state = self
-                .state
-                .read_recover();
+            let state = self.state.read_recover();
             state
                 .surface
                 .get(id)
@@ -217,8 +211,6 @@ impl ToolProvider for ToolRegistry {
             .await
     }
 
-
-
     fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
         self.resolve_execution_source(tool_id)
             .is_ok_and(|(source, _)| source.attempt_may_defer(tool_id))
@@ -248,9 +240,7 @@ impl ToolProvider for ToolRegistry {
             Err(result) => return result,
         };
         let _ = manifest;
-        source
-            .execute_by_id(tool_id, args, context)
-            .await
+        source.execute_by_id(tool_id, args, context).await
     }
 
     async fn execute_internal_by_id(
@@ -268,9 +258,7 @@ impl ToolProvider for ToolRegistry {
                 "tool id `{tool_id}` is not activated for internal execution"
             ));
         }
-        source
-            .execute_internal_by_id(tool_id, args, context)
-            .await
+        source.execute_internal_by_id(tool_id, args, context).await
     }
 
     async fn execute_granted(

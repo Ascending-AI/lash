@@ -1,9 +1,13 @@
-struct OrchestratingToolSource {
+use super::*;
+
+pub(super) struct OrchestratingToolSource {
     definition: crate::tool_provider::orchestration::OrchestratingToolDef,
 }
 
 impl OrchestratingToolSource {
-    fn new(definition: crate::tool_provider::orchestration::OrchestratingToolDef) -> Self {
+    pub(super) fn new(
+        definition: crate::tool_provider::orchestration::OrchestratingToolDef,
+    ) -> Self {
         Self { definition }
     }
 }
@@ -43,9 +47,7 @@ impl ToolSourceExecutor for OrchestratingToolSource {
         _args: &serde_json::Value,
         _context: &crate::AttemptContext<'_>,
     ) -> ToolOutcome {
-        ToolOutcome::err_fmt(
-            "orchestrating tools require direct OrchestrationContext dispatch",
-        )
+        ToolOutcome::err_fmt("orchestrating tools require direct OrchestrationContext dispatch")
     }
 
     async fn execute_orchestrating(
@@ -91,7 +93,9 @@ impl ToolProviderIndex {
         let mut index = Self::default();
         for (provider_idx, provider) in providers.iter().enumerate() {
             for manifest in provider.tool_manifests() {
-                index.by_id.insert(manifest.id.clone(), (manifest, provider_idx));
+                index
+                    .by_id
+                    .insert(manifest.id.clone(), (manifest, provider_idx));
             }
         }
         index.rebuild_name_index();
@@ -126,14 +130,14 @@ impl ToolProviderIndex {
     }
 }
 
-struct ToolProviderSource {
+pub(super) struct ToolProviderSource {
     id: String,
     tools: RwLock<ToolProviderIndex>,
     providers: Vec<Arc<dyn ToolProvider>>,
 }
 
 impl ToolProviderSource {
-    fn new(id: impl Into<String>, providers: Vec<Arc<dyn ToolProvider>>) -> Self {
+    pub(super) fn new(id: impl Into<String>, providers: Vec<Arc<dyn ToolProvider>>) -> Self {
         Self {
             id: id.into(),
             tools: RwLock::new(ToolProviderIndex::default()),
@@ -148,9 +152,7 @@ impl ToolProviderSource {
             .values()
             .map(|(manifest, _)| manifest.clone())
             .collect::<Vec<_>>();
-        *self
-            .tools
-            .write_recover() = index;
+        *self.tools.write_recover() = index;
         manifests
     }
 
@@ -168,16 +170,8 @@ impl ToolProviderSource {
             .map(|(_, provider_idx)| provider_idx)
     }
 
-    fn indexed_manifest_and_provider_by_id(
-        &self,
-        id: &ToolId,
-    ) -> Option<(ToolManifest, usize)> {
-        if let Some((manifest, provider_idx)) = self
-            .tools
-            .read_recover()
-            .by_id
-            .get(id)
-        {
+    fn indexed_manifest_and_provider_by_id(&self, id: &ToolId) -> Option<(ToolManifest, usize)> {
+        if let Some((manifest, provider_idx)) = self.tools.read_recover().by_id.get(id) {
             return Some((manifest.clone(), *provider_idx));
         }
         for (provider_idx, provider) in self.providers.iter().enumerate() {
@@ -263,7 +257,6 @@ impl ToolSourceExecutor for ToolProviderSource {
             .await
     }
 
-
     fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
         self.provider_index_for_id(tool_id)
             .is_some_and(|index| self.providers[index].attempt_may_defer(tool_id))
@@ -276,9 +269,9 @@ impl ToolSourceExecutor for ToolProviderSource {
         context: &crate::AttemptContext<'_>,
     ) -> crate::ToolAttemptOutcome {
         let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
-            return crate::ToolAttemptOutcome::from_tool_result(ToolOutcome::err_fmt(format_args!(
-                "Unknown tool id: {tool_id}"
-            )));
+            return crate::ToolAttemptOutcome::from_tool_result(ToolOutcome::err_fmt(
+                format_args!("Unknown tool id: {tool_id}"),
+            ));
         };
         self.providers[provider_idx]
             .execute_attempt_by_id(tool_id, args, context)
@@ -316,7 +309,7 @@ impl ToolSourceExecutor for ToolProviderSource {
 
 /// How a registry entry is connected to its tool source.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ToolBinding {
+pub(super) enum ToolBinding {
     /// Resolvable through the registered source with this id.
     Bound { source_key: ToolSourceKey },
     /// Persisted in a session snapshot but not resolvable from any currently
@@ -326,7 +319,7 @@ enum ToolBinding {
 }
 
 impl ToolBinding {
-    fn source_key(&self) -> Option<&ToolSourceKey> {
+    pub(super) fn source_key(&self) -> Option<&ToolSourceKey> {
         match self {
             Self::Bound { source_key } => Some(source_key),
             Self::Orphaned => None,

@@ -1,15 +1,17 @@
+use super::*;
+
 #[derive(Clone, PartialEq)]
-struct ToolRegistryEntry {
-    manifest: ToolManifest,
-    binding: ToolBinding,
-    kind: ToolRegistrationKind,
+pub(super) struct ToolRegistryEntry {
+    pub(super) manifest: ToolManifest,
+    pub(super) binding: ToolBinding,
+    pub(super) kind: ToolRegistrationKind,
     /// ToolId-keyed host curation intent. Authority policy is applied only to
     /// a pinned model-request surface and is never written back here.
-    member: bool,
+    pub(super) member: bool,
 }
 
 impl ToolRegistryEntry {
-    fn new(
+    pub(super) fn new(
         manifest: ToolManifest,
         source_key: ToolSourceKey,
         kind: ToolRegistrationKind,
@@ -22,7 +24,7 @@ impl ToolRegistryEntry {
         }
     }
 
-    fn orphaned(manifest: ToolManifest, kind: ToolRegistrationKind) -> Self {
+    pub(super) fn orphaned(manifest: ToolManifest, kind: ToolRegistrationKind) -> Self {
         Self {
             manifest,
             binding: ToolBinding::Orphaned,
@@ -31,25 +33,25 @@ impl ToolRegistryEntry {
         }
     }
 
-    fn is_orphaned(&self) -> bool {
+    pub(super) fn is_orphaned(&self) -> bool {
         self.binding == ToolBinding::Orphaned
     }
 
-    fn is_member(&self) -> bool {
+    pub(super) fn is_member(&self) -> bool {
         self.member && !self.is_orphaned()
     }
 
-    fn registration_kind(&self) -> ToolRegistrationKind {
+    pub(super) fn registration_kind(&self) -> ToolRegistrationKind {
         self.kind
     }
 
     /// The manifest as exposed to surfaces and catalogs. The view carries no
     /// curation or authority flags; callers derive effective membership.
-    fn view_manifest(&self) -> ToolManifest {
+    pub(super) fn view_manifest(&self) -> ToolManifest {
         self.manifest.clone()
     }
 
-    fn export(&self) -> ToolStateEntry {
+    pub(super) fn export(&self) -> ToolStateEntry {
         ToolStateEntry {
             manifest: self.manifest.clone(),
             orphaned: self.is_orphaned(),
@@ -60,19 +62,22 @@ impl ToolRegistryEntry {
 }
 
 #[derive(Clone, Default)]
-struct ToolSurface {
-    by_id: BTreeMap<ToolId, ToolRegistryEntry>,
-    by_name: BTreeMap<String, ToolId>,
+pub(super) struct ToolSurface {
+    pub(super) by_id: BTreeMap<ToolId, ToolRegistryEntry>,
+    pub(super) by_name: BTreeMap<String, ToolId>,
 }
 
 #[derive(Debug)]
-enum ToolSurfaceInsertError {
+pub(super) enum ToolSurfaceInsertError {
     DuplicateId,
     DuplicateName { name: String },
 }
 
 impl ToolSurface {
-    fn insert(&mut self, entry: ToolRegistryEntry) -> Result<(), ToolSurfaceInsertError> {
+    pub(super) fn insert(
+        &mut self,
+        entry: ToolRegistryEntry,
+    ) -> Result<(), ToolSurfaceInsertError> {
         let id = entry.manifest.id.clone();
         let name = entry.manifest.name.clone();
         match (self.by_id.contains_key(&id), self.by_name.get(&name)) {
@@ -88,27 +93,27 @@ impl ToolSurface {
         }
     }
 
-    fn remove(&mut self, id: &ToolId) -> Option<ToolRegistryEntry> {
+    pub(super) fn remove(&mut self, id: &ToolId) -> Option<ToolRegistryEntry> {
         let entry = self.by_id.remove(id)?;
         let removed_name = self.by_name.remove(&entry.manifest.name);
         debug_assert_eq!(removed_name.as_ref(), Some(id));
         Some(entry)
     }
 
-    fn get(&self, id: &ToolId) -> Option<&ToolRegistryEntry> {
+    pub(super) fn get(&self, id: &ToolId) -> Option<&ToolRegistryEntry> {
         self.by_id.get(id)
     }
 
-    fn get_mut(&mut self, id: &ToolId) -> Option<&mut ToolRegistryEntry> {
+    pub(super) fn get_mut(&mut self, id: &ToolId) -> Option<&mut ToolRegistryEntry> {
         self.by_id.get_mut(id)
     }
 
-    fn get_by_name(&self, name: &str) -> Option<(&ToolId, &ToolRegistryEntry)> {
+    pub(super) fn get_by_name(&self, name: &str) -> Option<(&ToolId, &ToolRegistryEntry)> {
         let id = self.by_name.get(name)?;
         self.by_id.get(id).map(|entry| (id, entry))
     }
 
-    fn debug_assert_invariant(&self) {
+    pub(super) fn debug_assert_invariant(&self) {
         debug_assert_eq!(self.by_id.len(), self.by_name.len());
         for (id, entry) in &self.by_id {
             debug_assert_eq!(self.by_name.get(&entry.manifest.name), Some(id));
@@ -149,10 +154,10 @@ impl std::fmt::Display for ToolSourceKey {
 }
 
 #[derive(Clone)]
-struct ToolRegistryState {
-    generation: u64,
-    surface: ToolSurface,
-    next_live_source_id: u64,
+pub(super) struct ToolRegistryState {
+    pub(super) generation: u64,
+    pub(super) surface: ToolSurface,
+    pub(super) next_live_source_id: u64,
 }
 
 /// Outcome of `ToolRegistry::restore_state`: the adopted generation plus the
@@ -185,6 +190,6 @@ pub enum ReconfigureError {
 
 #[derive(Clone)]
 pub struct ToolRegistry {
-    sources: Arc<RwLock<BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>>>,
-    state: Arc<RwLock<ToolRegistryState>>,
+    pub(super) sources: Arc<RwLock<BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>>>,
+    pub(super) state: Arc<RwLock<ToolRegistryState>>,
 }

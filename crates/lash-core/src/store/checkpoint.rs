@@ -1,3 +1,5 @@
+use super::*;
+
 pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 2;
 
 /// Encoding implemented for checkpoint-component logical bytes in this build.
@@ -274,7 +276,6 @@ impl HydratedCheckpointComponent {
             }
         }
     }
-
 }
 
 pub fn ensure_checkpoint_component_encoding_version(

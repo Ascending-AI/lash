@@ -1,3 +1,5 @@
+use super::*;
+
 impl ToolRegistry {
     /// Builds a `ToolRegistry` from tool provider data for protocol and process-engine implementors
     /// while preparing or executing plugin and tool work.
@@ -44,9 +46,7 @@ impl ToolRegistry {
     ) -> Result<Self, ReconfigureError> {
         let registry = Self::empty();
         for (source_id, providers) in sources {
-            registry.upsert_source(Arc::new(ToolProviderSource::new(
-                source_id, providers,
-            )))?;
+            registry.upsert_source(Arc::new(ToolProviderSource::new(source_id, providers)))?;
         }
         for definition in orchestrating_tools {
             registry.upsert_source(Arc::new(OrchestratingToolSource::new(definition)))?;
@@ -66,9 +66,7 @@ impl ToolRegistry {
     }
 
     pub(crate) fn generation(&self) -> u64 {
-        self.state
-            .read_recover()
-            .generation
+        self.state.read_recover().generation
     }
 
     pub(crate) fn is_orchestrating_tool(&self, tool_id: &ToolId) -> bool {
@@ -76,15 +74,11 @@ impl ToolRegistry {
             .read_recover()
             .surface
             .get(tool_id)
-            .is_some_and(|entry| {
-                entry.registration_kind() == ToolRegistrationKind::Orchestrating
-            })
+            .is_some_and(|entry| entry.registration_kind() == ToolRegistrationKind::Orchestrating)
     }
 
     pub(crate) fn export_state(&self) -> ToolState {
-        let state = self
-            .state
-            .read_recover();
+        let state = self.state.read_recover();
         ToolState::new(state.generation, export_tool_state_entries(&state.surface))
     }
 
@@ -107,9 +101,7 @@ impl ToolRegistry {
             )?
         };
 
-        let mut state = self
-            .state
-            .write_recover();
+        let mut state = self.state.write_recover();
         if state.generation != next.generation {
             return Err(ReconfigureError::GenerationMismatch {
                 expected: next.generation,
@@ -160,9 +152,7 @@ impl ToolRegistry {
             )?
         };
 
-        let mut state = self
-            .state
-            .write_recover();
+        let mut state = self.state.write_recover();
         state.surface = rebound.surface;
         state.surface.debug_assert_invariant();
         state.generation = reconciled_generation(snapshot.generation(), rebound.changed)?;
@@ -216,9 +206,7 @@ impl ToolRegistry {
                 return Err(ReconfigureError::UnknownSource(source_id.to_string()));
             }
         }
-        let mut state = self
-            .state
-            .write_recover();
+        let mut state = self.state.write_recover();
         let removed_ids = state
             .surface
             .by_id
@@ -307,12 +295,8 @@ impl ToolRegistry {
             None,
         )?;
 
-        self.sources
-            .write_recover()
-            .insert(source_key, source);
-        let mut state = self
-            .state
-            .write_recover();
+        self.sources.write_recover().insert(source_key, source);
+        let mut state = self.state.write_recover();
         state.surface = reconciled.surface;
         state.surface.debug_assert_invariant();
         if reconciled.changed {
@@ -338,9 +322,7 @@ impl ToolRegistry {
             ReconcileMode::LiveSurface,
             None,
         )?;
-        let mut state = self
-            .state
-            .write_recover();
+        let mut state = self.state.write_recover();
         state.surface = reconciled.surface;
         state.surface.debug_assert_invariant();
         if reconciled.changed {
