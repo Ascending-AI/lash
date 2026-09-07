@@ -12,12 +12,12 @@ pub mod promise_semantics;
 mod validation;
 
 pub use envelope::{
-    AssistantResponseHookEvents, CheckpointClaimSet, LlmAttachmentSpec, LlmRequestSpec,
-    ProcessCommand, ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome,
-    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectOutcome, RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay,
-    RuntimeReplayAttribution, RuntimeScope, RuntimeSubject, ToolAttemptEffectOutcome,
-    ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
+    AssistantResponseHookEvents, CheckpointClaimSet, LlmRequestSpec, ProcessCommand,
+    ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome,
+    RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectOutcome,
+    RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
+    RuntimeScope, RuntimeSubject, ToolAttemptEffectOutcome, ToolAttemptLaunch,
+    ToolBatchEffectOutcome, ToolCallLaunch,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
@@ -189,6 +189,16 @@ mod tests {
         assert!(!encoded.contains("provider_trace"));
         assert!(!encoded.contains("\"data\""));
         assert!(encoded.contains(crate::attachments::content_id(&[1, 2, 3, 4]).as_str()));
+        let mut legacy: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        legacy["messages"][0]["blocks"][0] =
+            serde_json::json!({"Attachment": {"attachment_idx": 2}});
+        legacy["attachments"] = serde_json::json!([]);
+        let error = serde_json::from_value::<LlmRequestSpec>(legacy)
+            .expect_err("a dangling legacy attachment must fail persisted-request decode");
+        assert!(
+            error.to_string().contains("missing field `source`"),
+            "{error}"
+        );
         let decoded: LlmRequestSpec = serde_json::from_str(&encoded).expect("decode llm spec");
         let live = decoded.into_request(None, None);
         assert_eq!(live.model, "model");

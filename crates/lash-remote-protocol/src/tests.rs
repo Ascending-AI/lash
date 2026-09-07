@@ -2448,3 +2448,20 @@ fn protocol_53_is_refused_before_window_54_payload_decode() {
         })
     ));
 }
+
+#[test]
+fn attachment_block_wire_literals_and_owned_source_are_pinned() {
+    let block = RemoteLlmContentBlock::Attachment {
+        source: Box::new(RemoteAttachmentSource::ExternalUrl {
+            media_type: "image/png".to_string(),
+            url: "https://example.test/image.png".to_string(),
+        }),
+    };
+    assert_eq!(
+        serde_json::to_value(&block).unwrap(),
+        serde_json::json!({
+            "type": "attachment",
+            "source": { "source": "external_url", "media_type": "image/png", "url": "https://example.test/image.png" }
+        })
+    );
+}
