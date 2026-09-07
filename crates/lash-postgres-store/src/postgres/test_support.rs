@@ -94,3 +94,42 @@ impl ConformanceSessionStoreFactory for PostgresSessionStoreFactory {
             .map(|store| store as Arc<dyn ConformancePersistence>))
     }
 }
+
+impl PostgresSessionStoreFactory {
+    /// Drive transaction admission time independently of record timestamps.
+    pub fn with_lease_clock_for_testing(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
+        self.lease_clock_for_testing = Some(clock);
+        self
+    }
+}
+
+impl PostgresSessionStore {
+    /// Drive transaction admission time independently of record timestamps.
+    pub fn with_lease_clock_for_testing(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
+        self.lease_clock_for_testing = Some(clock);
+        self
+    }
+}
+
+pub(crate) async fn set_transaction_lease_clock_for_testing(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    clock: Option<&Arc<dyn lash_core::Clock>>,
+) -> Result<(), StoreError> {
+    if let Some(clock) = clock {
+        sqlx::query("SELECT set_config('lash.test_lease_epoch_ms', $1, true)")
+            .bind(clock.timestamp_ms().to_string())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    Ok(())
+}
+
+impl PostgresSessionStore {
+    pub(crate) async fn set_transaction_lease_clock_for_testing(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), StoreError> {
+        set_transaction_lease_clock_for_testing(tx, self.lease_clock_for_testing.as_ref()).await
+    }
+}

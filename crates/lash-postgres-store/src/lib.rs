@@ -296,6 +296,8 @@ pub struct PostgresStorage {
 
 #[derive(Clone)]
 pub struct PostgresSessionStoreFactory {
+    #[cfg(any(test, feature = "testing"))]
+    lease_clock_for_testing: Option<Arc<dyn lash_core::Clock>>,
     pool: PgPool,
     process_registry_shared: bool,
     clock: Arc<dyn lash_core::Clock>,
@@ -303,6 +305,8 @@ pub struct PostgresSessionStoreFactory {
 
 #[derive(Clone)]
 pub struct PostgresSessionStore {
+    #[cfg(any(test, feature = "testing"))]
+    lease_clock_for_testing: Option<Arc<dyn lash_core::Clock>>,
     pool: PgPool,
     clock: Arc<dyn lash_core::Clock>,
     session_id: String,
@@ -685,6 +689,8 @@ impl PostgresStorage {
         PostgresSessionStoreFactory {
             pool: self.pool.clone(),
             process_registry_shared: false,
+            #[cfg(any(test, feature = "testing"))]
+            lease_clock_for_testing: None,
             clock: Arc::new(lash_core::facade_support::SystemClock),
         }
     }
@@ -697,6 +703,8 @@ impl PostgresStorage {
         PostgresSessionStoreFactory {
             pool: self.pool.clone(),
             process_registry_shared: true,
+            #[cfg(any(test, feature = "testing"))]
+            lease_clock_for_testing: None,
             clock: Arc::new(lash_core::facade_support::SystemClock),
         }
     }
@@ -715,6 +723,8 @@ impl PostgresStorage {
             pool: self.pool.clone(),
             clock: Arc::new(lash_core::facade_support::SystemClock),
             session_id: session_id.into(),
+            #[cfg(any(test, feature = "testing"))]
+            lease_clock_for_testing: None,
             #[cfg(test)]
             checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]

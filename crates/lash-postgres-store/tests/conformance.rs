@@ -289,6 +289,7 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
     let storage = Arc::new(storage);
     let database_url = database_url().expect("configured Postgres database URL");
     let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
+    let lease_clock = Arc::clone(&clock);
     lash_core::testing::conformance::runtime_persistence_reopenable(
         |session_id| {
             let storage = Arc::clone(&storage);
@@ -311,10 +312,12 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
                 };
                 let open_factory = open_storage
                     .session_store_factory()
-                    .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>);
+                    .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
+                    .with_lease_clock_for_testing(Arc::clone(&clock) as Arc<dyn lash_core::Clock>);
                 let reopen_factory = reopen_storage
                     .session_store_factory()
-                    .with_clock(clock as Arc<dyn lash_core::Clock>);
+                    .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
+                    .with_lease_clock_for_testing(clock as Arc<dyn lash_core::Clock>);
                 let open = open_factory
                     .create_store(&request)
                     .await
@@ -327,7 +330,9 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
                 ReopenableRuntimePersistence { open, reopen }
             })
         },
-        lash_core::testing::conformance::RuntimePersistenceLeaseTiming::Realtime,
+        lash_core::testing::conformance::RuntimePersistenceLeaseTiming::controlled(move |ms| {
+            lease_clock.advance(ms)
+        }),
     )
     .await;
 }
