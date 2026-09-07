@@ -23,6 +23,7 @@ pub use lash_core::llm::transport::{GOOGLE_FILE_MIMES, GOOGLE_IMAGE_MIMES, GOOGL
 
 #[cfg(test)]
 mod tests {
+    mod epilogue;
     use lash_sansio::sync::MutexExt;
 
     use std::num::NonZeroUsize;

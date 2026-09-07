@@ -18,6 +18,7 @@ pub use lash_core::llm::transport::{ANTHROPIC_FILE_MIMES, ANTHROPIC_IMAGE_MIMES}
 
 #[cfg(test)]
 mod tests {
+    mod epilogue;
     use lash_sansio::sync::MutexExt;
 
     use crate::stream::StreamState;
