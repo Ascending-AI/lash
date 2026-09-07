@@ -1,8 +1,6 @@
 use super::*;
 use lash_core::SessionCommitStore;
-use lash_core::runtime::{
-    DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkPayload, RuntimeSessionState,
-};
+use lash_core::runtime::{DeliveryPolicy, QueuedWorkBatchDraft, RuntimeSessionState};
 
 fn test_state(session_id: &str) -> RuntimeSessionState {
     RuntimeSessionState {
@@ -75,11 +73,11 @@ async fn rejected_commits_do_not_change_the_instrumentation_counter() {
     commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(
         "other-session",
         DeliveryPolicy::AfterCurrentTurnCommit,
-        vec![QueuedWorkPayload::agent_frame_task(
+        lash_core::runtime::TurnWorkPayload::agent_frame_task(
             lash_core::facade_support::frame_node_id("other-session", "follow-frame"),
             "follow-on task",
             None,
-        )],
+        ),
     )];
 
     let error = SessionCommitStore::commit_runtime_state(&store, commit)

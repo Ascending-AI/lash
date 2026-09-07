@@ -499,17 +499,6 @@ impl InMemorySessionStore {
         Ok(Self::in_memory_session_execution_lease(session_id, current))
     }
 
-    fn queued_batch_work_class(
-        batch: &crate::QueuedWorkBatch,
-    ) -> Result<crate::store::QueuedWorkClass, crate::store::StoreError> {
-        batch.work_class().ok_or_else(|| {
-            crate::store::StoreError::Backend(format!(
-                "queued-work batch `{}` has mixed or empty payload classes",
-                batch.batch_id
-            ))
-        })
-    }
-
     fn claim_ready_queued_work_in_memory(
         &self,
         session_id: &str,
@@ -606,15 +595,14 @@ impl InMemorySessionStore {
             .iter()
             .map(|index| {
                 let batch = &queued[*index].batch;
-                Self::queued_batch_work_class(batch)?;
-                Ok(crate::store::queued_work::ClaimCandidate::from_batch(
+                crate::store::queued_work::ClaimCandidate::from_batch(
                     batch,
                     queued[*index].claim.fencing_token,
                     queued[*index].claim.id(),
                     queued[*index].claim.token(),
-                ))
+                )
             })
-            .collect::<Result<Vec<_>, crate::store::StoreError>>()?;
+            .collect::<Vec<_>>();
         let (selected_indices, refusal): (Vec<usize>, Option<crate::QueuedWorkClaimRefusal>) =
             match kind {
                 InMemoryQueuedWorkClaimKind::LeadingSessionCommand => {
@@ -891,16 +879,10 @@ impl InMemorySessionStore {
                     && (entry.claim.claimable_by(generation))
             })
             .min_by_key(|entry| entry.batch.enqueue_seq);
-        first_ready
-            .map(|entry| {
-                Self::queued_batch_work_class(&entry.batch).map(|class| {
-                    class == crate::store::QueuedWorkClass::TurnWork
-                        && entry.batch.delivery_policy
-                            == crate::DeliveryPolicy::EarliestSafeBoundary
-                })
-            })
-            .transpose()
-            .map(Option::unwrap_or_default)
+        Ok(first_ready.is_some_and(|entry| {
+            entry.batch.work_class() == crate::store::QueuedWorkClass::TurnWork
+                && entry.batch.delivery_policy == crate::DeliveryPolicy::EarliestSafeBoundary
+        }))
     }
 }
 

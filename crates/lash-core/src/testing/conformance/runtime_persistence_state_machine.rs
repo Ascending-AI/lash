@@ -10,10 +10,10 @@ use crate::store::{
 use crate::{
     LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputDraft,
     PluginSessionSnapshot, PluginSnapshotEntry, PluginSnapshotMeta, QueuedWorkBatch,
-    QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkPayload,
-    RuntimeCommit, RuntimePersistence, RuntimeSessionState, RuntimeUsageDeltaIdentity,
-    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, StoreError, ToolState, TurnInput,
-    TurnInputClaim, TurnInputIngress, facade_support::ToolStateFacadeOps,
+    QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, RuntimeCommit,
+    RuntimePersistence, RuntimeSessionState, RuntimeUsageDeltaIdentity, SessionExecutionLease,
+    SessionExecutionLeaseClaimOutcome, StoreError, ToolState, TurnInput, TurnInputClaim,
+    TurnInputIngress, facade_support::ToolStateFacadeOps,
 };
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestRunner};
@@ -1465,11 +1465,11 @@ fn queued_draft(slot: u8, value: u8, coalesce: bool) -> QueuedWorkBatchDraft {
     let draft = QueuedWorkBatchDraft::new(
         SESSION_ID,
         DeliveryPolicy::EarliestSafeBoundary,
-        vec![QueuedWorkPayload::agent_frame_task(
+        crate::TurnWorkPayload::agent_frame_task(
             crate::session_graph::frame_node_id(SESSION_ID, &format!("property-frame-{value}")),
             format!("property-work-{value}"),
             None,
-        )],
+        ),
     )
     .with_source_key(format!("runtime-property-work-{slot}"));
     if coalesce {

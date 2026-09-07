@@ -1182,19 +1182,13 @@ pub(crate) struct QueuedBatchRow {
 pub(crate) fn claim_candidate_from_row(
     row: &QueuedBatchRow,
     batch: &QueuedWorkBatch,
-) -> Result<ClaimCandidate, StoreError> {
-    batch.work_class().ok_or_else(|| {
-        StoreError::Backend(format!(
-            "queued-work batch `{}` has mixed or empty payload classes",
-            batch.batch_id
-        ))
-    })?;
-    Ok(ClaimCandidate::from_batch(
+) -> ClaimCandidate {
+    ClaimCandidate::from_batch(
         batch,
         row.claim_fencing_token,
         row.claim_id.clone(),
         row.claim_token.clone(),
-    ))
+    )
 }
 
 pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError> {
@@ -1287,7 +1281,7 @@ pub(crate) async fn queued_work_batch_from_row(
             payload: store_decode_json(&payload_json, "queued work payload")?,
         });
     }
-    Ok(QueuedWorkBatch {
+    let batch = QueuedWorkBatch {
         batch_id: row.batch_id,
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
@@ -1299,7 +1293,9 @@ pub(crate) async fn queued_work_batch_from_row(
         available_at_ms: row.available_at_ms,
         enqueued_at_ms: row.enqueued_at_ms,
         items,
-    })
+    };
+    batch.validate_payload_family()?;
+    Ok(batch)
 }
 
 pub(crate) async fn ensure_queued_work_completion_tx(

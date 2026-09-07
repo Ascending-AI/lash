@@ -279,14 +279,14 @@ pub mod persistence {
         InMemorySessionStoreFactory, LiveReplayOutcome, LiveReplaySubscription,
         PROCESS_WAKE_MERGE_KEY, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
         ProcessWakeSource, QueuedCheckpointTurnInput, QueuedCheckpointWork, QueuedTurnWork,
-        QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-        QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClaimPolicy, QueuedWorkCompletion,
-        QueuedWorkCompletionData, QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind,
-        QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState, SessionCursorError,
-        SessionStoreCreateRequest, SessionStoreFactory, TurnInputCheckpointBoundary,
-        TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
-        TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim, TurnInputState,
-        UnclaimedTurnInputs,
+        QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads,
+        QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClaimPolicy,
+        QueuedWorkCompletion, QueuedWorkCompletionData, QueuedWorkEnqueueOutcome, QueuedWorkItem,
+        QueuedWorkKind, QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState,
+        SessionCommandPayload, SessionCursorError, SessionStoreCreateRequest, SessionStoreFactory,
+        TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
+        TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim,
+        TurnInputState, TurnWorkPayload, UnclaimedTurnInputs,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     /// Store-integrator attachment-manifest contracts and their persisted vocabulary.

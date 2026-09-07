@@ -85,11 +85,11 @@ async fn enqueue(
             lash::persistence::QueuedWorkBatchDraft::new(
                 session.session_id(),
                 lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
-                vec![lash::persistence::QueuedWorkPayload::agent_frame_task(
+                lash::persistence::TurnWorkPayload::agent_frame_task(
                     frame_node_id,
                     source_key,
                     None,
-                )],
+                ),
             )
             .with_source_key(source_key),
         )

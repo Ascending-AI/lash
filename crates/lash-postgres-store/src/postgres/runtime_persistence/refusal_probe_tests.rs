@@ -38,11 +38,11 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
             "refusal-probe",
             DeliveryPolicy::EarliestSafeBoundary,
-            vec![lash_core::runtime::QueuedWorkPayload::agent_frame_task(
+            lash_core::runtime::TurnWorkPayload::agent_frame_task(
                 lash_core::facade_support::frame_node_id("refusal-probe", "frame"),
                 "new arrival",
                 None,
-            )],
+            ),
         ))
         .await
         .unwrap();

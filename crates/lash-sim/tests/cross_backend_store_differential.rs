@@ -21,7 +21,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
-    QueuedWorkPayload,
 };
 use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport};
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
@@ -1577,11 +1576,9 @@ impl BackendRunner {
                     QueuedWorkBatchDraft::new(
                         &self.session_id,
                         DeliveryPolicy::EarliestSafeBoundary,
-                        vec![QueuedWorkPayload::session_command(
-                            lash_core::facade_support::SessionCommand::RefreshToolCatalog {
-                                reason: "cross-backend delete observability".to_string(),
-                            },
-                        )],
+                        lash_core::facade_support::SessionCommand::RefreshToolCatalog {
+                            reason: "cross-backend delete observability".to_string(),
+                        },
                     )
                     .with_source_key("cross-backend-delete-observability"),
                 )
@@ -1593,14 +1590,14 @@ impl BackendRunner {
                     QueuedWorkBatchDraft::new(
                         &self.session_id,
                         DeliveryPolicy::AfterCurrentTurnCommit,
-                        vec![QueuedWorkPayload::agent_frame_task(
+                        lash_core::runtime::TurnWorkPayload::agent_frame_task(
                             lash_core::facade_support::frame_node_id(
                                 &self.session_id,
                                 "differential-frame",
                             ),
                             "exercise queued-work claim state",
                             None,
-                        )],
+                        ),
                     )
                     .with_source_key("cross-backend-claim-observability")
                     .with_available_at_ms(777)

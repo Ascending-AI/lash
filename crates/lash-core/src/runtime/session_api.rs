@@ -605,7 +605,7 @@ impl LashRuntime {
         let draft = crate::QueuedWorkBatchDraft::new(
             session_id.clone(),
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
-            vec![crate::QueuedWorkPayload::session_command(command)],
+            command,
         )
         .with_source_key(source_key.clone());
         let enqueued = store.enqueue_queued_work(draft).await.map_err(|err| {

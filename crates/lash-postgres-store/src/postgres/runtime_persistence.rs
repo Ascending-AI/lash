@@ -2130,7 +2130,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                 let mut requested_batches = std::collections::BTreeMap::new();
                 for row in &requested_rows {
                     let batch = queued_work_batch_from_row(&mut tx, row.clone()).await?;
-                    if batch.work_class() != Some(lash_core::store::QueuedWorkClass::TurnWork) {
+                    if batch.work_class() != lash_core::store::QueuedWorkClass::TurnWork {
                         tx.rollback().await.map_err(store_sqlx_error)?;
                         return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
                             None,
@@ -2194,7 +2194,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             .iter()
             .zip(selected_batches.iter())
             .map(|(row, batch)| claim_candidate_from_row(row, batch))
-            .collect::<Result<Vec<_>, StoreError>>()?;
+            .collect::<Vec<_>>();
         let selected_len =
             select_exact_turn_work_claim_prefix(&candidates, boundary, &policy, now)?.len;
         if selected_len == 0 {
@@ -3255,7 +3255,7 @@ async fn postgres_refusal_for_empty_scan(
     if let Some(head_row) = head_rows.into_iter().next() {
         let head_row = queued_batch_row(head_row)?;
         let head_batch = queued_work_batch_from_row(tx, head_row.clone()).await?;
-        let head_candidates = vec![claim_candidate_from_row(&head_row, &head_batch)?];
+        let head_candidates = vec![claim_candidate_from_row(&head_row, &head_batch)];
         let head_prefix = select_turn_work_claim_prefix(&head_candidates, boundary, policy, now)?;
         // Under READ COMMITTED, concurrent enqueue can make this probe select
         // a head after the initial empty scan. Preserve the existing Empty
@@ -3386,7 +3386,7 @@ async fn scan_queued_work_candidates_postgres(
         .iter()
         .zip(selected_batches.iter())
         .map(|(row, batch)| claim_candidate_from_row(row, batch))
-        .collect::<Result<Vec<_>, StoreError>>()?;
+        .collect::<Vec<_>>();
     Ok((selected_batches, candidates))
 }
 

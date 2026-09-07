@@ -294,11 +294,11 @@ pub use turn_loop::ensure_durable_effect_input;
 pub use turn_queue::{
     DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork,
     QueuedTurnWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
-    QueuedWorkBatchingConfig, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData,
-    QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
+    QueuedWorkBatchPayloads, QueuedWorkBatchingConfig, QueuedWorkClaim, QueuedWorkClaimBoundary,
+    QueuedWorkClaimData, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
     QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
-    SessionCommandReceipt, process_wake_batch_draft, process_wake_batch_draft_with_delivery_policy,
-    process_wake_source_key,
+    SessionCommandPayload, SessionCommandReceipt, TurnWorkPayload, process_wake_batch_draft,
+    process_wake_batch_draft_with_delivery_policy, process_wake_source_key,
 };
 pub(crate) use turn_queue::{SessionCommandSettlement, SessionCommandSettlementHandle};
 pub use usage::{

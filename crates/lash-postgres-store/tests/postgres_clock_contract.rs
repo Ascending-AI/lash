@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use lash_core::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkPayload};
+use lash_core::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary};
 use lash_core::testing::TestClock;
 use lash_core::{
     CheckpointKind, Clock, DeliveryPolicy, LeaseOwnerIdentity, PendingTurnInputCancelOutcome,
@@ -373,11 +373,9 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
             &session_id,
             DeliveryPolicy::EarliestSafeBoundary,
-            vec![QueuedWorkPayload::session_command(
-                SessionCommand::RefreshToolCatalog {
-                    reason: "clock-contract command".to_string(),
-                },
-            )],
+            SessionCommand::RefreshToolCatalog {
+                reason: "clock-contract command".to_string(),
+            },
         ))
         .await
         .expect("enqueue session command under skewed client clock");
@@ -385,11 +383,11 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
             &session_id,
             DeliveryPolicy::EarliestSafeBoundary,
-            vec![QueuedWorkPayload::agent_frame_task(
+            lash_core::runtime::TurnWorkPayload::agent_frame_task(
                 lash_core::facade_support::frame_node_id(&session_id, "clock-contract-frame"),
                 "clock-contract queued work",
                 None,
-            )],
+            ),
         ))
         .await
         .expect("enqueue queued work under skewed client clock");

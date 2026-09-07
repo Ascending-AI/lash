@@ -60,7 +60,6 @@ fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> ClaimCandidate {
         claim_fencing_token: 0,
         prior_claim_id: None,
         prior_claim_token: None,
-        work_class: QueuedWorkClass::TurnWork,
         config_patch_command: false,
         delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
         kind: QueuedWorkKind::Turn,
@@ -79,10 +78,6 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
         Just(Some("other".to_string())),
     ];
     let kind = prop_oneof![Just(QueuedWorkKind::Turn), Just(QueuedWorkKind::Control),];
-    let work_class = prop_oneof![
-        Just(QueuedWorkClass::TurnWork),
-        Just(QueuedWorkClass::SessionCommand),
-    ];
     let delivery_policy = prop_oneof![
         Just(DeliveryPolicy::EarliestSafeBoundary),
         Just(DeliveryPolicy::AfterCurrentTurnCommit),
@@ -132,7 +127,6 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
         any::<u64>(),
         merge_key,
         kind,
-        work_class,
         delivery_policy,
         authority,
         input_texts,
@@ -143,7 +137,6 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
                 enqueue_seq,
                 merge_key,
                 kind,
-                work_class,
                 delivery_policy,
                 authority,
                 input_texts,
@@ -154,7 +147,6 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
                 claim_fencing_token: 0,
                 prior_claim_id: None,
                 prior_claim_token: None,
-                work_class,
                 config_patch_command: false,
                 delivery_policy,
                 kind,
@@ -229,7 +221,7 @@ fn each_refusal_names_the_scenario_that_produces_it() {
     let mut zero_row_policy = policy(1_000, 100);
     zero_row_policy.max_rows = 0;
     let mut command_head = candidate(1, None);
-    command_head.work_class = QueuedWorkClass::SessionCommand;
+    command_head.kind = QueuedWorkKind::Control;
     let mut boundary_blocked = candidate(1, None);
     boundary_blocked.delivery_policy = DeliveryPolicy::AfterCurrentTurnCommit;
 
@@ -388,19 +380,25 @@ fn authority_and_elevation_are_independent_compatibility_gates() {
 }
 
 #[test]
-fn control_kind_never_batches() {
+fn control_kind_is_a_command_barrier() {
     let mut first = candidate(1, Some("wake"));
     first.kind = QueuedWorkKind::Control;
+    // Kind now states the family completely; Control cannot masquerade as
+    // turn work by carrying an independent work_class value.
+    assert!(!first.kind.is_batchable());
     let candidates = vec![first, candidate(2, Some("wake"))];
+    assert_eq!(select_leading_session_command(&candidates), 1);
+    let selection = super::select_turn_work_claim_prefix(
+        &candidates,
+        QueuedWorkClaimBoundary::Idle,
+        &policy(1_000, 100),
+        1_000,
+    )
+    .unwrap();
+    assert_eq!(selection.len, 0);
     assert_eq!(
-        select_turn_work_claim_prefix(
-            &candidates,
-            QueuedWorkClaimBoundary::Idle,
-            &policy(1_000, 100),
-            1_000
-        )
-        .unwrap(),
-        1
+        selection.refusal,
+        Some(QueuedWorkClaimRefusal::CommandAtHead)
     );
 }
 
@@ -410,7 +408,7 @@ fn merge_key_delivery_and_work_class_mismatches_break_prefix() {
     let mut different_delivery = candidate(2, Some("a"));
     different_delivery.delivery_policy = DeliveryPolicy::AfterCurrentTurnCommit;
     let mut command = candidate(2, Some("a"));
-    command.work_class = QueuedWorkClass::SessionCommand;
+    command.kind = QueuedWorkKind::Control;
     for candidates in [
         vec![first.clone(), candidate(2, Some("b"))],
         vec![first.clone(), different_delivery],
@@ -765,7 +763,6 @@ fn active_turn_checkpoint_boundary_gates_on_delivery_policy() {
 #[test]
 fn leading_session_command_blocks_turn_work_claim() {
     let mut command = candidate(1, None);
-    command.work_class = QueuedWorkClass::SessionCommand;
     command.kind = QueuedWorkKind::Control;
     let candidates = vec![command, candidate(2, None)];
     assert_eq!(select_leading_session_command(&candidates), 1);
@@ -784,7 +781,6 @@ fn leading_session_command_blocks_turn_work_claim() {
 #[test]
 fn adjacent_config_commands_share_one_claim_but_not_other_commands() {
     let mut first = candidate(1, None);
-    first.work_class = QueuedWorkClass::SessionCommand;
     first.kind = QueuedWorkKind::Control;
     first.config_patch_command = true;
     let mut second = first.clone();
@@ -821,7 +817,6 @@ fn lease_derivation_is_deterministic_and_advances_fencing() {
         claim_fencing_token: 2,
         prior_claim_id: None,
         prior_claim_token: None,
-        work_class: QueuedWorkClass::TurnWork,
         config_patch_command: false,
         delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
         kind: QueuedWorkKind::Turn,

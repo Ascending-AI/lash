@@ -80,11 +80,7 @@ async fn enqueue(
             lash::persistence::QueuedWorkBatchDraft::new(
                 session.session_id(),
                 lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
-                vec![lash::persistence::QueuedWorkPayload::agent_frame_task(
-                    frame_node_id,
-                    task,
-                    None,
-                )],
+                lash::persistence::TurnWorkPayload::agent_frame_task(frame_node_id, task, None),
             )
             .with_source_key(source_key)
             // A shared merge key is the producer's statement that these rows

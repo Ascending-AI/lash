@@ -72,11 +72,9 @@ async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_confi
         .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
             session_id,
             lash_core::DeliveryPolicy::EarliestSafeBoundary,
-            vec![lash_core::runtime::QueuedWorkPayload::session_command(
-                lash_core::runtime::SessionCommand::RefreshToolCatalog {
-                    reason: "fence test".to_string(),
-                },
-            )],
+            lash_core::runtime::SessionCommand::RefreshToolCatalog {
+                reason: "fence test".to_string(),
+            },
         ))
         .await
         .expect("enqueue queued work");

@@ -413,11 +413,11 @@ async fn measure_store_hardening_backend_turn(
             QueuedWorkBatchDraft::new(
                 session_id,
                 DeliveryPolicy::EarliestSafeBoundary,
-                vec![QueuedWorkPayload::agent_frame_task(
+                lash_core::runtime::TurnWorkPayload::agent_frame_task(
                     lash_core::facade_support::frame_node_id(session_id, "perf-frame"),
                     format!("hardening task {turn_index}"),
                     None,
-                )],
+                ),
             )
             .with_source_key(format!("hardening:{session_id}:{turn_index}")),
         )

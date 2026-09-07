@@ -359,7 +359,7 @@ pub(crate) fn store_area_facade_witnesses() {
     member_witness(
         |session_id: String,
          delivery_policy: lash::persistence::DeliveryPolicy,
-         payloads: Vec<lash::persistence::QueuedWorkPayload>| {
+         payloads: lash::persistence::QueuedWorkBatchPayloads| {
             lash::persistence::QueuedWorkBatchDraft::new(session_id, delivery_policy, payloads)
         },
     );

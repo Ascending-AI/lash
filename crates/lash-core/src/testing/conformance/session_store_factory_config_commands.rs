@@ -21,19 +21,17 @@ pub(super) async fn session_store_factory_coalesces_config_command_claims(
             .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
                 &request.session_id,
                 crate::DeliveryPolicy::AfterCurrentTurnCommit,
-                vec![crate::QueuedWorkPayload::session_command(
-                    crate::SessionCommand::ApplyConfigPatch {
-                        patch: Box::new(crate::runtime::ApplyConfigPatch {
-                            model: Some(
-                                crate::ModelSpec::builder(model)
-                                    .context_window_tokens(32_000)
-                                    .build()
-                                    .expect("model"),
-                            ),
-                            ..crate::runtime::ApplyConfigPatch::default()
-                        }),
-                    },
-                )],
+                crate::SessionCommand::ApplyConfigPatch {
+                    patch: Box::new(crate::runtime::ApplyConfigPatch {
+                        model: Some(
+                            crate::ModelSpec::builder(model)
+                                .context_window_tokens(32_000)
+                                .build()
+                                .expect("model"),
+                        ),
+                        ..crate::runtime::ApplyConfigPatch::default()
+                    }),
+                },
             ))
             .await
             .expect("enqueue config command");
@@ -103,19 +101,17 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
             .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
                 &request.session_id,
                 crate::DeliveryPolicy::AfterCurrentTurnCommit,
-                vec![crate::QueuedWorkPayload::session_command(
-                    crate::SessionCommand::ApplyConfigPatch {
-                        patch: Box::new(crate::runtime::ApplyConfigPatch {
-                            model: Some(
-                                crate::ModelSpec::builder(format!("bounded-config-{index}"))
-                                    .context_window_tokens(32_000)
-                                    .build()
-                                    .expect("model"),
-                            ),
-                            ..crate::runtime::ApplyConfigPatch::default()
-                        }),
-                    },
-                )],
+                crate::SessionCommand::ApplyConfigPatch {
+                    patch: Box::new(crate::runtime::ApplyConfigPatch {
+                        model: Some(
+                            crate::ModelSpec::builder(format!("bounded-config-{index}"))
+                                .context_window_tokens(32_000)
+                                .build()
+                                .expect("model"),
+                        ),
+                        ..crate::runtime::ApplyConfigPatch::default()
+                    }),
+                },
             ))
             .await
             .expect("enqueue bounded config command");
@@ -332,11 +328,11 @@ async fn enqueue_config_settlement_blocker(
         .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
             session_id,
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
-            vec![crate::QueuedWorkPayload::agent_frame_task(
+            crate::TurnWorkPayload::agent_frame_task(
                 crate::session_graph::frame_node_id(session_id, "config-settlement-blocker"),
                 "block the FIFO head",
                 None,
-            )],
+            ),
         ))
         .await
         .expect("enqueue config-settlement blocker");

@@ -137,11 +137,11 @@ fn queued_draft(session_id: &str, label: &str) -> crate::QueuedWorkBatchDraft {
     crate::QueuedWorkBatchDraft::new(
         session_id,
         crate::DeliveryPolicy::EarliestSafeBoundary,
-        vec![crate::QueuedWorkPayload::agent_frame_task(
+        crate::TurnWorkPayload::agent_frame_task(
             crate::session_graph::frame_node_id(session_id, &format!("frame:{label}")),
             label,
             None,
-        )],
+        ),
     )
     .with_merge_key("fence-integrity")
 }

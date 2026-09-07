@@ -64,7 +64,7 @@ pub(crate) fn queued_work_batch_from_conn(
             payload: decode_queued_payload(payload_json)?,
         });
     }
-    Ok(QueuedWorkBatch {
+    let batch = QueuedWorkBatch {
         batch_id: row.batch_id,
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
@@ -76,7 +76,9 @@ pub(crate) fn queued_work_batch_from_conn(
         available_at_ms: row.available_at_ms,
         enqueued_at_ms: row.enqueued_at_ms,
         items,
-    })
+    };
+    batch.validate_payload_family()?;
+    Ok(batch)
 }
 
 pub(crate) fn queued_work_batches_from_conn(
@@ -125,7 +127,7 @@ pub(crate) fn queued_work_batches_from_conn(
         .cloned()
         .map(|row| {
             let items = items_by_batch.remove(&row.batch_id).unwrap_or_default();
-            Ok(QueuedWorkBatch {
+            let batch = QueuedWorkBatch {
                 batch_id: row.batch_id,
                 session_id: row.session_id,
                 enqueue_seq: row.enqueue_seq,
@@ -137,7 +139,9 @@ pub(crate) fn queued_work_batches_from_conn(
                 available_at_ms: row.available_at_ms,
                 enqueued_at_ms: row.enqueued_at_ms,
                 items,
-            })
+            };
+            batch.validate_payload_family()?;
+            Ok(batch)
         })
         .collect()
 }
@@ -163,19 +167,13 @@ pub(crate) struct QueuedBatchRow {
 pub(crate) fn claim_candidate_from_row(
     row: &QueuedBatchRow,
     batch: &QueuedWorkBatch,
-) -> Result<ClaimCandidate, StoreError> {
-    batch.work_class().ok_or_else(|| {
-        StoreError::Backend(format!(
-            "queued-work batch `{}` has mixed or empty payload classes",
-            batch.batch_id
-        ))
-    })?;
-    Ok(ClaimCandidate::from_batch(
+) -> ClaimCandidate {
+    ClaimCandidate::from_batch(
         batch,
         row.claim_fencing_token,
         row.claim_id.clone(),
         row.claim_token.clone(),
-    ))
+    )
 }
 
 pub(crate) fn queued_batch_row_from_sql(

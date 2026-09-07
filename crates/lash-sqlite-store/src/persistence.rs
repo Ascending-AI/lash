@@ -2136,9 +2136,7 @@ impl QueuedWorkStore for Store {
                         let mut requested_batches = std::collections::BTreeMap::new();
                         for row in &requested_rows {
                             let batch = queued_work_batch_from_conn(tx, row.clone())?;
-                            if batch.work_class()
-                                != Some(lash_core::store::QueuedWorkClass::TurnWork)
-                            {
+                            if batch.work_class() != lash_core::store::QueuedWorkClass::TurnWork {
                                 return Ok(SelectedQueuedWorkClaimOutcome::new(
                                     None,
                                     already_satisfied_batch_ids,
@@ -2205,7 +2203,7 @@ impl QueuedWorkStore for Store {
                         .iter()
                         .zip(batches.iter())
                         .map(|(row, batch)| claim_candidate_from_row(row, batch))
-                        .collect::<Result<Vec<_>, StoreError>>()?;
+                        .collect::<Vec<_>>();
                     let selected_len =
                         select_exact_turn_work_claim_prefix(&candidates, boundary, &policy, now)?
                             .len;
@@ -3338,7 +3336,7 @@ fn sqlite_refusal_for_empty_scan(
             .iter()
             .zip(head_batches.iter())
             .map(|(row, batch)| claim_candidate_from_row(row, batch))
-            .collect::<Result<Vec<_>, StoreError>>()?;
+            .collect::<Vec<_>>();
         let head_prefix = select_turn_work_claim_prefix(&head_candidates, boundary, policy, now)?;
         // A head the state machine would take contradicts the empty scan; there
         // is no such state, and `Empty` stays the conservative answer.
@@ -3474,7 +3472,7 @@ fn scan_queued_work_candidates_sqlite(
         .iter()
         .zip(candidate_batches.iter())
         .map(|(row, batch)| claim_candidate_from_row(row, batch))
-        .collect::<Result<Vec<_>, StoreError>>()?;
+        .collect::<Vec<_>>();
     Ok((candidate_batches, candidates))
 }
 

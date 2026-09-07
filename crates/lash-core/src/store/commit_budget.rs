@@ -515,11 +515,11 @@ mod tests {
         commit.enqueued_queue_batches = vec![crate::QueuedWorkBatchDraft::new(
             state.session_id.clone(),
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
-            vec![crate::QueuedWorkPayload::agent_frame_task(
+            crate::TurnWorkPayload::agent_frame_task(
                 crate::session_graph::frame_node_id(&state.session_id, "oversized-queue-batch"),
                 "q".repeat(BYTE_LIMIT * 2),
                 None,
-            )],
+            ),
         )];
 
         assert!(matches!(
@@ -661,11 +661,11 @@ mod tests {
         commit.enqueued_queue_batches = vec![crate::QueuedWorkBatchDraft::new(
             state.session_id.clone(),
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
-            vec![crate::QueuedWorkPayload::agent_frame_task(
+            crate::TurnWorkPayload::agent_frame_task(
                 crate::session_graph::frame_node_id(&state.session_id, "all-families-follow-up"),
                 "follow-up",
                 None,
-            )],
+            ),
         )];
 
         commit

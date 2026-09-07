@@ -70,11 +70,11 @@ impl LogicalTurnClaims {
                     crate::QueuedWorkBatchDraft::new(
                         session_id,
                         crate::DeliveryPolicy::AfterCurrentTurnCommit,
-                        vec![crate::QueuedWorkPayload::agent_frame_task(
+                        crate::TurnWorkPayload::agent_frame_task(
                             crate::session_graph::frame_node_id(session_id, frame_key.as_str()),
                             task.clone(),
                             protocol_turn_options,
-                        )],
+                        ),
                     )
                     .with_source_key(format!("agent-frame-handoff:{turn_id}")),
                 ]

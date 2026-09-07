@@ -1,6 +1,5 @@
 use lash_core::runtime::{
     DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
-    QueuedWorkPayload,
 };
 use lash_core::{LeaseOwnerIdentity, RuntimePersistence, SessionExecutionLease};
 use std::sync::Arc;
@@ -30,26 +29,22 @@ pub(super) struct Case {
 pub(super) async fn prepare(store: Arc<dyn RuntimePersistence>, entry: Entry) -> Case {
     let mut ids = Vec::new();
     for task in ["first", "second"] {
-        let payload = match entry {
-            Entry::Leading => QueuedWorkPayload::session_command(
-                lash_core::runtime::SessionCommand::ApplyConfigPatch {
-                    patch: Box::default(),
-                },
-            ),
-            _ => QueuedWorkPayload::agent_frame_task(
+        let payload: lash_core::runtime::QueuedWorkBatchPayloads = match entry {
+            Entry::Leading => lash_core::runtime::SessionCommand::ApplyConfigPatch {
+                patch: Box::default(),
+            }
+            .into(),
+            _ => lash_core::runtime::TurnWorkPayload::agent_frame_task(
                 lash_core::facade_support::frame_node_id("root", "frame"),
                 task,
                 None,
-            ),
+            )
+            .into(),
         };
         let batch = store
             .enqueue_queued_work(
-                QueuedWorkBatchDraft::new(
-                    "root",
-                    DeliveryPolicy::EarliestSafeBoundary,
-                    vec![payload],
-                )
-                .with_merge_key("atomicity"),
+                QueuedWorkBatchDraft::new("root", DeliveryPolicy::EarliestSafeBoundary, payload)
+                    .with_merge_key("atomicity"),
             )
             .await
             .expect("enqueue claim row");

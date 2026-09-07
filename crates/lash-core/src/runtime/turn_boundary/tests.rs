@@ -816,11 +816,11 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
         crate::QueuedWorkBatchDraft::new(
             "session-1",
             crate::DeliveryPolicy::EarliestSafeBoundary,
-            vec![crate::QueuedWorkPayload::agent_frame_task(
+            crate::TurnWorkPayload::agent_frame_task(
                 crate::session_graph::frame_node_id("session-1", "fig905-frame"),
                 "peer-owned row",
                 None,
-            )],
+            ),
         ),
     )
     .await

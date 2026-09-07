@@ -469,11 +469,9 @@ async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
         .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
             session_id,
             lash_core::DeliveryPolicy::EarliestSafeBoundary,
-            vec![lash_core::runtime::QueuedWorkPayload::session_command(
-                lash_core::runtime::SessionCommand::RefreshToolCatalog {
-                    reason: "fence test".to_string(),
-                },
-            )],
+            lash_core::runtime::SessionCommand::RefreshToolCatalog {
+                reason: "fence test".to_string(),
+            },
         ))
         .await
         .expect("enqueue queued work");
@@ -627,5 +625,32 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
         store
             .put_checkpoint(&HydratedSessionCheckpoint::default())
             .await,
+    );
+}
+
+#[tokio::test]
+async fn queued_work_hydration_rejects_kind_payload_contradiction() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("family-corrupt.db");
+    let store = Store::open(&path).await.expect("open store");
+    let batch = store
+        .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
+            "family-corrupt",
+            lash_core::DeliveryPolicy::EarliestSafeBoundary,
+            lash_core::runtime::SessionCommand::RefreshToolCatalog {
+                reason: "family test".into(),
+            },
+        ))
+        .await
+        .expect("enqueue command");
+    let raw = rusqlite::Connection::open(&path).expect("open raw connection");
+    raw.execute(
+        "UPDATE queued_work_batches SET work_kind = 'turn' WHERE batch_id = ?1",
+        params![batch.batch_id],
+    )
+    .expect("contradict stored family");
+    assert_corrupt(
+        store.list_queued_work("family-corrupt").await,
+        "QueuedWorkBatch",
     );
 }

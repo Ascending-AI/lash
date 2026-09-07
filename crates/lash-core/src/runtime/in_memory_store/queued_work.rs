@@ -351,9 +351,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 .map(|(index, _)| index)
                 .collect::<Vec<_>>();
             for index in &requested_indices {
-                if Self::queued_batch_work_class(&queued[*index].batch)?
-                    != crate::store::QueuedWorkClass::TurnWork
-                {
+                if queued[*index].batch.work_class() != crate::store::QueuedWorkClass::TurnWork {
                     return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
                         None,
                         already_satisfied_batch_ids,
