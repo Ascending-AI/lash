@@ -764,6 +764,8 @@ async fn run_user_turn(
     request: WorkbenchTurnWorkflowRequest,
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
+    journaled_session_admission(&state, controller, &request.session_id, "restate.user_turn")
+        .await?;
     let input = workbench_turn_input(&state, &request).await?;
     let turn_model_id = request.model.model.clone();
     let turn_model = model_spec_from_selection(request.model);
@@ -851,6 +853,13 @@ async fn run_button_trigger(
     request: WorkbenchButtonTriggerWorkflowRequest,
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
+    journaled_session_admission(
+        &state,
+        controller,
+        &request.session_id,
+        "restate.button_trigger",
+    )
+    .await?;
     state.set_selected_model(request.model.clone());
     let scoped_effect_controller = controller
         .scoped_effect_controller(lash::runtime::ExecutionScope::runtime_operation(format!(
@@ -897,6 +906,13 @@ async fn run_mail_received(
     request: WorkbenchMailReceivedWorkflowRequest,
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
+    journaled_session_admission(
+        &state,
+        controller,
+        &request.session_id,
+        "restate.mail_received",
+    )
+    .await?;
     state.set_selected_model(request.model.clone());
     let scoped_effect_controller = controller
         .scoped_effect_controller(lash::runtime::ExecutionScope::runtime_operation(format!(
@@ -940,6 +956,22 @@ async fn run_mail_received(
 
 async fn run_session_delete(
     state: AppState,
+    request: WorkbenchSessionDeleteWorkflowRequest,
+    controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
+) -> Result<(), AppError> {
+    // The workflow fences the session itself, so a delete submitted without
+    // going through the route (or replayed after the route's process died)
+    // still refuses new turns from its first instruction. Not journaled: the
+    // mark is process-local and idempotent.
+    let session_id = request.session_id.clone();
+    state.active_turns.begin_retirement(&session_id);
+    let outcome = run_session_delete_attempt(&state, request, controller).await;
+    state.settle_retirement_mark(&session_id, &outcome).await;
+    outcome
+}
+
+async fn run_session_delete_attempt(
+    state: &AppState,
     request: WorkbenchSessionDeleteWorkflowRequest,
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
@@ -1031,6 +1063,13 @@ async fn run_queued_turn(
     request: WorkbenchQueuedTurnWorkflowRequest,
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
+    journaled_session_admission(
+        &state,
+        controller,
+        &request.session_id,
+        "restate.queued_turn",
+    )
+    .await?;
     let turn_output_turn_id = request
         .drain_id
         .clone()
@@ -1226,10 +1265,25 @@ pub(crate) async fn settle_workbench_turn(
     session_id: &str,
     turn_id: &str,
 ) -> Result<(), AppError> {
-    let session = state
-        .open_session(session_id)
-        .await
-        .map_err(AppError::runtime)?;
+    let session = match state.open_session(session_id).await {
+        Ok(session) => session,
+        // A turn settling against a tombstoned session: its pending inputs
+        // died with the store, so release the in-process claim, then refuse
+        // with the typed terminal — the runtime-shaped SessionDeleted every
+        // terminalize branch must end in. Without the claim release and the
+        // terminal verdict, the bounded session-open retry surfaces this as a
+        // retryable bind failure and Restate redrives the refused turn
+        // forever.
+        Err(error) if crate::deleted_session_details(&error).is_some() => {
+            state.active_turns.remove(session_id, turn_id);
+            return Err(state.session_admission_error(
+                session_id,
+                "restate.turn_settlement",
+                error,
+            ));
+        }
+        Err(error) => return Err(AppError::runtime(error)),
+    };
     let targets = session
         .pending_turn_inputs()
         .await
@@ -1487,6 +1541,8 @@ fn cron_request_from_registration(
 
 mod error_helpers;
 use error_helpers::*;
+mod session_admission;
+use session_admission::journaled_session_admission;
 
 #[cfg(test)]
 mod tests;

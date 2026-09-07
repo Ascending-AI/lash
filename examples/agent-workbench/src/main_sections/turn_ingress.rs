@@ -16,7 +16,7 @@ pub(crate) async fn enqueue_turn_input(
     if text.is_empty() {
         return Err(AppError::bad_request("message text is required"));
     }
-    let session_id = query.resolve(&state)?;
+    let session_id = state.admit_session(&query, "api.turn.input").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::EnqueueTurnInput {

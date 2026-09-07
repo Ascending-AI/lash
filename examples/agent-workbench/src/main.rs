@@ -134,6 +134,9 @@ pub(crate) use session_open_retry::*;
 #[path = "main_sections/app_state.rs"]
 mod app_state;
 pub(crate) use app_state::*;
+#[path = "main_sections/session_fence.rs"]
+mod session_fence;
+pub(crate) use session_fence::*;
 #[path = "main_sections/plugins.rs"]
 mod plugins;
 pub(crate) use plugins::*;

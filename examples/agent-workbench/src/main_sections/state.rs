@@ -976,11 +976,56 @@ pub(crate) struct TriggerMutationResponse {
     pub(crate) registration: Option<lash::triggers::TriggerRegistration>,
 }
 
+/// The in-process turn registry and the session fence, under one lock.
+///
+/// Turn admission and session retirement race on exactly one fact — whether
+/// this session may still start work — so the retirement marks live in the
+/// same ledger the turn claim reads. A claim taken under this lock is either
+/// ordered before the delete marked the session (and the delete then cancels
+/// and settles it) or refused by the mark; there is no third interleaving.
+///
+/// Only the turns are persisted. The marks are an in-process ordering device:
+/// after a restart the durable session tombstone is the authority, and every
+/// admission read consults it as well (`AppState::admit_session`).
 #[derive(Clone, Default)]
 pub(crate) struct ActiveTurns {
-    pub(crate) inner: Arc<Mutex<BTreeSet<(String, String)>>>,
+    inner: Arc<Mutex<ActiveTurnLedger>>,
     pub(crate) prompts: Arc<Mutex<BTreeMap<(String, String), ActiveTurnPrompt>>>,
     pub(crate) path: Option<Arc<PathBuf>>,
+}
+
+#[derive(Default)]
+struct ActiveTurnLedger {
+    turns: BTreeSet<(String, String)>,
+    retirements: BTreeMap<String, SessionRetirement>,
+}
+
+/// Where a session stands in retirement, as recorded by this process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SessionRetirement {
+    /// A delete is in flight, or its outcome is still unconfirmed. Turn
+    /// admission refuses; a delete retry may proceed.
+    Retiring,
+    /// The durable tombstone is confirmed. Every session-bound surface refuses.
+    Retired,
+}
+
+/// The outcome of claiming the idle slot for a turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ActiveTurnClaim {
+    /// The turn now owns the session's single active slot.
+    Claimed,
+    /// Another turn owns the slot; the caller queues or refuses.
+    Busy,
+    /// The session is retiring or retired; no turn may start.
+    Refused(SessionRetirement),
+}
+
+impl ActiveTurnClaim {
+    pub(crate) fn is_claimed(self) -> bool {
+        matches!(self, Self::Claimed)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1128,7 +1173,10 @@ impl ActiveTurns {
             }
         };
         let active = Self {
-            inner: Arc::new(Mutex::new(turns)),
+            inner: Arc::new(Mutex::new(ActiveTurnLedger {
+                turns,
+                retirements: BTreeMap::new(),
+            })),
             prompts: Arc::new(Mutex::new(prompts)),
             path: Some(Arc::new(path)),
         };
@@ -1150,9 +1198,9 @@ impl ActiveTurns {
         attachment_id: Option<String>,
     ) {
         let key = (session_id.into(), turn_id.into());
-        let mut active = self.inner.lock_recover();
+        let mut ledger = self.inner.lock_recover();
         let mut prompts = self.prompts.lock_recover();
-        active.insert(key.clone());
+        ledger.turns.insert(key.clone());
         if let Some(prompt) = prompt {
             prompts.insert(
                 key,
@@ -1162,30 +1210,44 @@ impl ActiveTurns {
                 },
             );
         }
-        self.persist_snapshot(&active, &prompts);
+        self.persist_snapshot(&ledger.turns, &prompts);
     }
 
-    pub(crate) fn try_insert_for_idle_session(&self, session_id: &str, turn_id: &str) -> bool {
+    pub(crate) fn try_insert_for_idle_session(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> ActiveTurnClaim {
         self.try_insert_with_prompt_for_idle_session(session_id, turn_id, None, None)
     }
 
+    /// Claim the session's single active slot for `turn_id`, unless the session
+    /// is busy or fenced.
+    ///
+    /// The retirement read and the slot claim happen under one lock: a delete
+    /// that marks the session before this claim refuses it, and a claim that
+    /// lands first is a turn the delete will find in the registry and cancel.
     pub(crate) fn try_insert_with_prompt_for_idle_session(
         &self,
         session_id: &str,
         turn_id: &str,
         prompt: Option<String>,
         attachment_id: Option<String>,
-    ) -> bool {
-        let mut active = self.inner.lock_recover();
-        if active
+    ) -> ActiveTurnClaim {
+        let mut ledger = self.inner.lock_recover();
+        if let Some(retirement) = ledger.retirements.get(session_id) {
+            return ActiveTurnClaim::Refused(*retirement);
+        }
+        if ledger
+            .turns
             .iter()
             .any(|(active_session_id, _)| active_session_id == session_id)
         {
-            return false;
+            return ActiveTurnClaim::Busy;
         }
         let key = (session_id.to_string(), turn_id.to_string());
         let mut prompts = self.prompts.lock_recover();
-        active.insert(key.clone());
+        ledger.turns.insert(key.clone());
         if let Some(prompt) = prompt {
             prompts.insert(
                 key,
@@ -1195,32 +1257,74 @@ impl ActiveTurns {
                 },
             );
         }
-        self.persist_snapshot(&active, &prompts);
-        true
+        self.persist_snapshot(&ledger.turns, &prompts);
+        ActiveTurnClaim::Claimed
     }
 
     pub(crate) fn remove(&self, session_id: &str, turn_id: &str) {
         let key = (session_id.to_string(), turn_id.to_string());
-        let mut active = self.inner.lock_recover();
+        let mut ledger = self.inner.lock_recover();
         let mut prompts = self.prompts.lock_recover();
-        active.remove(&key);
+        ledger.turns.remove(&key);
         prompts.remove(&key);
-        self.persist_snapshot(&active, &prompts);
+        self.persist_snapshot(&ledger.turns, &prompts);
     }
 
     pub(crate) fn contains(&self, session_id: &str, turn_id: &str) -> bool {
         self.inner
             .lock_recover()
+            .turns
             .contains(&(session_id.to_string(), turn_id.to_string()))
     }
 
     pub(crate) fn for_session(&self, session_id: &str) -> Vec<lash::TurnAddress> {
         self.inner
             .lock_recover()
+            .turns
             .iter()
             .filter(|(active_session_id, _)| active_session_id == session_id)
             .map(|(session_id, turn_id)| lash::TurnAddress::new(session_id, turn_id))
             .collect()
+    }
+
+    /// Mark `session_id` as retiring, so no new turn claims its slot while the
+    /// delete runs. Idempotent: a session already retiring or retired keeps its
+    /// mark, and the return value says whether this call placed one.
+    pub(crate) fn begin_retirement(&self, session_id: &str) -> bool {
+        let mut ledger = self.inner.lock_recover();
+        if ledger.retirements.contains_key(session_id) {
+            return false;
+        }
+        ledger
+            .retirements
+            .insert(session_id.to_string(), SessionRetirement::Retiring);
+        true
+    }
+
+    /// Record that the durable tombstone for `session_id` is confirmed.
+    pub(crate) fn confirm_retirement(&self, session_id: &str) {
+        self.inner
+            .lock_recover()
+            .retirements
+            .insert(session_id.to_string(), SessionRetirement::Retired);
+    }
+
+    /// Lift a retiring mark after the delete definitively failed and the
+    /// session remains live. A confirmed retirement is never lifted: a deleted
+    /// session id cannot come back.
+    pub(crate) fn abandon_retirement(&self, session_id: &str) {
+        let mut ledger = self.inner.lock_recover();
+        if ledger.retirements.get(session_id) == Some(&SessionRetirement::Retiring) {
+            ledger.retirements.remove(session_id);
+        }
+    }
+
+    pub(crate) fn retirement(&self, session_id: &str) -> Option<SessionRetirement> {
+        self.inner
+            .lock_recover()
+            .retirements
+            .get(session_id)
+            .copied()
     }
 
     pub(crate) fn prompt_for(&self, session_id: &str, turn_id: &str) -> Option<ActiveTurnPrompt> {
@@ -1231,12 +1335,12 @@ impl ActiveTurns {
     }
 
     pub(crate) fn persist(&self) {
-        let active = self.inner.lock_recover();
+        let ledger = self.inner.lock_recover();
         let prompts = self.prompts.lock_recover();
-        self.persist_snapshot(&active, &prompts);
+        self.persist_snapshot(&ledger.turns, &prompts);
     }
 
-    pub(crate) fn persist_snapshot(
+    fn persist_snapshot(
         &self,
         active: &BTreeSet<(String, String)>,
         prompts: &BTreeMap<(String, String), ActiveTurnPrompt>,
@@ -1446,6 +1550,7 @@ impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
         if !self
             .active_turns
             .try_insert_for_idle_session(&session_id, &workflow_request.turn_id)
+            .is_claimed()
         {
             cleanup.complete();
             return Ok(());

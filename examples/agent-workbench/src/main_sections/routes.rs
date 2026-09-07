@@ -12,7 +12,7 @@ pub(crate) async fn app_state(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<StateReadSnapshot>, AppError> {
-    let session_id = query.resolve(&state)?;
+    let session_id = state.admit_session(&query, "api.state").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
@@ -226,10 +226,14 @@ pub(crate) async fn session_events(
     State(state): State<AppState>,
     Query(query): Query<ProductEventsQuery>,
 ) -> Result<Response, AppError> {
-    let session_id = SessionQuery {
-        session_id: query.session_id.clone(),
-    }
-    .resolve(&state)?;
+    let session_id = state
+        .admit_session(
+            &SessionQuery {
+                session_id: query.session_id.clone(),
+            },
+            "api.events",
+        )
+        .await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
@@ -271,10 +275,14 @@ pub(crate) async fn session_observations(
     State(state): State<AppState>,
     Query(query): Query<EventsQuery>,
 ) -> Result<Response, AppError> {
-    let session_id = SessionQuery {
-        session_id: query.session_id.clone(),
-    }
-    .resolve(&state)?;
+    let session_id = state
+        .admit_session(
+            &SessionQuery {
+                session_id: query.session_id.clone(),
+            },
+            "api.observations",
+        )
+        .await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
@@ -350,7 +358,7 @@ pub(crate) async fn send_turn(
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string);
-    let session_id = query.resolve(&state)?;
+    let session_id = state.admit_session(&query, "api.turn").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::EnqueueTurn {
@@ -359,7 +367,6 @@ pub(crate) async fn send_turn(
     // Last-active is a fact about use, so it moves when a turn is sent rather
     // than when a poll reads the session.
     state.sessions.touch(&session_id);
-    ensure_session_marker_readable(&state, &session_id, "api.turn").await?;
     let attachment = match attachment_id.as_deref() {
         None => None,
         Some(attachment_id) => match state
@@ -431,20 +438,30 @@ pub(crate) async fn send_turn(
         .collect();
     let cleanup = ActiveTurnSubmissionGuard::user_turn(&state, &session_id, &turn_id);
     state.trace_for_session(&session_id, "api.turn.claim_ready", json!({}));
-    if !state.active_turns.try_insert_with_prompt_for_idle_session(
+    match state.active_turns.try_insert_with_prompt_for_idle_session(
         &session_id,
         &turn_id,
         Some(text.clone()),
         attachment_id.clone(),
     ) {
-        cleanup.complete();
-        return admit_queued_send(
-            &state,
-            &session_id,
-            text,
-            attachment.map(|attachment| attachment.bytes),
-        )
-        .await;
+        ActiveTurnClaim::Claimed => {}
+        ActiveTurnClaim::Busy => {
+            cleanup.complete();
+            return admit_queued_send(
+                &state,
+                &session_id,
+                text,
+                attachment.map(|attachment| attachment.bytes),
+            )
+            .await;
+        }
+        // The delete fenced this session after the admission read above; the
+        // claim is where that ordering is decided, so refuse here exactly as
+        // the admission read would have.
+        ActiveTurnClaim::Refused(retirement) => {
+            cleanup.complete();
+            return Err(state.retirement_fence_refusal(&session_id, "api.turn", retirement));
+        }
     }
     tokio::spawn(commit_and_submit_user_turn(
         state,
@@ -468,7 +485,9 @@ pub(crate) async fn button_trigger(
     Query(query): Query<SessionQuery>,
     Json(request): Json<ButtonEventRequest>,
 ) -> Result<Json<CommandAccepted>, AppError> {
-    let session_id = query.resolve(&state)?;
+    // Side-effect ingress: the fence refuses before any message is pushed or
+    // any workflow submitted for a retired session.
+    let session_id = state.admit_session(&query, "api.button_trigger").await?;
     let turn_model = model_spec_for_request(
         &state.selected_model(),
         request.model.as_deref(),
@@ -514,7 +533,7 @@ pub(crate) async fn list_triggers(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Vec<WorkbenchTriggerRegistration>>, AppError> {
-    let session_id = query.resolve(&state)?;
+    let session_id = state.admit_session(&query, "api.triggers.list").await?;
     let records = state
         .trigger_store
         .list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session(
@@ -537,7 +556,7 @@ pub(crate) async fn set_trigger_enabled(
     Query(query): Query<SessionQuery>,
     Json(request): Json<TriggerEnabledRequest>,
 ) -> Result<Json<TriggerMutationResponse>, AppError> {
-    let session_id = query.resolve(&state)?;
+    let session_id = state.admit_session(&query, "api.triggers.enable").await?;
     let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
     let changed = record.enabled != request.enabled;
     let command = if request.enabled {
@@ -610,7 +629,7 @@ pub(crate) async fn delete_trigger(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<TriggerMutationResponse>, AppError> {
-    let session_id = query.resolve(&state)?;
+    let session_id = state.admit_session(&query, "api.triggers.delete").await?;
     let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
     restate::cancel_cron_job_before_trigger_delete(&state, &session_id, &record).await?;
     state
@@ -767,7 +786,9 @@ pub(crate) async fn inject_message(
     Query(query): Query<SessionQuery>,
     Json(request): Json<InjectMessageRequest>,
 ) -> Result<Json<CommandAccepted>, AppError> {
-    let session_id = query.resolve(&state)?;
+    // Side-effect ingress: the fence refuses before mail is delivered or any
+    // workflow submitted for a retired session.
+    let session_id = state.admit_session(&query, "api.accounts.inject").await?;
     let turn_model = model_spec_for_request(
         &state.selected_model(),
         request.model.as_deref(),
@@ -807,23 +828,10 @@ pub(crate) async fn reset_chat(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<StateSnapshot>, AppError> {
-    let old_session_id = query.resolve(&state)?;
-    restate::cancel_cron_jobs_for_session(&state, &old_session_id, "reset").await?;
-    let execution_scope = state
-        .core
-        .session_delete_scope(&old_session_id)
-        .await
-        // Audited: first-party existence probes return absence or untyped factory/backend errors, never SessionDeleted.
-        .map_err(AppError::internal)?;
-    restate::call_session_delete(
-        &state,
-        restate::WorkbenchSessionDeleteWorkflowRequest {
-            operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
-            session_id: old_session_id.clone(),
-            execution_scope,
-        },
-    )
-    .await?;
+    let old_session_id = state
+        .admit_session_for_delete(&query, "api.session.delete")
+        .await?;
+    retire_session(&state, &old_session_id).await?;
     state.event_tx.remove(&old_session_id);
     let retired_dialect = state.requested_dialect(&old_session_id);
     let (new_session_id, replaced_current) =
@@ -881,7 +889,14 @@ pub(crate) async fn list_work(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Vec<WorkItem>>, AppError> {
-    let session_id = query.resolve(&state)?;
+    // Only the explicit form is session-bound: the default query serves the
+    // runtime-wide registry snapshot (including work retired by a session
+    // delete), so it is not fenced on whatever session happens to be current.
+    let session_id = if query.is_explicit() {
+        state.admit_session(&query, "api.work.list").await?
+    } else {
+        query.resolve(&state)?
+    };
     let observed = if query.is_explicit() {
         state
             .process_observer
@@ -930,7 +945,7 @@ pub(crate) async fn list_queued_work(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Vec<lash::persistence::QueuedWorkBatch>>, AppError> {
-    let session_id = query.resolve(&state)?;
+    let session_id = state.admit_session(&query, "api.queued_work.list").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
@@ -949,7 +964,7 @@ pub(crate) async fn run_queued_work_batch(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<QueuedWorkBatchAction>, AppError> {
-    let session_id = query.resolve(&state)?;
+    let session_id = state.admit_session(&query, "api.queued_work.run").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
@@ -985,14 +1000,25 @@ pub(crate) async fn run_queued_work_batch(
     };
     let cleanup =
         ActiveTurnSubmissionGuard::queued_turn(state.active_turns.clone(), &session_id, &turn_id);
-    if !state
+    match state
         .active_turns
         .try_insert_for_idle_session(&session_id, &turn_id)
     {
-        cleanup.complete();
-        return Err(AppError::conflict(
-            "queued work cannot be run while this session has an active turn",
-        ));
+        ActiveTurnClaim::Claimed => {}
+        ActiveTurnClaim::Busy => {
+            cleanup.complete();
+            return Err(AppError::conflict(
+                "queued work cannot be run while this session has an active turn",
+            ));
+        }
+        ActiveTurnClaim::Refused(retirement) => {
+            cleanup.complete();
+            return Err(state.retirement_fence_refusal(
+                &session_id,
+                "api.queued_work.run",
+                retirement,
+            ));
+        }
     }
     tokio::spawn(submit_tracked_queued_turn(
         cleanup,
@@ -1020,7 +1046,9 @@ pub(crate) async fn cancel_queued_work_batch(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<QueuedWorkBatchAction>, AppError> {
-    let session_id = query.resolve(&state)?;
+    let session_id = state
+        .admit_session(&query, "api.queued_work.cancel")
+        .await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
@@ -1157,7 +1185,7 @@ pub(crate) async fn list_lashlang_graphs(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<execution_graphs::LashlangGraphIndex>, AppError> {
-    let session_id = query.resolve(&state)?;
+    let session_id = state.admit_session(&query, "api.lashlang_graphs").await?;
     let index = execution_graphs::index_for_session(
         &state.process_observer,
         &session_id,
@@ -1172,7 +1200,7 @@ pub(crate) async fn lashlang_graph(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<TraceLashlangGraph>, AppError> {
-    let session_id = query.resolve(&state)?;
+    let session_id = state.admit_session(&query, "api.lashlang_graph").await?;
     let graph = execution_graphs::visible_graph_by_key(
         &state.process_observer,
         &session_id,

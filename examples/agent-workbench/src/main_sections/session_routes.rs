@@ -127,10 +127,14 @@ pub(crate) async fn select_session(
     State(state): State<AppState>,
     Json(request): Json<SessionSelectRequest>,
 ) -> Result<Json<SessionSummary>, AppError> {
-    let session_id = SessionQuery {
-        session_id: Some(request.session_id.clone()),
-    }
-    .resolve(&state)?;
+    let session_id = state
+        .admit_session(
+            &SessionQuery {
+                session_id: Some(request.session_id.clone()),
+            },
+            "api.sessions.select",
+        )
+        .await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {

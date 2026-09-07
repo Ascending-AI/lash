@@ -24,24 +24,6 @@ pub(crate) fn state_store_request(
     }
 }
 
-pub(crate) async fn ensure_session_marker_readable(
-    state: &AppState,
-    session_id: &str,
-    surface: &'static str,
-) -> Result<(), AppError> {
-    let store = state
-        .session_store_factory
-        .create_store(&state_store_request(state, session_id))
-        .await
-        .map_err(|error| {
-            state.session_admission_error(session_id, surface, lash::EmbedError::Store(error))
-        })?;
-    store.read_session_state_version().await.map_err(|error| {
-        state.session_admission_error(session_id, surface, lash::EmbedError::Store(error))
-    })?;
-    Ok(())
-}
-
 pub(crate) async fn read_state_projection(
     state: &AppState,
     session_id: &str,

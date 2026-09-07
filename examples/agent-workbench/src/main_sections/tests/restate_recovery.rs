@@ -819,6 +819,17 @@ async fn live_failure_path_harness(
     label: &str,
     scenario: failure_provider::DevProviderScenario,
 ) -> (LiveFailurePathHarness, PathBuf) {
+    live_failure_path_harness_with_provider(
+        label,
+        scenario.provider(lash::rlm::RlmDialect::Lashlang),
+    )
+    .await
+}
+
+async fn live_failure_path_harness_with_provider(
+    label: &str,
+    provider: ProviderHandle,
+) -> (LiveFailurePathHarness, PathBuf) {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -837,7 +848,7 @@ async fn live_failure_path_harness(
     let harness = live_workbench_restate_state_with_provider(
         &data_dir,
         ingress_url,
-        scenario.provider(lash::rlm::RlmDialect::Lashlang),
+        provider,
         WorkbenchSessions::fresh(),
         ActiveTurns::default(),
     )
@@ -859,6 +870,14 @@ struct LiveFailurePathHarness {
 }
 
 async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inner() {
+    // An orphan active-turn claim: a registry row with no workflow behind it,
+    // the shape a turn leaves between ingress claiming the slot and its
+    // workflow journaling any awaits. Await-gate revocation cannot settle it,
+    // so the delete workflow exhausts its bounded settle window and fails
+    // terminally with the session still live. (A turn genuinely held inside a
+    // real workflow settles under revocation and lets the delete succeed --
+    // the revokes E2E test covers that path; the route additionally sweeps
+    // orphans via its cooperative cancel's liveness probe.)
     let (harness, data_dir) = live_failure_path_harness(
         "delete-failure",
         failure_provider::DevProviderScenario::RenderedSurface,
@@ -875,21 +894,45 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
         .active_turns
         .insert(&session_id, "held-delete-turn");
 
-    let error = Box::pin(tokio::time::timeout(
-        Duration::from_secs(30),
-        reset_chat(
-            State(harness.state.clone()),
-            Query(SessionQuery {
-                session_id: Some(session_id.clone()),
-            }),
-        ),
-    ))
+    // Submit the durable delete workflow directly -- the redrive path a
+    // delete whose submitting process died leaves behind. The route would
+    // first sweep the orphan claim through its cooperative cancel's liveness
+    // probe; the workflow alone must reach its own bounded terminal failure.
+    let execution_scope = harness
+        .state
+        .core
+        .session_delete_scope(&session_id)
+        .await
+        .expect("resolve held session scope");
+    let delete_invocation_id = restate::submit_session_delete(
+        &harness.state,
+        restate::WorkbenchSessionDeleteWorkflowRequest {
+            operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
+            session_id: session_id.clone(),
+            execution_scope,
+        },
+    )
     .await
-    .expect("the real delete workflow reaches its bounded terminal failure")
-    .expect_err("the held active turn must fail the real delete workflow");
-    assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains(&session_id));
-    assert!(error.message.contains("remains live"));
+    .expect("submit deletion against the orphan active-turn claim");
+    let delete_status = wait_for_restate_invocation_completion(
+        &harness.state,
+        &delete_invocation_id,
+        Duration::from_secs(60),
+    )
+    .await;
+    assert!(
+        !delete_status.completed_successfully(),
+        "the unsettleable active-turn claim must fail the real delete workflow: {delete_status:#?}"
+    );
+    assert!(
+        delete_status
+            .completion_failure
+            .as_deref()
+            .is_some_and(
+                |failure| failure.contains(&session_id) && failure.contains("remains live")
+            ),
+        "the delete must fail with the session-remains-live refusal: {delete_status:#?}"
+    );
     assert_eq!(harness.state.current_session_id(), session_id);
     assert!(
         !harness
@@ -898,6 +941,11 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
             .session_was_deleted(&session_id)
             .await
             .expect("read failed-delete tombstone fence")
+    );
+    assert_eq!(
+        harness.state.active_turns.retirement(&session_id),
+        None,
+        "a terminal delete failure lifts the in-process fence"
     );
     let _ = app_state(
         State(harness.state.clone()),
@@ -908,6 +956,8 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     .await
     .expect("the actual terminal failure leaves GET /api/state live");
 
+    // Drop the orphan claim: the delete can now be retried through the same
+    // route, and the fence admits the retry.
     harness
         .state
         .active_turns
@@ -925,7 +975,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     ))
     .await
     .expect("post-tombstone retention redrive settles")
-    .expect("retry succeeds after the held turn settles");
+    .expect("retry succeeds after the orphan claim is released");
     assert_ne!(replacement.settings.session_id, session_id);
     harness
         .state
@@ -1068,12 +1118,18 @@ finish (await handle)?
         !turn_status.completed_successfully(),
         "a tombstoned session turn must not report successful completion"
     );
+    // Re-baselined for FIG-2358: the revoked turn resumes while the delete
+    // workflow is inside its bounded settle window, so the session fence
+    // refuses it as retiring ("is being deleted"); a turn that resumes after
+    // the tombstone commits gets the deleted refusal ("used and deleted").
+    // Either way it is the shared typed retirement refusal, never success.
     assert!(
         turn_status
             .completion_failure
             .as_deref()
-            .is_some_and(|failure| failure.contains("used and deleted")),
-        "revoked turn must terminalize as the typed deleted-session refusal: {turn_status:#?}"
+            .is_some_and(|failure| failure.contains("used and deleted")
+                || failure.contains("is being deleted")),
+        "revoked turn must terminalize as the typed retirement refusal: {turn_status:#?}"
     );
     let process_terminal = tokio::time::timeout(
         Duration::from_secs(45),
