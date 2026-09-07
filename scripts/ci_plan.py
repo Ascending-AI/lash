@@ -15,6 +15,7 @@ FAMILIES = ("rust", "confidence", "stores", "functional_e2e", "workers_e2e")
 CHANGE_STATUSES = frozenset({"A", "M", "D", "T"})
 
 GATED_JOBS = {
+    "nextest-archive": "rust",
     "facade-gates": "rust",
     "semver-advisory": "rust",
     "lashlang-git-consumer": "rust",
@@ -55,6 +56,7 @@ DEFERRED_EVENTS = {"pull_request", "merge_group"}
 FULL_PROFILE_JOBS = {"facade-gates"}
 
 UNGATED_JOBS = {
+    "worker-artifacts",
     "plan",
     "facade-only-examples",
     "test-doc",
@@ -67,6 +69,7 @@ UNGATED_JOBS = {
 }
 
 WORKERS_E2E_JOBS = {
+    "worker-artifacts",
     "restate-postgres-workers",
     "restate-postgres-workers-summary",
 }
