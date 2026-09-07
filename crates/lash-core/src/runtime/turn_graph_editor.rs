@@ -174,6 +174,30 @@ impl TurnGraphEditor {
         self.active_messages.extend(appendable_messages);
     }
 
+    /// Appends nodes minted in `draft_namespace` at the editor's current leaf
+    /// and moves the leaf past them, so the next message append parents after
+    /// them. Ids are `draft_node_id(draft_namespace, ordinal)` from ordinal 0:
+    /// the ids an in-turn append answered with before it was folded here.
+    pub(super) fn append_node_drafts_in_namespace(
+        &mut self,
+        draft_namespace: &str,
+        drafts: Vec<crate::session_graph::SessionNodeDraft>,
+    ) -> Vec<String> {
+        let mut builder = self.base_graph.append_builder_in_namespace(draft_namespace);
+        builder.set_leaf_node_id(self.leaf_node_id());
+        let nodes = builder.append_drafts_at(drafts, self.clock.timestamp_rfc3339());
+        self.append_builder
+            .set_leaf_node_id(builder.leaf_node_id().cloned());
+        Arc::make_mut(&mut self.active_events)
+            .extend(nodes.iter().filter_map(|node| node.event().cloned()));
+        let node_ids = nodes
+            .iter()
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>();
+        self.record_append_builder_nodes(nodes);
+        node_ids
+    }
+
     pub(super) fn project_active_read_state(&mut self, messages: &[Message]) {
         let active_path = self.active_path_nodes();
         let projection = build_active_read_projection(active_path.iter().copied(), messages);
@@ -282,9 +306,9 @@ impl TurnGraphEditor {
 
     pub(super) fn into_session_graph(self) -> SessionGraph {
         // Commit-draft append invariant: every node staged by this editor was
-        // minted by its append builder, and the first one extends the leaf that
-        // builder captured before the turn. Projection-only tail nodes must
-        // never enter this collection or choose its parent.
+        // minted by an append builder anchored at this editor's leaf, and the
+        // first one extends the leaf captured before the turn. Projection-only
+        // tail nodes must never enter this collection or choose its parent.
         debug_assert!(
             self.appended_nodes
                 .iter()
@@ -355,8 +379,9 @@ impl TurnGraphEditor {
         path
     }
 
-    /// Accept only nodes returned by `SessionGraphAppendBuilder`; this is the
-    /// seam that keeps pending durable commits anchored to the pre-turn leaf.
+    /// Accept only nodes returned by a `SessionGraphAppendBuilder` anchored at
+    /// this editor's leaf; this is the seam that keeps pending durable commits
+    /// anchored to the pre-turn leaf.
     fn record_append_builder_nodes(&mut self, nodes: Vec<SessionNodeRecord>) {
         self.appended_node_indices.reserve(nodes.len());
         self.appended_nodes.reserve(nodes.len());

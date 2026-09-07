@@ -1,25 +1,217 @@
 #[cfg(test)]
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_sansio::core_support::*;
-use std::sync::Arc;
+use lash_sansio::sync::MutexExt;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use crate::session_model::SessionHistoryRecord;
 use crate::{MessageSequence, SessionReadView};
 
 use super::RuntimeSessionState;
+use super::state::{
+    append_session_nodes_to_state_with_clock, boundary_operation, session_append_node_drafts,
+};
 use super::turn_graph_editor::TurnGraphEditor;
+
+/// One `SessionGraphService::append_session_nodes` request recorded against a
+/// running turn's commit draft.
+#[derive(Clone, Debug)]
+pub(in crate::runtime) struct RecordedTurnGraphAppend {
+    /// Draft namespace the nodes are minted in: the append's boundary
+    /// operation storage key, so the ids handed to the caller and the ids the
+    /// turn commits are the same.
+    draft_namespace: String,
+    nodes: Vec<crate::SessionAppendNode>,
+    identity: crate::store::AppendRequestIdentity,
+    outcome: crate::AppendSessionNodesOutcome,
+}
+
+#[derive(Debug)]
+struct TurnGraphAppendDraftInner {
+    /// Node ids on the resident active path when the turn began, plus every
+    /// node minted by a recorded append: the set an ancestor requirement is
+    /// resolved against.
+    active_node_ids: HashSet<String>,
+    leaf_node_id: Option<String>,
+    recorded: Vec<RecordedTurnGraphAppend>,
+    /// Prefix of `recorded` already folded into the turn's final state.
+    applied: usize,
+}
+
+/// In-turn `SessionGraphService::append_session_nodes` requests on the current
+/// session are queued into the turn's commit draft instead of committing on
+/// their own.
+///
+/// Every turn-scoped `RuntimeSessionServices` instance records into the same
+/// handle; turn-scoped read snapshots overlay the recorded nodes so in-turn
+/// readers see them immediately. The turn draft folds the queue at the next
+/// boundary it applies (`prepared_checkpoint`, `progress_boundary`, or the
+/// final commit), after the messages that boundary carries, so an append is
+/// ordered behind the history that existed when the boundary ran and later
+/// messages parent after it. A boundary skipped because its messages are not
+/// prompt-resume-safe leaves the queue untouched. Draft ids are remapped to
+/// durable ids by the turn's commit like every other draft node.
+#[derive(Clone, Debug)]
+pub(in crate::runtime) struct TurnGraphAppendDraft {
+    inner: Arc<StdMutex<TurnGraphAppendDraftInner>>,
+    clock: Arc<dyn crate::Clock>,
+}
+
+impl TurnGraphAppendDraft {
+    /// Opens a draft against the resident state a physical turn starts from.
+    pub(in crate::runtime) fn from_resident_state(
+        state: &RuntimeSessionState,
+        clock: Arc<dyn crate::Clock>,
+    ) -> Self {
+        use crate::facade_support::SessionGraphFacadeOps;
+        let active_node_ids = state
+            .session_graph
+            .active_path_nodes()
+            .into_iter()
+            .map(|node| node.node_id.clone())
+            .collect();
+        Self {
+            inner: Arc::new(StdMutex::new(TurnGraphAppendDraftInner {
+                active_node_ids,
+                leaf_node_id: state.session_graph.leaf_node_id.clone(),
+                recorded: Vec::new(),
+                applied: 0,
+            })),
+            clock,
+        }
+    }
+
+    /// Records an append and answers it the way a durable append would: a
+    /// replayed identity returns the first outcome, a reused operation id
+    /// with a different request is a typed conflict, and an ancestor that is
+    /// not on the active path is a stale branch.
+    pub(in crate::runtime) fn record(
+        &self,
+        session_id: &str,
+        request: &crate::AppendSessionNodesRequest,
+    ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
+        let operation =
+            boundary_operation(session_id, &request.operation_id, "append-session-nodes");
+        let draft_namespace = operation
+            .storage_key()
+            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        let identity = crate::RuntimeTurnCommitStamp::append_session_nodes(
+            operation,
+            request.requires_ancestor_node_id.as_deref(),
+            &request.nodes,
+        )
+        .map_err(|err| crate::PluginError::Session(err.to_string()))?
+        .append_request_identity;
+        let mut inner = self.inner.lock_recover();
+        if let Some(existing) = inner
+            .recorded
+            .iter()
+            .find(|recorded| recorded.draft_namespace == draft_namespace)
+        {
+            if existing.identity == identity {
+                return Ok(existing.outcome.clone());
+            }
+            return Err(crate::PluginError::AppendOperationIdentityConflict {
+                session_id: session_id.to_string(),
+                operation_key: draft_namespace,
+            });
+        }
+        if let Some(required_node_id) = request.requires_ancestor_node_id.as_deref()
+            && !inner.active_node_ids.contains(required_node_id)
+        {
+            return Ok(crate::AppendSessionNodesOutcome::StaleBranch {
+                required_node_id: required_node_id.to_string(),
+            });
+        }
+        let node_ids = (0..request.nodes.len() as u64)
+            .map(|ordinal| crate::session_graph::draft_node_id(&draft_namespace, ordinal))
+            .collect::<Vec<_>>();
+        if let Some(leaf) = node_ids.last() {
+            inner.leaf_node_id = Some(leaf.clone());
+        }
+        inner.active_node_ids.extend(node_ids.iter().cloned());
+        let outcome = crate::AppendSessionNodesOutcome::Appended {
+            node_ids,
+            leaf_node_id: inner.leaf_node_id.clone().unwrap_or_default(),
+        };
+        inner.recorded.push(RecordedTurnGraphAppend {
+            draft_namespace,
+            nodes: request.nodes.clone(),
+            identity,
+            outcome: outcome.clone(),
+        });
+        Ok(outcome)
+    }
+
+    /// Overlays every recorded append on a turn-scoped read snapshot.
+    pub(in crate::runtime) fn overlay_on_read_state(&self, state: &mut RuntimeSessionState) {
+        let recorded = self.inner.lock_recover().recorded.clone();
+        apply_recorded_appends(state, &recorded, self.clock.as_ref());
+    }
+
+    /// Folds the appends recorded since the previous fold into `state`, after
+    /// whatever nodes `state` already holds.
+    pub(in crate::runtime) fn fold_into_final_state(&self, state: &mut RuntimeSessionState) {
+        let pending = self.take_pending();
+        apply_recorded_appends(state, &pending, self.clock.as_ref());
+    }
+
+    /// Drains the appends recorded since the previous fold.
+    fn take_pending(&self) -> Vec<RecordedTurnGraphAppend> {
+        let mut inner = self.inner.lock_recover();
+        let pending = inner.recorded[inner.applied..].to_vec();
+        inner.applied = inner.recorded.len();
+        pending
+    }
+}
+
+fn apply_recorded_appends(
+    state: &mut RuntimeSessionState,
+    appends: &[RecordedTurnGraphAppend],
+    clock: &dyn crate::Clock,
+) {
+    for append in appends {
+        let node_ids = append_session_nodes_to_state_with_clock(
+            state,
+            &append.nodes,
+            &append.draft_namespace,
+            clock,
+        );
+        debug_assert!(
+            matches!(
+                &append.outcome,
+                crate::AppendSessionNodesOutcome::Appended { node_ids: recorded, .. }
+                    if *recorded == node_ids
+            ),
+            "a recorded in-turn append mints the ids it answered with"
+        );
+    }
+}
 
 #[derive(Debug)]
 pub(super) struct TurnCommitDraft {
     graph: TurnGraphEditor,
     state: RuntimeSessionState,
+    graph_appends: TurnGraphAppendDraft,
 }
 
 impl TurnCommitDraft {
+    #[cfg(test)]
     pub(super) fn from_state_with_clock(
+        state: RuntimeSessionState,
+        clock: Arc<dyn crate::Clock>,
+        draft_namespace: &str,
+    ) -> Self {
+        let graph_appends = TurnGraphAppendDraft::from_resident_state(&state, Arc::clone(&clock));
+        Self::from_state_with_graph_appends(state, clock, draft_namespace, graph_appends)
+    }
+
+    pub(super) fn from_state_with_graph_appends(
         mut state: RuntimeSessionState,
         clock: Arc<dyn crate::Clock>,
         draft_namespace: &str,
+        graph_appends: TurnGraphAppendDraft,
     ) -> Self {
         state.ensure_agent_frame_initialized_with_clock(clock.as_ref());
         let base_graph = Arc::new(std::mem::take(&mut state.session_graph));
@@ -36,7 +228,11 @@ impl TurnCommitDraft {
             clock,
             persisted_node_ids,
         );
-        Self { graph, state }
+        Self {
+            graph,
+            state,
+            graph_appends,
+        }
     }
 
     pub(super) fn state_mut(&mut self) -> &mut RuntimeSessionState {
@@ -61,8 +257,28 @@ impl TurnCommitDraft {
         self.graph.take_projection_diagnostics()
     }
 
+    /// Applies one boundary: the boundary's messages first, then every
+    /// in-turn append queued since the previous boundary.
     pub(super) fn apply_prepared_messages(&mut self, messages: &MessageSequence) {
         self.apply_message_projection(messages);
+        self.fold_pending_graph_appends();
+    }
+
+    fn fold_pending_graph_appends(&mut self) {
+        for append in self.graph_appends.take_pending() {
+            let drafts = session_append_node_drafts(&append.nodes, &append.draft_namespace);
+            let node_ids = self
+                .graph
+                .append_node_drafts_in_namespace(&append.draft_namespace, drafts);
+            debug_assert!(
+                matches!(
+                    &append.outcome,
+                    crate::AppendSessionNodesOutcome::Appended { node_ids: recorded, .. }
+                        if *recorded == node_ids
+                ),
+                "a queued in-turn append mints the ids it answered with"
+            );
+        }
     }
 
     pub(super) fn append_events<I>(&mut self, events: I)
@@ -112,6 +328,9 @@ impl TurnCommitDraft {
     }
 
     pub(super) fn into_final_state(mut self) -> RuntimeSessionState {
+        // The final commit is the last boundary: appends queued since the
+        // previous one extend the leaf the editor produced, never choose it.
+        self.fold_pending_graph_appends();
         self.state.persisted_node_ids = self.graph.persisted_node_ids();
         self.state.session_graph = self.graph.into_session_graph();
         self.state.refresh_current_frame_projection();
@@ -154,10 +373,207 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::facade_support::SessionNodeProjection;
     use crate::{
-        AgentFrameReason, Message, MessageRole, OpenAgentFrameRequest, Part, RuntimeSessionState,
-        shared_parts,
+        AgentFrameReason, AppendSessionNodesOutcome, AppendSessionNodesRequest, Message,
+        MessageRole, OpenAgentFrameRequest, Part, RuntimeSessionState, SessionAppendNode,
+        SessionNodePayload, shared_parts,
     };
+
+    fn plugin_append(operation_id: &str, bodies: &[&str]) -> AppendSessionNodesRequest {
+        AppendSessionNodesRequest {
+            operation_id: operation_id.to_string(),
+            nodes: bodies
+                .iter()
+                .map(|body| SessionAppendNode::plugin("test.draft", serde_json::json!(body)))
+                .collect(),
+            requires_ancestor_node_id: None,
+        }
+    }
+
+    fn appended_ids(outcome: &AppendSessionNodesOutcome) -> Vec<String> {
+        match outcome {
+            AppendSessionNodesOutcome::Appended { node_ids, .. } => node_ids.clone(),
+            other => panic!("expected an appended outcome, got {other:?}"),
+        }
+    }
+
+    fn seeded_state(session_id: &str) -> RuntimeSessionState {
+        let clock = crate::SystemClock;
+        let mut state = RuntimeSessionState {
+            session_id: session_id.to_string(),
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        };
+        state.ensure_agent_frame_initialized_with_clock(&clock);
+        state.append_active_conversation_messages_with_clock(
+            &[text_message("durable", "durable request")],
+            &clock,
+        );
+        state.persisted_node_ids.extend(
+            state
+                .session_graph
+                .nodes
+                .iter()
+                .map(|node| node.node_id.clone()),
+        );
+        state
+    }
+
+    #[test]
+    fn recorded_appends_answer_like_durable_appends() {
+        let state = seeded_state("draft-answers");
+        let durable_leaf = state.session_graph.leaf_node_id.clone().expect("leaf");
+        let draft = TurnGraphAppendDraft::from_resident_state(&state, Arc::new(crate::SystemClock));
+
+        let first = draft
+            .record("draft-answers", &plugin_append("op-a", &["a0", "a1"]))
+            .expect("first append");
+        let first_ids = appended_ids(&first);
+        assert_eq!(first_ids.len(), 2);
+        assert!(matches!(
+            &first,
+            AppendSessionNodesOutcome::Appended { leaf_node_id, .. } if *leaf_node_id == first_ids[1]
+        ));
+
+        // Same identity replays the first answer; a reused id with another
+        // request is the typed conflict the store would raise.
+        let replayed = draft
+            .record("draft-answers", &plugin_append("op-a", &["a0", "a1"]))
+            .expect("replayed append");
+        assert_eq!(appended_ids(&replayed), first_ids);
+        assert!(matches!(
+            draft.record("draft-answers", &plugin_append("op-a", &["changed"])),
+            Err(crate::PluginError::AppendOperationIdentityConflict { .. })
+        ));
+
+        // Ancestors resolve against the resident active path plus nodes the
+        // draft itself minted.
+        let mut on_recorded = plugin_append("op-b", &["b0"]);
+        on_recorded.requires_ancestor_node_id = Some(first_ids[0].clone());
+        assert!(matches!(
+            draft
+                .record("draft-answers", &on_recorded)
+                .expect("append on recorded ancestor"),
+            AppendSessionNodesOutcome::Appended { .. }
+        ));
+        let mut on_durable = plugin_append("op-c", &["c0"]);
+        on_durable.requires_ancestor_node_id = Some(durable_leaf);
+        assert!(matches!(
+            draft
+                .record("draft-answers", &on_durable)
+                .expect("append on durable ancestor"),
+            AppendSessionNodesOutcome::Appended { .. }
+        ));
+        let mut off_path = plugin_append("op-d", &["d0"]);
+        off_path.requires_ancestor_node_id = Some("not-on-the-active-path".to_string());
+        assert!(matches!(
+            draft.record("draft-answers", &off_path).expect("stale branch answer"),
+            AppendSessionNodesOutcome::StaleBranch { required_node_id }
+                if required_node_id == "not-on-the-active-path"
+        ));
+    }
+
+    #[test]
+    fn queued_appends_fold_at_the_next_boundary_after_its_messages() {
+        let state = seeded_state("draft-fold");
+        let clock: Arc<dyn crate::Clock> = Arc::new(crate::SystemClock);
+        let appends = TurnGraphAppendDraft::from_resident_state(&state, Arc::clone(&clock));
+        let mut draft =
+            TurnCommitDraft::from_state_with_graph_appends(state, clock, "turn-1", appends.clone());
+        let durable = text_message("durable", "durable request");
+        let request = text_message("request", "turn request");
+        let reply = text_message("reply", "turn reply");
+
+        // Boundary one carries the request; the append recorded afterwards
+        // waits for boundary two.
+        draft.apply_prepared_messages(&MessageSequence::from_owned(vec![
+            durable.clone(),
+            request.clone(),
+        ]));
+        let before_reply = appended_ids(
+            &appends
+                .record("draft-fold", &plugin_append("before-reply", &["mid"]))
+                .expect("append after boundary one"),
+        );
+
+        // Read overlays show the queued node before any boundary folds it.
+        let mut read_state = draft.state().clone();
+        appends.overlay_on_read_state(&mut read_state);
+        assert!(
+            read_state
+                .session_graph
+                .find_node(&before_reply[0])
+                .is_some()
+        );
+
+        // Boundary two carries the reply: the queued append lands after it,
+        // and the append recorded after boundary two waits for the final one.
+        draft.apply_prepared_messages(&MessageSequence::from_owned(vec![
+            durable.clone(),
+            request.clone(),
+            reply.clone(),
+        ]));
+        let after_reply = appended_ids(
+            &appends
+                .record("draft-fold", &plugin_append("after-reply", &["late"]))
+                .expect("append after boundary two"),
+        );
+        draft.finalize_turn_read_state(
+            MessageSequence::from_owned(vec![durable, request, reply]),
+            false,
+        );
+        let mut state = draft.into_final_state();
+        let finalize_hook = appended_ids(
+            &appends
+                .record("draft-fold", &plugin_append("finalize-hook", &["hook"]))
+                .expect("finalize-hook append"),
+        );
+        appends.fold_into_final_state(&mut state);
+
+        let path = state
+            .session_graph
+            .active_path_nodes()
+            .into_iter()
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>();
+        let message_index = |message_id: &str| {
+            path.iter()
+                .position(|id| {
+                    state
+                        .session_graph
+                        .find_node(id)
+                        .and_then(|node| node.message())
+                        .is_some_and(|message| message.id == message_id)
+                })
+                .unwrap_or_else(|| panic!("message {message_id} is on the active path"))
+        };
+        let request_index = message_index("request");
+        let reply_index = message_index("reply");
+        assert_eq!(reply_index, request_index + 1);
+        assert_eq!(
+            &path[reply_index + 1..],
+            &[
+                before_reply[0].clone(),
+                after_reply[0].clone(),
+                finalize_hook[0].clone(),
+            ],
+            "each append lands at the boundary after it was queued, behind the messages that boundary carries"
+        );
+        assert_eq!(
+            state.session_graph.leaf_node_id,
+            Some(finalize_hook[0].clone())
+        );
+        let pending = state.pending_graph_commit();
+        assert_eq!(
+            pending
+                .nodes
+                .iter()
+                .filter(|node| matches!(node.payload, SessionNodePayload::Plugin { .. }))
+                .count(),
+            3,
+            "every queued append is committed exactly once"
+        );
+    }
 
     fn text_message(id: &str, text: &str) -> Message {
         Message {

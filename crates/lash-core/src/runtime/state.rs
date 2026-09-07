@@ -1273,17 +1273,7 @@ pub(crate) fn append_session_nodes_to_state_with_clock(
     draft_namespace: &str,
     clock: &dyn crate::Clock,
 ) -> Vec<String> {
-    let drafts = nodes
-        .iter()
-        .enumerate()
-        .map(|(ordinal, node)| {
-            let fallback_digest = crate::stable_hash::blake3_hex(
-                "lash-session-append-draft-fallback/v2",
-                format!("{draft_namespace}:{ordinal}").as_bytes(),
-            );
-            session_append_node_draft(node, &format!("m_append_{fallback_digest}"))
-        })
-        .collect::<Vec<_>>();
+    let drafts = session_append_node_drafts(nodes, draft_namespace);
     state.ensure_agent_frame_initialized_with_clock(clock);
     state
         .session_graph
@@ -1464,6 +1454,26 @@ pub(super) fn open_agent_frame_in_state_with_clock(
         opened: true,
         initial_node_ids,
     }
+}
+
+/// Builds the node drafts an append request materializes, with fallback
+/// message ids derived from the append's draft namespace so the same request
+/// yields the same drafts wherever it is folded.
+pub(crate) fn session_append_node_drafts(
+    nodes: &[crate::SessionAppendNode],
+    draft_namespace: &str,
+) -> Vec<crate::session_graph::SessionNodeDraft> {
+    nodes
+        .iter()
+        .enumerate()
+        .map(|(ordinal, node)| {
+            let fallback_digest = crate::stable_hash::blake3_hex(
+                "lash-session-append-draft-fallback/v2",
+                format!("{draft_namespace}:{ordinal}").as_bytes(),
+            );
+            session_append_node_draft(node, &format!("m_append_{fallback_digest}"))
+        })
+        .collect()
 }
 
 fn session_append_node_draft(

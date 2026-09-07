@@ -34,31 +34,32 @@ impl CurrentSessionCapability {
             )));
         }
 
+        let mut state = match &self.snapshot {
+            // A turn-scoped service never commits on its own: the append rides
+            // the running turn's draft and lands with the turn's final commit.
+            CurrentSnapshot::ReadModel { graph_appends, .. } => {
+                return graph_appends.record(session_id, &request);
+            }
+            CurrentSnapshot::Owned(_) => self.current_snapshot_for_store_write().await?,
+        };
         let Some(store) = &self.store else {
             return Err(crate::PluginError::Session(
                 "session graph mutation requires a runtime store".to_string(),
             ));
-        };
-
-        let mut state = if usage.persist_to_store {
-            self.current_snapshot_for_store_write().await?
-        } else {
-            self.snapshot.to_runtime_state()
         };
         let operation = super::super::state::boundary_operation(
             &state.session_id,
             &request.operation_id,
             "append-session-nodes",
         );
-        let mut staged_usage = if usage.persist_to_store {
-            Some(
-                usage
-                    .stage_token_ledger(&mut state, &operation)
-                    .map_err(|err| crate::PluginError::Session(err.to_string()))?,
-            )
-        } else {
-            None
-        };
+        // Host-scoped services persist the shared usage ledger with every
+        // store write they make.
+        debug_assert!(usage.persist_to_store);
+        let mut staged_usage = Some(
+            usage
+                .stage_token_ledger(&mut state, &operation)
+                .map_err(|err| crate::PluginError::Session(err.to_string()))?,
+        );
         let append_stamp = crate::RuntimeTurnCommitStamp::append_session_nodes(
             operation.clone(),
             request.requires_ancestor_node_id.as_deref(),
