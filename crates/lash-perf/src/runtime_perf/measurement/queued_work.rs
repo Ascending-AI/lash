@@ -1,11 +1,13 @@
+use super::*;
+
 const QUEUED_WORK_JOIN_BATCHES_PER_TURN: usize = 32;
 const QUEUED_WORK_SEED_OTHER_SESSION_BATCHES: usize = 64;
-const QUEUED_WORK_CLAIM_TTL_MS: u64 = 30_000;
+pub(super) const QUEUED_WORK_CLAIM_TTL_MS: u64 = 30_000;
 const TURN_INPUT_INGRESS_ACTIVE_PER_TURN: usize = 32;
 const TURN_INPUT_INGRESS_ACCEPTED_PER_TURN: usize = 16;
 const TURN_INPUT_INGRESS_NEXT_PER_TURN: usize = 8;
 
-async fn run_once_queued_work_claim_stress(
+pub(super) async fn run_once_queued_work_claim_stress(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::QueuedWorkClaimStress;
@@ -417,7 +419,7 @@ async fn enqueue_queued_work_stress_turn(
     Ok(())
 }
 
-fn queued_work_stress_wake(
+pub(super) fn queued_work_stress_wake(
     session_id: &str,
     input: &str,
     sequence: u64,
@@ -448,7 +450,7 @@ fn queued_work_stress_wake(
     }
 }
 
-async fn run_once_turn_input_ingress_interrupt(
+pub(super) async fn run_once_turn_input_ingress_interrupt(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::TurnInputIngressInterrupt;

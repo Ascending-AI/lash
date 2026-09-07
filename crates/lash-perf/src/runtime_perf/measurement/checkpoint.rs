@@ -1,4 +1,6 @@
-fn measure_runtime_perf_phase<T>(
+use super::*;
+
+pub(super) fn measure_runtime_perf_phase<T>(
     name: &'static str,
     f: impl FnOnce() -> anyhow::Result<T>,
 ) -> anyhow::Result<(T, (String, RuntimePerfPhaseRunResult))> {
@@ -22,7 +24,7 @@ fn measure_runtime_perf_phase<T>(
     ))
 }
 
-async fn measure_runtime_perf_async_phase<T, F>(
+pub(super) async fn measure_runtime_perf_async_phase<T, F>(
     name: &'static str,
     future: F,
 ) -> anyhow::Result<(T, (String, RuntimePerfPhaseRunResult))>
@@ -49,7 +51,9 @@ where
     ))
 }
 
-async fn run_once_turn_checkpoint(chat_turns: usize) -> anyhow::Result<RuntimePerfRunResult> {
+pub(super) async fn run_once_turn_checkpoint(
+    chat_turns: usize,
+) -> anyhow::Result<RuntimePerfRunResult> {
     let total_started = Instant::now();
     let before_memory = process_memory_sample();
     let total_before_alloc = allocator_stats();
@@ -192,7 +196,7 @@ async fn run_once_turn_checkpoint(chat_turns: usize) -> anyhow::Result<RuntimePe
 const CHECKPOINT_STATE_BINDINGS: usize = 300;
 const CHECKPOINT_STATE_BODY_BYTES: usize = 3 * 1024 + 512;
 
-async fn run_once_checkpoint_state_hot_paths(
+pub(super) async fn run_once_checkpoint_state_hot_paths(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::CheckpointStateHotPaths;
@@ -644,7 +648,7 @@ fn runtime_perf_turn_limit_final_message(message_id: String, max_turns: usize) -
     }
 }
 
-fn checkpoint_messages() -> Vec<Message> {
+pub(crate) fn checkpoint_messages() -> Vec<Message> {
     (0usize..36)
         .map(|index| {
             let role = if index.is_multiple_of(2) {
@@ -663,7 +667,7 @@ fn checkpoint_messages() -> Vec<Message> {
         .collect()
 }
 
-fn checkpoint_message(id: String, role: MessageRole, content: String) -> Message {
+pub(super) fn checkpoint_message(id: String, role: MessageRole, content: String) -> Message {
     Message {
         id: id.clone(),
         role,
@@ -1228,7 +1232,7 @@ pub(crate) fn mean_token_usage<'a>(usages: impl IntoIterator<Item = &'a TokenUsa
     }
 }
 
-fn token_usage_from_llm_usage(usage: &LlmUsage) -> TokenUsage {
+pub(super) fn token_usage_from_llm_usage(usage: &LlmUsage) -> TokenUsage {
     TokenUsage {
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
