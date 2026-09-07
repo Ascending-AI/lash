@@ -188,59 +188,6 @@ fn append_started_graph(store: &TraceLashlangGraphStore, graph: &TraceLashlangGr
 }
 
 #[test]
-fn reset_session_rotation_replaces_workbench_session_id() {
-    let ids = WorkbenchSessions::fresh();
-    let original = ids.current();
-    let (new, replaced_current) = ids.replace(&original, lash::rlm::RlmDialect::Lashlang);
-    assert!(replaced_current);
-    assert_eq!(ids.current(), new);
-    assert_ne!(original, new);
-    assert!(original.starts_with(SESSION_ID_PREFIX));
-    assert!(new.starts_with(SESSION_ID_PREFIX));
-}
-
-#[test]
-fn replacing_a_non_current_session_does_not_rotate_the_selected_session() {
-    let ids = WorkbenchSessions::fresh();
-    let retired = ids.current();
-    ids.ensure(&retired, lash::rlm::RlmDialect::Lashlang);
-    let selected = "workbench-selected-during-delete";
-    ids.record(
-        selected.to_string(),
-        "selected".to_string(),
-        lash::rlm::RlmDialect::Lashlang,
-    );
-    ids.select(selected).expect("select competing session");
-
-    let (replacement, replaced_current) = ids.replace(&retired, lash::rlm::RlmDialect::Lashlang);
-
-    assert!(!replaced_current);
-    assert_eq!(ids.current(), selected);
-    assert!(ids.entry(&retired).is_none());
-    assert_eq!(
-        ids.entry(&replacement)
-            .expect("replacement keeps retired roster slot")
-            .name,
-        retired
-    );
-}
-
-#[test]
-fn replacing_an_unrostered_session_records_its_replacement() {
-    let ids = WorkbenchSessions::fresh();
-    let retired = "workbench-external-session";
-
-    let (replacement, replaced_current) = ids.replace(retired, lash::rlm::RlmDialect::Typescript);
-
-    assert!(!replaced_current);
-    let entry = ids
-        .entry(&replacement)
-        .expect("replacement joins the roster");
-    assert_eq!(entry.name, retired);
-    assert_eq!(entry.dialect, lash::rlm::RlmDialect::Typescript);
-}
-
-#[test]
 fn turn_routing_state_survives_web_process_reconstruction() {
     let temp = tempfile::tempdir().expect("tempdir");
     let session_path = temp.path().join("session-id");
@@ -2489,6 +2436,9 @@ pub(crate) use concurrent_send_tests::queued_send_test_state;
 #[cfg(test)]
 #[path = "tests/no_progress_budget.rs"]
 mod no_progress_budget_tests;
+#[cfg(test)]
+#[path = "tests/session_fence.rs"]
+mod session_fence_tests;
 #[cfg(test)]
 #[path = "tests/session_open_admission.rs"]
 mod session_open_admission_tests;

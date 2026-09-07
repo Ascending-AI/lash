@@ -54,7 +54,7 @@ pub(crate) async fn cancel_turn_with_driver(
     query: SessionQuery,
     driver: &lash::TurnWorkDriver,
 ) -> Result<(StatusCode, Json<TurnCancelResponse>), AppError> {
-    let session_id = query.resolve(&state)?;
+    let session_id = state.admit_session(&query, "api.turn.cancel").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::CancelTurn {

@@ -372,7 +372,7 @@ impl lash::runtime::QueuedWorkRunHandle for RetiringQueuedWorkRunHandle {
     }
 }
 
-async fn retire_workbench_session(state: &AppState, session_id: &str) {
+pub(crate) async fn retire_workbench_session(state: &AppState, session_id: &str) {
     drop(
         state
             .core
@@ -397,7 +397,7 @@ async fn retire_workbench_session(state: &AppState, session_id: &str) {
         .expect("retire session");
 }
 
-fn assert_deleted_session_conflict(error: &AppError, session_id: &str) {
+pub(crate) fn assert_deleted_session_conflict(error: &AppError, session_id: &str) {
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert_eq!(error.message, deleted_session_message(session_id));
     assert_eq!(error.verdict, crate::AppErrorVerdict::Terminal);

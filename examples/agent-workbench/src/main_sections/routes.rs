@@ -350,7 +350,7 @@ pub(crate) async fn send_turn(
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string);
-    let session_id = query.resolve(&state)?;
+    let session_id = state.admit_session(&query, "api.turn").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::EnqueueTurn {
@@ -359,7 +359,6 @@ pub(crate) async fn send_turn(
     // Last-active is a fact about use, so it moves when a turn is sent rather
     // than when a poll reads the session.
     state.sessions.touch(&session_id);
-    ensure_session_marker_readable(&state, &session_id, "api.turn").await?;
     let attachment = match attachment_id.as_deref() {
         None => None,
         Some(attachment_id) => match state
@@ -431,20 +430,30 @@ pub(crate) async fn send_turn(
         .collect();
     let cleanup = ActiveTurnSubmissionGuard::user_turn(&state, &session_id, &turn_id);
     state.trace_for_session(&session_id, "api.turn.claim_ready", json!({}));
-    if !state.active_turns.try_insert_with_prompt_for_idle_session(
+    match state.active_turns.try_insert_with_prompt_for_idle_session(
         &session_id,
         &turn_id,
         Some(text.clone()),
         attachment_id.clone(),
     ) {
-        cleanup.complete();
-        return admit_queued_send(
-            &state,
-            &session_id,
-            text,
-            attachment.map(|attachment| attachment.bytes),
-        )
-        .await;
+        ActiveTurnClaim::Claimed => {}
+        ActiveTurnClaim::Busy => {
+            cleanup.complete();
+            return admit_queued_send(
+                &state,
+                &session_id,
+                text,
+                attachment.map(|attachment| attachment.bytes),
+            )
+            .await;
+        }
+        // The delete fenced this session after the admission read above; the
+        // claim is where that ordering is decided, so refuse here exactly as
+        // the admission read would have.
+        ActiveTurnClaim::Refused(retirement) => {
+            cleanup.complete();
+            return Err(state.retirement_fence_refusal(&session_id, "api.turn", retirement));
+        }
     }
     tokio::spawn(commit_and_submit_user_turn(
         state,
@@ -807,23 +816,10 @@ pub(crate) async fn reset_chat(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<StateSnapshot>, AppError> {
-    let old_session_id = query.resolve(&state)?;
-    restate::cancel_cron_jobs_for_session(&state, &old_session_id, "reset").await?;
-    let execution_scope = state
-        .core
-        .session_delete_scope(&old_session_id)
-        .await
-        // Audited: first-party existence probes return absence or untyped factory/backend errors, never SessionDeleted.
-        .map_err(AppError::internal)?;
-    restate::call_session_delete(
-        &state,
-        restate::WorkbenchSessionDeleteWorkflowRequest {
-            operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
-            session_id: old_session_id.clone(),
-            execution_scope,
-        },
-    )
-    .await?;
+    let old_session_id = state
+        .admit_session_for_delete(&query, "api.session.delete")
+        .await?;
+    retire_session(&state, &old_session_id).await?;
     state.event_tx.remove(&old_session_id);
     let retired_dialect = state.requested_dialect(&old_session_id);
     let (new_session_id, replaced_current) =
@@ -985,14 +981,25 @@ pub(crate) async fn run_queued_work_batch(
     };
     let cleanup =
         ActiveTurnSubmissionGuard::queued_turn(state.active_turns.clone(), &session_id, &turn_id);
-    if !state
+    match state
         .active_turns
         .try_insert_for_idle_session(&session_id, &turn_id)
     {
-        cleanup.complete();
-        return Err(AppError::conflict(
-            "queued work cannot be run while this session has an active turn",
-        ));
+        ActiveTurnClaim::Claimed => {}
+        ActiveTurnClaim::Busy => {
+            cleanup.complete();
+            return Err(AppError::conflict(
+                "queued work cannot be run while this session has an active turn",
+            ));
+        }
+        ActiveTurnClaim::Refused(retirement) => {
+            cleanup.complete();
+            return Err(state.retirement_fence_refusal(
+                &session_id,
+                "api.queued_work.run",
+                retirement,
+            ));
+        }
     }
     tokio::spawn(submit_tracked_queued_turn(
         cleanup,

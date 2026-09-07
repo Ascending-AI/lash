@@ -597,7 +597,7 @@ async fn two_live_writers_rebase_appends_into_durable_graph_order() {
 
 /// A provider whose first call parks until released, so a turn can be held
 /// mid-flight while the routes under test are exercised against a busy session.
-fn gated_first_call_provider(
+pub(super) fn gated_first_call_provider(
     kind: &'static str,
 ) -> (
     ProviderHandle,
@@ -1199,7 +1199,9 @@ fn active_turn_idle_claim_is_atomic_per_session() {
             let start = Arc::clone(&start);
             move || {
                 start.wait();
-                active_turns.try_insert_for_idle_session("race-session", "left")
+                active_turns
+                    .try_insert_for_idle_session("race-session", "left")
+                    .is_claimed()
             }
         });
         let right = scope.spawn({
@@ -1207,7 +1209,9 @@ fn active_turn_idle_claim_is_atomic_per_session() {
             let start = Arc::clone(&start);
             move || {
                 start.wait();
-                active_turns.try_insert_for_idle_session("race-session", "right")
+                active_turns
+                    .try_insert_for_idle_session("race-session", "right")
+                    .is_claimed()
             }
         });
         start.wait();
@@ -1262,6 +1266,7 @@ async fn a_send_queues_if_queued_work_claims_after_its_idle_read() {
         state
             .active_turns
             .try_insert_for_idle_session(&session_id, "queued-race-owner")
+            .is_claimed()
     );
     let (released, condition) = &*release;
     *released.lock().unwrap_or_else(|error| error.into_inner()) = true;
@@ -1405,7 +1410,7 @@ async fn failed_automatic_queued_submission_releases_claim_and_can_retry() {
         .expect("the retried automatic submission body");
 }
 
-struct TurnAdmissionGate {
+pub(super) struct TurnAdmissionGate {
     pub(super) event_name: &'static str,
     pub(super) entered: std::sync::mpsc::SyncSender<()>,
     pub(super) release: Arc<(Mutex<bool>, std::sync::Condvar)>,
