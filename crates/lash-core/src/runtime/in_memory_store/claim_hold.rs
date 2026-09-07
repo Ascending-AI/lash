@@ -11,7 +11,10 @@ pub(super) struct ClaimHold {
 #[derive(Clone)]
 enum HoldState {
     Unheld {
-        prior: Option<InterruptedClaim>,
+        // Abandon metadata is not live ownership. Both optional values must
+        // round-trip independently, exactly as the SQL backends preserve them.
+        prior_claim_id: Option<String>,
+        prior_token: Option<String>,
     },
     Held {
         claim_id: String,
@@ -21,15 +24,12 @@ enum HoldState {
     },
 }
 
-#[derive(Clone)]
-struct InterruptedClaim {
-    claim_id: String,
-    token: Option<String>,
-}
-
 impl Default for HoldState {
     fn default() -> Self {
-        Self::Unheld { prior: None }
+        Self::Unheld {
+            prior_claim_id: None,
+            prior_token: None,
+        }
     }
 }
 
@@ -43,14 +43,14 @@ impl ClaimHold {
 
     pub(super) fn id(&self) -> Option<String> {
         match &self.state {
-            HoldState::Unheld { prior } => prior.as_ref().map(|prior| prior.claim_id.clone()),
+            HoldState::Unheld { prior_claim_id, .. } => prior_claim_id.clone(),
             HoldState::Held { claim_id, .. } => Some(claim_id.clone()),
         }
     }
 
     pub(super) fn token(&self) -> Option<String> {
         match &self.state {
-            HoldState::Unheld { prior } => prior.as_ref().and_then(|prior| prior.token.clone()),
+            HoldState::Unheld { prior_token, .. } => prior_token.clone(),
             HoldState::Held { token, .. } => Some(token.clone()),
         }
     }
@@ -86,11 +86,8 @@ impl ClaimHold {
                 ..
             }
             | HoldState::Unheld {
-                prior:
-                    Some(InterruptedClaim {
-                        claim_id: held_id,
-                        token: Some(held_token),
-                    }),
+                prior_claim_id: Some(held_id),
+                prior_token: Some(held_token),
             } => held_id == claim_id && held_token == token,
             HoldState::Unheld { .. } => false,
         }
@@ -119,7 +116,8 @@ impl ClaimHold {
 
     pub(super) fn restore(&mut self, claim_id: Option<String>, token: Option<String>) {
         self.state = HoldState::Unheld {
-            prior: claim_id.map(|claim_id| InterruptedClaim { claim_id, token }),
+            prior_claim_id: claim_id,
+            prior_token: token,
         };
     }
 
@@ -127,9 +125,7 @@ impl ClaimHold {
     pub(super) fn diagnostic_generation(&self) -> Option<u64> {
         match &self.state {
             HoldState::Held { generation, .. } => Some(*generation),
-            HoldState::Unheld { prior } => prior
-                .as_ref()
-                .and_then(|prior| prior.token.as_ref().map(|_| 0)),
+            HoldState::Unheld { prior_token, .. } => prior_token.as_ref().map(|_| 0),
         }
     }
 }
@@ -168,5 +164,24 @@ mod tests {
         hold.release();
         assert_eq!(hold.id(), None);
         assert_eq!(hold.fencing_token, 2);
+    }
+    #[test]
+    fn abandon_preserves_each_optional_predecessor_field_without_live_ownership() {
+        for (id, token) in [
+            (None, None),
+            (Some("prior"), None),
+            (None, Some("token")),
+            (Some("prior"), Some("token")),
+        ] {
+            let mut hold = ClaimHold::with_fencing_token(9);
+            hold.restore(id.map(str::to_string), token.map(str::to_string));
+            assert_eq!(hold.id().as_deref(), id);
+            assert_eq!(hold.token().as_deref(), token);
+            assert_eq!(hold.diagnostic_generation(), token.map(|_| 0));
+            assert_eq!(hold.owner(), None);
+            assert!(!hold.live_under(Some(0)));
+            assert!(hold.claimable_by(1));
+            assert_eq!(hold.fencing_token, 9);
+        }
     }
 }
