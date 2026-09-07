@@ -61,7 +61,7 @@ futures-util = { workspace = true }
 lash = { workspace = true }
 lash-plugin-mcp = { workspace = true }
 lash-provider-openai = { workspace = true }
-lash-sqlite-store = { workspace = true }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../../crates/lash-sqlite-store", version = "=0.0.0-dev", default-features = false }
 # `form` is not optional here: Slack accepts form-encoded bodies for every Web
 # API method and JSON for only some, so the client's default encoding is form.
 reqwest = { workspace = true, features = ["json", "rustls", "http2", "form"] }

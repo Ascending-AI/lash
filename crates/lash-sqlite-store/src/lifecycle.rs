@@ -154,6 +154,7 @@ impl Store {
             conn,
             session_id: OnceLock::new(),
             clock,
+            #[cfg(feature = "lashlang")]
             artifact_cache: Mutex::new(BTreeMap::new()),
             options,
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
@@ -172,6 +173,7 @@ impl Store {
             conn,
             session_id: OnceLock::new(),
             clock: Arc::new(lash_core::facade_support::SystemClock),
+            #[cfg(feature = "lashlang")]
             artifact_cache: Mutex::new(BTreeMap::new()),
             options: StoreOptions::default(),
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
@@ -234,6 +236,7 @@ impl Store {
             conn,
             session_id: OnceLock::new(),
             clock,
+            #[cfg(feature = "lashlang")]
             artifact_cache: Mutex::new(BTreeMap::new()),
             options,
             commit_count: AtomicU64::new(commit_count_entropy_seed()),

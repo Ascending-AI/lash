@@ -6,6 +6,7 @@ use crate::*;
 /// equals a process-execution-env ref, say) resolves to independent rows instead
 /// of silently clobbering one another under last-writer-wins.
 pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
+#[cfg(feature = "lashlang")]
 const RAW_ARTIFACT_NAMESPACE: &str = "lashlang_artifact";
 const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 pub(crate) const CURRENT_TRIGGER_MANIFEST_NAMESPACE: &str = "lashlang_trigger_manifest";
@@ -47,6 +48,7 @@ impl PostgresLashlangArtifactStore {
     }
 }
 
+#[cfg(feature = "lashlang")]
 #[async_trait::async_trait]
 impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
     fn durability_tier(&self) -> lashlang::DurabilityTier {
