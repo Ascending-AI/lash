@@ -269,6 +269,11 @@ async fn execute_code_inner(
     {
         Ok(host_environment) => host_environment,
         Err(err) => {
+            emit_step_trace(
+                &ctx,
+                &lashlang_execution_trace_config,
+                Err(&format!("invalid Lashlang host tool surface: {err}")),
+            );
             return exec_setup_failure_or_stop(
                 state,
                 &ctx,
@@ -393,6 +398,14 @@ async fn execute_code_inner(
             },
         }
     };
+    emit_step_trace(
+        &ctx,
+        &lashlang_execution_trace_config,
+        compile_result
+            .as_ref()
+            .map(|_| ())
+            .map_err(|(_, diagnostic)| diagnostic.as_str()),
+    );
     let cached_program = match compile_result {
         Ok(program) => program,
         Err((kind, error)) => {
@@ -855,6 +868,39 @@ fn tool_result_projectors(ctx: &RuntimeExecutionContext<'_>) -> Vec<crate::RlmTo
         .unwrap_or_default()
 }
 
+fn emit_step_trace(
+    ctx: &RuntimeExecutionContext<'_>,
+    config: &RlmLashlangExecutionTraceConfig,
+    result: Result<(), &str>,
+) {
+    let Some(sink) = &config.sink else { return };
+    let Some(invocation) = ctx.parent_invocation() else {
+        return;
+    };
+    let Some(step_index) = invocation.scope.protocol_iteration else {
+        return;
+    };
+    let mut context = config.trace_context.clone();
+    context.session_id = Some(invocation.scope.session_id.clone());
+    context.turn_id = invocation.scope.turn_id.clone();
+    context.turn_index = invocation.scope.turn_index;
+    context.protocol_iteration = Some(step_index);
+    context.effect_id = invocation.effect_id().map(str::to_owned);
+    let outcome = match result {
+        Ok(()) => lash_trace::TraceRlmStepOutcome::Ok,
+        Err(diagnostic) => lash_trace::TraceRlmStepOutcome::Failure {
+            diagnostic: lash_sansio::session_model::truncate_raw_error(diagnostic),
+        },
+    };
+    let _ = sink.append(&lash_trace::TraceRecord::new(
+        context,
+        lash_trace::TraceEvent::RlmStep {
+            step_index,
+            outcome,
+        },
+    ));
+}
+
 fn foreground_lashlang_execution_trace(
     ctx: &RuntimeExecutionContext<'_>,
     artifact: &lashlang::ModuleArtifact,
@@ -976,6 +1022,7 @@ fn is_reserved_global_name(key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    mod step_trace;
     use super::*;
     use std::sync::Mutex;
 

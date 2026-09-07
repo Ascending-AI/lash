@@ -24,6 +24,7 @@ testing = ["lashlang/testing", "lash-core/testing"]
 workspace = true
 
 [dependencies]
+lash-trace = { workspace = true }
 lash-sansio = { workspace = true }
 lash-core = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
