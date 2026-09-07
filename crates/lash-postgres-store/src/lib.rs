@@ -286,7 +286,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 75 folds the newest event sequence into every process row and
 // persists the Process Prune horizon established by Tombstone Compaction.
 // Component-74 databases are rejected at open.
-const SCHEMA_VERSION: i32 = 75;
+// Version 76 pins process identifiers to byte ordering, including the live
+// worklist index and cursor bounds. Changing collation is not creation-only;
+// component-75 databases must be recreated under the schema cutover policy.
+const SCHEMA_VERSION: i32 = 76;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
