@@ -449,6 +449,11 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
             };
         }
     };
+    assert_eq!(
+        lease.fence().session_id,
+        session_id,
+        "lease session must match commit session"
+    );
     let evidence = lease.commit_evidence();
     let commit = commit.releasing_session_execution_lease(lease.completion());
     match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
@@ -487,7 +492,11 @@ pub(super) async fn commit_runtime_state_with_borrowed_lease(
     owner: &crate::LeaseOwnerIdentity,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
     let session_id = commit.session_id.clone();
-    debug_assert_eq!(lease.fence().session_id, session_id);
+    assert_eq!(
+        lease.fence().session_id,
+        session_id,
+        "lease session must match commit session"
+    );
     let evidence = lease.commit_evidence();
     let commit = commit.borrowing_session_execution_lease(lease.fence());
     match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {

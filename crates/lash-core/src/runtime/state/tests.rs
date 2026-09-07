@@ -508,3 +508,24 @@ fn new_session_rejects_unproven_checkpoint_component_projection() {
         crate::StoreError::IncompleteCheckpointComponentSet
     ));
 }
+
+#[test]
+#[should_panic(expected = "adopted head revision must advance")]
+fn persisted_commit_cannot_adopt_nonadvancing_revision() {
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut receipt = commit_result_for(&state);
+    receipt.head_revision = state.head_revision;
+    state.apply_persisted_commit_result(receipt);
+}
+
+#[test]
+#[should_panic(expected = "adopted head revision must advance")]
+fn persisted_commit_cannot_adopt_regressing_revision() {
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    state.head_revision = 2;
+    let mut receipt = commit_result_for(&state);
+    receipt.head_revision = 1;
+    state.apply_persisted_commit_result(receipt);
+}
