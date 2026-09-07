@@ -3,7 +3,7 @@
 #
 # Written for the GitHub-hosted ubuntu-24.04 image, which ships ~25GB of
 # preinstalled toolchains this repo never uses (dotnet, Android SDK, GHC,
-# CodeQL). The workspace debug cache plus sccache plus per-shard test-binary
+# CodeQL). The workspace debug cache plus per-shard test-binary
 # codegen exceeds the ~14GB that remains, which surfaces as `No space left on
 # device` and linker Bus errors mid-shard.
 #
