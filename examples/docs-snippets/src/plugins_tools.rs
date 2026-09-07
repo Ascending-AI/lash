@@ -32,7 +32,6 @@ async fn rank(call: ToolCall<'_>) -> ToolOutcome {
         model_variant: model.model_variant,
         model_capability: model.model_capability,
         messages: vec![/* ... */],
-        attachments: Vec::new(),
         output: DirectOutputSpec::Text,
         generation: Default::default(),
         stream_events: None,

@@ -1600,8 +1600,11 @@ fn persistence_manifest_adapter_forwards_holds_ref() {
 fn attachment_request(
     attachments: Vec<crate::AttachmentSource>,
 ) -> Arc<crate::llm::types::LlmRequest> {
-    let blocks = (0..attachments.len())
-        .map(|attachment_idx| crate::llm::types::LlmContentBlock::Attachment { attachment_idx })
+    let blocks = attachments
+        .into_iter()
+        .map(|source| crate::llm::types::LlmContentBlock::Attachment {
+            source: Box::new(source),
+        })
         .collect();
     Arc::new(crate::llm::types::LlmRequest {
         model: "attachment-model".to_string(),
@@ -1609,7 +1612,6 @@ fn attachment_request(
             crate::llm::types::LlmRole::User,
             blocks,
         )],
-        attachments,
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: crate::llm::types::LlmToolChoice::None,
@@ -1661,7 +1663,7 @@ fn unsupported_attachment_is_replaced_by_typed_placeholder() {
     let notices = degrade_unmaterializable_request_attachments(&mut request);
 
     assert_eq!(notices.len(), 1);
-    assert!(request.attachments.is_empty());
+    assert!(request.attachments().is_empty());
     assert!(matches!(
         request.messages[0].blocks.as_slice(),
         [crate::llm::types::LlmContentBlock::Text { text, .. }]
@@ -1702,7 +1704,7 @@ fn assert_typed_degradation_placeholder(block: &crate::llm::types::LlmContentBlo
 }
 
 #[test]
-fn degraded_then_accepted_attachment_remaps_surviving_index() {
+fn degraded_then_accepted_attachment_preserves_surviving_source() {
     let degraded_ref = stored_attachment(
         "mixed-degraded-first",
         "application/octet-stream",
@@ -1734,32 +1736,32 @@ fn degraded_then_accepted_attachment_remaps_surviving_index() {
         notices[0].reason,
         crate::AttachmentMaterializationReason::NoProviderAcceptsMimeAndSource
     );
-    assert_eq!(request.attachments, vec![accepted_source]);
+    assert_eq!(request.attachments(), vec![&accepted_source]);
     assert_eq!(
-        request.attachments[0].stored_ref(),
+        request.attachments()[0].stored_ref(),
         Some(&accepted_ref),
         "the accepted attachment must retain its exact metadata"
     );
     assert_eq!(
-        request.attachment_bytes(&request.attachments[0]),
+        request.attachment_bytes(request.attachments()[0]),
         Some(ACCEPTED_BYTES),
         "the accepted attachment must retain its exact original bytes"
     );
     assert_eq!(request.resolved_stored.len(), 1);
     assert!(!request.resolved_stored.contains_key(&degraded_ref.id));
     assert_typed_degradation_placeholder(&request.messages[0].blocks[0]);
-    let surviving_idx = match &request.messages[0].blocks[1] {
-        crate::llm::types::LlmContentBlock::Attachment { attachment_idx } => *attachment_idx,
+    let surviving_source = match &request.messages[0].blocks[1] {
+        crate::llm::types::LlmContentBlock::Attachment { source } => source.as_ref(),
         block => panic!("expected surviving attachment block, got {block:?}"),
     };
     assert_eq!(
-        surviving_idx, 0,
-        "surviving attachment block must align with the pruned attachment vector"
+        surviving_source, &accepted_source,
+        "surviving attachment block must retain its source"
     );
 }
 
 #[test]
-fn accepted_then_degraded_attachment_keeps_surviving_index() {
+fn accepted_then_degraded_attachment_keeps_surviving_source() {
     let accepted_ref = stored_attachment(
         "mixed-accepted-first",
         "image/png",
@@ -1787,18 +1789,18 @@ fn accepted_then_degraded_attachment_keeps_surviving_index() {
     let notices = degrade_unmaterializable_request_attachments(&mut request);
 
     assert_eq!(notices.len(), 1);
-    assert_eq!(request.attachments, vec![accepted_source]);
-    assert_eq!(request.attachments[0].stored_ref(), Some(&accepted_ref));
+    assert_eq!(request.attachments(), vec![&accepted_source]);
+    assert_eq!(request.attachments()[0].stored_ref(), Some(&accepted_ref));
     assert_eq!(
-        request.attachment_bytes(&request.attachments[0]),
+        request.attachment_bytes(request.attachments()[0]),
         Some(ACCEPTED_BYTES)
     );
     assert_eq!(request.resolved_stored.len(), 1);
     assert!(!request.resolved_stored.contains_key(&degraded_ref.id));
-    let surviving_idx = match &request.messages[0].blocks[0] {
-        crate::llm::types::LlmContentBlock::Attachment { attachment_idx } => *attachment_idx,
+    let surviving_source = match &request.messages[0].blocks[0] {
+        crate::llm::types::LlmContentBlock::Attachment { source } => source.as_ref(),
         block => panic!("expected surviving attachment block, got {block:?}"),
     };
-    assert_eq!(surviving_idx, 0);
+    assert_eq!(surviving_source, &accepted_source);
     assert_typed_degradation_placeholder(&request.messages[0].blocks[1]);
 }

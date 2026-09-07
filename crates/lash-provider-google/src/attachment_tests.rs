@@ -14,9 +14,10 @@ fn request_with_inline_attachment(mime: &str) -> (LlmRequest, AttachmentSource) 
         model: "gemini-3.1-pro-preview".to_string(),
         messages: vec![LlmMessage::new(
             LlmRole::User,
-            vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
+            vec![LlmContentBlock::Attachment {
+                source: Box::new(attachment.clone()),
+            }],
         )],
-        attachments: vec![attachment.clone()],
         resolved_stored: Default::default(),
         tools: Default::default(),
         tool_choice: Default::default(),
@@ -41,7 +42,7 @@ fn assert_inline_data(mime: &str) {
         .expect("allowlisted attachment MIME must validate");
     let part = GoogleOAuthProvider::inline_attachment_part(&request, &attachment);
     let contents = GoogleOAuthProvider::for_test()
-        .build_contents_with_attachment_parts(&request, std::slice::from_ref(&part));
+        .build_contents_with_attachment_parts(&request, &[(attachment, part)]);
     let wire_part = &contents[0]["parts"][0];
 
     assert_eq!(wire_part["inlineData"]["mimeType"], mime, "MIME: {mime}");

@@ -5,7 +5,6 @@ impl RemoteLlmRequest {
         let core_llm::LlmRequest {
             model,
             messages,
-            attachments,
             tools,
             tool_choice,
             model_variant,
@@ -28,7 +27,6 @@ impl RemoteLlmRequest {
                 metadata: HashMap::new(),
             },
             messages: messages.into_iter().map(Into::into).collect(),
-            attachments: attachments.into_iter().map(Into::into).collect(),
             tools: tools.iter().cloned().map(Into::into).collect(),
             tool_choice: tool_choice.into(),
             output_spec: output_spec.map(Into::into),
@@ -47,7 +45,6 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
             request_id: _,
             model_intent,
             messages,
-            attachments,
             tools,
             tool_choice,
             output_spec,
@@ -64,11 +61,10 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
         } = model_intent;
         Ok(Self {
             model,
-            messages: messages.into_iter().map(Into::into).collect(),
-            attachments: attachments
+            messages: messages
                 .into_iter()
                 .map(TryInto::try_into)
-                .collect::<Result<Vec<_>, _>>()?,
+                .collect::<Result<_, _>>()?,
             resolved_stored: Default::default(),
             tools: Arc::new(tools.into_iter().map(Into::into).collect()),
             tool_choice: tool_choice.into(),
@@ -689,10 +685,17 @@ impl From<core_llm::LlmMessage> for RemoteLlmMessage {
     }
 }
 
-impl From<RemoteLlmMessage> for core_llm::LlmMessage {
-    fn from(value: RemoteLlmMessage) -> Self {
+impl TryFrom<RemoteLlmMessage> for core_llm::LlmMessage {
+    type Error = RemoteProtocolError;
+    fn try_from(value: RemoteLlmMessage) -> Result<Self, Self::Error> {
         let RemoteLlmMessage { role, content } = value;
-        Self::new(role.into(), content.into_iter().map(Into::into).collect())
+        Ok(Self::new(
+            role.into(),
+            content
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+        ))
     }
 }
 
@@ -728,8 +731,8 @@ impl From<core_llm::LlmContentBlock> for RemoteLlmContentBlock {
                 response_meta: response_meta.map(Into::into),
                 cache_breakpoint,
             },
-            core_llm::LlmContentBlock::Attachment { attachment_idx } => Self::Attachment {
-                attachment_index: attachment_idx,
+            core_llm::LlmContentBlock::Attachment { source } => Self::Attachment {
+                source: Box::new((*source).into()),
             },
             core_llm::LlmContentBlock::ToolCall {
                 call_id,
@@ -759,9 +762,10 @@ impl From<core_llm::LlmContentBlock> for RemoteLlmContentBlock {
     }
 }
 
-impl From<RemoteLlmContentBlock> for core_llm::LlmContentBlock {
-    fn from(value: RemoteLlmContentBlock) -> Self {
-        match value {
+impl TryFrom<RemoteLlmContentBlock> for core_llm::LlmContentBlock {
+    type Error = RemoteProtocolError;
+    fn try_from(value: RemoteLlmContentBlock) -> Result<Self, Self::Error> {
+        Ok(match value {
             RemoteLlmContentBlock::Text {
                 text,
                 response_meta,
@@ -771,8 +775,8 @@ impl From<RemoteLlmContentBlock> for core_llm::LlmContentBlock {
                 response_meta: response_meta.map(Into::into),
                 cache_breakpoint,
             },
-            RemoteLlmContentBlock::Attachment { attachment_index } => Self::Attachment {
-                attachment_idx: attachment_index,
+            RemoteLlmContentBlock::Attachment { source } => Self::Attachment {
+                source: Box::new((*source).try_into()?),
             },
             RemoteLlmContentBlock::ToolCall {
                 call_id,
@@ -798,7 +802,7 @@ impl From<RemoteLlmContentBlock> for core_llm::LlmContentBlock {
                 text,
                 replay: replay.map(Into::into),
             },
-        }
+        })
     }
 }
 

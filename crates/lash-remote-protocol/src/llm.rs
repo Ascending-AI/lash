@@ -94,8 +94,6 @@ pub struct RemoteLlmRequest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub messages: Vec<RemoteLlmMessage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attachments: Vec<RemoteAttachmentSource>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<RemoteLlmToolSpec>,
     #[serde(default)]
     pub tool_choice: RemoteLlmToolChoice,
@@ -108,6 +106,18 @@ pub struct RemoteLlmRequest {
 }
 
 impl RemoteLlmRequest {
+    /// Attachment sources in message order, derived from their owning blocks.
+    pub fn attachments(&self) -> Vec<&RemoteAttachmentSource> {
+        self.messages
+            .iter()
+            .flat_map(|message| message.content.iter())
+            .filter_map(|block| match block {
+                RemoteLlmContentBlock::Attachment { source } => Some(source.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Encodes one request inside the shared remote-protocol envelope.
     pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         crate::Envelope::new(self).encode_json()
@@ -140,7 +150,7 @@ impl RemoteLlmRequest {
         for (index, message) in self.messages.iter().enumerate() {
             message.validate(index)?;
         }
-        for (index, attachment) in self.attachments.iter().enumerate() {
+        for (index, attachment) in self.attachments().iter().enumerate() {
             attachment.validate(index)?;
         }
         for tool in &self.tools {
@@ -715,7 +725,7 @@ pub enum RemoteLlmContentBlock {
         cache_breakpoint: bool,
     },
     Attachment {
-        attachment_index: usize,
+        source: Box<RemoteAttachmentSource>,
     },
     ToolCall {
         call_id: String,

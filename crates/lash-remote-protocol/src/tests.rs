@@ -37,10 +37,6 @@ fn remote_llm_request_json_round_trips() {
                 cache_breakpoint: false,
             }],
         }],
-        attachments: vec![RemoteAttachmentSource::Inline {
-            media_type: "image/png".to_string(),
-            data_base64: "AQID".to_string(),
-        }],
         tools: Vec::new(),
         tool_choice: RemoteLlmToolChoice::Auto,
         output_spec: Some(RemoteLlmOutputSpec::JsonObject),
@@ -120,7 +116,6 @@ fn current_llm_envelope_rejects_userinfo_in_replay_route_without_echoing_it() {
                 cache_breakpoint: false,
             }],
         }],
-        attachments: Vec::new(),
         tools: Vec::new(),
         tool_choice: RemoteLlmToolChoice::Auto,
         output_spec: None,
@@ -161,10 +156,14 @@ fn remote_attachment_media_types_are_validated_syntactically() {
         request_id: "request-invalid-mime".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-invalid-mime"),
         model_intent: RemoteModelIntent::new("gpt-test"),
-        messages: Vec::new(),
-        attachments: vec![RemoteAttachmentSource::ExternalUrl {
-            media_type: "not a mime".to_string(),
-            url: "https://example.test/file".to_string(),
+        messages: vec![RemoteLlmMessage {
+            role: RemoteLlmRole::User,
+            content: vec![RemoteLlmContentBlock::Attachment {
+                source: Box::new(RemoteAttachmentSource::ExternalUrl {
+                    media_type: "invalid-mime".to_string(),
+                    url: "https://example.test/file".to_string(),
+                }),
+            }],
         }],
         tools: Vec::new(),
         tool_choice: RemoteLlmToolChoice::Auto,
@@ -182,9 +181,11 @@ fn remote_attachment_media_types_are_validated_syntactically() {
             .contains("syntactically valid type/subtype")
     );
 
-    request.attachments = vec![RemoteAttachmentSource::ExternalUrl {
-        media_type: "audio/mpeg".to_string(),
-        url: "https://example.test/file".to_string(),
+    request.messages[0].content = vec![RemoteLlmContentBlock::Attachment {
+        source: Box::new(RemoteAttachmentSource::ExternalUrl {
+            media_type: "audio/mpeg".to_string(),
+            url: "https://example.test/file".to_string(),
+        }),
     }];
     request
         .validate()

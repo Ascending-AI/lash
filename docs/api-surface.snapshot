@@ -5546,7 +5546,7 @@ lash::provider::GoogleDialect::Legacy
 lash::provider::GoogleDialect::is_legacy
 lash::provider::LlmContentBlock
 lash::provider::LlmContentBlock::Attachment
-lash::provider::LlmContentBlock::Attachment::attachment_idx
+lash::provider::LlmContentBlock::Attachment::source
 lash::provider::LlmContentBlock::Reasoning
 lash::provider::LlmContentBlock::Reasoning::replay
 lash::provider::LlmContentBlock::Reasoning::text
@@ -5971,7 +5971,7 @@ lash::remote::llm::RemoteLlmCallRecord::label
 lash::remote::llm::RemoteLlmCallRecord::replay_drops
 lash::remote::llm::RemoteLlmContentBlock
 lash::remote::llm::RemoteLlmContentBlock::Attachment
-lash::remote::llm::RemoteLlmContentBlock::Attachment::attachment_index
+lash::remote::llm::RemoteLlmContentBlock::Attachment::source
 lash::remote::llm::RemoteLlmContentBlock::Reasoning
 lash::remote::llm::RemoteLlmContentBlock::Reasoning::replay
 lash::remote::llm::RemoteLlmContentBlock::Reasoning::text
@@ -9845,7 +9845,7 @@ lash::tracing::TraceChargeSafetyDenialReason::RetryAfterExceedsCap
 lash::tracing::TraceChargeSafetyDenialReason::UnsafeRetryLimitExceeded
 lash::tracing::TraceContentBlock
 lash::tracing::TraceContentBlock::Attachment
-lash::tracing::TraceContentBlock::Attachment::attachment_idx
+lash::tracing::TraceContentBlock::Attachment::source
 lash::tracing::TraceContentBlock::Reasoning
 lash::tracing::TraceContentBlock::Reasoning::has_encrypted
 lash::tracing::TraceContentBlock::Reasoning::item_id

@@ -97,7 +97,6 @@ fn request(deltas: Arc<Mutex<Vec<String>>>) -> LlmRequest {
     LlmRequest {
         model: "claude-sonnet-4-6".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,

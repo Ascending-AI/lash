@@ -6,13 +6,18 @@ use crate::{ANTHROPIC_FILE_MIMES, ANTHROPIC_IMAGE_MIMES, AnthropicProvider};
 const ATTACHMENT_FIXTURE_BYTES: &[u8] = b"fig1417-attachment-fixture";
 
 fn request_with_inline_attachment(mime: &str) -> LlmRequest {
-    let mut request = LlmRequest {
+    let attachment = AttachmentSource::inline(
+        lash_core::MediaType::parse(mime).expect("fixture MIME"),
+        ATTACHMENT_FIXTURE_BYTES.to_vec(),
+    );
+    LlmRequest {
         model: "claude-sonnet-4-6".to_string(),
         messages: vec![LlmMessage::new(
             LlmRole::User,
-            vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
+            vec![LlmContentBlock::Attachment {
+                source: Box::new(attachment),
+            }],
         )],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Default::default(),
         tool_choice: Default::default(),
@@ -27,12 +32,7 @@ fn request_with_inline_attachment(mime: &str) -> LlmRequest {
         stream_events: None,
         generation: Default::default(),
         provider_trace: None,
-    };
-    request.attachments = vec![AttachmentSource::inline(
-        lash_core::MediaType::parse(mime).expect("fixture MIME"),
-        ATTACHMENT_FIXTURE_BYTES.to_vec(),
-    )];
-    request
+    }
 }
 
 #[test]

@@ -5825,7 +5825,6 @@ fn llm_spec() -> lash_core::LlmRequestSpec {
     lash_core::LlmRequestSpec {
         model: "model".to_string(),
         messages: Vec::new(),
-        attachments: Vec::new(),
         tools: Arc::new(Vec::new()),
         tool_choice: Default::default(),
         model_variant: Default::default(),

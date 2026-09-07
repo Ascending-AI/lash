@@ -28,7 +28,7 @@ impl OpenAiCompatibleProvider {
     }
 
     fn validate_chat_attachments(req: &LlmRequest) -> Result<(), LlmTransportError> {
-        for source in &req.attachments {
+        for source in &req.attachments() {
             let supported = source
                 .media_type()
                 .is_some_and(|mime| OPENAI_IMAGE_MIMES.contains(&mime.as_str()))
@@ -99,12 +99,8 @@ impl OpenAiCompatibleProvider {
                         }
                         text_parts.push(part);
                     }
-                    LlmContentBlock::Attachment { attachment_idx }
-                        if matches!(msg.role, LlmRole::User) =>
-                    {
-                        if let Some(att) = req.attachments.get(*attachment_idx) {
-                            text_parts.push(Self::chat_attachment_part(req, att));
-                        }
+                    LlmContentBlock::Attachment { source } if matches!(msg.role, LlmRole::User) => {
+                        text_parts.push(Self::chat_attachment_part(req, source));
                     }
                     LlmContentBlock::ToolCall {
                         call_id,

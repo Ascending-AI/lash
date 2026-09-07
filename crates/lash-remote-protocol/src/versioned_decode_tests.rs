@@ -45,7 +45,6 @@ fn streamed_llm_request() -> RemoteLlmRequest {
         ),
         model_intent: RemoteModelIntent::new("model-stream"),
         messages: Vec::new(),
-        attachments: Vec::new(),
         tools: Vec::new(),
         tool_choice: RemoteLlmToolChoice::Auto,
         output_spec: None,

@@ -19,7 +19,7 @@ pub enum DirectRole {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DirectPart {
     Text(String),
-    Attachment(usize),
+    Attachment(Box<AttachmentSource>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -53,8 +53,6 @@ pub struct DirectRequest {
     #[serde(default)]
     pub messages: Vec<DirectMessage>,
     #[serde(default)]
-    pub attachments: Vec<AttachmentSource>,
-    #[serde(default)]
     pub output: DirectOutputSpec,
     #[serde(default)]
     pub generation: crate::GenerationOptions,
@@ -78,6 +76,18 @@ pub struct DirectRequest {
 }
 
 impl DirectRequest {
+    /// Attachment sources in message order, derived from their owning blocks.
+    pub fn attachments(&self) -> Vec<&AttachmentSource> {
+        self.messages
+            .iter()
+            .flat_map(|message| message.parts.iter())
+            .filter_map(|part| match part {
+                DirectPart::Attachment(source) => Some(source.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn text(model: impl Into<String>, prompt: impl Into<String>) -> Self {
         Self {
             model: model.into(),
@@ -87,7 +97,6 @@ impl DirectRequest {
                 role: DirectRole::User,
                 parts: vec![DirectPart::Text(prompt.into())],
             }],
-            attachments: Vec::new(),
             output: DirectOutputSpec::Text,
             generation: crate::GenerationOptions::default(),
             stream_events: None,
@@ -316,7 +325,6 @@ pub(crate) fn build_llm_request(
         model_variant,
         model_capability,
         messages,
-        attachments,
         output,
         generation,
         stream_events: _,
@@ -354,10 +362,8 @@ pub(crate) fn build_llm_request(
                         });
                     }
                 }
-                DirectPart::Attachment(idx) => {
-                    blocks.push(LlmContentBlock::Attachment {
-                        attachment_idx: idx,
-                    });
+                DirectPart::Attachment(source) => {
+                    blocks.push(LlmContentBlock::Attachment { source });
                 }
             }
         }
@@ -389,7 +395,6 @@ pub(crate) fn build_llm_request(
     LlmRequest {
         model,
         messages: llm_messages,
-        attachments,
         resolved_stored: Default::default(),
         tools: Vec::new().into(),
         tool_choice: LlmToolChoice::None,
@@ -655,17 +660,17 @@ mod tests {
             .map(|bytes| String::from_utf8(bytes).expect("trace bytes are UTF-8"))
             .collect();
         let expected = [
-                r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace success"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":17,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
+                r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace success"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":18,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
                     .to_string(),
-                r#"{"attempts":[{"duration_ms":0,"ordinal":1,"outcome":"completed"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","response":{"duration_ms":0,"parts":[{"text":"direct success","type":"text"}],"request_model":"trace-model","terminal_reason":"stop","text":"direct success"},"schema_version":17,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_completed","usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}"#
+                r#"{"attempts":[{"duration_ms":0,"ordinal":1,"outcome":"completed"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","response":{"duration_ms":0,"parts":[{"text":"direct success","type":"text"}],"request_model":"trace-model","terminal_reason":"stop","text":"direct success"},"schema_version":18,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_completed","usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}"#
                     .to_string(),
-                r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace failure"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":17,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
+                r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace failure"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":18,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
                     .to_string(),
-                r#"{"attempts":[{"delay_ms":2000,"duration_ms":0,"ordinal":1,"outcome":"failed","reason":"unknown; retry: failure_before_response"},{"delay_ms":4000,"duration_ms":0,"ordinal":2,"outcome":"failed","reason":"unknown; retry: failure_before_response"},{"delay_ms":8000,"duration_ms":0,"ordinal":3,"outcome":"failed","reason":"unknown; retry: failure_before_response"},{"duration_ms":0,"ordinal":4,"outcome":"failed","reason":"unknown; retry: retry_budget_exhausted"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"error":{"message":"direct transport failure","retryable":true,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":17,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#
+                r#"{"attempts":[{"delay_ms":2000,"duration_ms":0,"ordinal":1,"outcome":"failed","reason":"unknown; retry: failure_before_response"},{"delay_ms":4000,"duration_ms":0,"ordinal":2,"outcome":"failed","reason":"unknown; retry: failure_before_response"},{"delay_ms":8000,"duration_ms":0,"ordinal":3,"outcome":"failed","reason":"unknown; retry: failure_before_response"},{"duration_ms":0,"ordinal":4,"outcome":"failed","reason":"unknown; retry: retry_budget_exhausted"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"error":{"message":"direct transport failure","retryable":true,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":18,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#
                     .to_string(),
-                r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace structured rejection"}],"role":"user"}],"model":"trace-model","output_spec":{"name":"answer_shape","schema":{"canonical":{"properties":{"answer":{"type":"string"}},"required":["answer"],"type":"object"}},"strict":true,"type":"json_schema"},"stream":false,"tool_choice":"none"},"schema_version":17,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
+                r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace structured rejection"}],"role":"user"}],"model":"trace-model","output_spec":{"name":"answer_shape","schema":{"canonical":{"properties":{"answer":{"type":"string"}},"required":["answer"],"type":"object"}},"strict":true,"type":"json_schema"},"stream":false,"tool_choice":"none"},"schema_version":18,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
                     .to_string(),
-                r#"{"attempts":[{"duration_ms":0,"ordinal":1,"outcome":"completed"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"error":{"code":"invalid_structured_output","message":"invalid response: \"answer\" is a required property","retryable":false,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":17,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#
+                r#"{"attempts":[{"duration_ms":0,"ordinal":1,"outcome":"completed"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"error":{"code":"invalid_structured_output","message":"invalid response: \"answer\" is a required property","retryable":false,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":18,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#
                     .to_string(),
             ];
 
@@ -995,57 +1000,14 @@ mod tests {
     }
 
     #[test]
-    fn build_llm_request_preserves_nonempty_content_and_drops_empty_messages() {
-        let provider = TestProvider::default().into_handle();
-        let request = DirectRequest {
-            model: "input-model".to_string(),
-            messages: vec![
-                DirectMessage {
-                    role: DirectRole::System,
-                    parts: vec![DirectPart::Text(String::new())],
-                },
-                DirectMessage {
-                    role: DirectRole::User,
-                    parts: vec![
-                        DirectPart::Text("hello".to_string()),
-                        DirectPart::Text(String::new()),
-                    ],
-                },
-                DirectMessage {
-                    role: DirectRole::Assistant,
-                    parts: vec![DirectPart::Attachment(2)],
-                },
-            ],
-            attachments: Vec::new(),
-            output: DirectOutputSpec::Text,
-            generation: crate::GenerationOptions::default(),
-            stream_events: None,
-            session_id: None,
-            model_variant: Default::default(),
-            model_capability: ModelCapability::default(),
-            caused_by: None,
-            replay: None,
-        };
-
-        let llm_request = build_llm_request(&provider, request, "transport-model".to_string());
-
-        assert_eq!(llm_request.model, "transport-model");
-        assert_eq!(
-            llm_request.messages.len(),
-            2,
-            "empty normalized messages must be dropped"
-        );
-        assert_eq!(llm_request.messages[0].role, LlmRole::User);
-        assert_eq!(llm_request.messages[0].blocks.len(), 1);
-        assert!(matches!(
-            &llm_request.messages[0].blocks[0],
-            LlmContentBlock::Text { text, .. } if text.as_ref() == "hello"
-        ));
-        assert_eq!(llm_request.messages[1].role, LlmRole::Assistant);
-        assert!(matches!(
-            &llm_request.messages[1].blocks[0],
-            LlmContentBlock::Attachment { attachment_idx: 2 }
-        ));
+    fn direct_request_rejects_legacy_dangling_attachment() {
+        let error = serde_json::from_value::<DirectRequest>(serde_json::json!({
+            "model": "input-model",
+            "messages": [{"role": "assistant", "parts": [{"Attachment": 2}]}],
+            "attachments": []
+        }))
+        .expect_err("legacy dangling source must fail decoding");
+        assert!(error.to_string().contains("invalid type"), "{error}");
     }
 
     #[test]

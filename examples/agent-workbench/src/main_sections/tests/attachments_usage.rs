@@ -266,8 +266,8 @@ async fn run_attachment_usage_gate(
     {
         let requests = provider_requests.lock_recover();
         assert_eq!(requests.len(), 1, "gate must make exactly one LLM call");
-        assert_eq!(requests[0].attachments.len(), 1);
-        let source = &requests[0].attachments[0];
+        assert_eq!(requests[0].attachments().len(), 1);
+        let source = &requests[0].attachments()[0];
         assert_eq!(
             source
                 .media_type()

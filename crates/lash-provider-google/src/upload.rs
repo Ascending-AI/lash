@@ -241,11 +241,11 @@ impl GoogleOAuthProvider {
         credential_scope_seed: &str,
         project_id: Option<&str>,
         req: &LlmRequest,
-    ) -> Result<(Vec<Value>, bool), LlmTransportError> {
-        let mut parts = Vec::with_capacity(req.attachments.len());
+    ) -> Result<(Vec<(AttachmentSource, Value)>, bool), LlmTransportError> {
+        let mut parts = Vec::with_capacity(req.attachments().len());
         let mut used_uploaded_files = false;
 
-        for source in &req.attachments {
+        for source in &req.attachments() {
             if let AttachmentSource::Stored { attachment_ref } = source {
                 let bytes = req
                     .attachment_bytes(source)
@@ -262,18 +262,23 @@ impl GoogleOAuthProvider {
                 {
                     Ok(uploaded) => {
                         used_uploaded_files = true;
-                        parts.push(json!({
-                            "fileData": {
-                                "mimeType": attachment_ref.media_type,
-                                "fileUri": uploaded.uri,
-                            }
-                        }));
+                        parts.push((
+                            (*source).clone(),
+                            json!({
+                                "fileData": {
+                                    "mimeType": attachment_ref.media_type,
+                                    "fileUri": uploaded.uri,
+                                }
+                            }),
+                        ));
                     }
                     Err(error) if error.status == Some(401) => return Err(error),
-                    Err(_) => parts.push(Self::inline_attachment_part(req, source)),
+                    Err(_) => {
+                        parts.push(((*source).clone(), Self::inline_attachment_part(req, source)))
+                    }
                 }
             } else {
-                parts.push(Self::inline_attachment_part(req, source));
+                parts.push(((*source).clone(), Self::inline_attachment_part(req, source)));
             }
         }
 

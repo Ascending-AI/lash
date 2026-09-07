@@ -8,7 +8,6 @@ fn replay_request(blocks: Vec<LlmContentBlock>) -> LlmRequest {
     LlmRequest {
         model: "model-a".to_string(),
         messages: vec![LlmMessage::new(LlmRole::Assistant, blocks)],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: std::sync::Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,

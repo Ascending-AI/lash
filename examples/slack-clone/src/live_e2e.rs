@@ -148,7 +148,7 @@ impl SpendLedger {
         &self,
         request: &LlmRequest,
     ) -> std::result::Result<Reservation, lash::provider::LlmTransportError> {
-        if !request.attachments.is_empty() {
+        if !request.attachments().is_empty() {
             return Err(typed_provider_error(
                 "InputBudgetExceeded",
                 ProviderFailureKind::Validation,

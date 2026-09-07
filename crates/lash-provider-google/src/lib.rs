@@ -87,7 +87,6 @@ mod tests {
         LlmRequest {
             model: "gemini-3.1-pro-preview".to_string(),
             messages: vec![LlmMessage::text(LlmRole::User, "hello")],
-            attachments: Vec::new(),
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::<LlmToolSpec>::new()),
             tool_choice: LlmToolChoice::Auto,
@@ -808,7 +807,12 @@ mod tests {
             bytes.clone(),
         );
         let mut req = request(None);
-        req.attachments = vec![attachment.clone()];
+        req.messages.push(LlmMessage::new(
+            LlmRole::User,
+            vec![LlmContentBlock::Attachment {
+                source: Box::new(attachment.clone()),
+            }],
+        ));
 
         GoogleOAuthProvider::validate_attachments(&req).expect("audio is supported");
         let part = GoogleOAuthProvider::inline_attachment_part(&req, &attachment);
@@ -832,7 +836,12 @@ mod tests {
                 media_type,
             );
             let mut req = request(None);
-            req.attachments = vec![attachment.clone()];
+            req.messages.push(LlmMessage::new(
+                LlmRole::User,
+                vec![LlmContentBlock::Attachment {
+                    source: Box::new(attachment.clone()),
+                }],
+            ));
 
             GoogleOAuthProvider::validate_attachments(&req).expect("provider file is supported");
             assert_eq!(
@@ -845,10 +854,15 @@ mod tests {
     #[test]
     fn google_accepts_webp_attachment_through_validation() {
         let mut req = request(None);
-        req.attachments = vec![AttachmentSource::inline(
-            lash_core::MediaType::parse("image/webp").unwrap(),
-            vec![0],
-        )];
+        req.messages.push(LlmMessage::new(
+            LlmRole::User,
+            vec![LlmContentBlock::Attachment {
+                source: Box::new(AttachmentSource::inline(
+                    lash_core::MediaType::parse("image/webp").unwrap(),
+                    vec![0],
+                )),
+            }],
+        ));
 
         GoogleOAuthProvider::validate_attachments(&req).expect("webp is supported");
     }

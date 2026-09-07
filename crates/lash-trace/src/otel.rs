@@ -631,7 +631,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             ));
             attrs.push(KeyValue::new(
                 attr::LASH_LLM_ATTACHMENT_COUNT,
-                request.attachments.len() as i64,
+                request.attachments().len() as i64,
             ));
             push_payload_json(&mut attrs, options, attr::LASH_LLM_REQUEST_JSON, request);
         }

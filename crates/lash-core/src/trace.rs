@@ -318,7 +318,6 @@ pub(crate) fn trace_llm_request(req: &LlmRequest) -> TraceLlmRequest {
             crate::ReasoningSelection::Effort(effort) => Some(effort.clone()),
         },
         messages: req.messages.iter().map(trace_llm_message).collect(),
-        attachments: req.attachments.iter().map(trace_attachment).collect(),
         tools: req.tools.iter().map(trace_tool_spec).collect(),
         tool_choice: match req.tool_choice {
             LlmToolChoice::Auto => "auto",
@@ -468,8 +467,8 @@ fn trace_content_block(block: &LlmContentBlock) -> TraceContentBlock {
             text: text.to_string(),
             cache_breakpoint: *cache_breakpoint,
         },
-        LlmContentBlock::Attachment { attachment_idx } => TraceContentBlock::Attachment {
-            attachment_idx: *attachment_idx,
+        LlmContentBlock::Attachment { source } => TraceContentBlock::Attachment {
+            source: Box::new(trace_attachment(source)),
         },
         LlmContentBlock::ToolCall {
             call_id,
@@ -801,7 +800,6 @@ mod span_identity_tests {
             model: "openai/test".to_string(),
             model_variant: Default::default(),
             messages: Vec::new(),
-            attachments: Vec::new(),
             tools: Vec::new(),
             tool_choice: "auto".to_string(),
             output_spec: None,

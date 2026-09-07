@@ -1094,7 +1094,6 @@ pub struct LlmAttachmentSpec {
 pub struct LlmRequestSpec {
     pub model: String,
     pub messages: Vec<LlmMessage>,
-    pub attachments: Vec<LlmAttachmentSpec>,
     pub tools: Arc<Vec<LlmToolSpec>>,
     pub tool_choice: LlmToolChoice,
     pub model_variant: crate::ReasoningSelection,
@@ -1107,15 +1106,42 @@ pub struct LlmRequestSpec {
 }
 
 impl LlmRequestSpec {
+    /// Sources are retained by their message blocks.
+    pub fn attachments(&self) -> Vec<&AttachmentSource> {
+        self.messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                crate::llm::types::LlmContentBlock::Attachment { source } => Some(source.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub(crate) async fn from_request(
         request: &CoreLlmRequest,
         attachment_store: &crate::SessionAttachmentStore,
     ) -> Result<Self, RuntimeEffectControllerError> {
+        let mut messages = request.messages.clone();
+        for message in &mut messages {
+            if !message
+                .blocks
+                .iter()
+                .any(|block| matches!(block, crate::llm::types::LlmContentBlock::Attachment { .. }))
+            {
+                continue;
+            }
+            for block in Arc::make_mut(&mut message.blocks) {
+                if let crate::llm::types::LlmContentBlock::Attachment { source } = block {
+                    **source = attachment_spec_from_attachment(source, attachment_store)
+                        .await?
+                        .source;
+                }
+            }
+        }
         Ok(Self {
             model: request.model.clone(),
-            messages: request.messages.clone(),
-            attachments: attachment_specs_from_attachments(&request.attachments, attachment_store)
-                .await?,
+            messages,
             tools: Arc::clone(&request.tools),
             tool_choice: request.tool_choice.clone(),
             model_variant: request.model_variant.clone(),
@@ -1134,11 +1160,6 @@ impl LlmRequestSpec {
         CoreLlmRequest {
             model: self.model,
             messages: self.messages,
-            attachments: self
-                .attachments
-                .into_iter()
-                .map(|spec| spec.source)
-                .collect(),
             resolved_stored: Default::default(),
             tools: self.tools,
             tool_choice: self.tool_choice,
@@ -1151,17 +1172,6 @@ impl LlmRequestSpec {
             provider_trace,
         }
     }
-}
-
-async fn attachment_specs_from_attachments(
-    attachments: &[AttachmentSource],
-    attachment_store: &crate::SessionAttachmentStore,
-) -> Result<Vec<LlmAttachmentSpec>, RuntimeEffectControllerError> {
-    let mut specs = Vec::with_capacity(attachments.len());
-    for attachment in attachments {
-        specs.push(attachment_spec_from_attachment(attachment, attachment_store).await?);
-    }
-    Ok(specs)
 }
 
 async fn attachment_spec_from_attachment(

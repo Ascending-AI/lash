@@ -157,10 +157,14 @@ mod tests {
         let attachment_store = crate::SessionAttachmentStore::in_memory();
         let llm_request = CoreLlmRequest {
             model: "model".to_string(),
-            messages: vec![LlmMessage::text(crate::llm::types::LlmRole::User, "hello")],
-            attachments: vec![AttachmentSource::inline(
-                crate::MediaType::parse("image/png").unwrap(),
-                vec![1, 2, 3, 4],
+            messages: vec![LlmMessage::new(
+                crate::llm::types::LlmRole::User,
+                vec![crate::llm::types::LlmContentBlock::Attachment {
+                    source: Box::new(AttachmentSource::inline(
+                        crate::MediaType::parse("image/png").unwrap(),
+                        vec![1, 2, 3, 4],
+                    )),
+                }],
             )],
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::new()),
@@ -189,7 +193,7 @@ mod tests {
         let live = decoded.into_request(None, None);
         assert_eq!(live.model, "model");
         assert!(matches!(
-            live.attachments[0],
+            live.attachments()[0],
             AttachmentSource::Stored { .. }
         ));
         assert!(live.stream_events.is_none());

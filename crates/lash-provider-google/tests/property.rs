@@ -97,7 +97,6 @@ fn request(deltas: Arc<Mutex<Vec<String>>>) -> LlmRequest {
     LlmRequest {
         model: "gemini-3.1-pro-preview".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,

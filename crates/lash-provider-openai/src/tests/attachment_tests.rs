@@ -3,15 +3,16 @@ use super::*;
 const FIXTURE_BYTES: &[u8] = b"fig1417-attachment-fixture";
 
 fn request_with_inline_attachment(mime: &str) -> LlmRequest {
-    let mut req = request(vec![LlmMessage::new(
-        LlmRole::User,
-        vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
-    )]);
-    req.attachments = vec![AttachmentSource::inline(
+    let attachment = AttachmentSource::inline(
         lash_core::MediaType::parse(mime).expect("fixture MIME"),
         FIXTURE_BYTES.to_vec(),
-    )];
-    req
+    );
+    request(vec![LlmMessage::new(
+        LlmRole::User,
+        vec![LlmContentBlock::Attachment {
+            source: Box::new(attachment),
+        }],
+    )])
 }
 
 fn fixture_data_url(mime: &str) -> String {
@@ -73,14 +74,16 @@ fn chat_image_allowlist_serializes_every_mime_as_image_url() {
 #[test]
 fn responses_pdf_url_serializes_as_input_file_url() {
     let provider = OpenAiProvider::new("key");
-    let mut req = request(vec![LlmMessage::new(
-        LlmRole::User,
-        vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
-    )]);
-    req.attachments = vec![AttachmentSource::external_url(
+    let attachment = AttachmentSource::external_url(
         lash_core::MediaType::parse("application/pdf").unwrap(),
         "https://example.test/report.pdf",
-    )];
+    );
+    let req = request(vec![LlmMessage::new(
+        LlmRole::User,
+        vec![LlmContentBlock::Attachment {
+            source: Box::new(attachment),
+        }],
+    )]);
 
     let body = provider.build_responses_request_body(&req, false).unwrap();
     assert_eq!(body["input"][0]["content"][0]["type"], "input_file");
@@ -98,15 +101,17 @@ fn responses_provider_file_ignores_optional_media_type_hint() {
         None,
         Some(lash_core::MediaType::parse("image/png").unwrap()),
     ] {
-        let mut req = request(vec![LlmMessage::new(
-            LlmRole::User,
-            vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
-        )]);
-        req.attachments = vec![AttachmentSource::provider_file(
+        let attachment = AttachmentSource::provider_file(
             lash_core::ProviderFileScope::new("openai", "credential"),
             "file-123",
             media_type,
-        )];
+        );
+        let req = request(vec![LlmMessage::new(
+            LlmRole::User,
+            vec![LlmContentBlock::Attachment {
+                source: Box::new(attachment),
+            }],
+        )]);
 
         let body = provider.build_responses_request_body(&req, false).unwrap();
         assert_eq!(

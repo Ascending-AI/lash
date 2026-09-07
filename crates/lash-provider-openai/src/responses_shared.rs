@@ -60,7 +60,7 @@ pub fn validate_responses_attachments(
     req: &LlmRequest,
     provider: &str,
 ) -> Result<(), LlmTransportError> {
-    for source in &req.attachments {
+    for source in &req.attachments() {
         match source {
             AttachmentSource::ProviderFile { provider_scope, .. }
                 if provider_scope.provider.eq_ignore_ascii_case("openai") => {}
@@ -479,9 +479,9 @@ pub fn build_responses_input(
                         }));
                     }
                 }
-                LlmContentBlock::Attachment { attachment_idx } => {
-                    if is_user && let Some(att) = req.attachments.get(*attachment_idx) {
-                        pending_content.push(input_attachment_part(req, att));
+                LlmContentBlock::Attachment { source } => {
+                    if is_user {
+                        pending_content.push(input_attachment_part(req, source));
                     }
                 }
                 LlmContentBlock::Reasoning { text, replay, .. } => {
@@ -610,10 +610,8 @@ fn collect_tool_result_image_folds(
         let mut parts: Vec<Value> = Vec::new();
         for (j, sibling) in msg.blocks.iter().enumerate().skip(idx + 1) {
             match sibling {
-                LlmContentBlock::Attachment { attachment_idx } => {
-                    if let Some(att) = req.attachments.get(*attachment_idx) {
-                        parts.push(input_attachment_part(req, att));
-                    }
+                LlmContentBlock::Attachment { source } => {
+                    parts.push(input_attachment_part(req, source));
                     consumed.insert(j);
                 }
                 LlmContentBlock::Text { text: t, .. } if t.starts_with("[Tool image:") => {

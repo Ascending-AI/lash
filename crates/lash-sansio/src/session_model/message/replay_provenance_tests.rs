@@ -58,7 +58,6 @@ fn replay_request_from_reopened_message(
     crate::llm::types::LlmRequest {
         model: serving_model.to_string(),
         messages: render_prompt(&reopened).messages,
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: crate::llm::types::LlmToolChoice::Auto,

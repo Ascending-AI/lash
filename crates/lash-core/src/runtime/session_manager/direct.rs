@@ -342,7 +342,7 @@ impl DirectCompletionCapability {
     ) -> Result<DirectEffectPlan, crate::PluginError> {
         let current = context.current;
         let usage_source = usage_source.to_string();
-        for source in &request.attachments {
+        for source in &request.attachments() {
             current
                 .host
                 .core

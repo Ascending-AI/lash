@@ -72,7 +72,7 @@ fn attachment_provider(requests: Arc<Mutex<Vec<crate::llm::types::LlmRequest>>>)
                         ..LlmResponse::default()
                     });
                 }
-                if let Some(source) = request.attachments.iter().find(|source| {
+                if let Some(source) = request.attachments().iter().find(|source| {
                     crate::llm::transport::known_attachment_acceptors(source).is_empty()
                 }) {
                     return Err(crate::llm::transport::unsupported_attachment_capability(
@@ -174,7 +174,7 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
     assert_eq!(requests.len(), 3);
     for request in &requests[1..] {
         assert!(
-            request.attachments.is_empty(),
+            request.attachments().is_empty(),
             "unmaterializable attachments must be omitted from provider requests"
         );
         let text = request_text(request);
@@ -229,8 +229,8 @@ async fn accepted_tool_attachment_round_trips_without_degradation() {
     let requests = requests.lock_recover();
     assert_eq!(requests.len(), 2);
     let replay = &requests[1];
-    assert_eq!(replay.attachments.len(), 1);
-    let source = &replay.attachments[0];
+    assert_eq!(replay.attachments().len(), 1);
+    let source = &replay.attachments()[0];
     let attachment_ref = source.stored_ref().expect("stored accepted attachment");
     assert_eq!(attachment_ref.media_type.as_str(), "image/png");
     assert_eq!(attachment_ref.label.as_deref(), Some("accepted.png"));

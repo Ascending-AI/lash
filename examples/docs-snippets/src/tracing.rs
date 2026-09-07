@@ -222,7 +222,6 @@ mod asserted_examples {
                     },
                 ],
             }],
-            attachments: Vec::new(),
             tools: vec![tool],
             tool_choice: "required".to_string(),
             output_spec: None,

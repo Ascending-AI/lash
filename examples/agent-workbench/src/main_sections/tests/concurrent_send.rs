@@ -1564,9 +1564,13 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
         .and_then(Value::as_str)
         .expect("committed turn id")
         .to_string();
-    let first =
-        run_workbench_turn_attempt(&state, &session_id, &turn_id, "committed before disconnect")
-            .await;
+    let first = Box::pin(run_workbench_turn_attempt(
+        &state,
+        &session_id,
+        &turn_id,
+        "committed before disconnect",
+    ))
+    .await;
     crate::restate::terminalize_turn_execution(
         &state,
         &session_id,
@@ -1655,8 +1659,13 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
         let session_id = session_id.clone();
         let first_turn_id = first_turn_id.clone();
         async move {
-            let result =
-                run_workbench_turn_attempt(&state, &session_id, &first_turn_id, "first send").await;
+            let result = Box::pin(run_workbench_turn_attempt(
+                &state,
+                &session_id,
+                &first_turn_id,
+                "first send",
+            ))
+            .await;
             crate::restate::terminalize_turn_execution(
                 &state,
                 &session_id,
