@@ -418,3 +418,234 @@ finish (await handle)?
     assert_deleted_session_conflict(&error, &old_session_id);
 }
 
+// FIG-2359: every session-bound route resolves its id through the one
+// admission read, so a retired id gets the same typed 409 everywhere —
+// side-effect ingress included — instead of a 200 for a dead session.
+#[test]
+fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict() {
+    run_async_test_on_stack_budget("session-fence-route-sweep-test", || async {
+        use futures_util::TryFutureExt as _;
+
+        let data_dir = tempfile::tempdir().expect("route sweep tempdir");
+        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let session_id = state.current_session_id();
+        retire_workbench_session(&state, &session_id).await;
+
+        let query = || SessionQuery {
+            session_id: Some(session_id.clone()),
+        };
+        type RouteCall<'a> =
+            std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AppError>> + 'a>>;
+        let routes: Vec<(&'static str, RouteCall<'_>)> = vec![
+            (
+                "GET /api/state",
+                Box::pin(app_state(State(state.clone()), Query(query())).map_ok(drop)),
+            ),
+            (
+                "GET /api/events",
+                Box::pin(
+                    session_events(
+                        State(state.clone()),
+                        Query(ProductEventsQuery {
+                            cursor: None,
+                            session_id: Some(session_id.clone()),
+                        }),
+                    )
+                    .map_ok(drop),
+                ),
+            ),
+            (
+                "GET /api/observations",
+                Box::pin(
+                    session_observations(
+                        State(state.clone()),
+                        Query(EventsQuery {
+                            cursor: None,
+                            session_id: Some(session_id.clone()),
+                        }),
+                    )
+                    .map_ok(drop),
+                ),
+            ),
+            (
+                "POST /api/turn",
+                Box::pin(
+                    send_turn(
+                        State(state.clone()),
+                        Query(query()),
+                        Json(TurnRequest {
+                            text: "refused".to_string(),
+                            model: Some("test-model".to_string()),
+                            model_variant: None,
+                            attachment_id: None,
+                        }),
+                    )
+                    .map_ok(drop),
+                ),
+            ),
+            (
+                "POST /api/turn/input",
+                Box::pin(
+                    enqueue_turn_input(
+                        State(state.clone()),
+                        Query(query()),
+                        Json(TurnInputRequest {
+                            text: "refused".to_string(),
+                            ingress: TurnInputIngressRequest::NextTurn,
+                        }),
+                    )
+                    .map_ok(drop),
+                ),
+            ),
+            (
+                "POST /api/turn/cancel",
+                Box::pin(cancel_turn(State(state.clone()), Query(query())).map_ok(drop)),
+            ),
+            (
+                "DELETE /api/session",
+                Box::pin(Box::pin(reset_chat(State(state.clone()), Query(query()))).map_ok(drop)),
+            ),
+            (
+                "POST /api/button-trigger",
+                Box::pin(
+                    button_trigger(
+                        State(state.clone()),
+                        Query(query()),
+                        Json(ButtonEventRequest {
+                            button: ButtonChoice::Red,
+                            model: Some("test-model".to_string()),
+                            model_variant: None,
+                        }),
+                    )
+                    .map_ok(drop),
+                ),
+            ),
+            (
+                "GET /api/triggers",
+                Box::pin(list_triggers(State(state.clone()), Query(query())).map_ok(drop)),
+            ),
+            (
+                "PUT /api/triggers/{key}/enabled",
+                Box::pin(
+                    set_trigger_enabled(
+                        AxumPath("any-subscription".to_string()),
+                        State(state.clone()),
+                        Query(query()),
+                        Json(TriggerEnabledRequest { enabled: false }),
+                    )
+                    .map_ok(drop),
+                ),
+            ),
+            (
+                "DELETE /api/triggers/{key}",
+                Box::pin(
+                    delete_trigger(
+                        AxumPath("any-subscription".to_string()),
+                        State(state.clone()),
+                        Query(query()),
+                    )
+                    .map_ok(drop),
+                ),
+            ),
+            (
+                "POST /api/accounts/{slug}/messages",
+                Box::pin(
+                    inject_message(
+                        AxumPath("personal".to_string()),
+                        State(state.clone()),
+                        Query(query()),
+                        Json(InjectMessageRequest {
+                            title: "refused".to_string(),
+                            text: "refused".to_string(),
+                            model: Some("test-model".to_string()),
+                            model_variant: None,
+                        }),
+                    )
+                    .map_ok(drop),
+                ),
+            ),
+            (
+                "GET /api/work",
+                Box::pin(list_work(State(state.clone()), Query(query())).map_ok(drop)),
+            ),
+            (
+                "GET /api/queued-work",
+                Box::pin(list_queued_work(State(state.clone()), Query(query())).map_ok(drop)),
+            ),
+            (
+                "POST /api/queued-work/{batch}/run",
+                Box::pin(
+                    run_queued_work_batch(
+                        AxumPath("any-batch".to_string()),
+                        State(state.clone()),
+                        Query(query()),
+                    )
+                    .map_ok(drop),
+                ),
+            ),
+            (
+                "POST /api/queued-work/{batch}/cancel",
+                Box::pin(
+                    cancel_queued_work_batch(
+                        AxumPath("any-batch".to_string()),
+                        State(state.clone()),
+                        Query(query()),
+                    )
+                    .map_ok(drop),
+                ),
+            ),
+            (
+                "GET /api/lashlang-graphs",
+                Box::pin(list_lashlang_graphs(State(state.clone()), Query(query())).map_ok(drop)),
+            ),
+            (
+                "GET /api/lashlang-graph/{key}",
+                Box::pin(
+                    lashlang_graph(
+                        AxumPath("any-graph".to_string()),
+                        State(state.clone()),
+                        Query(query()),
+                    )
+                    .map_ok(drop),
+                ),
+            ),
+            (
+                "POST /api/sessions/select",
+                Box::pin(
+                    select_session(
+                        State(state.clone()),
+                        Json(SessionSelectRequest {
+                            session_id: session_id.clone(),
+                        }),
+                    )
+                    .map_ok(drop),
+                ),
+            ),
+        ];
+        for (route, call) in routes {
+            let error = match call.await {
+                Ok(()) => panic!("{route} must refuse the retired session"),
+                Err(error) => error,
+            };
+            assert_eq!(
+                error.status,
+                StatusCode::CONFLICT,
+                "{route} must return the shared 409"
+            );
+            assert_eq!(
+                error.message,
+                deleted_session_message(&session_id),
+                "{route} must return the shared refusal message"
+            );
+            assert_eq!(
+                error.verdict,
+                AppErrorVerdict::Terminal,
+                "{route} must return the terminal verdict"
+            );
+        }
+        assert!(
+            state.messages_snapshot().is_empty(),
+            "no side-effect ingress committed anything for the retired session"
+        );
+    });
+}
