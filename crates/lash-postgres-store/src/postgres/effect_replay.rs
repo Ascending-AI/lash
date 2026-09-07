@@ -20,17 +20,16 @@ use crate::*;
 
 use lash_core::facade_support::effect_replay_driver;
 use lash_core::facade_support::effect_replay_driver::{
-    EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectFinalizeOutcome,
-    EffectGroupColumn, EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp, EffectReplayRowStore,
-    EffectReplayVocabulary, EffectRowDefect, EffectRowStatus, EffectTerminal,
-    StoreEffectReplayDriver, StoredEffectRow, StoredGroupSettlement, UnsettledGroupChild,
-    decide_effect_claim,
+    CompletionKeys, EffectClaimDecision, EffectClaimObservation, EffectClaimRequest,
+    EffectFinalizeOutcome, EffectGroupColumn, EffectGroupRecord, EffectLeaseFence,
+    EffectLeaseStamp, EffectReplayCapabilities, EffectReplayRowStore, EffectReplayVocabulary,
+    EffectRowDefect, EffectRowStatus, EffectTerminal, StoreEffectReplayDriver, StoredEffectRow,
+    StoredGroupSettlement, ToolBatchRedrive, UnsettledGroupChild, decide_effect_claim,
 };
 
 use lash_core::{GroupExecutors, StoreEffectGroupDrain};
 
 use crate::await_event::{PostgresAwaitEventBackend, postgres_await_events};
-use tokio_util::sync::CancellationToken;
 
 const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::postgres();
 
@@ -56,6 +55,33 @@ pub struct PostgresEffectHost {
 pub struct PostgresRuntimeEffectController {
     inner: Arc<PostgresEffectReplay>,
     scope: ExecutionScope,
+}
+
+// The `AwaitEventResolver` / `EffectHost` / `RuntimeEffectController` surface of
+// both types is the shared adapter in `effect_replay_driver::adapter`; this
+// store only says which driver each handle forwards to.
+impl effect_replay_driver::StoreReplayAdapter for PostgresEffectHost {
+    type Persistence = PostgresEffectReplayRowStore;
+    type AwaitEvents = PostgresAwaitEventBackend;
+    fn replay_driver(&self) -> &Arc<PostgresEffectReplay> {
+        &self.inner
+    }
+}
+
+impl effect_replay_driver::StoreReplayHost for PostgresEffectHost {}
+
+impl effect_replay_driver::StoreReplayAdapter for PostgresRuntimeEffectController {
+    type Persistence = PostgresEffectReplayRowStore;
+    type AwaitEvents = PostgresAwaitEventBackend;
+    fn replay_driver(&self) -> &Arc<PostgresEffectReplay> {
+        &self.inner
+    }
+}
+
+impl effect_replay_driver::StoreReplayController for PostgresRuntimeEffectController {
+    fn execution_scope(&self) -> &ExecutionScope {
+        &self.scope
+    }
 }
 
 impl PostgresEffectHost {
@@ -111,123 +137,6 @@ impl PostgresEffectHost {
     }
 }
 
-#[async_trait::async_trait]
-impl AwaitEventResolver for PostgresEffectHost {
-    async fn prepare_completion_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-        may_defer: bool,
-    ) -> Result<lash_core::CompletionKeyPreparation, RuntimeError> {
-        if !may_defer {
-            return Ok(lash_core::CompletionKeyPreparation::NotNeeded);
-        }
-        self.await_event_key(scope, wait)
-            .await
-            .map(lash_core::CompletionKeyPreparation::Issued)
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> Result<lash_core::AwaitEventKey, RuntimeError> {
-        self.inner.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> Result<lash_core::ResolveOutcome, RuntimeError> {
-        self.inner.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-    ) -> Result<Option<lash_core::Resolution>, RuntimeError> {
-        self.inner.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<lash_core::Resolution, RuntimeError> {
-        self.inner.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
-    }
-
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inner.cancel_await_events_for_session(session_id).await
-    }
-}
-
-#[async_trait::async_trait]
-impl EffectHost for PostgresEffectHost {
-    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
-        self
-    }
-
-    fn scoped<'run>(
-        &'run self,
-        scope: ExecutionScope,
-    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        scope.validate()?;
-        let controller = PostgresRuntimeEffectController {
-            inner: Arc::clone(&self.inner),
-            scope: scope.clone(),
-        };
-        ScopedEffectController::shared(Arc::new(controller), scope)
-    }
-
-    fn scoped_static(
-        &self,
-        scope: ExecutionScope,
-    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        scope.validate()?;
-        let controller = PostgresRuntimeEffectController {
-            inner: Arc::clone(&self.inner),
-            scope: scope.clone(),
-        };
-        Ok(Some(ScopedEffectController::shared(
-            Arc::new(controller),
-            scope,
-        )?))
-    }
-
-    async fn prepare_tool_intent(
-        &self,
-        _sink: &dyn lash_core::ToolIntentOutcomeSink,
-        _identity: &lash_core::ToolIntentIdentity,
-        _intent: lash_core::ToolIntent,
-    ) -> Result<lash_core::ToolIntentPreparation, RuntimeError> {
-        Ok(lash_core::ToolIntentPreparation::ControllerOwned)
-    }
-
-    async fn record_tool_intent_outcome(
-        &self,
-        sink: &dyn lash_core::ToolIntentOutcomeSink,
-        identity: &lash_core::ToolIntentIdentity,
-        submitted: lash_core::ToolIntent,
-        outcome: lash_core::ToolIntentExecutionOutcome,
-    ) -> Result<(), RuntimeError> {
-        sink.retain_in_journal(identity, submitted, outcome).await
-    }
-
-    async fn retire_effect_journal(
-        &self,
-        retirement: lash_core::EffectJournalRetirement,
-    ) -> Result<usize, RuntimeError> {
-        self.inner.retire_effect_journal(retirement).await
-    }
-}
-
 impl PostgresRuntimeEffectController {
     pub fn new(storage: &PostgresStorage, scope: ExecutionScope) -> Self {
         Self::with_options(storage, scope, PostgresEffectReplayOptions::default())
@@ -267,149 +176,6 @@ impl PostgresRuntimeEffectController {
     }
 }
 
-#[async_trait::async_trait]
-impl AwaitEventResolver for PostgresRuntimeEffectController {
-    async fn prepare_completion_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-        may_defer: bool,
-    ) -> Result<lash_core::CompletionKeyPreparation, RuntimeError> {
-        if !may_defer {
-            return Ok(lash_core::CompletionKeyPreparation::NotNeeded);
-        }
-        self.await_event_key(scope, wait)
-            .await
-            .map(lash_core::CompletionKeyPreparation::Issued)
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> Result<lash_core::AwaitEventKey, RuntimeError> {
-        self.inner.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> Result<lash_core::ResolveOutcome, RuntimeError> {
-        self.inner.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-    ) -> Result<Option<lash_core::Resolution>, RuntimeError> {
-        self.inner.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<lash_core::Resolution, RuntimeError> {
-        self.inner.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
-    }
-
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inner.cancel_await_events_for_session(session_id).await
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectController for PostgresRuntimeEffectController {
-    async fn runtime_effect_failure_disposition(
-        &self,
-        _code: lash_core::RuntimeErrorCode,
-    ) -> Result<lash_core::RuntimeEffectFailureDisposition, RuntimeError> {
-        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> Result<lash_core::TurnControlParticipation, RuntimeError> {
-        Ok(lash_core::TurnControlParticipation::DurableJournaled)
-    }
-
-    async fn execute_effect(
-        &self,
-        envelope: RuntimeEffectEnvelope,
-        local_executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        if matches!(
-            envelope.command,
-            lash_core::RuntimeEffectCommand::ToolBatch { .. }
-        ) {
-            // Re-enter the coordinator on redrive so each child command is
-            // reconstructed and crosses its own key-addressed journal row.
-            // The aggregate remains durable: after the child drain settles,
-            // the ordinary driver records (or validates) the ToolBatch outcome.
-            let settled = local_executor.execute(envelope.clone()).await;
-            return Box::pin(self.inner.execute_effect(
-                &self.scope,
-                envelope,
-                RuntimeEffectLocalExecutor::testing(move |_| async move { settled }),
-            ))
-            .await;
-        }
-        Box::pin(
-            self.inner
-                .execute_effect(&self.scope, envelope, local_executor),
-        )
-        .await
-    }
-
-    /// `true` exactly when this host has a registered
-    /// [`GroupExecutors`] resolver.
-    ///
-    /// The group methods below are implemented against the durable journal, so
-    /// the remaining question is where a child's runner comes from: the resolver
-    /// is what supplies the `'static` executors the flag's other half requires,
-    /// since a child must be able to outlive its caller to honor
-    /// [`LoserPolicy::RunToCompletion`](lash_core::LoserPolicy::RunToCompletion).
-    /// A host with no resolver would admit a group and then have nothing to run
-    /// it with, which is the drift this answer forecloses.
-    fn supports_effect_groups(&self) -> bool {
-        self.inner.supports_effect_groups()
-    }
-
-    /// Delegated to the shared driver exactly as `execute_effect` is: the group
-    /// host is one implementation over
-    /// [`EffectReplayRowStore`](lash_core::facade_support::effect_replay_driver::EffectReplayRowStore),
-    /// and this store contributes the substrate half of it rather than a second
-    /// copy of the state machine.
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, RuntimeEffectControllerError> {
-        Box::pin(self.inner.open_effect_group(&self.scope, group)).await
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, RuntimeEffectControllerError> {
-        Box::pin(self.inner.await_next_group_settlement(handle, cancel)).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        Box::pin(self.inner.close_effect_group(&handle, disposition)).await
-    }
-}
-
 fn build_effect_replay_driver(
     storage: &PostgresStorage,
     options: PostgresEffectReplayOptions,
@@ -436,7 +202,10 @@ fn build_effect_replay_driver(
 }
 
 /// PostgreSQL storage atoms for the durable effect journal.
-struct PostgresEffectReplayRowStore {
+///
+/// `pub` only because it names an associated type of the shared adapter; the
+/// module is private, so nothing outside this crate can reach it.
+pub struct PostgresEffectReplayRowStore {
     pool: PgPool,
 }
 
@@ -446,6 +215,13 @@ impl effect_replay_driver::sealed::EffectReplayBackend for PostgresEffectReplayR
 impl EffectReplayRowStore for PostgresEffectReplayRowStore {
     fn vocabulary(&self) -> EffectReplayVocabulary {
         VOCABULARY
+    }
+
+    fn capabilities(&self) -> EffectReplayCapabilities {
+        EffectReplayCapabilities {
+            completion_keys: CompletionKeys::Issued,
+            tool_batch_redrive: ToolBatchRedrive::ChildrenFirst,
+        }
     }
 
     async fn claim(
