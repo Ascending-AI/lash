@@ -20,6 +20,51 @@ def unregistered_ci_jobs(workflow_source: str) -> set[str]:
     return set(jobs) - set(aggregator_needs) - AGGREGATOR_ALLOWLIST
 
 
+class ConfidenceConclusionTests(unittest.TestCase):
+    def needs(self, event="workflow_dispatch", selector="full"):
+        return {job: {"result": "success" if event in {"schedule", "workflow_dispatch"}
+                      and ((selector != "full") if policy == "selector" else selector == "full")
+                      else "skipped"} for job, policy in ci_plan.CONFIDENCE_JOB_POLICY.items()}
+
+    def test_confidence_job_policy_matches_workflow_and_producer_edges(self):
+        jobs = yaml.safe_load(CI_WORKFLOW.with_name("confidence.yml").read_text())["jobs"]
+        self.assertEqual(set(jobs) - {"confidence-conclusion"}, set(ci_plan.CONFIDENCE_JOB_POLICY))
+        self.assertEqual(set(ci_plan.CONFIDENCE_JOB_POLICY), set(jobs["confidence-conclusion"]["needs"]))
+        self.assertEqual("full-producer", ci_plan.CONFIDENCE_JOB_POLICY["confidence-build"])
+        for job, policy in ci_plan.CONFIDENCE_JOB_POLICY.items():
+            if policy == "full-consumer":
+                self.assertEqual("confidence-build", jobs[job]["needs"])
+
+    def test_confidence_event_and_selector_policy(self):
+        for event in ("schedule", "workflow_dispatch", "push", "merge_group"):
+            for selector in (("full", "full+area:sim", "fast") if event != "schedule" else ("full",)):
+                with self.subTest(event=event, selector=selector):
+                    self.assertEqual([], ci_plan.evaluate_confidence_conclusion(self.needs(event, selector), event, selector))
+
+    def test_every_confidence_stage_fails_closed(self):
+        for job in ci_plan.CONFIDENCE_JOB_POLICY:
+            selector = "fast" if job == "confidence" else "full"
+            for result in ("failure", "cancelled", "skipped", None, "missing"):
+                with self.subTest(job=job, result=result):
+                    needs = self.needs(selector=selector)
+                    if result == "missing":
+                        del needs[job]
+                    else:
+                        needs[job]["result"] = result
+                    self.assertTrue(any(job in p for p in ci_plan.evaluate_confidence_conclusion(needs, "workflow_dispatch", selector)))
+
+    def test_confidence_rejects_unknown_jobs_policies_and_events(self):
+        from unittest.mock import patch
+        needs = self.needs()
+        needs["unmapped"] = {"result": "success"}
+        self.assertTrue(ci_plan.evaluate_confidence_conclusion(needs, "workflow_dispatch", "full"))
+        with patch.dict(ci_plan.CONFIDENCE_JOB_POLICY, {"confidence-build": "unknown"}):
+            self.assertTrue(ci_plan.evaluate_confidence_conclusion(self.needs(), "workflow_dispatch", "full"))
+        self.assertTrue(ci_plan.evaluate_confidence_conclusion(self.needs(), "unknown", "full"))
+        self.assertTrue(ci_plan.evaluate_confidence_conclusion(self.needs(), "schedule", "fast"))
+        self.assertTrue(ci_plan.evaluate_confidence_conclusion(self.needs(), "workflow_dispatch", ""))
+
+
 class ClassifyTests(unittest.TestCase):
     def test_docs_only_skips_every_expensive_family(self) -> None:
         plan = ci_plan.classify(

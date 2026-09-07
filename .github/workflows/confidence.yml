@@ -36,13 +36,8 @@ jobs:
   confidence:
     name: Confidence ${{ github.event_name == 'workflow_dispatch' && inputs.lane || 'full' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 360
-    env:
-      # The unscoped full lane's sim search seed space is partitioned across this job
-      # (shard 1/9) and the eight sim-search matrix jobs (shards 2/9..9/9), so
-      # the weekly fleet covers every configured seed exactly once. Area-qualified
-      # selectors and other lanes run their selected work unsharded.
-      LASH_SIM_SHARD: ${{ (github.event_name != 'workflow_dispatch' || inputs.lane == 'full') && '1/9' || '1/1' }}
+    timeout-minutes: 350
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.lane != 'full' }}
 
     steps:
       - name: Check out repository
@@ -51,6 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
@@ -59,7 +55,7 @@ jobs:
           git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+          git checkout --detach --force "${GITHUB_SHA}"
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -88,16 +84,11 @@ jobs:
           name: confidence-artifacts-attempt-${{ github.run_attempt }}
           path: target/confidence/**
 
-  sim-search:
-    name: Sim search shard ${{ matrix.shard }}/9
+  confidence-build:
+    name: Build full confidence once
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [2, 3, 4, 5, 6, 7, 8, 9]
-
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
       - name: Check out repository
         env:
@@ -105,6 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           git init .
+          git config gc.auto 0
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
           export GIT_CONFIG_COUNT=1
@@ -113,29 +105,685 @@ jobs:
           git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+          git checkout --detach --force "${GITHUB_SHA}"
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
-
-
-      - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          cache-bin: true
-          shared-key: confidence
+          components: llvm-tools-preview
 
       - name: Install protoc
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
-      - name: Run sim search shard
+      - name: Restore cargo cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: confidence
+          cache-bin: true
+          cache-workspace-crates: true
+
+      - name: Build full confidence
+        env:
+          LASH_CONFIDENCE_STAGE: build
+        run: bash scripts/confidence-gate.sh full
+
+      - name: Pack shared build
+        run: |
+          mkdir -p target/confidence-tools
+          cp "$HOME/.cargo/bin/cargo-mutants" "$HOME/.cargo/bin/cargo-llvm-cov" target/confidence-tools/
+          tar -cf "${RUNNER_TEMP}/build.tar" target
+
+      - name: Upload shared build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/build.tar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  confidence-harnesses:
+    name: Confidence harnesses
+    needs: confidence-build
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          components: llvm-tools-preview
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Download shared build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-build
+
+      - name: Restore shared build
+        run: |
+          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
+          mkdir -p "$HOME/.cargo/bin"
+          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+
+      - name: Run harnesses
+        env:
+          LASH_CONFIDENCE_STAGE: harnesses
+          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/harnesses
+        run: bash scripts/confidence-gate.sh full
+
+      - name: Upload harnesses evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: confidence-harnesses-attempt-${{ github.run_attempt }}
+          path: target/confidence/stages/harnesses/**
+          if-no-files-found: error
+
+  confidence-generated:
+    name: Confidence generated-${{ matrix.shard }}
+    needs: confidence-build
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          components: llvm-tools-preview
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Download shared build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-build
+
+      - name: Restore shared build
+        run: |
+          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
+          mkdir -p "$HOME/.cargo/bin"
+          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+
+      - name: Run generated
+        env:
+          LASH_CONFIDENCE_STAGE: generated
+          LASH_SIM_SHARD: ${{ matrix.shard }}/9
+          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/generated-${{ matrix.shard }}
+        run: bash scripts/confidence-gate.sh full
+
+      - name: Upload generated evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: confidence-generated-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
+          path: target/confidence/stages/generated-${{ matrix.shard }}/**
+          if-no-files-found: error
+
+  confidence-minimizer:
+    name: Confidence minimizer
+    needs: confidence-build
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          components: llvm-tools-preview
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Download shared build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-build
+
+      - name: Restore shared build
+        run: |
+          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
+          mkdir -p "$HOME/.cargo/bin"
+          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+
+      - name: Run minimizer
+        env:
+          LASH_CONFIDENCE_STAGE: minimizer
+          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/minimizer
+        run: bash scripts/confidence-gate.sh full
+
+      - name: Upload minimizer evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: confidence-minimizer-attempt-${{ github.run_attempt }}
+          path: target/confidence/stages/minimizer/**
+          if-no-files-found: error
+
+  confidence-backends:
+    name: Confidence backends
+    needs: confidence-build
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          components: llvm-tools-preview
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Download shared build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-build
+
+      - name: Restore shared build
+        run: |
+          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
+          mkdir -p "$HOME/.cargo/bin"
+          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+
+      - name: Run backends
+        env:
+          LASH_CONFIDENCE_STAGE: backends
+          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/backends
+        run: bash scripts/confidence-gate.sh full
+
+      - name: Upload backends evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: confidence-backends-attempt-${{ github.run_attempt }}
+          path: target/confidence/stages/backends/**
+          if-no-files-found: error
+
+  confidence-workers:
+    name: Confidence workers
+    needs: confidence-build
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          components: llvm-tools-preview
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Download shared build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-build
+
+      - name: Restore shared build
+        run: |
+          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
+          mkdir -p "$HOME/.cargo/bin"
+          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+
+      - name: Run workers
+        env:
+          LASH_CONFIDENCE_STAGE: workers
+          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/workers
+        run: bash scripts/confidence-gate.sh full
+
+      - name: Upload workers evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: confidence-workers-attempt-${{ github.run_attempt }}
+          path: target/confidence/stages/workers/**
+          if-no-files-found: error
+
+  confidence-coverage:
+    name: Confidence coverage
+    needs: confidence-build
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          components: llvm-tools-preview
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Download shared build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-build
+
+      - name: Restore shared build
+        run: |
+          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
+          mkdir -p "$HOME/.cargo/bin"
+          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+
+      - name: Run coverage
+        env:
+          LASH_CONFIDENCE_STAGE: coverage
+          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/coverage
+        run: bash scripts/confidence-gate.sh full
+
+      - name: Upload coverage evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: confidence-coverage-attempt-${{ github.run_attempt }}
+          path: target/confidence/stages/coverage/**
+          if-no-files-found: error
+
+  confidence-mutation-core:
+    name: Confidence mutation-core
+    needs: confidence-build
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          components: llvm-tools-preview
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Download shared build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-build
+
+      - name: Restore shared build
+        run: |
+          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
+          mkdir -p "$HOME/.cargo/bin"
+          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+
+      - name: Run mutation-core
+        env:
+          LASH_CONFIDENCE_STAGE: mutation-core
+          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/mutation-core
+        run: bash scripts/confidence-gate.sh full
+
+      - name: Upload mutation-core evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: confidence-mutation-core-attempt-${{ github.run_attempt }}
+          path: target/confidence/stages/mutation-core/**
+          if-no-files-found: error
+
+  confidence-mutation-sim:
+    name: Confidence mutation-sim
+    needs: confidence-build
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          components: llvm-tools-preview
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Download shared build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-build
+
+      - name: Restore shared build
+        run: |
+          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
+          mkdir -p "$HOME/.cargo/bin"
+          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+
+      - name: Run mutation-sim
+        env:
+          LASH_CONFIDENCE_STAGE: mutation-sim
+          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/mutation-sim
+        run: bash scripts/confidence-gate.sh full
+
+      - name: Upload mutation-sim evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: confidence-mutation-sim-attempt-${{ github.run_attempt }}
+          path: target/confidence/stages/mutation-sim/**
+          if-no-files-found: error
+
+  confidence-mutation-packages:
+    name: Confidence mutation-packages-${{ matrix.package }}
+    needs: confidence-build
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [lash-internal-core, lash-internal-lashlang, lash-internal-protocol-rlm, lash-internal-protocol-standard, lash-internal-sqlite-store, lash-internal-postgres-store]
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          components: llvm-tools-preview
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Download shared build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-build
+
+      - name: Restore shared build
+        run: |
+          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
+          mkdir -p "$HOME/.cargo/bin"
+          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+
+      - name: Run mutation-packages
+        env:
+          LASH_CONFIDENCE_STAGE: mutation-packages
+          LASH_CONFIDENCE_PACKAGE: ${{ matrix.package }}
+          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/mutation-packages-${{ matrix.package }}
+        run: bash scripts/confidence-gate.sh full
+
+      - name: Upload mutation-packages evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: confidence-mutation-packages-${{ matrix.package }}-attempt-${{ github.run_attempt }}
+          path: target/confidence/stages/mutation-packages-${{ matrix.package }}/**
+          if-no-files-found: error
+
+  sim-search:
+    name: Confidence sim-search-${{ matrix.shard }}
+    needs: confidence-build
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          components: llvm-tools-preview
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Download shared build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/confidence-build
+
+      - name: Restore shared build
+        run: |
+          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
+          mkdir -p "$HOME/.cargo/bin"
+          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+
+      - name: Run sim-search
+        env:
+          LASH_CONFIDENCE_BOOTSTRAP: "0"
         run: bash scripts/confidence-gate.sh "sim-search:${{ matrix.shard }}/9"
 
-      - name: Upload sim search artifacts
+      - name: Upload sim-search evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: confidence-sim-search-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
           path: target/confidence/sim-search/**
+          if-no-files-found: error
+
+  confidence-conclusion:
+    name: Confidence conclusion
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [confidence, confidence-build, confidence-harnesses, confidence-generated, confidence-minimizer, confidence-backends, confidence-workers, confidence-coverage, confidence-mutation-core, confidence-mutation-sim, confidence-mutation-packages, sim-search]
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Validate every confidence producer and consumer
+        env:
+          CONCLUSION_WORKFLOW: confidence
+          CONFIDENCE_SELECTOR: ${{ github.event_name == 'workflow_dispatch' && inputs.lane || 'full' }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/conclusion.py conclusion
