@@ -3,12 +3,13 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use lash_core::{ToolCallOutcome, ToolFailure, ToolFailureClass, ToolOutcome};
 use rmcp::model::{CancelledNotification, CancelledNotificationParam, ClientNotification};
 use rmcp::service::{Peer, RoleClient};
 use serde_json::json;
+use tokio::time::Instant;
 
 use super::*;
 
@@ -274,12 +275,41 @@ fn starts(root: &Path) -> u64 {
         .unwrap_or_default()
 }
 
-async fn wait_until(mut condition: impl FnMut() -> bool, message: &str) {
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while !condition() {
-        assert!(Instant::now() < deadline, "{message}");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+/// Waits for the actor's publication cell to satisfy `condition`: a watch
+/// rendezvous with the lifecycle actor, never a timed poll.
+async fn service_settles(
+    entry: &McpEntry,
+    condition: impl FnMut(&Option<Arc<PublishedService>>) -> bool,
+    message: &str,
+) {
+    entry
+        .service
+        .clone()
+        .wait_for(condition)
+        .await
+        .expect(message);
+}
+
+async fn published_generation(entry: &McpEntry, generation: u64) {
+    service_settles(
+        entry,
+        |service| {
+            service
+                .as_ref()
+                .is_some_and(|service| service.generation >= generation)
+        },
+        "lifecycle actor publishes the awaited generation",
+    )
+    .await;
+}
+
+async fn unpublished(entry: &McpEntry) {
+    service_settles(
+        entry,
+        Option::is_none,
+        "lifecycle actor unpublishes the dead service",
+    )
+    .await;
 }
 
 async fn peer(pool: &McpConnectionPool) -> Peer<RoleClient> {
@@ -418,16 +448,18 @@ async fn wall_clock_cap_fires_despite_continuous_progress() {
 
 #[tokio::test]
 async fn idle_timeout_emits_cancellation_notification() {
+    let clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(root.path(), MockOptions::default()).await;
-
-    let result = call(&pool).await;
+    let (pool, mut mock) = scripted::Mock::connect(root.path(), MockOptions::default()).await;
+    let mut request = Box::pin(call(&pool));
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    mock.started(&pool).await;
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    tokio::time::advance(Duration::from_millis(151)).await;
+    let result = request.await;
     assert_eq!(failure(&result).class, ToolFailureClass::Timeout);
-    wait_until(
-        || received(root.path()).contains("notifications/cancelled"),
-        "mock never received timeout cancellation notification",
-    )
-    .await;
+    mock.event("cancelled").await;
+    drop(clock);
     pool.shutdown_all().await;
 }
 
@@ -508,13 +540,12 @@ async fn silent_tool_and_failed_ping_disconnects_and_runs_one_reconnect_cycle() 
     )
     .await;
 
+    let mut lifecycle = scripted::Lifecycle::new();
+    lifecycle.observe(&entry(&pool));
     let result = call(&pool).await;
     assert_eq!(failure(&result).class, ToolFailureClass::Unavailable);
-    wait_until(
-        || starts(root.path()) == 2 && pool.server_statuses()[0].reconnect_exhausted,
-        "reconnect cycle did not become terminal",
-    )
-    .await;
+    lifecycle.reconnect_exhausted().await;
+    assert_eq!(starts(root.path()), 2);
     let status = &pool.server_statuses()[0];
     assert!(!status.connected);
     assert!(status.last_error.is_some());
@@ -628,15 +659,7 @@ async fn late_failure_after_reconnect_cannot_disconnect_healthy_service() {
         .expect("initial service")
         .generation;
     assert!(call(&pool).await.is_success());
-    wait_until(
-        || {
-            current_entry
-                .service_snapshot()
-                .is_some_and(|service| service.generation == 2)
-        },
-        "replacement connection must publish generation 2",
-    )
-    .await;
+    published_generation(&current_entry, 2).await;
     assert!(!current_entry.mark_disconnected(
         "late failure from generation 1".to_string(),
         stale_generation,
@@ -684,15 +707,7 @@ async fn stale_generation_timeout_does_not_contaminate_replacement_accounting() 
     .await;
     let current_entry = entry(&pool);
     assert!(call(&pool).await.is_success());
-    wait_until(
-        || {
-            current_entry
-                .service_snapshot()
-                .is_some_and(|service| service.generation == 2)
-        },
-        "replacement connection must publish generation 2",
-    )
-    .await;
+    published_generation(&current_entry, 2).await;
 
     let (reply, result) = tokio::sync::oneshot::channel();
     current_entry
@@ -733,22 +748,12 @@ async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
             .refresh_tools(initial.peer.clone(), 1)
             .await;
     });
-    tokio::time::timeout(Duration::from_secs(2), hook.reached.notified())
-        .await
-        .expect("generation-1 refresh did not pause before install");
+    hook.reached.notified().await;
     assert!(current_entry.mark_disconnected(
         "replace generation 1 while its catalog refresh is paused".to_string(),
         1,
     ));
-    wait_until(
-        || {
-            current_entry
-                .service_snapshot()
-                .is_some_and(|service| service.generation == 2)
-        },
-        "replacement connection must publish generation 2",
-    )
-    .await;
+    published_generation(&current_entry, 2).await;
     hook.release.notify_one();
     refresh.await.expect("stale refresh task");
     current_entry
@@ -786,15 +791,7 @@ async fn failed_connection_attempt_reserves_a_unique_generation() {
         .establish()
         .await
         .expect_err("first attempt must fail before publication");
-    wait_until(
-        || {
-            entry
-                .service_snapshot()
-                .is_some_and(|service| service.generation == 2)
-        },
-        "a failed unpublished attempt must consume generation 1",
-    )
-    .await;
+    published_generation(&entry, 2).await;
     entry.shutdown().await;
 }
 
@@ -822,15 +819,7 @@ async fn successful_respawn_resets_reconnect_attempt_budget_but_not_generation()
         .await
         .expect_err("generation 1 must fail before publication");
 
-    wait_until(
-        || {
-            entry
-                .service_snapshot()
-                .is_some_and(|service| service.generation == 4)
-        },
-        "successful generation 2 did not reset the reconnect-attempt budget for generations 3 and 4",
-    )
-    .await;
+    published_generation(&entry, 4).await;
     assert_eq!(starts(root.path()), 4);
     assert!(!pool.server_statuses()[0].reconnect_exhausted);
     pool.shutdown_all().await;
@@ -868,11 +857,8 @@ async fn crash_per_call_preserves_backoff_across_successful_respawns() {
     for expected_starts in 2..=4 {
         let result = call(&pool).await;
         assert!(result.is_success(), "crash-after-call result: {result:?}");
-        wait_until(
-            || starts(root.path()) >= expected_starts && pool.server_statuses()[0].connected,
-            "crash-per-call server did not reconnect",
-        )
-        .await;
+        published_generation(&entry, expected_starts).await;
+        assert!(starts(root.path()) >= expected_starts);
     }
 
     assert_eq!(
@@ -912,27 +898,11 @@ async fn disconnect_immediately_after_reconnect_publish_rearms_actor() {
         .establish()
         .await
         .expect_err("the eager connection must fail");
-    wait_until(
-        || {
-            entry
-                .service_snapshot()
-                .is_some_and(|service| service.generation == 2)
-        },
-        "reconnect did not publish generation 2",
-    )
-    .await;
+    published_generation(&entry, 2).await;
     assert!(pool.server_statuses()[0].connected);
 
     assert!(entry.mark_disconnected("forced post-publish disconnect".to_string(), 2));
-    wait_until(
-        || {
-            entry
-                .service_snapshot()
-                .is_some_and(|service| service.generation == 3)
-        },
-        "disconnect immediately after reconnect publication left the actor wedged",
-    )
-    .await;
+    published_generation(&entry, 3).await;
     assert_eq!(starts(root.path()), 3);
     pool.shutdown_all().await;
 }
@@ -952,11 +922,8 @@ async fn keepalive_rearms_an_exhausted_reconnect_loop() {
     )
     .await;
 
-    wait_until(
-        || starts(root.path()) >= 3 && pool.server_statuses()[0].connected,
-        "keepalive did not re-arm exhausted reconnect attempts",
-    )
-    .await;
+    published_generation(&entry(&pool), 3).await;
+    assert!(starts(root.path()) >= 3);
     pool.shutdown_all().await;
 }
 
@@ -989,14 +956,26 @@ fn process_state(pid: u32) -> Option<char> {
 }
 
 #[cfg(target_os = "linux")]
-fn wait_for_process_state(pid: u32, expected: char, timeout: Duration) -> Option<char> {
-    let deadline = Instant::now() + timeout;
+fn alive(pid: u32) -> bool {
+    process_state(pid).is_some_and(|state| state != 'Z')
+}
+
+/// Waits for `pid` to exit, waking on the process-wide child-exit signal
+/// rather than polling; returns `Some('Z')` for an unreaped child and `None`
+/// once it is reaped.
+#[cfg(target_os = "linux")]
+async fn exited_process_state(pid: u32) -> Option<char> {
+    let mut exits = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::child())
+        .expect("observe child exits");
     loop {
         let state = process_state(pid);
-        if state == Some(expected) || Instant::now() >= deadline {
+        if state.is_none() || state == Some('Z') {
             return state;
         }
-        std::thread::sleep(Duration::from_millis(10));
+        exits
+            .recv()
+            .await
+            .expect("child exit signal stream stays open");
     }
 }
 
@@ -1030,13 +1009,11 @@ fn dropping_connected_pool_kills_misbehaving_stdio_child_and_logs() {
 
     drop(pool);
 
-    let state = wait_for_process_state(pid, 'Z', Duration::from_secs(3));
-    if state != Some('Z') {
-        let _ = std::process::Command::new("kill")
-            .args(["-KILL", &pid.to_string()])
-            .status();
-        panic!("stdio child PID {pid} must be killed (zombie), not still running; state={state:?}");
-    }
+    assert_eq!(
+        runtime.block_on(exited_process_state(pid)),
+        Some('Z'),
+        "stdio child PID {pid} must be killed (zombie), not still running"
+    );
     let trace = String::from_utf8(traces.0.lock_recover().clone()).unwrap();
     assert!(
         trace.contains(&format!("pid={pid}")),
@@ -1084,89 +1061,102 @@ fn shutdown_all_fully_reaps_stdio_child() {
 }
 
 #[cfg(target_os = "linux")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn shutdown_all_joins_actor_reaping_stdio_child() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
-            behavior: "close_streams_when_triggered_after_list",
+            behavior: "ignore_eof",
             ..MockOptions::default()
         },
     )
     .await;
-    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
-        .expect("stdio child must publish its pid")
-        .parse()
-        .expect("numeric child pid");
-    let entry = Arc::clone(pool.entries.read_recover().get("mock").expect("mock entry"));
+    let current_entry = entry(&pool);
+    lifecycle.observe(&current_entry);
 
-    let started = Instant::now();
-    std::fs::write(root.path().join("close"), "close")
-        .expect("release mock to close its transport streams");
-    tokio::time::timeout(Duration::from_secs(2), async {
-        loop {
-            if entry.service_snapshot().is_none() {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("actor must unpublish the service during graceful reap");
+    let closed = Instant::now();
+    mock.command("close").await;
+    let (pid, deadline) = lifecycle.grace_armed().await;
+    assert_eq!(pid, current_entry.active_pid.load(Ordering::SeqCst));
     assert_eq!(
-        wait_for_process_state(pid, 'S', Duration::from_secs(2)),
-        Some('S'),
-        "actor must own a still-running child during graceful reap"
-    );
-
-    pool.shutdown_all().await;
-    let elapsed = started.elapsed();
-    eprintln!("actor-reap shutdown elapsed: {elapsed:?}");
-    assert!(
-        elapsed >= Duration::from_secs(3),
-        "close-ignoring child did not receive the configured three-second default grace: {elapsed:?}"
+        deadline,
+        closed + Duration::from_secs(3),
+        "close-ignoring child receives the configured three-second default grace"
     );
     assert!(
-        elapsed < Duration::from_secs(5),
-        "actor-reap shutdown exceeded its literal elapsed ceiling: {elapsed:?}"
+        current_entry.service_snapshot().is_none(),
+        "actor unpublishes the service before graceful reap"
+    );
+    assert!(
+        alive(pid),
+        "actor owns a still-running child during graceful reap"
     );
 
+    let mut shutdown = Box::pin(pool.shutdown_all());
+    assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
+    clock.expire(deadline).await;
+    assert_eq!(
+        lifecycle.kill_issued(pid).await,
+        Instant::now() + Duration::from_secs(1),
+        "the kill request arms the one-second default cleanup deadline"
+    );
+    lifecycle.reaped(pid).await;
+    shutdown.await;
+    assert_eq!(
+        Instant::now(),
+        deadline + scripted::TIMER_TICK,
+        "joining the reaper needs no controlled time past the grace deadline"
+    );
     assert_eq!(
         process_state(pid),
         None,
-        "shutdown_all must join the actor and fully reap stdio child PID {pid}"
+        "shutdown_all joins the actor and fully reaps stdio child PID {pid}"
     );
 }
 
 #[cfg(target_os = "linux")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn startup_timeout_drops_handshake_before_graceful_reap() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
-    let started = Instant::now();
-    let pool = connect_mock(
+    let pool = lifecycle.observed_pool();
+    let config = mock_config(
         root.path(),
         MockOptions {
             behavior: "exit_on_eof_after_hang_initialize",
             startup_timeout_ms: 400,
             ..MockOptions::default()
         },
-    )
-    .await;
-    let elapsed = started.elapsed();
-    assert!(
-        elapsed >= Duration::from_millis(400),
-        "startup timeout returned before the literal 400ms timeout: {elapsed:?}"
     );
+    let mut attaching = Box::pin(pool.attach("mock".to_string(), config));
+    assert!(futures_util::poll!(attaching.as_mut()).is_pending());
+    let pid = lifecycle.spawned().await;
+    let handshake_started = Instant::now();
+    tokio::time::advance(Duration::from_millis(399)).await;
     assert!(
-        elapsed < Duration::from_millis(1_500),
-        "startup timeout did not preserve a live grace window below the literal 1500ms ceiling: {elapsed:?}"
+        futures_util::poll!(attaching.as_mut()).is_pending(),
+        "startup timeout fires no earlier than the literal 400ms"
+    );
+    clock
+        .expire(handshake_started + Duration::from_millis(400))
+        .await;
+    let (reaping, grace) = lifecycle.grace_armed().await;
+    assert_eq!(reaping, pid);
+    assert_eq!(grace, Instant::now() + Duration::from_secs(3));
+    lifecycle.reaped(pid).await;
+    attaching
+        .await
+        .expect("attach keeps a timed-out server registered");
+    assert_eq!(
+        Instant::now(),
+        handshake_started + Duration::from_millis(400) + scripted::TIMER_TICK,
+        "a child that exits on EOF is reaped without consuming the grace period"
     );
 
-    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
-        .expect("startup-timeout child pid")
-        .parse()
-        .expect("numeric child pid");
     assert_eq!(
         std::fs::read_to_string(root.path().join("eof")).expect("stdin EOF marker"),
         "closed"
@@ -1182,10 +1172,12 @@ async fn startup_timeout_drops_handshake_before_graceful_reap() {
 }
 
 #[cfg(target_os = "linux")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn shutdown_during_live_handshake_reaps_actor_owned_child() {
+    let _clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
-    let pool = Arc::new(McpConnectionPool::empty());
+    let pool = lifecycle.observed_pool();
     let attaching_pool = Arc::clone(&pool);
     let config = mock_config(
         root.path(),
@@ -1197,33 +1189,21 @@ async fn shutdown_during_live_handshake_reaps_actor_owned_child() {
     );
     let attaching =
         tokio::spawn(async move { attaching_pool.attach("mock".to_string(), config).await });
-    wait_until(
-        || {
-            std::fs::read_to_string(root.path().join("pid"))
-                .ok()
-                .and_then(|pid| pid.parse::<u32>().ok())
-                .is_some()
-        },
-        "handshake child did not publish its PID",
-    )
-    .await;
-    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
-        .expect("handshake child pid")
-        .parse()
-        .expect("numeric child pid");
-    assert_eq!(
-        wait_for_process_state(pid, 'S', Duration::from_secs(2)),
-        Some('S')
-    );
+    let pid = lifecycle.spawned().await;
     let current_entry = entry(&pool);
+    assert_eq!(current_entry.active_pid.load(Ordering::SeqCst), pid);
+    assert!(alive(pid));
 
     let started = Instant::now();
     pool.shutdown_all().await;
-    let elapsed = started.elapsed();
-    assert!(
-        elapsed < Duration::from_secs(5),
-        "live-handshake shutdown exceeded the configured five-second default bound: {elapsed:?}"
+    assert_eq!(
+        started.elapsed(),
+        Duration::ZERO,
+        "a child that exits on EOF is reaped without consuming the grace period"
     );
+    let (reaping, _) = lifecycle.grace_armed().await;
+    assert_eq!(reaping, pid);
+    lifecycle.reaped(pid).await;
     assert!(matches!(
         attaching.await.expect("attach task panicked"),
         Err(McpError::PoolShutDown)
@@ -1237,8 +1217,10 @@ async fn shutdown_during_live_handshake_reaps_actor_owned_child() {
 }
 
 #[cfg(target_os = "linux")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn non_finishing_child_reap_records_literal_pid_at_cleanup_deadline() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
     let pool = Arc::new(McpConnectionPool::empty());
     let current_entry = McpEntry::new(
@@ -1253,27 +1235,44 @@ async fn non_finishing_child_reap_records_literal_pid_at_cleanup_deadline() {
         McpHostServices::default(),
     )
     .with_never_finishing_child_reap();
+    lifecycle.observe(&current_entry);
     assert!(
         pool.install("mock".to_string(), Arc::clone(&current_entry))
             .is_ok()
     );
     current_entry.establish().await.expect("connect mock");
-    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
-        .expect("stdio child pid")
-        .parse()
-        .expect("numeric child pid");
+    let pid = lifecycle.spawned().await;
+    assert_eq!(pid, current_entry.active_pid.load(Ordering::SeqCst));
 
     let started = Instant::now();
-    pool.shutdown_all().await;
-    let elapsed = started.elapsed();
-    assert!(
-        elapsed >= Duration::from_secs(4),
-        "non-finishing reap returned before the default 3s + 1s cleanup deadline: {elapsed:?}"
+    let mut shutdown = Box::pin(pool.shutdown_all());
+    assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
+    let (reaping, grace) = lifecycle.grace_armed().await;
+    assert_eq!(reaping, pid);
+    assert_eq!(
+        grace,
+        started + Duration::from_secs(3),
+        "the default three-second grace precedes the kill request"
+    );
+    clock.expire(grace).await;
+    let cleanup = lifecycle.kill_issued(pid).await;
+    assert_eq!(
+        cleanup,
+        Instant::now() + Duration::from_secs(1),
+        "the default one-second cleanup deadline follows the kill request"
+    );
+    assert_eq!(
+        exited_process_state(pid).await,
+        Some('Z'),
+        "the kill request lands even though the reaper refuses to observe the exit"
     );
     assert!(
-        elapsed < Duration::from_secs(5),
-        "non-finishing reap exceeded the default five-second entry bound: {elapsed:?}"
+        futures_util::poll!(shutdown.as_mut()).is_pending(),
+        "abandonment waits for the cleanup deadline"
     );
+    clock.expire(cleanup).await;
+    shutdown.await;
+    assert_eq!(Instant::now(), cleanup + scripted::TIMER_TICK);
     assert_eq!(
         current_entry.last_error.read_recover().as_deref(),
         Some(
@@ -1284,55 +1283,56 @@ async fn non_finishing_child_reap_records_literal_pid_at_cleanup_deadline() {
         )
     );
     assert_eq!(current_entry.active_pid.load(Ordering::SeqCst), 0);
-    assert_eq!(
-        wait_for_process_state(pid, 'Z', Duration::from_secs(1)),
-        Some('Z')
-    );
+    assert_eq!(process_state(pid), Some('Z'));
 }
 
 #[cfg(target_os = "linux")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn shutdown_preempts_in_flight_keepalive_probe_and_reaps_child() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
-            behavior: "ignore_eof",
+            behavior: "silent_ping_ignore_eof",
             probe_interval_ms: 10,
             probe_timeout_ms: 5_000,
             ..MockOptions::default()
         },
     )
     .await;
-    wait_until(
-        || received(root.path()).contains("\"method\":\"ping\""),
-        "keepalive probe did not enter its unresponsive wait",
-    )
-    .await;
-    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
-        .expect("stdio child pid")
-        .parse()
-        .expect("numeric child pid");
+    let current_entry = entry(&pool);
+    lifecycle.observe(&current_entry);
+    let pid = current_entry.active_pid.load(Ordering::SeqCst);
+    tokio::time::advance(Duration::from_millis(11)).await;
+    mock.event("ping").await;
 
     let started = Instant::now();
-    pool.shutdown_all().await;
-    let elapsed = started.elapsed();
-    assert!(
-        elapsed >= Duration::from_millis(2_900),
-        "close-ignoring child did not receive its configured three-second default grace: {elapsed:?}"
+    let mut shutdown = Box::pin(pool.shutdown_all());
+    assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
+    let (reaping, deadline) = lifecycle.grace_armed().await;
+    assert_eq!(reaping, pid);
+    assert_eq!(
+        deadline,
+        started + Duration::from_secs(3),
+        "shutdown preempts the unanswered five-second probe and starts the grace period at once"
     );
-    assert!(
-        elapsed < Duration::from_secs(5),
-        "probe-preempting shutdown exceeded the configured five-second default bound: {elapsed:?}"
-    );
+    clock.expire(deadline).await;
+    lifecycle.kill_issued(pid).await;
+    lifecycle.reaped(pid).await;
+    shutdown.await;
+    assert_eq!(Instant::now(), deadline + scripted::TIMER_TICK);
     assert_eq!(process_state(pid), None);
 }
 
 #[cfg(target_os = "linux")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn cancelling_shutdown_owner_aborts_actor_on_live_runtime() {
+    let _clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
             behavior: "ignore_eof",
@@ -1341,23 +1341,17 @@ async fn cancelling_shutdown_owner_aborts_actor_on_live_runtime() {
     )
     .await;
     let current_entry = entry(&pool);
+    lifecycle.observe(&current_entry);
     let actor = current_entry
         .actor_handle
         .lock_recover()
         .as_ref()
         .expect("actor handle")
         .abort_handle();
-    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
-        .expect("stdio child pid")
-        .parse()
-        .expect("numeric child pid");
     let shutdown_pool = Arc::clone(&pool);
     let shutdown = tokio::spawn(async move { shutdown_pool.shutdown_all().await });
-    wait_until(
-        || root.path().join("eof").exists(),
-        "shutdown did not enter the child grace period",
-    )
-    .await;
+    let (pid, _) = lifecycle.grace_armed().await;
+    mock.event("eof").await;
 
     shutdown.abort();
     assert!(
@@ -1366,24 +1360,29 @@ async fn cancelling_shutdown_owner_aborts_actor_on_live_runtime() {
             .expect_err("first shutdown must be cancelled")
             .is_cancelled()
     );
-    wait_until(
-        || actor.is_finished(),
-        "cancelled shutdown left actor running",
-    )
-    .await;
-    tokio::time::timeout(Duration::from_secs(1), pool.shutdown_all())
-        .await
-        .expect("second shutdown must return immediately");
-    assert!(actor.is_finished());
+    lifecycle.abandoned(pid).await;
+    assert!(
+        actor.is_finished(),
+        "cancelling the shutdown owner aborts the actor it was joining"
+    );
+    let started = Instant::now();
+    pool.shutdown_all().await;
     assert_eq!(
-        wait_for_process_state(pid, 'Z', Duration::from_secs(2)),
+        started.elapsed(),
+        Duration::ZERO,
+        "second shutdown returns immediately"
+    );
+    assert_eq!(
+        exited_process_state(pid).await,
         Some('Z'),
-        "abort-on-drop must kill the actor-owned child rather than leave it running"
+        "abort-on-drop kills the actor-owned child rather than leaving it running"
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn shutdown_all_bounds_an_actor_that_never_finishes() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let traces = TraceBuffer::default();
     let subscriber = tracing_subscriber::fmt()
         .without_time()
@@ -1399,20 +1398,16 @@ async fn shutdown_all_bounds_an_actor_that_never_finishes() {
         McpHostServices::default(),
     )
     .with_shutdown_wedge(424_242);
+    lifecycle.observe(&entry);
     assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
 
     let started = Instant::now();
-    pool.shutdown_all().await;
-    let elapsed = started.elapsed();
-
-    assert!(
-        elapsed >= Duration::from_secs(4),
-        "mock actor wait returned before the literal total bound: {elapsed:?}"
-    );
-    assert!(
-        elapsed < Duration::from_secs(6),
-        "bounded actor join exceeded its literal elapsed ceiling: {elapsed:?}"
-    );
+    let mut shutdown = Box::pin(pool.shutdown_all());
+    assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
+    assert_eq!(lifecycle.wedged().await, 424_242);
+    clock
+        .elapses(shutdown.as_mut(), started, Duration::from_secs(5))
+        .await;
     assert_eq!(pool.entries.read_recover().len(), 0);
     assert_eq!(
         entry.last_error.read_recover().as_deref(),
@@ -1429,8 +1424,10 @@ async fn shutdown_all_bounds_an_actor_that_never_finishes() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn shutdown_policy_shortens_shutdown_all_budget() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
     let pool = Arc::new(McpConnectionPool::empty());
     let shutdown_policy = McpShutdownPolicy {
@@ -1443,20 +1440,16 @@ async fn shutdown_policy_shortens_shutdown_all_budget() {
         McpHostServices::default(),
     )
     .with_shutdown_wedge(424_242);
+    lifecycle.observe(&entry);
     assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
 
     let started = Instant::now();
-    pool.shutdown_all().await;
-    let elapsed = started.elapsed();
-
-    assert!(
-        elapsed >= Duration::from_millis(900),
-        "custom shutdown budget returned before its one-second scheduling margin: {elapsed:?}"
-    );
-    assert!(
-        elapsed < Duration::from_secs(2),
-        "sub-second shutdown policy did not shorten shutdown_all: {elapsed:?}"
-    );
+    let mut shutdown = Box::pin(pool.shutdown_all());
+    assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
+    assert_eq!(lifecycle.wedged().await, 424_242);
+    clock
+        .elapses(shutdown.as_mut(), started, Duration::from_millis(1_100))
+        .await;
     assert_eq!(pool.entries.read_recover().len(), 0);
     let reason = entry
         .last_error
@@ -1469,8 +1462,10 @@ async fn shutdown_policy_shortens_shutdown_all_budget() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn abandoned_actor_teardown_releases_normalized_prefix_reservation() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let first_root = tempfile::tempdir().unwrap();
     let replacement_root = tempfile::tempdir().unwrap();
     let pool = Arc::new(McpConnectionPool::empty());
@@ -1480,22 +1475,20 @@ async fn abandoned_actor_teardown_releases_normalized_prefix_reservation() {
         McpHostServices::default(),
     )
     .with_shutdown_wedge(333_333);
+    lifecycle.observe(&abandoned);
     assert!(
         pool.install("Mock Server".to_string(), Arc::clone(&abandoned))
             .is_ok()
     );
 
     let started = Instant::now();
-    pool.detach("Mock Server").await.expect("detach entry");
-    let elapsed = started.elapsed();
-    assert!(
-        elapsed >= Duration::from_secs(4),
-        "abandoned detach returned before the literal actor bound: {elapsed:?}"
-    );
-    assert!(
-        elapsed < Duration::from_secs(6),
-        "abandoned detach exceeded its literal ceiling: {elapsed:?}"
-    );
+    let mut detaching = Box::pin(pool.detach("Mock Server"));
+    assert!(futures_util::poll!(detaching.as_mut()).is_pending());
+    assert_eq!(lifecycle.wedged().await, 333_333);
+    clock
+        .elapses(detaching.as_mut(), started, Duration::from_secs(5))
+        .await
+        .expect("detach entry");
     assert_eq!(pool.entries.read_recover().len(), 0);
 
     let replacement = McpEntry::new(
@@ -1512,44 +1505,44 @@ async fn abandoned_actor_teardown_releases_normalized_prefix_reservation() {
 }
 
 #[cfg(target_os = "linux")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn eager_attach_cannot_publish_after_shutdown() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
     let hook = Arc::new(ActorPauseHook::default());
-    let pool = Arc::new(McpConnectionPool::empty());
+    let pool = lifecycle.observed_pool();
     *pool.mid_establish_hook.write_recover() = Some(Arc::clone(&hook));
 
     let attaching_pool = Arc::clone(&pool);
     let config = mock_config(root.path(), MockOptions::default());
     let attaching =
         tokio::spawn(async move { attaching_pool.attach("mock".to_string(), config).await });
-    tokio::time::timeout(Duration::from_secs(2), hook.reached.notified())
-        .await
-        .expect("eager attach actor did not pause mid-establish");
-    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
-        .expect("stdio child must publish its pid")
-        .parse()
-        .expect("numeric child pid");
-    assert_eq!(
-        wait_for_process_state(pid, 'S', Duration::from_secs(2)),
-        Some('S'),
-        "paused lifecycle actor must still own its exact live child"
+    let pid = lifecycle.spawned().await;
+    hook.reached.notified().await;
+    assert_eq!(entry(&pool).active_pid.load(Ordering::SeqCst), pid);
+    assert!(
+        alive(pid),
+        "paused lifecycle actor still owns its exact live child"
     );
 
     let shutdown_pool = Arc::clone(&pool);
     let shutdown = tokio::spawn(async move {
         shutdown_pool.shutdown_all().await;
     });
-    tokio::time::timeout(Duration::from_secs(2), async {
-        loop {
-            if pool.entries.read_recover().is_empty() {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("shutdown did not remove the attaching entry");
+    let (reaping, deadline) = lifecycle.grace_armed().await;
+    assert_eq!(reaping, pid);
+    assert!(
+        pool.entries.read_recover().is_empty(),
+        "shutdown removes the attaching entry before joining its actor"
+    );
+    assert!(
+        !attaching.is_finished(),
+        "attach stays in flight until its actor reports the shutdown"
+    );
+    clock.expire(deadline).await;
+    lifecycle.kill_issued(pid).await;
+    lifecycle.reaped(pid).await;
     let attach_result = attaching.await.expect("attach task panicked");
     shutdown.await.expect("shutdown task panicked");
 
@@ -1563,29 +1556,23 @@ async fn eager_attach_cannot_publish_after_shutdown() {
 }
 
 #[cfg(target_os = "linux")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn aborted_mid_establish_attach_still_allows_bounded_shutdown() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
     let hook = Arc::new(ActorPauseHook::default());
-    let pool = Arc::new(McpConnectionPool::empty());
+    let pool = lifecycle.observed_pool();
     *pool.mid_establish_hook.write_recover() = Some(Arc::clone(&hook));
 
     let attaching_pool = Arc::clone(&pool);
     let config = mock_config(root.path(), MockOptions::default());
     let attaching =
         tokio::spawn(async move { attaching_pool.attach("mock".to_string(), config).await });
-    tokio::time::timeout(Duration::from_secs(2), hook.reached.notified())
-        .await
-        .expect("lifecycle actor did not pause mid-establish");
-    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
-        .expect("stdio child must publish its pid")
-        .parse()
-        .expect("numeric child pid");
-    assert_eq!(
-        wait_for_process_state(pid, 'S', Duration::from_secs(2)),
-        Some('S'),
-        "mid-establish actor must own the exact live child"
-    );
+    let pid = lifecycle.spawned().await;
+    hook.reached.notified().await;
+    assert_eq!(entry(&pool).active_pid.load(Ordering::SeqCst), pid);
+    assert!(alive(pid), "mid-establish actor owns the exact live child");
 
     attaching.abort();
     assert!(
@@ -1595,12 +1582,19 @@ async fn aborted_mid_establish_attach_still_allows_bounded_shutdown() {
             .is_cancelled()
     );
     let started = Instant::now();
-    pool.shutdown_all().await;
-    let elapsed = started.elapsed();
-
-    assert!(
-        elapsed < Duration::from_secs(6),
-        "shutdown after an aborted attach exceeded its literal ceiling: {elapsed:?}"
+    let mut shutdown = Box::pin(pool.shutdown_all());
+    assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
+    let (reaping, deadline) = lifecycle.grace_armed().await;
+    assert_eq!(reaping, pid);
+    assert_eq!(deadline, started + Duration::from_secs(3));
+    clock.expire(deadline).await;
+    lifecycle.kill_issued(pid).await;
+    lifecycle.reaped(pid).await;
+    shutdown.await;
+    assert_eq!(
+        Instant::now(),
+        deadline + scripted::TIMER_TICK,
+        "shutdown after an aborted attach is bounded by the grace period alone"
     );
     assert_eq!(pool.entries.read_recover().len(), 0);
     assert_eq!(
@@ -1628,23 +1622,13 @@ async fn publish_then_die_while_attach_is_in_flight_reconnects() {
     );
     let attaching =
         tokio::spawn(async move { attaching_pool.attach("mock".to_string(), config).await });
-    tokio::time::timeout(Duration::from_secs(2), hook.reached.notified())
-        .await
-        .expect("attach did not pause after the first service publication");
+    hook.reached.notified().await;
     assert!(
         !attaching.is_finished(),
         "attach must remain in flight at the seam"
     );
 
-    wait_until(
-        || {
-            entry(&pool)
-                .service_snapshot()
-                .is_some_and(|service| service.generation == 2)
-        },
-        "published service death did not trigger generation 2 while attach was in flight",
-    )
-    .await;
+    published_generation(&entry(&pool), 2).await;
     assert_eq!(starts(root.path()), 2);
     assert!(
         !attaching.is_finished(),
@@ -1659,8 +1643,10 @@ async fn publish_then_die_while_attach_is_in_flight_reconnects() {
     pool.shutdown_all().await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn two_wedged_entries_shutdown_concurrently_within_one_total_bound() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let first_root = tempfile::tempdir().unwrap();
     let second_root = tempfile::tempdir().unwrap();
     let pool = Arc::new(McpConnectionPool::empty());
@@ -1676,6 +1662,8 @@ async fn two_wedged_entries_shutdown_concurrently_within_one_total_bound() {
         McpHostServices::default(),
     )
     .with_shutdown_wedge(222_222);
+    lifecycle.observe(&first);
+    lifecycle.observe(&second);
     assert!(
         pool.install("first".to_string(), Arc::clone(&first))
             .is_ok()
@@ -1686,17 +1674,14 @@ async fn two_wedged_entries_shutdown_concurrently_within_one_total_bound() {
     );
 
     let started = Instant::now();
-    pool.shutdown_all().await;
-    let elapsed = started.elapsed();
-
-    assert!(
-        elapsed >= Duration::from_secs(4),
-        "wedged actors returned before the literal total bound: {elapsed:?}"
-    );
-    assert!(
-        elapsed < Duration::from_secs(6),
-        "two wedged actors serialized their total bounds: {elapsed:?}"
-    );
+    let mut shutdown = Box::pin(pool.shutdown_all());
+    assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
+    let mut wedged = [lifecycle.wedged().await, lifecycle.wedged().await];
+    wedged.sort_unstable();
+    assert_eq!(wedged, [111_111, 222_222]);
+    clock
+        .elapses(shutdown.as_mut(), started, Duration::from_secs(5))
+        .await;
     assert_eq!(pool.entries.read_recover().len(), 0);
     assert_eq!(
         first.last_error.read_recover().as_deref(),
@@ -1712,8 +1697,9 @@ async fn two_wedged_entries_shutdown_concurrently_within_one_total_bound() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn actor_panic_surfaces_as_join_error_and_shutdown_continues() {
+    let _clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
     let pool = Arc::new(McpConnectionPool::empty());
     let entry = McpEntry::new(
@@ -1730,30 +1716,24 @@ async fn actor_panic_surfaces_as_join_error_and_shutdown_continues() {
     .with_panicking_actor();
     assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
     entry.establish().await.expect("initial connection");
-    tokio::time::timeout(Duration::from_secs(2), async {
-        loop {
-            if entry
-                .actor_handle
-                .lock_recover()
-                .as_ref()
-                .is_some_and(tokio::task::JoinHandle::is_finished)
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("injected lifecycle actor panic did not occur");
-    let started = Instant::now();
-    tokio::time::timeout(Duration::from_secs(2), pool.shutdown_all())
-        .await
-        .expect("panicked actor made shutdown exceed its literal ceiling");
-    let elapsed = started.elapsed();
-
+    let mut publication = entry.service.clone();
+    // The publication cell closes when the panicking actor drops its sender.
+    while publication.changed().await.is_ok() {}
     assert!(
-        elapsed < Duration::from_secs(2),
-        "actor panic shutdown exceeded its literal elapsed ceiling: {elapsed:?}"
+        entry
+            .actor_handle
+            .lock_recover()
+            .as_ref()
+            .is_some_and(tokio::task::JoinHandle::is_finished),
+        "injected lifecycle actor panic did not occur"
+    );
+
+    let started = Instant::now();
+    pool.shutdown_all().await;
+    assert_eq!(
+        started.elapsed(),
+        Duration::ZERO,
+        "a panicked actor costs shutdown no controlled time"
     );
     assert!(
         entry
@@ -1766,15 +1746,55 @@ async fn actor_panic_surfaces_as_join_error_and_shutdown_continues() {
     assert_eq!(pool.entries.read_recover().len(), 0);
 }
 
-#[cfg(unix)]
+/// A host runtime built without the IO driver has no SIGCHLD stream. The
+/// stdio child still connects (its pipes run on the blocking pool), and
+/// `shutdown_all` must reap it through the clocked poll: no actor panic, no
+/// unreaped child.
+#[cfg(target_os = "linux")]
+#[test]
+fn shutdown_all_reaps_stdio_child_on_a_runtime_without_a_signal_driver() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("time-only runtime");
+    let pool = runtime.block_on(connect_mock(root.path(), MockOptions::default()));
+    let entry = entry(&pool);
+    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
+        .expect("mock records its pid")
+        .trim()
+        .parse()
+        .expect("mock pid");
+    assert!(alive(pid), "mock child runs after connect");
+
+    runtime.block_on(pool.shutdown_all());
+
+    assert_eq!(
+        process_state(pid),
+        None,
+        "shutdown_all reaps the child without a SIGCHLD stream"
+    );
+    assert_eq!(
+        entry.last_error.read_recover().as_deref(),
+        None,
+        "the lifecycle actor must finish shutdown without a JoinError"
+    );
+    assert!(
+        entry.actor_handle.lock_recover().is_none(),
+        "shutdown_all joins the lifecycle actor"
+    );
+}
+
+#[cfg(target_os = "linux")]
 #[test]
 fn runtime_drop_does_not_wait_for_in_flight_graceful_child_reap() {
     let root = tempfile::tempdir().unwrap();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
+    let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("test runtime");
+    let clock = runtime.block_on(scripted::Clock::new());
+    let mut lifecycle = scripted::Lifecycle::new();
     let (pool, mut mock) = runtime.block_on(scripted::Mock::connect(
         root.path(),
         MockOptions {
@@ -1782,20 +1802,28 @@ fn runtime_drop_does_not_wait_for_in_flight_graceful_child_reap() {
             ..MockOptions::default()
         },
     ));
+    lifecycle.observe(&entry(&pool));
     let shutdown_pool = Arc::clone(&pool);
     runtime.spawn(async move {
         shutdown_pool.shutdown_all().await;
     });
     drop(pool);
+    let (pid, _) = runtime.block_on(lifecycle.grace_armed());
     runtime.block_on(mock.event("eof"));
+    // Release the clock's blocking task before teardown joins the blocking
+    // pool; the reaper itself stays in flight inside its grace period.
+    runtime.block_on(async move { drop(clock) });
 
-    let started = Instant::now();
     drop(runtime);
-    let elapsed = started.elapsed();
-    eprintln!("runtime teardown elapsed: {elapsed:?}");
-    assert!(
-        elapsed < Duration::from_millis(500),
-        "runtime teardown waited for in-flight shutdown's graceful child reaper: {elapsed:?}"
+    lifecycle.abandoned_after_runtime_drop(pid);
+    let observer = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("observer runtime");
+    assert_eq!(
+        observer.block_on(exited_process_state(pid)),
+        Some('Z'),
+        "runtime teardown kills the abandoned child without waiting for its reaper"
     );
 }
 
@@ -1927,30 +1955,18 @@ async fn dead_transport_short_circuits_before_dispatch_timeout() {
 #[tokio::test]
 async fn idle_service_death_updates_status_without_a_tool_call() {
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
-            behavior: "close_streams_when_triggered_after_list",
             reconnect_initial_ms: 5_000,
             ..MockOptions::default()
         },
     )
     .await;
-    let peer = peer(&pool).await;
-    std::fs::write(root.path().join("close"), "close")
-        .expect("release mock to close its transport streams");
-    wait_until(
-        || peer.is_transport_closed(),
-        "mock transport did not close",
-    )
-    .await;
-
-    wait_until(
-        || !pool.server_statuses()[0].connected,
-        "idle service death did not update pool status",
-    )
-    .await;
+    mock.command("close").await;
+    unpublished(&entry(&pool)).await;
     let status = &pool.server_statuses()[0];
+    assert!(!status.connected);
     assert!(
         status
             .last_error
@@ -1988,11 +2004,7 @@ async fn discovery_publishes_received_catalog_before_observing_same_burst_quit()
         .establish()
         .await
         .expect("a received tools/list catalog must publish before transport EOF is observed");
-    wait_until(
-        || !pool.server_statuses()[0].connected,
-        "same-burst service quit was not observed after catalog publication",
-    )
-    .await;
+    unpublished(&entry).await;
 
     let status = &pool.server_statuses()[0];
     assert!(!status.connected);
@@ -2012,46 +2024,46 @@ async fn discovery_publishes_received_catalog_before_observing_same_burst_quit()
 }
 
 #[cfg(target_os = "linux")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn service_quit_records_cause_before_close_ignoring_child_cleanup() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
-            behavior: "close_streams_when_triggered_after_list",
+            behavior: "ignore_eof",
             reconnect_initial_ms: 5_000,
             ..MockOptions::default()
         },
     )
     .await;
-    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
-        .expect("stdio child must publish its pid")
-        .parse()
-        .expect("numeric child pid");
+    let current_entry = entry(&pool);
+    lifecycle.observe(&current_entry);
+    let pid = current_entry.active_pid.load(Ordering::SeqCst);
     assert!(pool.server_statuses()[0].connected);
 
-    std::fs::write(root.path().join("close"), "close")
-        .expect("release mock to close its transport streams");
-    wait_until(
-        || !pool.server_statuses()[0].connected,
-        "service quit did not unpublish the connection",
-    )
-    .await;
+    mock.command("close").await;
+    let (reaping, deadline) = lifecycle.grace_armed().await;
+    assert_eq!(reaping, pid);
     let status_during_cleanup = pool.server_statuses()[0].clone();
-    let process_state_during_cleanup = wait_for_process_state(pid, 'S', Duration::from_secs(2));
+    assert!(
+        alive(pid),
+        "status is sampled while the close-ignoring child is still alive"
+    );
 
-    pool.shutdown_all().await;
+    let mut shutdown = Box::pin(pool.shutdown_all());
+    assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
+    clock.expire(deadline).await;
+    lifecycle.kill_issued(pid).await;
+    lifecycle.reaped(pid).await;
+    shutdown.await;
 
     assert!(!status_during_cleanup.connected);
     assert_eq!(
         status_during_cleanup.last_error,
         Some("MCP server `mock` service quit: Ok(Closed)".to_string()),
         "service quit cause must be visible throughout bounded child cleanup"
-    );
-    assert_eq!(
-        process_state_during_cleanup,
-        Some('S'),
-        "status must be sampled while the close-ignoring child is still alive"
     );
     assert_eq!(
         process_state(pid),
@@ -2073,11 +2085,7 @@ async fn interval_probe_marks_unresponsive_peer_disconnected() {
     )
     .await;
 
-    wait_until(
-        || !pool.server_statuses()[0].connected,
-        "background liveness probe did not disconnect peer",
-    )
-    .await;
+    unpublished(&entry(&pool)).await;
     assert!(
         pool.server_statuses()[0]
             .last_error

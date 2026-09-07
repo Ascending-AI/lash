@@ -86,6 +86,10 @@ pub struct McpConnectionPool {
     mid_establish_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
     #[cfg(test)]
     attach_return_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
+    /// Copied onto every entry this pool installs, so tests observe the
+    /// lifecycle of children spawned before they can reach the entry.
+    #[cfg(test)]
+    lifecycle_observer: RwLock<Option<crate::service_lifecycle::LifecycleObserver>>,
 }
 
 /// Connection status of one configured server, for host/UI observability.
@@ -139,6 +143,10 @@ struct McpEntry {
     shutdown_wedge_pid: AtomicU32,
     #[cfg(test)]
     never_finish_child_reap: AtomicBool,
+    /// Test-only rendezvous with the lifecycle actor and its child guard:
+    /// deadlines armed, kills issued, children reaped or abandoned.
+    #[cfg(test)]
+    lifecycle_observer: RwLock<Option<crate::service_lifecycle::LifecycleObserver>>,
 }
 
 #[derive(Clone)]
@@ -184,6 +192,8 @@ impl McpConnectionPool {
             mid_establish_hook: RwLock::new(None),
             #[cfg(test)]
             attach_return_hook: RwLock::new(None),
+            #[cfg(test)]
+            lifecycle_observer: RwLock::new(None),
         }
     }
 
@@ -299,6 +309,10 @@ impl McpConnectionPool {
         server_name: String,
         entry: Arc<McpEntry>,
     ) -> Result<Option<Arc<McpEntry>>, (Arc<McpEntry>, McpError)> {
+        #[cfg(test)]
+        if let Some(observer) = self.lifecycle_observer.read_recover().clone() {
+            *entry.lifecycle_observer.write_recover() = Some(observer);
+        }
         let previous = {
             let mut entries = self.entries.write_recover();
             if self.shut_down.load(Ordering::SeqCst) {
@@ -770,6 +784,8 @@ impl McpEntry {
                 shutdown_wedge_pid: AtomicU32::new(0),
                 #[cfg(test)]
                 never_finish_child_reap: AtomicBool::new(false),
+                #[cfg(test)]
+                lifecycle_observer: RwLock::new(None),
             }
         })
     }
@@ -1003,6 +1019,11 @@ impl McpEntry {
             }
         }
         abort_on_drop.disarm();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn lifecycle_observer(&self) -> Option<crate::service_lifecycle::LifecycleObserver> {
+        self.lifecycle_observer.read_recover().clone()
     }
 
     #[cfg(test)]

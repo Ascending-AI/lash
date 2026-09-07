@@ -165,6 +165,8 @@ impl LifecycleActor {
         });
         #[cfg(test)]
         let never_finish_child_reap = entry.never_finish_child_reap.load(Ordering::SeqCst);
+        #[cfg(test)]
+        let lifecycle_observer = entry.lifecycle_observer();
         drop(entry);
 
         let ConnectingService {
@@ -189,6 +191,14 @@ impl LifecycleActor {
         #[cfg(test)]
         if never_finish_child_reap && let Some(child) = stdio_child.as_mut() {
             child.never_finish_reap();
+        }
+        #[cfg(test)]
+        if let Some(observer) = lifecycle_observer
+            && let Some(child) = stdio_child.as_mut()
+        {
+            let _ = observer
+                .send(crate::service_lifecycle::LifecycleEvent::Spawned { pid: child.pid() });
+            child.observe(observer);
         }
         let mut connection_attempt = Box::pin(timeout(startup_timeout, handshake));
         let connected = loop {
@@ -772,6 +782,10 @@ impl LifecycleActor {
             attempts = self.reconnect_attempts,
             "MCP reconnect attempts exhausted"
         );
+        #[cfg(test)]
+        if let Some(observer) = entry.lifecycle_observer() {
+            let _ = observer.send(crate::service_lifecycle::LifecycleEvent::ReconnectExhausted);
+        }
     }
 
     #[cfg(test)]
@@ -839,12 +853,16 @@ impl LifecycleActor {
 
     #[cfg(test)]
     async fn wedge_shutdown_if_injected(&self) {
-        let pid = self
-            .entry
-            .upgrade()
-            .map_or(0, |entry| entry.shutdown_wedge_pid.load(Ordering::SeqCst));
+        let Some(entry) = self.entry.upgrade() else {
+            return;
+        };
+        let pid = entry.shutdown_wedge_pid.load(Ordering::SeqCst);
         if pid != 0 {
             self.active_pid.store(pid, Ordering::SeqCst);
+            if let Some(observer) = entry.lifecycle_observer() {
+                let _ = observer.send(crate::service_lifecycle::LifecycleEvent::Wedged { pid });
+            }
+            drop(entry);
             pending::<()>().await;
         }
     }
@@ -864,6 +882,12 @@ async fn reap_child(
         active_pid.store(0, Ordering::SeqCst);
         return;
     };
+    #[cfg(test)]
+    let mut child = child;
+    #[cfg(test)]
+    if let Some(observer) = entry.upgrade().and_then(|entry| entry.lifecycle_observer()) {
+        child.observe(observer);
+    }
     let pid = child.pid();
     if let Err(error) = child
         .reap_after_graceful_close(
