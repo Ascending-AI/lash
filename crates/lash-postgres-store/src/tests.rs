@@ -166,18 +166,45 @@ async fn turn_failure_reopen_skips_one_corrupt_evidence_receipt_among_many_recei
     );
 }
 
-#[test]
-fn unwired_process_registry_factory_warns() {
-    let warning_count = Arc::new(AtomicUsize::new(0));
-    let subscriber = Registry::default().with(WarningCounter(Arc::clone(&warning_count)));
-
-    tracing::subscriber::with_default(subscriber, warn_postgres_process_registry_not_wired);
-
-    assert_eq!(
-        warning_count.load(Ordering::Relaxed),
-        1,
-        "the legacy factory must warn that process-owner liveness is not wired"
-    );
+#[tokio::test]
+async fn attachment_unwired_process_registry_factory_warns() {
+    let storage = PostgresStorage {
+        pool: sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/unused")
+            .unwrap(),
+        await_event_signing_secret: Arc::from(&b"unused"[..]),
+    };
+    for path in [
+        "PostgresStorage::session_store_factory",
+        "PostgresSessionStoreFactory::new",
+    ] {
+        let warnings = AttachmentWarnings::default();
+        let subscriber = Registry::default().with(warnings.clone());
+        tracing::subscriber::with_default(subscriber, || {
+            let factory = if path == "PostgresStorage::session_store_factory" {
+                storage.session_store_factory()
+            } else {
+                PostgresSessionStoreFactory::new(&storage)
+            };
+            assert!(!lash_core::AttachmentRootSet::can_prove_process_owner_death(&factory));
+            let wired = storage.session_store_factory_with_shared_process_registry();
+            assert!(lash_core::AttachmentRootSet::can_prove_process_owner_death(
+                &wired
+            ));
+            let wired = PostgresSessionStoreFactory::new_with_shared_process_registry(&storage);
+            assert!(lash_core::AttachmentRootSet::can_prove_process_owner_death(
+                &wired
+            ));
+        });
+        let events = warnings.0.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["store"], "postgres");
+        assert_eq!(events[0]["path"], path);
+        assert_eq!(
+            events[0]["consequence"],
+            "process-owned uncommitted intents are never reclaimed"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1172,4 +1199,28 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     lash_core::AttachmentStore::get(&backend, &attachment.id)
         .await
         .expect("live committed blob survives the refused sweep");
+}
+
+#[derive(Clone, Default)]
+struct AttachmentWarnings(Arc<std::sync::Mutex<Vec<std::collections::BTreeMap<String, String>>>>);
+impl<S: tracing::Subscriber> Layer<S> for AttachmentWarnings {
+    fn on_event(&self, event: &tracing::Event<'_>, _: tracing_subscriber::layer::Context<'_, S>) {
+        if *event.metadata().level() != tracing::Level::WARN {
+            return;
+        }
+        #[derive(Default)]
+        struct Fields(std::collections::BTreeMap<String, String>);
+        impl tracing::field::Visit for Fields {
+            fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                self.0.insert(field.name().to_string(), value.to_string());
+            }
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                self.0
+                    .insert(field.name().to_string(), format!("{value:?}"));
+            }
+        }
+        let mut fields = Fields::default();
+        event.record(&mut fields);
+        self.0.lock().unwrap().push(fields.0);
+    }
 }

@@ -1790,11 +1790,13 @@ lash::persistence::AttachmentReclamationReport::condemn_deferred_ids
 lash::persistence::AttachmentReclamationReport::deleted_while_referenced
 lash::persistence::AttachmentReclamationReport::failed_ids
 lash::persistence::AttachmentReclamationReport::fence
+lash::persistence::AttachmentReclamationReport::owner_death_proof_degraded
 lash::persistence::AttachmentReclamationReport::reclaimed_count
 lash::persistence::AttachmentReclamationReport::root_enumeration_failure
 lash::persistence::AttachmentReclamationReport::scanned_blob_count
 lash::persistence::AttachmentRootSet
 lash::persistence::AttachmentRootSet::arm_attachment_delete
+lash::persistence::AttachmentRootSet::can_prove_process_owner_death
 lash::persistence::AttachmentRootSet::condemn_attachment
 lash::persistence::AttachmentRootSet::fence
 lash::persistence::AttachmentRootSet::has_live_attachment_ref
@@ -8860,6 +8862,7 @@ lash::testing::conformance::append_receipt_mixed_usage_envelope
 lash::testing::conformance::append_request_receipt_replays_after_ancestor_superseded
 lash::testing::conformance::append_usage_cancellation_publishes_exactly_once
 lash::testing::conformance::attachment_owner_cold_replay
+lash::testing::conformance::attachment_owner_degraded_proof
 lash::testing::conformance::attachment_ownership_isolation
 lash::testing::conformance::attachment_ownership_isolation_with_store
 lash::testing::conformance::attachment_store

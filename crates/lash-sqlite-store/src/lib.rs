@@ -582,7 +582,7 @@ pub struct SqliteSessionStoreFactory {
 impl SqliteSessionStoreFactory {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
-        warn_process_registry_not_wired();
+        warn_process_registry_not_wired("SqliteSessionStoreFactory::new");
         Self {
             root,
             process_registry_path: None,
@@ -595,7 +595,7 @@ impl SqliteSessionStoreFactory {
 
     pub fn with_options(root: impl Into<PathBuf>, options: StoreOptions) -> Self {
         let root = root.into();
-        warn_process_registry_not_wired();
+        warn_process_registry_not_wired("SqliteSessionStoreFactory::with_options");
         Self {
             root,
             process_registry_path: None,
@@ -1079,6 +1079,10 @@ fn list_session_summaries(
 
 #[async_trait::async_trait]
 impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
+    fn can_prove_process_owner_death(&self) -> bool {
+        self.process_registry_path.is_some()
+    }
+
     async fn live_attachment_refs(
         &self,
         intent_grace_cutoff_epoch_ms: u64,
@@ -1189,8 +1193,11 @@ impl SqliteSessionStoreFactory {
     }
 }
 
-fn warn_process_registry_not_wired() {
+fn warn_process_registry_not_wired(path: &'static str) {
     tracing::warn!(
+        store = "sqlite",
+        path,
+        consequence = "process-owned uncommitted intents are never reclaimed",
         "SQLite attachment GC process-owner liveness is not wired; process-owned intents will be retained indefinitely. Call SqliteSessionStoreFactory::new_with_process_registry(...)."
     );
 }

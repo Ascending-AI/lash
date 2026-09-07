@@ -239,8 +239,21 @@ pub struct InMemorySessionStore {
     pub(crate) session_admission_count: std::sync::atomic::AtomicUsize,
 }
 
+fn warn_process_owner_death_degraded(path: &'static str) {
+    static WARN: std::sync::Once = std::sync::Once::new();
+    WARN.call_once(|| {
+        tracing::warn!(
+            store = "memory",
+            path,
+            consequence = "process-owned uncommitted intents are never reclaimed",
+            "in-memory attachment GC cannot prove process-owner death"
+        )
+    });
+}
+
 impl InMemorySessionStore {
     pub fn new() -> Self {
+        warn_process_owner_death_degraded("InMemorySessionStore::new");
         Self::with_clock(Arc::new(crate::SystemClock))
     }
 
@@ -252,6 +265,7 @@ impl InMemorySessionStore {
     /// hide malformed durable rows.
     ///
     pub fn with_clock(clock: Arc<dyn crate::Clock>) -> Self {
+        warn_process_owner_death_degraded("InMemorySessionStore::with_clock");
         Self::with_shared_history(
             clock,
             Arc::new(Mutex::new(())),
@@ -283,6 +297,7 @@ impl InMemorySessionStore {
         session_catalog: SharedSessionCatalog,
         attachment_condemnations: SharedAttachmentCondemnations,
     ) -> Self {
+        warn_process_owner_death_degraded("InMemorySessionStore::with_shared_history");
         Self {
             clock,
             write_transaction,
@@ -879,6 +894,7 @@ impl InMemorySessionStore {
 
 impl Default for InMemorySessionStore {
     fn default() -> Self {
+        warn_process_owner_death_degraded("InMemorySessionStore::default");
         Self::new()
     }
 }

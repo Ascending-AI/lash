@@ -571,6 +571,10 @@ impl PostgresSessionStoreFactory {
 
 #[async_trait::async_trait]
 impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
+    fn can_prove_process_owner_death(&self) -> bool {
+        self.process_registry_shared
+    }
+
     async fn live_attachment_refs(
         &self,
         intent_grace_cutoff_epoch_ms: u64,

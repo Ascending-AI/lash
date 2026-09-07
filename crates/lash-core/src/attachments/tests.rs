@@ -429,7 +429,7 @@ async fn gc_all_deletes_failed_is_incomplete() {
 }
 
 #[tokio::test]
-async fn gc_empty_backend_reports_nothing_to_do_with_root_diagnostic() {
+async fn gc_empty_backend_reports_incomplete_with_degraded_proof_and_root_diagnostic() {
     let backend = InMemoryAttachmentStore::new();
 
     let report = reclaim_unreferenced_attachments(
@@ -449,7 +449,7 @@ async fn gc_empty_backend_reports_nothing_to_do_with_root_diagnostic() {
     assert!(report.condemn_deferred_ids.is_empty());
     assert_eq!(
         crate::store::MaintenanceReport::sweep(&report),
-        crate::store::MaintenanceSweep::NothingToDo
+        crate::store::MaintenanceSweep::Incomplete
     );
     assert_eq!(
         report.root_enumeration_failure.as_deref(),
