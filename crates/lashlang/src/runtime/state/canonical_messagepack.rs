@@ -18,6 +18,26 @@ pub enum CanonicalMapOrder {
     Declared(&'static [&'static str]),
 }
 
+/// A structural step from the root of a canonical MessagePack value.
+#[doc(hidden)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CanonicalPathSegment {
+    /// The value of a map entry, independent of how its key is displayed.
+    Key(String),
+    /// An array element.
+    Index(usize),
+}
+
+impl CanonicalPathSegment {
+    /// Return a map key; array positions have no key.
+    pub fn key(&self) -> Option<&str> {
+        match self {
+            Self::Key(key) => Some(key),
+            Self::Index(_) => None,
+        }
+    }
+}
+
 /// Validate arbitrary MessagePack with the canonical scalar/length rules and
 /// Lash-owned nesting guard used by snapshot decoding.
 ///
@@ -29,14 +49,14 @@ pub fn validate_canonical_messagepack_structure(
     bytes: &[u8],
     root_location: &str,
     max_depth: usize,
-    map_order: impl Fn(&str) -> CanonicalMapOrder,
-    map_required: impl Fn(&str) -> bool,
+    map_order: impl Fn(&[CanonicalPathSegment]) -> CanonicalMapOrder,
+    map_required: impl Fn(&[CanonicalPathSegment]) -> bool,
 ) -> Result<(), SnapshotDecodeError> {
     let mut cursor = 0;
     validate_arbitrary_messagepack_value(
         bytes,
         &mut cursor,
-        root_location,
+        (root_location, &mut Vec::new()),
         1,
         max_depth,
         &map_order,
@@ -51,12 +71,13 @@ pub fn validate_canonical_messagepack_structure(
 fn validate_arbitrary_messagepack_value(
     bytes: &[u8],
     cursor: &mut usize,
-    location: &str,
+    position: (&str, &mut Vec<CanonicalPathSegment>),
     depth: usize,
     max_depth: usize,
-    map_order: &impl Fn(&str) -> CanonicalMapOrder,
-    map_required: &impl Fn(&str) -> bool,
+    map_order: &impl Fn(&[CanonicalPathSegment]) -> CanonicalMapOrder,
+    map_required: &impl Fn(&[CanonicalPathSegment]) -> bool,
 ) -> Result<(), SnapshotDecodeError> {
+    let (location, path) = position;
     if depth > max_depth {
         return Err(SnapshotDecodeError::DepthLimitExceeded { limit: max_depth });
     }
@@ -64,7 +85,7 @@ fn validate_arbitrary_messagepack_value(
         .get(*cursor)
         .ok_or_else(|| invalid_messagepack("unexpected end of input"))?;
     let is_map = matches!(marker, 0x80..=0x8f | 0xde | 0xdf);
-    if map_required(location) && !is_map {
+    if map_required(path) && !is_map {
         return Err(non_canonical(
             location,
             "structs and dynamic maps must use map form",
@@ -93,20 +114,22 @@ fn validate_arbitrary_messagepack_value(
         0x90..=0x9f | 0xdc | 0xdd => {
             let length = take_array_length(bytes, cursor, location)?;
             for index in 0..length {
+                path.push(CanonicalPathSegment::Index(index));
                 validate_arbitrary_messagepack_value(
                     bytes,
                     cursor,
-                    &format!("{location}[{index}]"),
+                    (&format!("{location}[{index}]"), path),
                     depth + 1,
                     max_depth,
                     map_order,
                     map_required,
                 )?;
+                path.pop();
             }
         }
         0x80..=0x8f | 0xde | 0xdf => {
             let length = take_map_length(bytes, cursor, location, "map")?;
-            let order = map_order(location);
+            let order = map_order(path);
             let mut previous_key: Option<String> = None;
             let mut previous_declaration = None;
             let mut keys = std::collections::BTreeSet::new();
@@ -160,15 +183,17 @@ fn validate_arbitrary_messagepack_value(
                     }
                 }
                 let child = child_location(location, &key);
+                path.push(CanonicalPathSegment::Key(key.clone()));
                 validate_arbitrary_messagepack_value(
                     bytes,
                     cursor,
-                    &child,
+                    (&child, path),
                     depth + 1,
                     max_depth,
                     map_order,
                     map_required,
                 )?;
+                path.pop();
                 previous_key = Some(key);
             }
         }

@@ -114,7 +114,8 @@ pub(crate) use ops::*;
 pub use state::LASHLANG_SNAPSHOT_VERSION;
 #[doc(hidden)]
 pub use state::{
-    CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, validate_canonical_messagepack_structure,
+    CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
+    validate_canonical_messagepack_structure,
 };
 pub use state::{GlobalPatch, GlobalPatchOutcome, Snapshot, SnapshotDecodeError, State};
 pub use value::{

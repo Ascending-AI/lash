@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use lash_core::SessionError;
 use lashlang::{
-    CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, ExecutionScratch, SnapshotDecodeError,
-    State as FlowState, Value as FlowValue, validate_canonical_messagepack_structure,
+    CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment, ExecutionScratch,
+    SnapshotDecodeError, State as FlowState, Value as FlowValue,
+    validate_canonical_messagepack_structure,
 };
 use serde::{Deserialize, Serialize};
 
@@ -148,103 +149,90 @@ fn probe_snapshot_version(data: &[u8]) -> Result<u32, RlmSnapshotError> {
     read_u32(data, &mut offset).ok_or_else(incompatible)
 }
 
-fn root_map_order(location: &str) -> CanonicalMapOrder {
-    match location {
-        "root" => CanonicalMapOrder::Declared(ROOT_FIELDS),
-        "root.globals" | "root.deferred_resolutions.resolutions" => CanonicalMapOrder::Sorted,
-        "root.deferred_resolutions" => CanonicalMapOrder::Declared(DEFERRED_RESOLUTION_FIELDS),
-        "root.deferred_resolutions.link_key" => {
-            CanonicalMapOrder::Declared(DEFERRED_LINK_KEY_FIELDS)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RootNode {
+    Root,
+    Globals,
+    Global,
+    Deferred,
+    LinkKey,
+    Resolutions,
+    Resolution,
+    Definition,
+    SchemaContract,
+    Projection,
+    Overrides,
+    Override,
+    CompactContract,
+    RetryPolicy,
+    OutputContract,
+    ArgumentProjection,
+    Json,
+    Other,
+}
+
+impl RootNode {
+    fn child(self, segment: &CanonicalPathSegment) -> Self {
+        use RootNode::*;
+        match (self, segment.key()) {
+            (Root, Some("globals")) => Globals,
+            (Root, Some("deferred_resolutions")) => Deferred,
+            (Globals, Some(_)) => Global,
+            (Deferred, Some("link_key")) => LinkKey,
+            (Deferred, Some("resolutions")) => Resolutions,
+            (Resolutions, Some(_)) => Resolution,
+            (Resolution, Some("definition")) => Definition,
+            (Resolution, Some("execution_binding")) => Json,
+            (Definition, Some("bindings")) => Json,
+            (Definition, Some("input_schema" | "output_schema")) => SchemaContract,
+            (Definition, Some("compact_contract")) => CompactContract,
+            (Definition, Some("retry_policy")) => RetryPolicy,
+            (Definition, Some("output_contract")) => OutputContract,
+            (Definition, Some("argument_projection")) => ArgumentProjection,
+            (SchemaContract, Some("canonical")) => Json,
+            (SchemaContract, Some("projection")) => Projection,
+            (Projection, Some("overrides")) => Overrides,
+            (Overrides, None) => Override,
+            (Override, Some("schema")) => Json,
+            (CompactContract, Some("parameters" | "return_fields")) => Json,
+            (OutputContract, Some("default_schema")) => Json,
+            (Json, _) => Json,
+            _ => Other,
         }
-        _ if is_global_location(location) => CanonicalMapOrder::Declared(PERSISTED_VALUE_FIELDS),
-        _ if is_resolution_location(location) => CanonicalMapOrder::Declared(RESOLUTION_FIELDS),
-        _ if is_root_json_location(location) => CanonicalMapOrder::Sorted,
-        _ if location.ends_with(".definition") => CanonicalMapOrder::Fields(TOOL_DEFINITION_FIELDS),
-        _ if location.ends_with(".input_schema") || location.ends_with(".output_schema") => {
-            CanonicalMapOrder::Fields(SCHEMA_CONTRACT_FIELDS)
-        }
-        _ if location.ends_with(".projection") => {
-            CanonicalMapOrder::Fields(SCHEMA_PROJECTION_FIELDS)
-        }
-        _ if is_schema_override_location(location) => {
-            CanonicalMapOrder::Fields(SCHEMA_OVERRIDE_FIELDS)
-        }
-        _ if location.ends_with(".compact_contract") => {
-            CanonicalMapOrder::Fields(COMPACT_CONTRACT_FIELDS)
-        }
-        _ if location.ends_with(".retry_policy") => CanonicalMapOrder::Fields(RETRY_POLICY_FIELDS),
-        _ if location.ends_with(".output_contract") => {
-            CanonicalMapOrder::Fields(OUTPUT_CONTRACT_FIELDS)
-        }
-        _ if location.ends_with(".argument_projection") => {
-            CanonicalMapOrder::Fields(ARGUMENT_PROJECTION_FIELDS)
-        }
-        // FIG-1210: serde flatten prevents a fixed declaration-order rule for
-        // the ToolDefinition map and its fixed-field descendants.
-        _ => CanonicalMapOrder::Unordered,
     }
 }
 
-fn root_map_required(location: &str) -> bool {
-    matches!(
-        location,
-        "root"
-            | "root.globals"
-            | "root.deferred_resolutions"
-            | "root.deferred_resolutions.link_key"
-            | "root.deferred_resolutions.resolutions"
-    ) || is_resolution_location(location)
-        || is_global_location(location)
-        || location.ends_with(".definition")
-        || location.ends_with(".input_schema")
-        || location.ends_with(".output_schema")
-        || location.ends_with(".projection")
-        || is_schema_override_location(location)
-        || location.ends_with(".compact_contract")
-        || location.ends_with(".retry_policy")
-        || location.ends_with(".output_contract")
-        || location.ends_with(".argument_projection")
+fn root_node(path: &[CanonicalPathSegment]) -> RootNode {
+    path.iter().fold(RootNode::Root, RootNode::child)
 }
 
-fn is_resolution_location(location: &str) -> bool {
-    location
-        .strip_prefix("root.deferred_resolutions.resolutions.")
-        .is_some_and(|suffix| !suffix.contains('.'))
-        || (location.starts_with("root.deferred_resolutions.resolutions[")
-            && !location["root.deferred_resolutions.resolutions".len()..].contains("]."))
+fn root_map_order(path: &[CanonicalPathSegment]) -> CanonicalMapOrder {
+    use RootNode::*;
+    match root_node(path) {
+        Root => CanonicalMapOrder::Declared(ROOT_FIELDS),
+        Globals | Resolutions | Json => CanonicalMapOrder::Sorted,
+        Global => CanonicalMapOrder::Declared(PERSISTED_VALUE_FIELDS),
+        Deferred => CanonicalMapOrder::Declared(DEFERRED_RESOLUTION_FIELDS),
+        LinkKey => CanonicalMapOrder::Declared(DEFERRED_LINK_KEY_FIELDS),
+        Resolution => CanonicalMapOrder::Declared(RESOLUTION_FIELDS),
+        Definition => CanonicalMapOrder::Fields(TOOL_DEFINITION_FIELDS),
+        SchemaContract => CanonicalMapOrder::Fields(SCHEMA_CONTRACT_FIELDS),
+        Projection => CanonicalMapOrder::Fields(SCHEMA_PROJECTION_FIELDS),
+        Override => CanonicalMapOrder::Fields(SCHEMA_OVERRIDE_FIELDS),
+        CompactContract => CanonicalMapOrder::Fields(COMPACT_CONTRACT_FIELDS),
+        RetryPolicy => CanonicalMapOrder::Fields(RETRY_POLICY_FIELDS),
+        OutputContract => CanonicalMapOrder::Fields(OUTPUT_CONTRACT_FIELDS),
+        ArgumentProjection => CanonicalMapOrder::Fields(ARGUMENT_PROJECTION_FIELDS),
+        // FIG-1210: serde flatten prevents declaration ordering for tool fields.
+        Overrides | Other => CanonicalMapOrder::Unordered,
+    }
 }
 
-fn is_global_location(location: &str) -> bool {
-    location
-        .strip_prefix("root.globals.")
-        .is_some_and(|suffix| !suffix.contains('.'))
-        || (location.starts_with("root.globals[") && location.ends_with(']'))
-}
-
-fn is_schema_override_location(location: &str) -> bool {
-    location.contains(".projection.overrides[") && location.ends_with(']')
-}
-
-fn is_root_json_location(location: &str) -> bool {
-    let json_field = [
-        ".execution_binding",
-        ".canonical",
-        ".default_schema",
-        ".parameters",
-        ".return_fields",
-        ".schema",
-    ]
-    .into_iter()
-    .any(|field| {
-        location.find(field).is_some_and(|index| {
-            location[index + field.len()..].is_empty()
-                || matches!(
-                    location.as_bytes().get(index + field.len()),
-                    Some(b'.' | b'[')
-                )
-        })
-    });
-    json_field || location.ends_with(".bindings") || location.contains(".bindings[")
+fn root_map_required(path: &[CanonicalPathSegment]) -> bool {
+    !matches!(
+        root_node(path),
+        RootNode::Overrides | RootNode::Json | RootNode::Other
+    )
 }
 
 fn snapshot_runtime_value(value: &FlowValue) -> Result<Vec<u8>, lashlang::ContinuationError> {
