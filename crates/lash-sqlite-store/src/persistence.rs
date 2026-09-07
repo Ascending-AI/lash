@@ -25,6 +25,7 @@
 
 use super::*;
 use lash_core::SelectedQueuedWorkClaimOutcome;
+use lash_core::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
 
 pub(crate) const LOAD_TURN_FAILURE_SETTLEMENTS_SQL: &str = "SELECT turn_id, result_json
      FROM runtime_turn_commits
@@ -1833,28 +1834,30 @@ impl QueuedWorkStore for Store {
                     )?;
                     let prefix =
                         select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
-                    let selected_len = prefix.len;
-                    if selected_len == 0 {
-                        let refusal = prefix.refusal.expect("an empty prefix names its refusal");
-                        // The candidate query applies the boundary rule in SQL,
-                        // so an empty scan reaches the claim state machine as a
-                        // bare `Empty`. Re-ask it with the unfiltered ready head
-                        // (and, failing that, look for deferred work) so this
-                        // backend names the same fact every other one names.
-                        let refusal = if refusal == QueuedWorkClaimRefusal::Empty {
-                            sqlite_refusal_for_empty_scan(
-                                tx,
-                                &session_id,
-                                now,
-                                generation,
-                                boundary,
-                                &policy,
-                            )?
-                        } else {
-                            refusal
-                        };
-                        return Ok(TxOutcome::Commit(QueuedWorkClaimOutcome::Refused(refusal)));
-                    }
+                    let selected_len = match prefix {
+                        TurnWorkClaimPrefix::Selected { len } => len,
+                        TurnWorkClaimPrefix::Refused { reason: refusal } => {
+                            // The candidate query applies the boundary rule in SQL,
+                            // so an empty scan reaches the claim state machine as a
+                            // bare `Empty`. Re-ask it with the unfiltered ready head
+                            // (and, failing that, look for deferred work) so this
+                            // backend names the same fact every other one names.
+                            let refusal = if refusal == QueuedWorkClaimRefusal::Empty {
+                                sqlite_refusal_for_empty_scan(
+                                    tx,
+                                    &session_id,
+                                    now,
+                                    generation,
+                                    boundary,
+                                    &policy,
+                                )?
+                                .into_refusal()
+                            } else {
+                                refusal
+                            };
+                            return Ok(TxOutcome::Commit(QueuedWorkClaimOutcome::Refused(refusal)));
+                        }
+                    };
                     let mut selected_batches = candidate_batches;
                     selected_batches.truncate(selected_len);
                     match claim_queued_work_rows_sqlite(
@@ -2204,15 +2207,20 @@ impl QueuedWorkStore for Store {
                         .zip(batches.iter())
                         .map(|(row, batch)| claim_candidate_from_row(row, batch))
                         .collect::<Vec<_>>();
-                    let selected_len =
-                        select_exact_turn_work_claim_prefix(&candidates, boundary, &policy, now)?
-                            .len;
-                    if selected_len == 0 {
-                        return Ok(SelectedQueuedWorkClaimOutcome::new(
-                            None,
-                            already_satisfied_batch_ids,
-                        ));
-                    }
+                    let selected_len = match select_exact_turn_work_claim_prefix(
+                        &candidates,
+                        boundary,
+                        &policy,
+                        now,
+                    )? {
+                        TurnWorkClaimPrefix::Selected { len } => len,
+                        TurnWorkClaimPrefix::Refused { .. } => {
+                            return Ok(SelectedQueuedWorkClaimOutcome::new(
+                                None,
+                                already_satisfied_batch_ids,
+                            ));
+                        }
+                    };
                     rows.truncate(selected_len);
                     batches.truncate(selected_len);
                     let claim = match claim_queued_work_rows_sqlite(
@@ -3306,7 +3314,7 @@ fn sqlite_refusal_for_empty_scan(
     generation: u64,
     boundary: QueuedWorkClaimBoundary,
     policy: &QueuedWorkClaimPolicy,
-) -> Result<QueuedWorkClaimRefusal, StoreError> {
+) -> Result<TurnWorkEmptyScanDiagnostic, StoreError> {
     let head_rows = {
         let mut stmt = tx
             .prepare(&format!(
@@ -3338,9 +3346,7 @@ fn sqlite_refusal_for_empty_scan(
             .map(|(row, batch)| claim_candidate_from_row(row, batch))
             .collect::<Vec<_>>();
         let head_prefix = select_turn_work_claim_prefix(&head_candidates, boundary, policy, now)?;
-        // A head the state machine would take contradicts the empty scan; there
-        // is no such state, and `Empty` stays the conservative answer.
-        return Ok(head_prefix.refusal.unwrap_or(QueuedWorkClaimRefusal::Empty));
+        return Ok(TurnWorkEmptyScanDiagnostic::from(head_prefix));
     }
     let deferred_row_pending = tx
         .query_row(
@@ -3363,10 +3369,12 @@ fn sqlite_refusal_for_empty_scan(
         )
         .map_err(sqlite_error)?
         != 0;
-    Ok(if deferred_row_pending {
-        QueuedWorkClaimRefusal::NotYetAvailable
-    } else {
-        QueuedWorkClaimRefusal::Empty
+    Ok(TurnWorkEmptyScanDiagnostic::Refused {
+        reason: if deferred_row_pending {
+            QueuedWorkClaimRefusal::NotYetAvailable
+        } else {
+            QueuedWorkClaimRefusal::Empty
+        },
     })
 }
 
@@ -3497,10 +3505,12 @@ fn claim_ready_queued_work_sqlite_conn(
         boundary,
         policy.max_rows,
     )?;
-    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?.len;
-    if selected_len == 0 {
-        return Ok(TxOutcome::Commit(None));
-    }
+    let selected_len = match select_turn_work_claim_prefix(&candidates, boundary, &policy, now)? {
+        TurnWorkClaimPrefix::Selected { len } => len,
+        TurnWorkClaimPrefix::Refused { .. } => {
+            return Ok(TxOutcome::Commit(None));
+        }
+    };
     let mut selected_batches = candidate_batches;
     selected_batches.truncate(selected_len);
     claim_queued_work_rows_sqlite(

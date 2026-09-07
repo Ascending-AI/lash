@@ -386,19 +386,20 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 )
             })
             .collect::<Vec<_>>();
-        let selected_len = crate::store::queued_work::select_exact_turn_work_claim_prefix(
+        let selected_len = match crate::store::queued_work::select_exact_turn_work_claim_prefix(
             &candidates,
             boundary,
             &policy,
             now,
-        )?
-        .len;
-        if selected_len == 0 {
-            return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
-                None,
-                already_satisfied_batch_ids,
-            ));
-        }
+        )? {
+            crate::store::TurnWorkClaimPrefix::Selected { len } => len,
+            crate::store::TurnWorkClaimPrefix::Refused { .. } => {
+                return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                    None,
+                    already_satisfied_batch_ids,
+                ));
+            }
+        };
         indices.truncate(selected_len);
         let next_fencing_tokens = indices
             .iter()
