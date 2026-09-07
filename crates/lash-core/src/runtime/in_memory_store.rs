@@ -1073,7 +1073,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         }
         let mut meta = self.session_head_meta.lock_recover();
         let actual = meta.as_ref().map_or(0, |meta| meta.head_revision);
-        planner.validate_session_binding(meta.as_ref().map(|meta| meta.session_id.as_str()))?;
         let session_meta_before_commit = self.session_meta.lock_recover().clone();
         self.ensure_session_metadata_for_commit(commit)?;
         #[cfg(test)]

@@ -61,25 +61,9 @@ impl InMemorySessionStore {
                 session_id: binding.session_id.clone(),
             });
         }
-        let mut bound = self.bound_session_id.lock_recover();
-        if let Some(existing) = bound.as_ref() {
-            if existing != &binding.session_id {
-                return Err(crate::StoreError::SessionBindingMismatch {
-                    bound_session_id: existing.clone(),
-                    attempted_session_id: binding.session_id.clone(),
-                });
-            }
-        } else {
-            *bound = Some(binding.session_id.clone());
-        }
+        self.bind_or_verify(&binding.session_id)?;
         let mut durable = self.session_meta.lock_recover();
-        if let Some(meta) = durable.as_ref() {
-            if meta.session_id != binding.session_id {
-                return Err(crate::StoreError::SessionBindingMismatch {
-                    bound_session_id: meta.session_id.clone(),
-                    attempted_session_id: binding.session_id.clone(),
-                });
-            }
+        if durable.is_some() {
             return Ok(crate::SessionAdmission::Rebound);
         }
         *durable = Some(crate::SessionMeta {
