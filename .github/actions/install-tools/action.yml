@@ -28,7 +28,7 @@ runs:
           local url="$1"
           local checksum="$2"
           local archive="$3"
-          curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused \
+          curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --retry-all-errors \
             --location --silent --show-error --fail --output "${archive}" "${url}"
           printf '%s  %s\n' "${checksum}" "${archive}" | sha256sum --check --status
         }
