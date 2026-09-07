@@ -1746,6 +1746,45 @@ async fn actor_panic_surfaces_as_join_error_and_shutdown_continues() {
     assert_eq!(pool.entries.read_recover().len(), 0);
 }
 
+/// A host runtime built without the IO driver has no SIGCHLD stream. The
+/// stdio child still connects (its pipes run on the blocking pool), and
+/// `shutdown_all` must reap it through the clocked poll: no actor panic, no
+/// unreaped child.
+#[cfg(target_os = "linux")]
+#[test]
+fn shutdown_all_reaps_stdio_child_on_a_runtime_without_a_signal_driver() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("time-only runtime");
+    let pool = runtime.block_on(connect_mock(root.path(), MockOptions::default()));
+    let entry = entry(&pool);
+    let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
+        .expect("mock records its pid")
+        .trim()
+        .parse()
+        .expect("mock pid");
+    assert!(alive(pid), "mock child runs after connect");
+
+    runtime.block_on(pool.shutdown_all());
+
+    assert_eq!(
+        process_state(pid),
+        None,
+        "shutdown_all reaps the child without a SIGCHLD stream"
+    );
+    assert_eq!(
+        entry.last_error.read_recover().as_deref(),
+        None,
+        "the lifecycle actor must finish shutdown without a JoinError"
+    );
+    assert!(
+        entry.actor_handle.lock_recover().is_none(),
+        "shutdown_all joins the lifecycle actor"
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn runtime_drop_does_not_wait_for_in_flight_graceful_child_reap() {

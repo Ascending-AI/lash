@@ -235,37 +235,92 @@ pub(crate) enum LifecycleEvent {
 pub(crate) type LifecycleObserver = tokio::sync::mpsc::UnboundedSender<LifecycleEvent>;
 
 /// Wakes the reaper whenever a child of this process changes state, so a
-/// child exit is observed as a rendezvous rather than by polling.
-#[cfg(unix)]
-struct ChildExits(tokio::signal::unix::Signal);
+/// child exit is observed as a rendezvous rather than by polling. Without a
+/// SIGCHLD stream (non-unix targets, or a runtime built without the signal
+/// driver) the reaper polls on the runtime clock, which stays the deadline's
+/// clock.
+enum ChildExits {
+    #[cfg(unix)]
+    Signal(tokio::signal::unix::Signal),
+    Polled,
+}
 
-#[cfg(unix)]
 impl ChildExits {
-    fn subscribe() -> std::io::Result<Self> {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::child()).map(Self)
+    fn subscribe() -> Self {
+        #[cfg(unix)]
+        if let Some(signal) = child_signal_stream() {
+            return Self::Signal(signal);
+        }
+        Self::Polled
     }
 
     async fn recv(&mut self) {
-        if self.0.recv().await.is_none() {
-            // The signal driver is gone; only the deadline can end the wait.
-            std::future::pending::<()>().await;
+        match self {
+            #[cfg(unix)]
+            Self::Signal(signal) => {
+                if signal.recv().await.is_none() {
+                    // The signal driver is gone; only the deadline can end the wait.
+                    std::future::pending::<()>().await;
+                }
+            }
+            Self::Polled => tokio::time::sleep(Duration::from_millis(10)).await,
         }
     }
 }
 
-/// Without SIGCHLD the reaper polls on the runtime clock, which stays the
-/// deadline's clock.
-#[cfg(not(unix))]
-struct ChildExits;
+#[cfg(unix)]
+thread_local! {
+    /// Set while this thread probes for the SIGCHLD stream, so the probe's
+    /// own panic never reaches the process panic hook.
+    static PROBING_CHILD_SIGNAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
-#[cfg(not(unix))]
-impl ChildExits {
-    fn subscribe() -> std::io::Result<Self> {
-        Ok(Self)
-    }
+/// Subscribes to SIGCHLD on the current runtime, or reports why it cannot.
+///
+/// Tokio panics rather than errs when the runtime has no signal driver (a
+/// runtime built without `enable_io`) or when no runtime is entered, so the
+/// subscription is probed under `catch_unwind` with the panic hook silenced
+/// for this thread; the probe's failure is a warning, never a panic.
+#[cfg(unix)]
+fn child_signal_stream() -> Option<tokio::signal::unix::Signal> {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    async fn recv(&mut self) {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    HOOK.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if !PROBING_CHILD_SIGNAL.with(std::cell::Cell::get) {
+                previous(info);
+            }
+        }));
+    });
+
+    PROBING_CHILD_SIGNAL.with(|probing| probing.set(true));
+    let probed = catch_unwind(AssertUnwindSafe(|| {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::child())
+    }));
+    PROBING_CHILD_SIGNAL.with(|probing| probing.set(false));
+    match probed {
+        Ok(Ok(signal)) => Some(signal),
+        Ok(Err(error)) => {
+            tracing::warn!(
+                error = %error,
+                "MCP stdio reaper cannot subscribe to SIGCHLD; polling on the runtime clock"
+            );
+            None
+        }
+        Err(panic) => {
+            let reason = panic
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panic.downcast_ref::<&str>().copied())
+                .unwrap_or("signal driver unavailable");
+            tracing::warn!(
+                reason,
+                "MCP stdio reaper has no signal driver; polling on the runtime clock"
+            );
+            None
+        }
     }
 }
 
@@ -317,7 +372,7 @@ impl StdioChildGuard {
         post_kill_wait: Duration,
     ) -> std::io::Result<()> {
         self.explicit_abandonment = true;
-        let mut exits = ChildExits::subscribe()?;
+        let mut exits = ChildExits::subscribe();
         let deadline = Instant::now() + graceful_period;
         #[cfg(test)]
         self.emit(LifecycleEvent::GraceArmed {
@@ -558,5 +613,32 @@ mod tests {
         );
         // The guard's Drop killed the child; like the pool-level abandonment
         // scenarios, the unreaped zombie is the documented residue.
+    }
+
+    /// A runtime without the signal driver has no SIGCHLD stream: the reaper
+    /// must fall back to the runtime-clocked poll and still reap, never panic.
+    #[test]
+    fn reap_without_a_signal_driver_falls_back_to_the_clocked_poll() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("time-only runtime");
+        let (mut guard, mut events) = runtime.block_on(async { observed_child("cat >/dev/null") });
+        let pid = guard.pid();
+        guard.child.stdin.take();
+        runtime
+            .block_on(
+                guard.reap_after_graceful_close(Duration::from_secs(30), Duration::from_secs(30)),
+            )
+            .expect("child exits on EOF and is reaped without SIGCHLD");
+        let observed = drain(&mut events);
+        assert!(
+            matches!(
+                observed.as_slice(),
+                [LifecycleEvent::GraceArmed { .. }, LifecycleEvent::Reaped { pid: reaped }]
+                    if *reaped == pid
+            ),
+            "{observed:?}"
+        );
     }
 }
