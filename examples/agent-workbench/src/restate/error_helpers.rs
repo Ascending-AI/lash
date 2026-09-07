@@ -1,4 +1,6 @@
-fn record_turn_failure(
+use super::*;
+
+pub(super) fn record_turn_failure(
     state: &AppState,
     session_id: &str,
     turn_id: &str,
@@ -18,11 +20,11 @@ fn record_turn_failure(
     state.publish_turn_failed_with_message(session_id, turn_id, public_message);
 }
 
-fn terminal_handler_error(err: AppError) -> HandlerError {
+pub(super) fn terminal_handler_error(err: AppError) -> HandlerError {
     TerminalError::new(err.message).into()
 }
 
-fn session_delete_handler_error(err: AppError) -> HandlerError {
+pub(super) fn session_delete_handler_error(err: AppError) -> HandlerError {
     if err.verdict == AppErrorVerdict::Retryable {
         HandlerError::from(err)
     } else {
@@ -30,7 +32,7 @@ fn session_delete_handler_error(err: AppError) -> HandlerError {
     }
 }
 
-fn settlement_handler_error(err: AppError) -> HandlerError {
+pub(super) fn settlement_handler_error(err: AppError) -> HandlerError {
     match err.verdict {
         AppErrorVerdict::Retryable => HandlerError::from(err),
         AppErrorVerdict::ReplacementAbort | AppErrorVerdict::Terminal => {
@@ -43,10 +45,10 @@ fn settlement_handler_error(err: AppError) -> HandlerError {
     }
 }
 
-fn classified_embed_handler_error(error: lash::EmbedError) -> HandlerError {
+pub(super) fn classified_embed_handler_error(error: lash::EmbedError) -> HandlerError {
     settlement_handler_error(AppError::runtime(error))
 }
 
-fn classified_plugin_handler_error(error: lash::plugins::PluginError) -> HandlerError {
+pub(super) fn classified_plugin_handler_error(error: lash::plugins::PluginError) -> HandlerError {
     classified_embed_handler_error(lash::EmbedError::Plugin(error))
 }

@@ -809,7 +809,9 @@ fn settlement_reader_treats_ambiguous_errors_as_retryable() {
     );
 }
 
-include!("restate_cron_tests.rs");
+use lash::sync::MutexExt;
+
+mod cron_tests;
 
 #[async_trait::async_trait]
 trait QueuedWorkExt {
