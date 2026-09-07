@@ -4,7 +4,7 @@ use lash_core::llm::types::{
     LlmContentBlock, LlmMessage, LlmRequest, LlmRequestScope, LlmRole, LlmToolChoice, LlmToolSpec,
     ProviderReasoningReplay, ProviderRouteIdentity,
 };
-use lash_core::provider::{ModelCapability, Provider};
+use lash_core::provider::Provider;
 use lash_sansio::sync::MutexExt;
 
 use crate::AnthropicProvider;
@@ -39,7 +39,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
-        model_capability: ModelCapability::default(),
+        model_capability: crate::attachment_test_capability(),
         scope: LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",

@@ -49,6 +49,7 @@ fn google_dialect_is_closed_host_data_and_survives_the_wire_mirror() {
         assert_eq!(serde_json::to_value(core).unwrap(), literal);
         assert_eq!(serde_json::to_value(remote).unwrap(), literal);
         let capability = ModelCapability {
+            attachment_acceptance: Default::default(),
             google_dialect: core,
             ..Default::default()
         };

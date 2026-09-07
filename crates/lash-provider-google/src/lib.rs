@@ -19,7 +19,6 @@ pub mod testing;
 mod upload;
 
 pub use config::{GoogleOAuthClient, GoogleOAuthProvider};
-pub use lash_core::llm::transport::{GOOGLE_FILE_MIMES, GOOGLE_IMAGE_MIMES, GOOGLE_MEDIA_FAMILIES};
 
 #[cfg(test)]
 mod tests {
@@ -82,8 +81,10 @@ mod tests {
 
     fn request_with_capability(
         model_variant: Option<&str>,
-        model_capability: ModelCapability,
+        mut model_capability: ModelCapability,
     ) -> LlmRequest {
+        model_capability.attachment_acceptance =
+            crate::attachment_test_capability().attachment_acceptance;
         LlmRequest {
             model: "gemini-3.1-pro-preview".to_string(),
             messages: vec![LlmMessage::text(LlmRole::User, "hello")],
@@ -718,6 +719,7 @@ mod tests {
 
     fn effort_capability(efforts: &[&str]) -> ModelCapability {
         ModelCapability {
+            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: efforts.iter().copied().map(str::to_string).collect(),
@@ -735,6 +737,7 @@ mod tests {
 
     fn budget_capability(entries: &[(&str, u32)]) -> ModelCapability {
         ModelCapability {
+            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: entries
@@ -1526,3 +1529,8 @@ mod tests {
     mod conformance;
     mod protocol53;
 }
+
+#[cfg(test)]
+mod attachment_capability_fixture;
+#[cfg(test)]
+pub(crate) use attachment_capability_fixture::attachment_test_capability;

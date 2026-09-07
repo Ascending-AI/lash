@@ -3185,7 +3185,16 @@ async fn queued_checkpoint_input_preserves_images() {
             }
         })
         .build();
-    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    let store = Arc::new(RecordingStore::default());
+    let mut runtime = TestRuntime::new(transport)
+        .plugins(Vec::new())
+        .host(test_host_config())
+        .store(store.clone())
+        .attachment_acceptance(
+            crate::attachments::attachment_test_capability().attachment_acceptance,
+        )
+        .build()
+        .await;
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
         "root",
@@ -3731,13 +3740,13 @@ async fn commit_checkpoint_injected_turn_for_redrive(
         },
     ]);
     let runtime_store: Arc<dyn crate::RuntimePersistence> = store.clone();
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+    let mut runtime = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
         transport,
         journal_replay_host(Arc::clone(&controller)),
         runtime_store,
-    )
+    ))
     .await;
     enqueue_idle_turn_input(store.as_ref(), "root", "queued before opening").await;
     enqueue_turn_input_for_checkpoint(
@@ -10037,6 +10046,7 @@ async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
         .into_handle();
 
     let capability = crate::ModelCapability {
+        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(crate::ReasoningCapability {
             efforts: ["low", "medium", "high", "max"]
@@ -10116,6 +10126,7 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() {
         .into_handle();
 
     let capability = crate::ModelCapability {
+        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(crate::ReasoningCapability {
             efforts: ["low", "medium", "high"]

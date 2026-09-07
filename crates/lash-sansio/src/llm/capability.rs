@@ -13,6 +13,12 @@ use serde::{Deserialize, Serialize};
 /// Capability metadata for a single model on a route, supplied by the host.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelCapability {
+    /// Host acceptance revision retained with the session policy.
+    #[serde(
+        default,
+        skip_serializing_if = "AttachmentCapabilitySnapshot::is_empty"
+    )]
+    pub attachment_acceptance: std::sync::Arc<AttachmentCapabilitySnapshot>,
     /// Google wire dialect selected by the host for this route.
     #[serde(default, skip_serializing_if = "GoogleDialect::is_legacy")]
     pub google_dialect: GoogleDialect,
@@ -189,7 +195,8 @@ impl std::error::Error for ModelEffortValidationError {}
 
 impl ModelCapability {
     pub fn is_empty(&self) -> bool {
-        self.google_dialect.is_legacy()
+        self.attachment_acceptance.is_empty()
+            && self.google_dialect.is_legacy()
             && self.reasoning.is_none()
             && self.cache_control.is_none()
             && self.stream_termination.is_none()
@@ -330,6 +337,7 @@ mod tests {
 
     fn capability(reasoning: Option<ReasoningCapability>) -> ModelCapability {
         ModelCapability {
+            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning,
             cache_control: None,
@@ -344,6 +352,7 @@ mod tests {
         assert!(!capability(Some(reasoning())).is_empty());
         assert!(
             !ModelCapability {
+                attachment_acceptance: Default::default(),
                 cache_control: Some(CacheControlDialect::Anthropic),
                 ..ModelCapability::default()
             }
@@ -351,6 +360,7 @@ mod tests {
         );
         assert!(
             !ModelCapability {
+                attachment_acceptance: Default::default(),
                 stream_termination: Some(StreamTermination::RequireTerminalEvidence),
                 ..ModelCapability::default()
             }
@@ -359,6 +369,7 @@ mod tests {
         // A capability whose only statement is "this model pins its own
         // sampling" must still reach the wire.
         let pinned = ModelCapability {
+            attachment_acceptance: Default::default(),
             sampling: SamplingCapability::Pinned,
             ..ModelCapability::default()
         };
@@ -566,6 +577,7 @@ mod tests {
         assert_eq!(back, cap);
 
         let cap = ModelCapability {
+            attachment_acceptance: Default::default(),
             cache_control: Some(CacheControlDialect::Gemini),
             ..ModelCapability::default()
         };
@@ -586,5 +598,105 @@ mod tests {
         let json = serde_json::to_value(&cap).expect("serialize");
         let back: ModelCapability = serde_json::from_value(json).expect("deserialize");
         assert_eq!(back, cap);
+    }
+}
+
+/// An immutable host catalogue revision retained in a session's model policy.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AttachmentCapabilitySnapshot {
+    pub revision: String,
+    pub acceptors: Vec<AttachmentAcceptor>,
+}
+
+impl AttachmentCapabilitySnapshot {
+    pub fn is_empty(&self) -> bool {
+        self.revision.is_empty() && self.acceptors.is_empty()
+    }
+
+    /// Provider labels whose host-supplied rules accept this exact source.
+    pub fn acceptors(&self, source: &super::types::AttachmentSource) -> Vec<&str> {
+        self.acceptors
+            .iter()
+            .filter(|acceptor| acceptor.rules.iter().any(|rule| rule.accepts(source)))
+            .map(|acceptor| acceptor.provider.as_str())
+            .collect()
+    }
+
+    pub fn accepts(&self, provider: &str, source: &super::types::AttachmentSource) -> bool {
+        self.acceptors.iter().any(|acceptor| {
+            acceptor.provider == provider && acceptor.rules.iter().any(|rule| rule.accepts(source))
+        })
+    }
+}
+
+/// Acceptance rules supplied by the host for a transport dialect.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AttachmentAcceptor {
+    pub provider: String,
+    pub rules: Vec<AttachmentAcceptanceRule>,
+}
+
+/// MIME-bearing sources and scoped provider handles have distinct admission facts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AttachmentAcceptanceRule {
+    Mime {
+        source: AttachmentMimeSource,
+        media_types: Vec<String>,
+        media_families: Vec<String>,
+    },
+    ProviderFile {
+        provider: String,
+    },
+}
+
+/// The source modes which carry a required MIME type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentMimeSource {
+    Inline,
+    Stored,
+    ExternalUrl,
+}
+
+impl AttachmentAcceptanceRule {
+    fn accepts(&self, attachment: &super::types::AttachmentSource) -> bool {
+        use super::types::AttachmentSource;
+        match (self, attachment) {
+            (
+                Self::ProviderFile { provider },
+                AttachmentSource::ProviderFile { provider_scope, .. },
+            ) => provider.eq_ignore_ascii_case(&provider_scope.provider),
+            (
+                Self::Mime {
+                    source,
+                    media_types,
+                    media_families,
+                },
+                attachment,
+            ) => {
+                let actual = match attachment {
+                    AttachmentSource::Inline { .. } => AttachmentMimeSource::Inline,
+                    AttachmentSource::Stored { .. } => AttachmentMimeSource::Stored,
+                    AttachmentSource::ExternalUrl { .. } => AttachmentMimeSource::ExternalUrl,
+                    AttachmentSource::ProviderFile { .. } => return false,
+                };
+                actual == *source
+                    && attachment.media_type().is_some_and(|mime| {
+                        media_types
+                            .iter()
+                            .any(|candidate| candidate == mime.as_str())
+                            || media_families.iter().any(|family| family == mime.family())
+                    })
+            }
+            (
+                Self::ProviderFile { .. },
+                AttachmentSource::Inline { .. }
+                | AttachmentSource::Stored { .. }
+                | AttachmentSource::ExternalUrl { .. },
+            ) => false,
+        }
     }
 }

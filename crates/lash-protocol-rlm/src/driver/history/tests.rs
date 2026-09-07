@@ -82,22 +82,19 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMess
     let dialect = crate::dialect::LashlangDialect::prompt_only(
         lash_lashlang_runtime::LashlangSurface::default(),
     );
-    render_history_messages(
-        &RlmHistoryRenderInput {
-            dialect: &dialect,
-            events,
-            turn_messages: &lash_core::facade_support::MessageSequence::default(),
-            turn_causes: &[],
-            max_output_chars: 1000,
-            protocol_iteration: 0,
-            finalization: "",
-            required_output: None,
-            final_answer_format: None,
-            budget_suffix: None,
-            bound_variables: "",
-        },
-        &mut Vec::new(),
-    )
+    render_history_messages(&RlmHistoryRenderInput {
+        dialect: &dialect,
+        events,
+        turn_messages: &lash_core::facade_support::MessageSequence::default(),
+        turn_causes: &[],
+        max_output_chars: 1000,
+        protocol_iteration: 0,
+        finalization: "",
+        required_output: None,
+        final_answer_format: None,
+        budget_suffix: None,
+        bound_variables: "",
+    })
 }
 
 #[test]

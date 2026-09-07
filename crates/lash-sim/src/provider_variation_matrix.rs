@@ -916,6 +916,7 @@ fn matrix_request(
 ) -> LlmRequest {
     let model = dialect_model(dialect);
     let model_capability = lash_core::ModelCapability {
+        attachment_acceptance: Default::default(),
         stream_termination: Some(StreamTermination::RequireTerminalEvidence),
         ..Default::default()
     };

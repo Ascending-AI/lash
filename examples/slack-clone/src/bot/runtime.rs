@@ -365,6 +365,7 @@ pub fn provider_from_env() -> Result<(ProviderHandle, ModelSpec)> {
         .build()
         .map_err(|error| anyhow::anyhow!("invalid OPENROUTER_MODEL metadata: {error}"))?
         .with_capability(lash::provider::ModelCapability {
+            attachment_acceptance: slack_attachment_acceptance().into(),
             cache_control: Some(lash::provider::CacheControlDialect::Anthropic),
             ..Default::default()
         });
@@ -398,6 +399,39 @@ fn fresh_incarnation() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_nanos().to_string())
         .unwrap_or_else(|_| "0".to_string())
+}
+
+fn slack_attachment_acceptance() -> lash::provider::AttachmentCapabilitySnapshot {
+    use lash::provider::{
+        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+        AttachmentMimeSource,
+    };
+    // This example host owns its model catalogue and revision. Existing sessions
+    // retain the opening snapshot when this catalogue changes.
+    AttachmentCapabilitySnapshot {
+        revision: "slack-attachments-1".into(),
+        acceptors: ["OpenAI Chat Completions"]
+            .into_iter()
+            .map(|provider| AttachmentAcceptor {
+                provider: provider.into(),
+                rules: [
+                    AttachmentMimeSource::Inline,
+                    AttachmentMimeSource::Stored,
+                    AttachmentMimeSource::ExternalUrl,
+                ]
+                .into_iter()
+                .map(|source| AttachmentAcceptanceRule::Mime {
+                    source,
+                    media_types: ["image/jpeg", "image/png", "image/gif", "image/webp"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    media_families: Vec::new(),
+                })
+                .collect(),
+            })
+            .collect(),
+    }
 }
 
 #[cfg(test)]

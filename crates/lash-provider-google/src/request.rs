@@ -23,7 +23,9 @@ impl GoogleOAuthProvider {
             AttachmentSource::ProviderFile { id, .. } => {
                 json!({"fileData": {"fileUri": id}})
             }
-            AttachmentSource::ExternalUrl { .. } => unreachable!("validated as unsupported"),
+            AttachmentSource::ExternalUrl { media_type, url } => {
+                json!({"fileData": {"mimeType": media_type, "fileUri": url}})
+            }
             AttachmentSource::Inline { .. } | AttachmentSource::Stored { .. } => {
                 let media_type = source.media_type().expect("MIME-bearing source");
                 let bytes = req
@@ -42,20 +44,13 @@ impl GoogleOAuthProvider {
 
     pub(crate) fn validate_attachments(req: &LlmRequest) -> Result<(), LlmTransportError> {
         for source in &req.attachments() {
-            let supported = match source {
-                AttachmentSource::ExternalUrl { .. } => false,
-                AttachmentSource::ProviderFile { provider_scope, .. } => matches!(
-                    provider_scope.provider.to_ascii_lowercase().as_str(),
-                    "google" | "google_oauth" | "gemini"
-                ),
-                source => source.media_type().is_some_and(|mime| {
-                    GOOGLE_IMAGE_MIMES.contains(&mime.as_str())
-                        || GOOGLE_MEDIA_FAMILIES.contains(&mime.family())
-                        || GOOGLE_FILE_MIMES.contains(&mime.as_str())
-                }),
-            };
+            let supported = req
+                .model_capability
+                .attachment_acceptance
+                .accepts("Google Gemini", source);
             if !supported {
-                let accepted_by = known_attachment_acceptors(source);
+                let accepted_by =
+                    known_attachment_acceptors(&req.model_capability.attachment_acceptance, source);
                 return Err(unsupported_attachment_capability(
                     "Google Gemini",
                     source,

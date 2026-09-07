@@ -5,9 +5,11 @@ use std::sync::Arc;
 use crate::{AttachmentRef, MediaType, SchemaContract};
 
 pub use crate::llm::capability::{
-    CacheControlDialect, GoogleDialect, ModelCapability, ModelEffortValidationCategory,
-    ModelEffortValidationError, ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding,
-    ReasoningSelection, SamplingCapability, StreamTermination,
+    AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+    AttachmentMimeSource, CacheControlDialect, GoogleDialect, ModelCapability,
+    ModelEffortValidationCategory, ModelEffortValidationError, ReasoningCapability,
+    ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
+    StreamTermination,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

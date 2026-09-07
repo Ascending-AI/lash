@@ -1,7 +1,7 @@
 use base64::Engine;
 use lash_core::llm::types::{AttachmentSource, LlmContentBlock, LlmMessage, LlmRequest, LlmRole};
 
-use crate::{ANTHROPIC_FILE_MIMES, ANTHROPIC_IMAGE_MIMES, AnthropicProvider};
+use crate::AnthropicProvider;
 
 const ATTACHMENT_FIXTURE_BYTES: &[u8] = b"fig1417-attachment-fixture";
 
@@ -22,7 +22,7 @@ fn request_with_inline_attachment(mime: &str) -> LlmRequest {
         tools: Default::default(),
         tool_choice: Default::default(),
         model_variant: Default::default(),
-        model_capability: Default::default(),
+        model_capability: crate::attachment_test_capability(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",
@@ -39,7 +39,7 @@ fn request_with_inline_attachment(mime: &str) -> LlmRequest {
 fn image_allowlist_serializes_every_mime_as_base64_image_block() {
     let provider = AnthropicProvider::new("key");
 
-    for &mime in ANTHROPIC_IMAGE_MIMES {
+    for mime in ["image/jpeg", "image/png", "image/gif", "image/webp"] {
         let body = provider
             .build_request_body(&request_with_inline_attachment(mime))
             .expect("allowlisted image MIME must serialize");
@@ -60,21 +60,20 @@ fn image_allowlist_serializes_every_mime_as_base64_image_block() {
 fn file_allowlist_serializes_every_mime_as_base64_document_block() {
     let provider = AnthropicProvider::new("key");
 
-    for &mime in ANTHROPIC_FILE_MIMES {
-        let body = provider
-            .build_request_body(&request_with_inline_attachment(mime))
-            .expect("allowlisted file MIME must serialize");
-        let block = &body["messages"][0]["content"][0];
+    let mime = "application/pdf";
+    let body = provider
+        .build_request_body(&request_with_inline_attachment(mime))
+        .expect("allowlisted file MIME must serialize");
+    let block = &body["messages"][0]["content"][0];
 
-        assert_eq!(block["type"], "document", "MIME: {mime}");
-        assert_eq!(block["source"]["type"], "base64", "MIME: {mime}");
-        assert_eq!(block["source"]["media_type"], mime, "MIME: {mime}");
-        assert_eq!(
-            block["source"]["data"],
-            base64::engine::general_purpose::STANDARD.encode(ATTACHMENT_FIXTURE_BYTES),
-            "MIME: {mime}"
-        );
-    }
+    assert_eq!(block["type"], "document", "MIME: {mime}");
+    assert_eq!(block["source"]["type"], "base64", "MIME: {mime}");
+    assert_eq!(block["source"]["media_type"], mime, "MIME: {mime}");
+    assert_eq!(
+        block["source"]["data"],
+        base64::engine::general_purpose::STANDARD.encode(ATTACHMENT_FIXTURE_BYTES),
+        "MIME: {mime}"
+    );
 }
 
 #[test]
