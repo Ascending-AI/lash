@@ -1535,7 +1535,7 @@ derive_mutation_jobs() {{
         # returns the differential to comparing nothing. A workflow-wide
         # `assertIn` cannot see that: the sibling step still carries the flag.
         for step_name in (
-            "Test Postgres store (conformance)",
+            "Test Postgres store (conformance and attempt atomicity)",
             "Test runtime pool-wait binding",
             "Test runtime Postgres agent scenarios",
             "Test cross-backend store differential",
