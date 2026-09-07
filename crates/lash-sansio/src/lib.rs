@@ -34,7 +34,8 @@ pub use llm::capability::{
 };
 pub use llm::types::{LlmTerminalReason, ProviderFailureKind};
 pub use plugin::{
-    CheckpointKind, PluginMessage, PluginRuntimeEvent, PromptContribution, PromptContributionGate,
+    CheckpointKind, PluginMessage, PluginRuntimeEvent, PromptContribution, PromptContributionBody,
+    PromptContributionGate,
 };
 pub use prompt::{
     PreparedPrompt, PromptBuildInput, PromptCache, PromptContext, PromptContributionSet,
