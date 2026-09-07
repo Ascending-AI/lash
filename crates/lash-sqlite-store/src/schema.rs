@@ -601,7 +601,6 @@ CREATE TABLE IF NOT EXISTS processes (
     wake_session_id       TEXT,
     identity_kind         TEXT NOT NULL,
     identity_label        TEXT,
-    is_waiting            INTEGER NOT NULL,
     created_at_ms         INTEGER NOT NULL,
     updated_at_ms         INTEGER NOT NULL,
     last_event_sequence   INTEGER NOT NULL,
@@ -623,8 +622,6 @@ CREATE INDEX IF NOT EXISTS idx_processes_originator
     ON processes(originator_id);
 CREATE INDEX IF NOT EXISTS idx_processes_identity
     ON processes(identity_kind, identity_label);
-CREATE INDEX IF NOT EXISTS idx_processes_waiting
-    ON processes(is_waiting);
 CREATE INDEX IF NOT EXISTS idx_processes_created
     ON processes(created_at_ms);
 CREATE INDEX IF NOT EXISTS idx_processes_recent_retired
@@ -802,7 +799,9 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// Version 30 folds the newest event sequence into every process row and
 /// persists the Process Prune horizon established by Tombstone Compaction.
 /// Version-29 registries are rejected rather than migrated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 30;
+/// Version 31 removes the unread process waiting projection and its index.
+/// Version-30 registries are rejected rather than migrated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 31;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1366,13 +1365,13 @@ mod check_constraint_tests {
             .execute_batch(PROCESS_SCHEMA)
             .expect("create process constraint fixture");
         let process_columns = "process_id, incarnation, registration_fingerprint, originator_id,
-            identity_kind, is_waiting, created_at_ms, updated_at_ms, last_event_sequence, change_seq,
+            identity_kind, created_at_ms, updated_at_ms, last_event_sequence, change_seq,
             status, record_json";
         assert_check_rejects(
             &process,
             &format!(
                 "INSERT INTO processes ({process_columns}) VALUES
-                 ('bad-status', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0, 0,
+                 ('bad-status', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
                   'paused', '{{}}')"
             ),
             "ck_processes_status",
@@ -1380,7 +1379,7 @@ mod check_constraint_tests {
         process
             .execute_batch(&format!(
                 "INSERT INTO processes ({process_columns}) VALUES
-                 ('wake-parent', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0, 0,
+                 ('wake-parent', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
                   'running', '{{}}')"
             ))
             .expect("insert valid wake parent");

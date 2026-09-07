@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 76);
+    assert_eq!(PostgresStorage::schema_version(), 77);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -206,7 +206,8 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
          DROP TABLE lash_process_events;
          DROP TABLE lash_process_tombstones;
          DROP TABLE lash_processes;
-         DROP TABLE lash_process_change_clock;",
+         DROP TABLE lash_process_change_clock;
+         DROP TABLE lash_wake_allocation_floors;",
     )
     .execute(&pool)
     .await
@@ -228,7 +229,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
                      OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
                          AND state IN ('deferred_next_turn', 'cancelled', 'completed')));
          UPDATE lash_schema_versions
-            SET version = 76
+            SET version = 77
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)

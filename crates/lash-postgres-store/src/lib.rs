@@ -289,7 +289,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 76 pins process identifiers to byte ordering, including the live
 // worklist index and cursor bounds. Changing collation is not creation-only;
 // component-75 databases must be recreated under the schema cutover policy.
-const SCHEMA_VERSION: i32 = 76;
+// Version 77 removes the unread process waiting projection and gives the whole
+// process registry family byte-order identifiers. Component-76 stores must be
+// recreated; there is no migration into this generation.
+const SCHEMA_VERSION: i32 = 77;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -1,20 +1,6 @@
 use super::*;
 
-pub(super) async fn prune_terminal_processes(
-    registry: &PostgresProcessRegistry,
-    cutoff_epoch_ms: u64,
-    filter: Option<lash_core::ProcessListFilter>,
-    watermark: lash_core::ProjectionWatermark,
-) -> Result<ProcessPruneReport, PluginError> {
-    let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-    let pruned_at_ms = registry.clock.timestamp_ms() as i64;
-    let max_change_seq = match watermark {
-        lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
-        lash_core::ProjectionWatermark::NoProjector => None,
-    };
-    let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
-    let rows = sqlx::query(
-        "SELECT process_id, record_json FROM lash_processes
+const PRUNE_TERMINAL_SQL: &str = "SELECT process_id, record_json FROM lash_processes
          WHERE status NOT IN ('running', 'waiting')
            AND updated_at_ms < $1
            AND ($2::BIGINT IS NULL OR change_seq <= $2)
@@ -28,13 +14,27 @@ pub(super) async fn prune_terminal_processes(
                WHERE plan.process_id = lash_processes.process_id
            )
          ORDER BY process_id ASC
-         FOR UPDATE",
-    )
-    .bind(cutoff)
-    .bind(max_change_seq)
-    .fetch_all(&mut *tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
+         FOR UPDATE";
+
+pub(super) async fn prune_terminal_processes(
+    registry: &PostgresProcessRegistry,
+    cutoff_epoch_ms: u64,
+    filter: Option<lash_core::ProcessListFilter>,
+    watermark: lash_core::ProjectionWatermark,
+) -> Result<ProcessPruneReport, PluginError> {
+    let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+    let pruned_at_ms = registry.clock.timestamp_ms() as i64;
+    let max_change_seq = match watermark {
+        lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
+        lash_core::ProjectionWatermark::NoProjector => None,
+    };
+    let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
+    let rows = sqlx::query(PRUNE_TERMINAL_SQL)
+        .bind(cutoff)
+        .bind(max_change_seq)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
     let mut prunable = Vec::new();
     for row in rows {
         let process_id: String = row.get(0);
@@ -81,4 +81,51 @@ pub(super) async fn prune_terminal_processes(
         "process prune reclaimed process-session checkpoint blobs"
     );
     Ok(report)
+}
+
+#[cfg(test)]
+mod planner_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn prune_parent_plan_anti_join_uses_index_order_without_sort() {
+        let Some(url) = crate::postgres_test_support::database_url() else {
+            return;
+        };
+        let _lock = crate::postgres_test_support::SharedDatabaseLock::acquire(&url).await;
+        let storage = crate::PostgresStorage::connect(&url)
+            .await
+            .expect("connect planner witness");
+        let mut tx = storage.pool().begin().await.expect("begin planner witness");
+        // As in the worklist planner witness, remove small-table cost preference.
+        // Disable alternative joins to prove the existing btrees can supply merge
+        // order directly; a collation mismatch still requires an explicit sort.
+        for setting in [
+            "SET LOCAL enable_seqscan = off",
+            "SET LOCAL enable_bitmapscan = off",
+            "SET LOCAL enable_hashjoin = off",
+            "SET LOCAL enable_nestloop = off",
+        ] {
+            sqlx::query(setting)
+                .execute(&mut *tx)
+                .await
+                .expect("set planner witness preference");
+        }
+        let plan =
+            sqlx::query_scalar::<_, String>(&format!("EXPLAIN (COSTS OFF) {PRUNE_TERMINAL_SQL}"))
+                .bind(i64::MAX)
+                .bind(None::<i64>)
+                .fetch_all(&mut *tx)
+                .await
+                .expect("explain process prune")
+                .join(" | ");
+        eprintln!("prune anti-join plan: {plan}");
+        assert!(
+            plan.contains("Merge Anti Join")
+                && plan.contains("lash_process_parent_end_plans_pkey")
+                && !plan.contains("Sort Key: plan.process_id"),
+            "prune parent-plan anti-join must inherit btree order without sorting: {plan}"
+        );
+        tx.rollback().await.expect("rollback planner witness");
+    }
 }

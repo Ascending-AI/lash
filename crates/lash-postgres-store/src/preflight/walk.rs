@@ -668,6 +668,49 @@ struct SessionCheckpointRow {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn parked_segment_join_uses_index_order_without_sort() {
+        let Some(url) = crate::postgres_test_support::database_url() else {
+            return;
+        };
+        let _lock = crate::postgres_test_support::SharedDatabaseLock::acquire(&url).await;
+        let storage = crate::PostgresStorage::connect(&url)
+            .await
+            .expect("connect planner witness");
+        let mut tx = storage.pool().begin().await.expect("begin planner witness");
+        // As in the worklist planner witness, remove small-table cost preference.
+        // Disable alternative joins to prove the existing btrees can supply merge
+        // order directly; a collation mismatch still requires an explicit sort.
+        for setting in [
+            "SET LOCAL enable_seqscan = off",
+            "SET LOCAL enable_bitmapscan = off",
+            "SET LOCAL enable_hashjoin = off",
+            "SET LOCAL enable_nestloop = off",
+        ] {
+            sqlx::query(setting)
+                .execute(&mut *tx)
+                .await
+                .expect("set planner witness preference");
+        }
+        let plan =
+            sqlx::query_scalar::<_, String>(&format!("EXPLAIN (COSTS OFF) {PARKED_SEGMENT_SQL}"))
+                .bind(None::<String>)
+                .bind(0_i64)
+                .bind(65_i64)
+                .fetch_all(&mut *tx)
+                .await
+                .expect("explain parked segment walk")
+                .join(" | ");
+        eprintln!("parked segment plan: {plan}");
+        assert!(
+            plan.contains("Merge Join")
+                && plan.contains("lash_process_segment_handovers_pkey")
+                && !plan.contains("Sort"),
+            "parked segment merge join must inherit btree order without sorting: {plan}"
+        );
+        tx.rollback().await.expect("rollback planner witness");
+    }
+
     #[test]
     fn a_minted_segment_cursor_round_trips_through_its_split() {
         let cursor = segment_cursor("proc-7", 42);

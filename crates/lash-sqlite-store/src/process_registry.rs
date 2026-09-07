@@ -138,11 +138,11 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     tx.execute(
                         "INSERT INTO processes (
                             process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
-                            identity_kind, identity_label, is_waiting,
+                            identity_kind, identity_label,
                             created_at_ms, updated_at_ms, last_event_sequence,
                             change_seq, status, record_json
                          )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                         params![
                             record.id.as_str(),
                             record.incarnation.registration_sequence() as i64,
@@ -151,7 +151,6 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             wake_session_id,
                             record.identity.kind.as_str(),
                             record.identity.label.as_deref(),
-                            i64::from(record.wait.is_some()),
                             record.created_at_ms as i64,
                             record.updated_at_ms as i64,
                             record.last_event_sequence as i64,
