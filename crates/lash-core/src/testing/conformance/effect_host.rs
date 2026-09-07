@@ -176,6 +176,7 @@ where
     let second = make();
     assert_fresh_instances(&first, &second, "effect_host_await_events");
     drop((first, second));
+    effect_host_local_turn_control_resolves_on_minting_host(make()).await;
     effect_host_await_event_key_is_stable(make()).await;
     effect_host_await_event_accepts_early_resolution(make()).await;
     effect_host_await_event_duplicate_resolution_is_terminal(make()).await;
@@ -816,6 +817,92 @@ async fn effect_host_static_scope_preserves_metadata_when_available(host: Arc<dy
     };
     assert_eq!(scoped.execution_scope(), &scope);
     assert_eq!(scoped.scope_id(), "static-runtime-op");
+}
+
+pub(super) async fn effect_host_local_turn_control_resolves_on_minting_host(
+    host: Arc<dyn EffectHost>,
+) {
+    let scope = ExecutionScope::turn(
+        format!("local-control-{}", uuid::Uuid::new_v4()),
+        "local-turn",
+    );
+    let local = crate::runtime::NativeRuntimeEffectController::default();
+    let local_scoped =
+        ScopedEffectController::borrowed(&local, scope.clone()).expect("local turn-control scope");
+    let binding = host
+        .turn_control_binding(&local_scoped)
+        .await
+        .expect("local turn-control binding");
+    let crate::TurnControlBinding::HostOwned { resolver, .. } = binding else {
+        panic!("local turn-control binding must be host-owned");
+    };
+    for identity in [
+        AwaitEventWaitIdentity::TurnCancelGate,
+        AwaitEventWaitIdentity::TurnTerminal,
+    ] {
+        let key = resolver
+            .await_event_key(&scope, identity)
+            .await
+            .expect("mint local turn-control key through binding");
+        let resolution = Resolution::Ok(serde_json::json!({"control": "ready"}));
+        resolver
+            .resolve_await_event(&key, resolution.clone())
+            .await
+            .expect("resolve local turn-control key through minting resolver");
+        let result = host
+            .await_await_event(&key, tokio_util::sync::CancellationToken::new(), None)
+            .await;
+        assert_eq!(
+            result.expect("minting host must accept its local turn-control key"),
+            resolution
+        );
+    }
+}
+
+#[cfg(test)]
+mod local_control_conformance_tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct ForeignResolverHost {
+        host: crate::NativeEffectHost,
+        foreign: crate::NativeEffectHost,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::AwaitEventResolver for ForeignResolverHost {
+        async fn await_await_event(
+            &self,
+            key: &crate::AwaitEventKey,
+            cancel: tokio_util::sync::CancellationToken,
+            deadline: Option<std::time::Instant>,
+        ) -> Result<Resolution, crate::RuntimeError> {
+            self.host.await_await_event(key, cancel, deadline).await
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl EffectHost for ForeignResolverHost {
+        fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
+            &self.foreign
+        }
+
+        fn scoped<'run>(
+            &'run self,
+            scope: ExecutionScope,
+        ) -> Result<ScopedEffectController<'run>, crate::RuntimeError> {
+            self.host.scoped(scope)
+        }
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "minting host must accept its local turn-control key")]
+    async fn effect_host_conformance_rejects_foreign_turn_control_resolver() {
+        effect_host_local_turn_control_resolves_on_minting_host(Arc::new(
+            ForeignResolverHost::default(),
+        ))
+        .await;
+    }
 }
 
 async fn effect_host_await_event_key_is_stable(host: Arc<dyn EffectHost>) {
