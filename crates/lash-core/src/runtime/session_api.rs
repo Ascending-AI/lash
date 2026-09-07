@@ -594,13 +594,8 @@ impl LashRuntime {
                 batch_id: format!("inline-command:{}", uuid::Uuid::new_v4()),
                 source_key,
             };
-            self.apply_session_command(
-                vec![command],
-                None,
-                None,
-                tokio_util::sync::CancellationToken::new(),
-            )
-            .await?;
+            self.apply_session_command_after_admission(vec![command], None, None)
+                .await?;
             return Ok(AcceptedSessionCommand::Inline(receipt));
         };
         self.persist_materialized_protocol_config()
@@ -826,9 +821,26 @@ impl LashRuntime {
         &mut self,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
+        if self
+            .session
+            .as_ref()
+            .and_then(Session::history_store)
+            .is_none()
+        {
+            self.reload_invalidated_resident_session_state().await?;
+            return Ok(None);
+        }
+        let host = self.effect_host();
+        // Select the host's controller without executing an effect. The command
+        // commit keeps its claimed batch's existing operation identity.
+        let controller = host.scoped(crate::ExecutionScope::queue_drain(
+            &self.state.session_id,
+            "session-command",
+        ))?;
         self.drain_next_session_command_with_cancellation(
             session_execution_lease,
             tokio_util::sync::CancellationToken::new(),
+            controller.controller(),
         )
         .await
     }
@@ -837,6 +849,7 @@ impl LashRuntime {
         &mut self,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         cancellation: tokio_util::sync::CancellationToken,
+        effect_controller: &dyn crate::RuntimeEffectController,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
         self.reload_invalidated_resident_session_state().await?;
         let Some(store) = self
@@ -886,6 +899,7 @@ impl LashRuntime {
             Some(claim.completion()),
             Some(session_execution_lease),
             cancellation,
+            effect_controller,
         )
         .await?;
         Ok(receipts.into_iter().next())
@@ -897,13 +911,16 @@ impl LashRuntime {
         completion: Option<crate::QueuedWorkCompletion>,
         session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
         cancellation: tokio_util::sync::CancellationToken,
+        effect_controller: &dyn crate::RuntimeEffectController,
     ) -> Result<(), RuntimeError> {
         let has_durable_store = self
             .session
             .as_ref()
             .and_then(|session| session.history_store())
             .is_some();
-        if !has_durable_store {
+        if !has_durable_store
+            || !super::commit_admission::requires_local_commit_admission(effect_controller)
+        {
             return self
                 .apply_session_command_after_admission(
                     commands,

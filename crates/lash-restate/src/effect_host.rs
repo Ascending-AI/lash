@@ -407,6 +407,10 @@ impl AwaitEventResolver for RestateEffectHostController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for RestateEffectHostController {
+    fn owns_commit_backpressure(&self) -> bool {
+        true
+    }
+
     fn supports_concurrent_effects(&self) -> bool {
         false
     }

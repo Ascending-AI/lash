@@ -7895,6 +7895,7 @@ lash::runtime::RuntimeEffectController::await_next_settlement
 lash::runtime::RuntimeEffectController::close_effect_group
 lash::runtime::RuntimeEffectController::execute_effect
 lash::runtime::RuntimeEffectController::open_effect_group
+lash::runtime::RuntimeEffectController::owns_commit_backpressure
 lash::runtime::RuntimeEffectController::runtime_effect_failure_disposition
 lash::runtime::RuntimeEffectController::supports_concurrent_effects
 lash::runtime::RuntimeEffectController::supports_effect_groups

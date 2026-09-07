@@ -866,6 +866,7 @@ pub(super) struct RemoteLocalExecutionRequest {
 pub(crate) struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
     supports_concurrent_effects: bool,
+    owns_commit_backpressure: bool,
 }
 
 impl EffectTaskController {
@@ -883,6 +884,7 @@ impl EffectTaskController {
         let proxy = Self {
             requests,
             supports_concurrent_effects: controller.supports_concurrent_effects(),
+            owns_commit_backpressure: controller.owns_commit_backpressure(),
         };
         Ok((
             ScopedEffectController::shared(Arc::new(proxy), scope)?,
@@ -1002,6 +1004,10 @@ impl AwaitEventResolver for EffectTaskController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for EffectTaskController {
+    fn owns_commit_backpressure(&self) -> bool {
+        self.owns_commit_backpressure
+    }
+
     fn supports_concurrent_effects(&self) -> bool {
         self.supports_concurrent_effects
     }
@@ -1452,6 +1458,13 @@ pub trait EffectHost: AwaitEventResolver {
 /// Boundary for nondeterministic runtime work.
 #[async_trait::async_trait]
 pub trait RuntimeEffectController: AwaitEventResolver {
+    /// Whether an engine owns pacing for commits made by this controller.
+    /// Store-backed replay controllers leave this false: durable journal
+    /// participation alone does not imply engine-owned backpressure.
+    fn owns_commit_backpressure(&self) -> bool {
+        false
+    }
+
     async fn runtime_effect_failure_disposition(
         &self,
         _code: RuntimeErrorCode,
