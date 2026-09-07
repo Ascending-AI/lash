@@ -219,3 +219,6 @@ mod tests;
 
 #[cfg(test)]
 mod versioned_decode_tests;
+
+#[cfg(test)]
+mod prompt_body_tests;
