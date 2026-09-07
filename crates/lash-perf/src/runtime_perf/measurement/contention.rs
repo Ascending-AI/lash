@@ -107,25 +107,34 @@ async fn run_contention_wave(
     }
     waiter_barrier.wait().await;
     tokio::task::yield_now().await;
+    let mut contended_ms = Vec::with_capacity(target_sessions.len());
     if expect_contention {
         assert_eq!(
             completed.load(std::sync::atomic::Ordering::SeqCst),
             0,
             "writer contention witness: a waiter completed before the held writer was released"
         );
+    } else {
+        while let Some(result) = waiters.join_next().await {
+            contended_ms.push(result.map_err(anyhow::Error::from)??);
+        }
+        assert_eq!(
+            completed.load(std::sync::atomic::Ordering::SeqCst),
+            target_sessions.len(),
+            "writer contention witness: peer-session waiters must complete while the writer is held"
+        );
     }
     let release_latency_ms = elapsed_ms(release_latency_started);
     control.release_provider.notify_one();
 
-    let mut contended_ms = Vec::with_capacity(target_sessions.len());
     while let Some(result) = waiters.join_next().await {
         contended_ms.push(result.map_err(anyhow::Error::from)??);
     }
     holder.await.map_err(anyhow::Error::from)??;
     contended_ms.sort_by(f64::total_cmp);
     execution_ms.sort_by(f64::total_cmp);
-    // Latencies are benchmark evidence only. The same-session barrier assertion
-    // above is the correctness witness that the held writer blocked waiters.
+    // Latencies are benchmark evidence only. The same-session assertion witnesses
+    // blocking; the peer-session drain witnesses progress while the writer is held.
     let wait_ms = contended_ms
         .iter()
         .zip(&execution_ms)
