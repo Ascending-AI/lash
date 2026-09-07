@@ -20,8 +20,6 @@ WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 CONFIDENCE_WORKFLOW = ROOT / ".github" / "workflows" / "confidence.yml"
 PERF_WORKFLOW = ROOT / ".github" / "workflows" / "perf.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
-SCCACHE_ACTION_REF = "./.github/actions/setup-sccache"
-SCCACHE_ACTION = ROOT / ".github" / "actions" / "setup-sccache" / "action.yml"
 MOLD_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
 GATE = ROOT / "scripts" / "confidence-gate.sh"
 PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
@@ -353,6 +351,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "confidence-fast-summary",
             "s3-store",
             "functional-e2e",
+            "functional-e2e-process-operations",
         }
         guard = (
             "github.event_name != 'pull_request' "
@@ -385,10 +384,10 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertEqual(evaluate(needs, "pull_request"), [])
         self.assertEqual(evaluate(needs, "merge_group"), [])
         push_problems = evaluate(needs, "push")
-        self.assertEqual(len(push_problems), len(trunk_only) + 2)
+        self.assertEqual(len(push_problems), len(trunk_only) + 3)
         for problem in push_problems:
             self.assertTrue("although plan." in problem or "workers E2E job" in problem)
-        for job in ("restate-postgres-workers", "restate-postgres-workers-summary"):
+        for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
             needs[job] = {"result": "skipped", "outputs": {}}
         for job in trunk_only:
             needs[job] = {"result": "success", "outputs": {}}
@@ -471,7 +470,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for job in trunk_only:
             pr_needs[job] = {"result": "skipped", "outputs": {}}
         pr_needs["facade-gates"] = {"result": "skipped", "outputs": {}}
-        for job in ("restate-postgres-workers", "restate-postgres-workers-summary"):
+        for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
             pr_needs[job] = {"result": "success", "outputs": {}}
         pr_needs["postgres-store"] = {"result": "skipped", "outputs": {}}
         self.assertIn(
@@ -890,7 +889,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
 
     def test_asserting_operator_e2es_are_in_functional_matrix(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        functional = workflow_job_block(workflow, "functional-e2e")
+        functional = (workflow_job_block(workflow, "functional-e2e")
+                      + workflow_job_block(workflow, "functional-e2e-process-operations"))
 
         for name, recipe in (
             ("process-operations", "process-operations-e2e"),
@@ -1904,24 +1904,12 @@ derive_mutation_jobs() {{
         self,
     ) -> None:
         workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-        action_source = SCCACHE_ACTION.read_text(encoding="utf-8")
-        action = yaml.safe_load(action_source)
-        action_steps = action["runs"]["steps"]
-        action_effects = yaml.safe_dump(
-            [
-                {key: step[key] for key in ("run", "env", "uses") if key in step}
-                for step in action_steps
-            ]
-        )
-
         # RUSTFLAGS is part of cargo's per-unit fingerprint. When the flag was
         # appended by a step, the five jobs that restore `linux-debug` without
         # that step matched the cache key, logged "cache restored", and then
         # cold-built the entire graph. The flag is a property of the workflow
         # now, so nothing about a job's step list can move it.
         self.assertEqual((workflow.get("env") or {}).get("RUSTFLAGS"), MOLD_RUSTFLAGS)
-        self.assertNotIn("RUSTFLAGS", action_effects)
-        self.assertNotIn("inputs", action)
 
         for job_id, job in workflow["jobs"].items():
             steps = job.get("steps") or []
@@ -1941,17 +1929,10 @@ derive_mutation_jobs() {{
                 self.assertTrue(
                     any(
                         "setup-mold" in (step.get("uses") or "")
-                        or (step.get("uses") or "") == SCCACHE_ACTION_REF
                         for step in steps
                     ),
                     f"{job_id} resolves the mold RUSTFLAGS without installing mold",
                 )
-        mold_steps = [
-            step
-            for step in action_steps
-            if step.get("uses") == "./.github/actions/setup-mold"
-        ]
-        self.assertEqual(len(mold_steps), 1)
 
     def test_linux_release_cache_stays_mold_free_across_workflows(self) -> None:
         workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
@@ -1985,7 +1966,7 @@ derive_mutation_jobs() {{
             self.assertIn(cache_action, block)
             self.assertIn("shared-key: linux-debug", block)
 
-    def test_heavy_compile_jobs_route_through_sccache(self) -> None:
+    def test_heavy_compile_jobs_install_mold(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
@@ -2000,7 +1981,7 @@ derive_mutation_jobs() {{
             "linux-release-cache",
         ):
             block = workflow_job_block(workflow, job_id)
-            self.assertIn("./.github/actions/setup-sccache", block)
+            self.assertIn("./.github/actions/setup-mold", block)
         self.assertNotIn("cargo build", release)
 
     def test_api_surface_job_is_advisory_and_reports_snapshot_delta(self) -> None:

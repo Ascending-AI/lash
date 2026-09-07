@@ -15,6 +15,7 @@ FAMILIES = ("rust", "confidence", "stores", "functional_e2e", "workers_e2e")
 CHANGE_STATUSES = frozenset({"A", "M", "D", "T"})
 
 GATED_JOBS = {
+    "nextest-archive": "rust",
     "facade-gates": "rust",
     "semver-advisory": "rust",
     "lashlang-git-consumer": "rust",
@@ -28,6 +29,7 @@ GATED_JOBS = {
     "postgres-store": "stores",
     "s3-store": "stores",
     "functional-e2e": "functional_e2e",
+    "functional-e2e-process-operations": "functional_e2e",
 }
 
 # Jobs deferred entirely to trunk runs (push / workflow_dispatch): their
@@ -46,6 +48,7 @@ TRUNK_ONLY_JOBS = {
     "confidence-fast-summary",
     "s3-store",
     "functional-e2e",
+    "functional-e2e-process-operations",
 }
 
 DEFERRED_EVENTS = {"pull_request", "merge_group"}
@@ -55,6 +58,7 @@ DEFERRED_EVENTS = {"pull_request", "merge_group"}
 FULL_PROFILE_JOBS = {"facade-gates"}
 
 UNGATED_JOBS = {
+    "worker-artifacts",
     "plan",
     "facade-only-examples",
     "test-doc",
@@ -67,6 +71,7 @@ UNGATED_JOBS = {
 }
 
 WORKERS_E2E_JOBS = {
+    "worker-artifacts",
     "restate-postgres-workers",
     "restate-postgres-workers-summary",
 }
