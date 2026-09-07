@@ -9,6 +9,11 @@ contracts and panic immediately; they are not debug-only diagnostics.
 Receipt replay makes no new commit and may return a previously committed revision.
 It is exempt from the store-boundary advance check; append replay refreshes
 resident state rather than adopting the old receipt as a new commit.
+Receipt replay, flagged by the store via `receipt_replayed`, is the only
+non-advancing receipt the boundary accepts: every store — test doubles included
+— must flag replayed receipts and advance the head revision on fresh commits
+(a reopened session's next turn is a fresh commit), and a double that fails
+either half is fixed to conform rather than the assertion being widened.
 
 Expected contention, stale claims, and invalid external input return existing
 typed errors. The execution lease remains advisory (ADR 0029): session identity

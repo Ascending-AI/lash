@@ -274,6 +274,12 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             self.runtime_turn_commits.lock_recover().get(&key).cloned()
         {
             if stored_hash == turn_commit_hash {
+                // Contract (`SessionCommitStore::commit_runtime_state`): a
+                // replay returns the stored first-attempt receipt with only
+                // `receipt_replayed` set transiently. The verified boundary's
+                // revision-advance assertion exempts exactly this bit.
+                let mut result = result;
+                result.receipt_replayed = true;
                 return Ok(result);
             }
             return Err(lash_core::store::StoreError::RuntimeTurnCommitConflict {
@@ -346,9 +352,13 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             }
         }
         drop(usage_delta_identities);
+        // Contract: every fresh commit (including the first turn after a
+        // session reopen) must advance the durable head revision; only receipt
+        // replay may return a non-advancing receipt.
+        let next_head_revision = read.as_ref().map_or(0, |read| read.head_revision) + 1;
         *read = Some(lash_core::store::PersistedSessionRead {
             session_id: commit.session_id.clone(),
-            head_revision: 8,
+            head_revision: next_head_revision,
             config: commit.config,
             current_frame_node_id: commit.current_frame_node_id,
             graph,
@@ -358,7 +368,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             turn_failure_settlements: Vec::new(),
         });
         let result = lash_core::store::RuntimeCommitReceipt {
-            head_revision: 8,
+            head_revision: next_head_revision,
             checkpoint_ref: lash_core::BlobRef("checkpoint".to_string()),
             manifest: lash_core::store::SessionCheckpoint::default(),
             committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
