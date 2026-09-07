@@ -9,6 +9,7 @@ use crate::parser::IdentifierPosition;
 
 /// Error returned when canonical IR cannot be represented as Lashlang source.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CanonicalSourceError {
     #[error("invalid {context} identifier `{name}`")]
     InvalidIdentifier { context: &'static str, name: String },

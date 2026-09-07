@@ -18,6 +18,7 @@ pub struct FrameKey(String);
 
 /// A caller attempted to derive an agent-frame key from invalid naming material.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FrameKeyError {
     /// Caller-owned naming material must identify a frame rather than collapse
     /// unrelated callers onto the same blank-derived key.

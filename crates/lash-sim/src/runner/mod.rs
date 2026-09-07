@@ -112,6 +112,7 @@ pub const GENERATED_SIM_SCENARIO_PACKAGES: &str = "scenario-contract-packages";
 pub const GENERATED_SIM_BACKEND_REGRESSION_FIXTURES: &str = "backend-regression-fixtures";
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum FixedScriptRunnerError {
     Io(std::io::Error),
     Json(serde_json::Error),

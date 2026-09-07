@@ -114,6 +114,8 @@ pub(crate) fn credential_transport_error(error: CredentialError) -> LlmTransport
         CredentialErrorKind::InvalidGrant => "credential_invalid_grant",
         CredentialErrorKind::Transient => "credential_refresh_transient",
         CredentialErrorKind::Other => "credential_refresh_failed",
+        // Future credential kinds retain the generic failure code and explicit retry policy.
+        _ => "credential_refresh_failed",
     };
     let retry_verdict = if error.retryable {
         TransportRetryVerdict::RetryableTransient

@@ -181,6 +181,7 @@ pub(crate) struct ParsedSessionCursor<'a> {
 }
 
 #[derive(Clone, Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum SessionCursorError {
     #[error("malformed session cursor: {message}")]
     Malformed { message: String },
@@ -306,6 +307,7 @@ pub enum LiveReplayGapReason {
 }
 
 #[derive(Clone, Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum LiveReplayStoreError {
     #[error("{0}")]
     Cursor(#[from] SessionCursorError),

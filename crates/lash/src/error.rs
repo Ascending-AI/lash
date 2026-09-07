@@ -46,6 +46,7 @@ pub enum SelectedQueuedWorkDrainRefusalCause {
 
 #[derive(Debug, thiserror::Error)]
 /// Errors returned while configuring or operating the embedded Lash runtime.
+#[non_exhaustive]
 pub enum EmbedError {
     #[error(
         "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder(lash::TurnBudget::bounded(...))/LashCore::rlm_builder(lash::TurnBudget::bounded(...), ...)"

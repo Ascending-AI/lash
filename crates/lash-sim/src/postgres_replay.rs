@@ -88,6 +88,7 @@ pub struct PostgresReopenedSessionEvidence {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PostgresReplayError {
     TraceIo(TraceIoError),
     Replay(ReplayError),

@@ -7,6 +7,7 @@ use crate::position::PositionType;
 
 /// Deterministic execution failure from a fuel-limited match.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MatchError {
     /// The matcher consumed every configured bytecode/backtrack step.
     Exhausted,

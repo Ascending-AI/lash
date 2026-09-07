@@ -4,6 +4,7 @@ use lash_core::facade_support::ReconfigureError;
 /// when a tool call errors out, or when the registry rejects the new
 /// surface.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum McpError {
     #[error("MCP connection pool has shut down")]
     PoolShutDown,

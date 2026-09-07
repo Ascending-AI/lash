@@ -259,6 +259,7 @@ fn required_entry<'expr>(entries: &'expr [(AstString, Expr)], name: &str) -> Opt
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TriggerCallShapeError {
     Registration,
     List,
@@ -571,6 +572,7 @@ impl HostDescriptor {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum HostDescriptorError {
     #[error("host descriptor must be a host descriptor constructor result")]
     InvalidHostDescriptor,
@@ -596,6 +598,7 @@ pub fn event_type_for_source(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum TriggerRequestDecodeError {
     #[error("{operation} requires `{field}`")]
     MissingField {
@@ -719,6 +722,7 @@ pub fn check_trigger_compatibility(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum TriggerCompatibilityError {
     #[error("host descriptor `{source_type}` is not registered as a trigger source")]
     UnknownSourceType { source_type: String },

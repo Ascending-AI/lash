@@ -33,6 +33,7 @@ impl ProviderBinding {
 }
 
 #[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ProviderResolutionError {
     #[error("session policy does not specify provider_id")]
     MissingProviderId,

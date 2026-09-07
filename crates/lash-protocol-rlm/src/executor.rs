@@ -342,6 +342,8 @@ async fn execute_code_inner(
                         lashlang_link_feedback_kind(&error),
                         format_rlm_link_diagnostic(code, &error),
                     ),
+                    // Future compiler failures still produce diagnostic feedback without a guessed repair.
+                    _ => (lash_core::CellFailureKind::Host, error.to_string()),
                 }),
             // TypeScript is parsed here rather than by the cache, so the cache
             // is asked first: otherwise every cell would pay a full parse even

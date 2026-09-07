@@ -1064,6 +1064,7 @@ impl<'de> serde::Deserialize<'de> for RuntimeErrorCode {
 /// the code's ordinary classification.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum RuntimeErrorCause {
     SessionDeleted { session_id: String },
 }

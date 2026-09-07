@@ -149,13 +149,15 @@ impl From<lash_regress::Match> for CapturedMatch {
 fn collect_regress_match(
     found: Result<lash_regress::Match, lash_regress::MatchError>,
 ) -> Result<CapturedMatch, RuntimeError> {
-    found
-        .map(CapturedMatch::from)
-        .map_err(
-            |lash_regress::MatchError::Exhausted| RuntimeError::RegExpBudgetExceeded {
-                limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
-            },
-        )
+    found.map(CapturedMatch::from).map_err(|error| match error {
+        lash_regress::MatchError::Exhausted => RuntimeError::RegExpBudgetExceeded {
+            limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+        },
+        // Future matcher failures must stop execution just like exhausted fuel.
+        _ => RuntimeError::RegExpBudgetExceeded {
+            limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+        },
+    })
 }
 
 fn collect_bounded_regress_matches<I>(
@@ -493,11 +495,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .next()
                 .transpose()
         }
-        .map_err(
-            |lash_regress::MatchError::Exhausted| RuntimeError::RegExpBudgetExceeded {
+        .map_err(|error| match error {
+            lash_regress::MatchError::Exhausted => RuntimeError::RegExpBudgetExceeded {
                 limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
             },
-        )?
+            // Future matcher failures must stop execution just like exhausted fuel.
+            _ => RuntimeError::RegExpBudgetExceeded {
+                limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+            },
+        })?
         .map(CapturedMatch::from);
         Ok(found)
     }
@@ -871,15 +877,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
         I: Iterator<Item = Result<lash_regress::Match, lash_regress::MatchError>>,
     {
         if units.is_empty() {
-            let found =
-                matches
-                    .next()
-                    .transpose()
-                    .map_err(|lash_regress::MatchError::Exhausted| {
-                        RuntimeError::RegExpBudgetExceeded {
-                            limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
-                        }
-                    })?;
+            let found = matches.next().transpose().map_err(|error| match error {
+                lash_regress::MatchError::Exhausted => RuntimeError::RegExpBudgetExceeded {
+                    limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+                },
+                // Future matcher failures must stop execution just like exhausted fuel.
+                _ => RuntimeError::RegExpBudgetExceeded {
+                    limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+                },
+            })?;
             return Ok(Value::List(
                 if found.is_some_and(|found| found.range().is_empty()) {
                     Vec::new()

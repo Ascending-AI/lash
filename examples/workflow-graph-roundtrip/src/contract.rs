@@ -671,6 +671,8 @@ impl RenderErrorResponse {
             GraphRenderError::RenderedSourceInvalid { message } => {
                 ("rendered_source_invalid", json!({ "reason": message }))
             }
+            // Future render failures keep their message without inventing structured details.
+            _ => ("render_failed", json!({})),
         };
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message, details)
     }

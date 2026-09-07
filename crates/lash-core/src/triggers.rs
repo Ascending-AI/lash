@@ -1056,6 +1056,7 @@ pub enum TriggerCommandOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum TriggerOperationError {
     #[error(
         "trigger subscription conflict for `{subscription_key}`: {reason}; existing revision {existing_revision:?}, existing definition {existing_definition_fingerprint:?}, requested definition {requested_definition_fingerprint:?}"

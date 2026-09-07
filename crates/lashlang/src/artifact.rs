@@ -336,6 +336,7 @@ fn reject_future_shape(raw: &serde_json::Value) -> Result<(), ModuleArtifactErro
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ModuleArtifactError {
     #[error("failed to encode module artifact: {0}")]
     Codec(String),
@@ -353,6 +354,7 @@ pub enum ModuleArtifactError {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ArtifactStoreError {
     #[error("failed to encode lashlang artifact: {0}")]
     Encode(String),

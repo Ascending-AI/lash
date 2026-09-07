@@ -367,6 +367,7 @@ pub struct CompactionContext<'run> {
 }
 
 #[derive(Debug, thiserror::Error, Clone)]
+#[non_exhaustive]
 pub enum ContextError {
     #[error("context pipeline error: {0}")]
     Pipeline(String),

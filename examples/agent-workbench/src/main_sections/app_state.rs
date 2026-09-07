@@ -1467,7 +1467,8 @@ pub(crate) fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str,
                 Some(lash::runtime::RuntimeErrorCause::SessionDeleted { session_id }) => {
                     Some((session_id.as_str(), Some(error.code.as_str())))
                 }
-                None => None,
+                // Future terminal causes do not establish that this session was deleted.
+                _ => None,
             };
         }
         _ => return None,

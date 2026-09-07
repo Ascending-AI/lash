@@ -807,6 +807,7 @@ fn empty_protocol_turn_payload() -> serde_json::Value {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ProtocolTurnOptionsError {
     #[error(
         "protocol turn options are missing schema_version and were written by unsupported pre-versioned state (expected {expected})"

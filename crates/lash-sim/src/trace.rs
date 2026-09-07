@@ -552,6 +552,7 @@ impl ReplayReport {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum TraceIoError {
     Io(std::io::Error),
     Json(serde_json::Error),

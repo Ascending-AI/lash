@@ -201,6 +201,7 @@ impl TypeView {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum ModuleIntrospectionError {
     #[error("failed to render canonical source: {0}")]
     CanonicalSource(#[from] crate::CanonicalSourceError),

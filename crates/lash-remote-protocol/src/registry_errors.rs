@@ -57,6 +57,7 @@ pub(crate) fn require_non_empty(
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum RemoteProtocolError {
     #[error("unsupported remote protocol version {actual}; expected {expected}")]
     UnsupportedProtocolVersion { actual: u32, expected: u32 },

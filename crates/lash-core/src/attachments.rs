@@ -50,6 +50,7 @@ impl AttachmentSourcePolicy for OpenAttachmentSourcePolicy {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum AttachmentStoreError {
     #[error("attachment `{0}` was not found")]
     NotFound(AttachmentId),

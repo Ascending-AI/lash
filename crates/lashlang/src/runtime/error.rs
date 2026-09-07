@@ -730,6 +730,7 @@ impl RuntimeError {
 
 /// How the VM and its host must treat a [`RuntimeError`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ErrorTaxonomy {
     /// A host, execution-bound or internal-invariant terminal: it ends
     /// execution and bypasses every guest handler. `InvalidExceptionState`

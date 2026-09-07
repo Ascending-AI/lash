@@ -22,6 +22,7 @@ pub struct OAuthTokens {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum OAuthError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
@@ -40,6 +41,7 @@ pub enum OAuthError {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum OAuthTokenErrorCode {
     InvalidGrant,
     InvalidClient,

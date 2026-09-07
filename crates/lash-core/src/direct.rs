@@ -130,6 +130,7 @@ impl DirectRequest {
 }
 
 #[derive(Debug, thiserror::Error, Clone)]
+#[non_exhaustive]
 pub enum DirectLlmError {
     #[error("invalid request: {message}")]
     InvalidRequest {
