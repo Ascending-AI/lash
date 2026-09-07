@@ -39,7 +39,7 @@ pub struct FreshRuntimeCommitFacts {
     /// Revision observed under the backend's commit authority.
     pub actual_head_revision: u64,
     /// Leaf published by the existing head, when one exists.
-    pub old_leaf_node_id: Option<String>,
+    pub published_leaf: PublishedLeafFacts,
     /// Whether the requested append ancestor is on the active path. Backends
     /// may pass `true` when the request has no ancestor fence.
     pub requested_ancestor_is_active: bool,
@@ -52,14 +52,17 @@ pub struct FreshRuntimeCommitFacts {
     /// Whether this session owns any live durable graph-node row, including a
     /// live row outside the active path.
     pub has_live_nodes: bool,
-    /// Whether the previously published leaf is still live. Backends derive
-    /// this from an active-path read or a targeted liveness query under their
-    /// commit authority.
-    pub old_leaf_is_live: bool,
-    /// Immutable facts for the previously published leaf, when one exists.
-    /// Backends obtain these with one indexed row lookup; the core planner
-    /// derives every appended node's facts from this seed.
-    pub parent_node_facts: Option<ParentNodeFacts>,
+}
+
+/// The previously published leaf observed under commit authority.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PublishedLeafFacts {
+    /// No leaf has been published.
+    Absent,
+    /// A live leaf with its immutable ancestry seed.
+    Live(ParentNodeFacts),
+    /// The published identity no longer names a live node.
+    Retired { node_id: String },
 }
 
 /// Immutable derived facts for an append's durable parent node.
@@ -316,14 +319,15 @@ impl RuntimeCommitPlanner {
             _ => {}
         }
 
-        let old_leaf_node_id = facts.old_leaf_node_id.clone();
-        if let Some(old_leaf_node_id) = old_leaf_node_id.as_ref()
-            && !facts.old_leaf_is_live
-        {
-            return Err(StoreError::InvalidGraphLeaf {
-                leaf_node_id: Some(old_leaf_node_id.clone()),
-            });
-        }
+        let (old_leaf_node_id, parent_node_facts) = match facts.published_leaf {
+            PublishedLeafFacts::Absent => (None, None),
+            PublishedLeafFacts::Live(parent) => (Some(parent.node_id.clone()), Some(parent)),
+            PublishedLeafFacts::Retired { node_id } => {
+                return Err(StoreError::InvalidGraphLeaf {
+                    leaf_node_id: Some(node_id),
+                });
+            }
+        };
         match self.commit.graph.nodes.first() {
             None if self.commit.graph.leaf_node_id != old_leaf_node_id => {
                 return Err(StoreError::InvalidGraphLeaf {
@@ -340,28 +344,8 @@ impl RuntimeCommitPlanner {
             _ => {}
         }
 
-        if facts
-            .parent_node_facts
-            .as_ref()
-            .map(|parent| parent.node_id.as_str())
-            != old_leaf_node_id.as_deref()
-        {
-            return Err(StoreError::InvalidGraphParent {
-                node_id: self
-                    .commit
-                    .graph
-                    .nodes
-                    .first()
-                    .map_or_else(|| "selected leaf".to_string(), |node| node.node_id.clone()),
-                expected: old_leaf_node_id.clone(),
-                actual: facts
-                    .parent_node_facts
-                    .as_ref()
-                    .map(|parent| parent.node_id.clone()),
-            });
-        }
         let (planned_node_facts, derived_frame_node_id) =
-            derive_appended_node_facts(&self.commit.graph, facts.parent_node_facts)?;
+            derive_appended_node_facts(&self.commit.graph, parent_node_facts)?;
         if self.commit.graph.leaf_node_id.is_some() && derived_frame_node_id.is_none() {
             return Err(StoreError::MissingFrameOpenAncestor {
                 leaf_node_id: self
@@ -649,13 +633,11 @@ mod tests {
         let planner = RuntimeCommitPlanner::prepare(commit).expect("prepare commit");
         let error = match planner.plan(FreshRuntimeCommitFacts {
             actual_head_revision: i64::MAX as u64,
-            old_leaf_node_id: None,
+            published_leaf: PublishedLeafFacts::Absent,
             requested_ancestor_is_active: true,
             occupied_node_ids: HashSet::new(),
             selected_leaf_is_live: false,
             has_live_nodes: false,
-            old_leaf_is_live: false,
-            parent_node_facts: None,
         }) {
             Ok(_) => panic!("exhausted head revision must refuse"),
             Err(error) => error,
@@ -667,5 +649,29 @@ mod tests {
                 current,
             } if current == i64::MAX as u64
         ));
+    }
+    #[test]
+    fn fresh_commit_plan_retired_old_leaf_is_invalid_graph_leaf() {
+        let state = crate::RuntimeSessionState {
+            session_id: "retired-leaf".into(),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        let commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let planner = RuntimeCommitPlanner::prepare(commit).expect("prepare empty commit");
+        let result = planner.plan(FreshRuntimeCommitFacts {
+            actual_head_revision: 0,
+            published_leaf: PublishedLeafFacts::Retired {
+                node_id: "retired-parent".into(),
+            },
+            requested_ancestor_is_active: true,
+            occupied_node_ids: HashSet::new(),
+            selected_leaf_is_live: false,
+            has_live_nodes: false,
+        });
+        assert!(
+            matches!(result, Err(StoreError::InvalidGraphLeaf { leaf_node_id: Some(id) }) if id == "retired-parent")
+        );
     }
 }

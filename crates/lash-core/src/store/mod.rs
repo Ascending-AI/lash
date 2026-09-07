@@ -71,8 +71,8 @@ pub use runtime_commit::{
 };
 #[doc(hidden)]
 pub use runtime_commit_plan::{
-    FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, RuntimeCommitPlan,
-    RuntimeCommitPlanner, RuntimeCommitReceiptRecord, RuntimeCommitReceiptWrite,
+    FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, PublishedLeafFacts,
+    RuntimeCommitPlan, RuntimeCommitPlanner, RuntimeCommitReceiptRecord, RuntimeCommitReceiptWrite,
     RuntimeCommitReplay,
 };
 pub use session_execution_lease::{

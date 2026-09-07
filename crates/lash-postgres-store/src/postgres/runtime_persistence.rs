@@ -922,16 +922,20 @@ impl SessionCommitStore for PostgresSessionStore {
         .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        let old_leaf_is_live = old_leaf_node_id.is_none() || parent_node_facts.is_some();
+        let published_leaf = match old_leaf_node_id {
+            None => lash_core::store::PublishedLeafFacts::Absent,
+            Some(node_id) => match parent_node_facts {
+                Some(parent) => lash_core::store::PublishedLeafFacts::Live(parent),
+                None => lash_core::store::PublishedLeafFacts::Retired { node_id },
+            },
+        };
         let plan = planner.plan(lash_core::store::FreshRuntimeCommitFacts {
             actual_head_revision: authoritative_revision,
-            old_leaf_node_id,
+            published_leaf,
             requested_ancestor_is_active,
             occupied_node_ids,
             selected_leaf_is_live,
             has_live_nodes,
-            old_leaf_is_live,
-            parent_node_facts,
         })?;
         let sql_head_revision = sql_monotonic_counter_value(
             "session_head_revision",

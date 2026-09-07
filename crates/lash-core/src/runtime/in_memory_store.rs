@@ -1128,7 +1128,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .collect();
         drop(graph);
         drop(tombstoned);
-        let (has_existing_live_nodes, selected_leaf_is_live, old_leaf_is_live) = {
+        let (has_existing_live_nodes, selected_leaf_is_live, published_leaf) = {
             let graph = self.global_session_graph.lock_recover();
             let tombstoned = self.tombstoned_node_ids.lock_recover();
             let has_existing_live_nodes = global_node_owners.iter().any(|(node_id, owner)| {
@@ -1137,19 +1137,44 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             let selected_leaf_is_live = commit.graph.leaf_node_id().is_some_and(|leaf_node_id| {
                 !tombstoned.contains(leaf_node_id) && graph.find_node(leaf_node_id).is_some()
             });
-            let old_leaf_is_live = meta
-                .as_ref()
-                .and_then(|head| head.leaf_node_id.as_deref())
-                .is_none_or(|leaf_node_id| {
-                    !tombstoned.contains(leaf_node_id) && graph.find_node(leaf_node_id).is_some()
-                });
+            let published_leaf = match meta.as_ref().and_then(|head| head.leaf_node_id.as_ref()) {
+                None => crate::store::PublishedLeafFacts::Absent,
+                Some(leaf_node_id)
+                    if tombstoned.contains(leaf_node_id)
+                        || graph.find_node(leaf_node_id).is_none() =>
+                {
+                    crate::store::PublishedLeafFacts::Retired {
+                        node_id: leaf_node_id.clone(),
+                    }
+                }
+                Some(leaf_node_id) => {
+                    let resident = self.session_graph.lock_recover();
+                    let active_path = resident.active_path_nodes();
+                    let generation = active_path.len().checked_sub(1).ok_or_else(|| {
+                        crate::StoreError::StoredDataCorrupt {
+                            record_kind: "SessionGraph",
+                            message: "published leaf has an empty active path".to_string(),
+                        }
+                    })? as u64;
+                    let frame_node_id = resident
+                        .nearest_frame_node_id(Some(leaf_node_id))
+                        .map(ToOwned::to_owned)
+                        .ok_or_else(|| crate::StoreError::MissingFrameOpenAncestor {
+                            leaf_node_id: leaf_node_id.to_string(),
+                        })?;
+                    crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
+                        node_id: leaf_node_id.to_string(),
+                        generation,
+                        frame_node_id,
+                    })
+                }
+            };
             (
                 has_existing_live_nodes,
                 selected_leaf_is_live,
-                old_leaf_is_live,
+                published_leaf,
             )
         };
-        let old_leaf_node_id = meta.as_ref().and_then(|head| head.leaf_node_id.clone());
         let requested_ancestor_is_active = match &commit.turn_commit.append_request_identity {
             crate::AppendRequestIdentity::Append {
                 requested_ancestor_node_id: Some(required),
@@ -1164,42 +1189,16 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 ..
             } => true,
         };
-        let parent_node_facts = old_leaf_node_id
-            .as_deref()
-            .map(|leaf_node_id| {
-                let resident = self.session_graph.lock_recover();
-                let active_path = resident.active_path_nodes();
-                let generation = active_path.len().checked_sub(1).ok_or_else(|| {
-                    crate::StoreError::StoredDataCorrupt {
-                        record_kind: "SessionGraph",
-                        message: "published leaf has an empty active path".to_string(),
-                    }
-                })? as u64;
-                let frame_node_id = resident
-                    .nearest_frame_node_id(Some(leaf_node_id))
-                    .map(ToOwned::to_owned)
-                    .ok_or_else(|| crate::StoreError::MissingFrameOpenAncestor {
-                        leaf_node_id: leaf_node_id.to_string(),
-                    })?;
-                Ok(crate::store::ParentNodeFacts {
-                    node_id: leaf_node_id.to_string(),
-                    generation,
-                    frame_node_id,
-                })
-            })
-            .transpose()?;
         let mut proposed = self.global_session_graph.lock_recover().clone();
         proposed.extend_node_records(commit.graph.nodes.iter().cloned());
         proposed.set_leaf_node_id(commit.graph.leaf_node_id().cloned());
         let plan = planner.plan(crate::store::FreshRuntimeCommitFacts {
             actual_head_revision: actual,
-            old_leaf_node_id,
+            published_leaf,
             requested_ancestor_is_active,
             occupied_node_ids,
             selected_leaf_is_live,
             has_live_nodes: has_existing_live_nodes,
-            old_leaf_is_live,
-            parent_node_facts,
         })?;
         let (staged_tombstoned_node_ids, staged_session_heads) = {
             let new_leaf_node_id = commit.graph.leaf_node_id().cloned();

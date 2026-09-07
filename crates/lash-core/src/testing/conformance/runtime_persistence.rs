@@ -1024,13 +1024,11 @@ async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
     let same_leaf_plan = same_leaf_planner
         .plan(crate::store::FreshRuntimeCommitFacts {
             actual_head_revision: same_leaf_commit.expected_head_revision,
-            old_leaf_node_id: Some(old_leaf.clone()),
             requested_ancestor_is_active: true,
             occupied_node_ids: std::collections::HashSet::new(),
             selected_leaf_is_live: true,
             has_live_nodes: true,
-            old_leaf_is_live: true,
-            parent_node_facts: Some(crate::store::ParentNodeFacts {
+            published_leaf: crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,
                 frame_node_id: seed_frame_node_id.to_string(),
@@ -1066,13 +1064,11 @@ async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
     let changed_plan = changed_planner
         .plan(crate::store::FreshRuntimeCommitFacts {
             actual_head_revision: changed_commit.expected_head_revision,
-            old_leaf_node_id: Some(old_leaf.clone()),
             requested_ancestor_is_active: true,
             occupied_node_ids: std::collections::HashSet::new(),
             selected_leaf_is_live: false,
             has_live_nodes: true,
-            old_leaf_is_live: true,
-            parent_node_facts: Some(crate::store::ParentNodeFacts {
+            published_leaf: crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,
                 frame_node_id: seed_frame_node_id.into_inner(),
