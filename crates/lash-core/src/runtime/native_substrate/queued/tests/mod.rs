@@ -460,6 +460,7 @@ async fn create_only_factory_treats_claimability_as_unknown_and_runs() {
 struct PublicProbeRunHandle {
     peeks: AtomicUsize,
     hydrations: AtomicUsize,
+    hydrated: tokio::sync::Notify,
 }
 
 #[async_trait::async_trait]
@@ -477,22 +478,56 @@ impl QueuedWorkRunHandle for PublicProbeRunHandle {
         _request: QueuedWorkRunRequest,
     ) -> Result<(), QueuedWorkRunError> {
         self.hydrations.fetch_add(1, Ordering::SeqCst);
+        self.hydrated.notify_one();
         Ok(())
     }
 }
 
+/// A public handle keeps the default single-pass `claim_and_run_pending_with_progress`,
+/// so a positive peek admits exactly one hydration and the demand retires.
+/// The test awaits the hydration acknowledgement instead of sampling counters
+/// after a wall-clock sleep, then proves the negative law by waiting for the
+/// driver's task set to drain: an eager rehydration would keep the
+/// always-positive peek looping and the drain would never complete.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn public_single_pass_handle_never_eagerly_rehydrates_a_positive_peek() {
     let handle = Arc::new(PublicProbeRunHandle {
         peeks: AtomicUsize::new(0),
         hydrations: AtomicUsize::new(0),
+        hydrated: tokio::sync::Notify::new(),
     });
+    let hydrated = handle.hydrated.notified();
     let driver = NativeQueuedWork::new(handle.clone());
 
     driver.notify_pending_work(Some("session-public-probe"), "queued_turn_input");
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
+    tokio::time::timeout(Duration::from_secs(5), hydrated)
+        .await
+        .expect("the positive peek admits one hydration");
     assert_eq!(handle.hydrations.load(Ordering::SeqCst), 1);
+    assert_eq!(handle.peeks.load(Ordering::SeqCst), 1);
+
+    // The peek stays positive, so only the single-pass contract can retire the
+    // demand. Closing the tracker does not block spawns: a rehydrating driver
+    // would keep the dispatcher alive and this wait would not return.
+    let wake_tasks = driver.inner.wake_tasks.clone();
+    wake_tasks.close();
+    tokio::time::timeout(Duration::from_secs(5), wake_tasks.wait())
+        .await
+        .expect("the single pass retires the demand without rehydrating the positive peek");
+    let state = driver.inner.scheduler.lock_state();
+    assert!(
+        !state.dispatcher_running,
+        "the dispatcher retires after the single pass"
+    );
+    assert_eq!(state.active, 0);
+    assert!(state.pending.is_empty());
+    assert!(state.rerun.is_empty());
+    drop(state);
+    assert_eq!(
+        handle.hydrations.load(Ordering::SeqCst),
+        1,
+        "a retired single pass must not rehydrate a positive peek"
+    );
     assert_eq!(handle.peeks.load(Ordering::SeqCst), 1);
 }
 
@@ -531,8 +566,15 @@ impl QueuedWorkRunHandle for ContendedRunHandle {
     }
 }
 
-#[tokio::test]
+/// A positive peek followed by a blocked pass is lease contention: the driver
+/// must back off between passes rather than rehydrate eagerly, and must keep
+/// retrying rather than give up. The paused clock makes both exact: each pass
+/// is acknowledged by a notification, the next pass cannot start until virtual
+/// time reaches its jittered backoff deadline, and the gap between passes is
+/// the backoff itself instead of a wall-clock count sampled after a sleep.
+#[tokio::test(start_paused = true)]
 async fn one_notification_during_live_lease_contention_has_bounded_hydrations() {
+    const PASSES: usize = 5;
     let handle = Arc::new(ContendedRunHandle {
         peeks: AtomicUsize::new(0),
         hydrations: AtomicUsize::new(0),
@@ -540,16 +582,44 @@ async fn one_notification_during_live_lease_contention_has_bounded_hydrations() 
     });
     let driver =
         NativeQueuedWork::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
+    let cadence = driver.inner.work_cadence.clone();
+    let mut blocked = handle.blocked.notified();
 
     driver.notify_pending_work(Some("session-contended"), "queued_turn_input");
-    tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let hydrations = handle.hydrations.load(Ordering::SeqCst);
+    let mut previous = None;
+    let mut backoff = cadence.retry_initial;
+    for pass in 1..=PASSES {
+        // Each blocked pass is the rendezvous: the driver cannot start the
+        // next one until virtual time reaches its backoff deadline.
+        tokio::time::timeout(Duration::from_secs(60), blocked)
+            .await
+            .expect("a contended pass must retry after backing off");
+        blocked = handle.blocked.notified();
+        let now = tokio::time::Instant::now();
+        assert_eq!(
+            handle.hydrations.load(Ordering::SeqCst),
+            pass,
+            "each contended pass hydrates exactly once"
+        );
+        assert_eq!(handle.peeks.load(Ordering::SeqCst), pass);
+        if let Some(previous) = previous {
+            let gap: Duration = now - previous;
+            let floor = backoff.mul_f64(0.8).max(cadence.retry_initial);
+            let ceiling = backoff.mul_f64(1.2).min(cadence.retry_max);
+            assert!(
+                (floor..=ceiling).contains(&gap),
+                "pass {pass} must wait the jittered backoff ({floor:?}..={ceiling:?}), got {gap:?}"
+            );
+            backoff = backoff.saturating_mul(2).min(cadence.retry_max);
+        }
+        previous = Some(now);
+    }
+    // No pass runs ahead of its backoff: the next rendezvous is still pending.
     assert!(
-        (3..=5).contains(&hydrations),
-        "one contended notification must back off, got {hydrations} hydrations"
+        futures_util::FutureExt::now_or_never(blocked).is_none(),
+        "a further pass must wait for its backoff deadline"
     );
-    assert_eq!(handle.peeks.load(Ordering::SeqCst), hydrations);
 }
 
 mod final_regressions;
