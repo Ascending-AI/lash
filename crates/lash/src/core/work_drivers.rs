@@ -1,5 +1,11 @@
 use super::queued_work::{NativeQueuedWorkRunConfig, NativeQueuedWorkRunHandle};
-use crate::support::*;
+#[cfg(test)]
+use crate::support::DurableProcessWorkerConfig;
+use crate::support::{
+    Arc, DurableProcessWorker, NativeProcessWork, NativeSubstrateConfig, NoQueuedWork,
+    ProcessRegistry, ProcessWorkSubstrate, ProcessWorkWiring, QueuedWorkSubstrate,
+    SessionStoreFactory, SessionWorkTarget, WorkerProcessWork, WorkerSlotSupplier, async_trait,
+};
 use lash_core::facade_support;
 
 /// How a [`LashCore`] resolves its process-work port, decided at `build()`

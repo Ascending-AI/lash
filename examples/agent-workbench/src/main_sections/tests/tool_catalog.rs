@@ -58,7 +58,7 @@ pub(crate) async fn assert_tool_catalog_contract(
         .expect_err("unknown core tool has a typed miss");
     assert_eq!(miss.name, "inbox__test__missing");
 
-    let session_tools = session.tools();
+    let session_tools = session.admin().tools();
     let session_contract = session_tools
         .resolve_contract("inbox__test__send")
         .await
@@ -117,7 +117,7 @@ async fn add_live_provider(
     session: &lash::LashSession,
 ) -> LiveProviderFixture {
     let core_catalog = core.tool_catalog();
-    let session_tools = session.tools();
+    let session_tools = session.admin().tools();
 
     let live_mail_world = mail::MailWorld::new();
     live_mail_world
@@ -179,11 +179,13 @@ pub(crate) async fn assert_live_tool_provider_execution_and_removal(
     assert_eq!(live.mail_world.inbox("live").expect("live inbox").len(), 1);
 
     let membership_generation = session
+        .admin()
         .tools()
         .set_membership(live.tool_id.clone(), false)
         .await
         .expect("record a source membership choice before removal");
     let removal_generation = session
+        .admin()
         .tools()
         .remove_source(&live.source)
         .await
@@ -192,13 +194,19 @@ pub(crate) async fn assert_live_tool_provider_execution_and_removal(
         removal_generation > membership_generation,
         "removal must advance the generation from the preceding state mutation"
     );
-    let removal_state = session.tools().state().await.expect("state after removal");
+    let removal_state = session
+        .admin()
+        .tools()
+        .state()
+        .await
+        .expect("state after removal");
     assert_eq!(
         serde_json::to_value(removal_state).expect("serialize tool state")["generation"],
         serde_json::json!(removal_generation),
         "remove_source returns the refreshed session ToolState generation"
     );
     let removed = session
+        .admin()
         .tools()
         .resolve_contract("inbox__live__send")
         .await
@@ -211,6 +219,7 @@ pub(crate) async fn assert_live_tool_provider_execution_and_removal(
         "the core projection remains unchanged after session source removal"
     );
     let absent_source = session
+        .admin()
         .tools()
         .remove_source(&live.source)
         .await
@@ -222,6 +231,7 @@ pub(crate) async fn assert_live_tool_provider_execution_and_removal(
     );
 
     let replacement_source = session
+        .admin()
         .tools()
         .add_provider(Arc::new(mail::MockMailProvider::new(
             live.mail_world.clone(),
@@ -230,6 +240,7 @@ pub(crate) async fn assert_live_tool_provider_execution_and_removal(
         .expect("re-add the live provider");
     assert!(
         session
+            .admin()
             .tools()
             .active_manifests()
             .await
@@ -239,6 +250,7 @@ pub(crate) async fn assert_live_tool_provider_execution_and_removal(
         "re-adding a removed source creates fresh default-member tool state"
     );
     session
+        .admin()
         .tools()
         .remove_source(&replacement_source)
         .await

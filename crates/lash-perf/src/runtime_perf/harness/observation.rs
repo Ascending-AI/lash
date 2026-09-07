@@ -14,6 +14,7 @@ impl BenchmarkRuntime {
         self.session
             .as_ref()
             .expect("benchmark session")
+            .admin()
             .commands()
             .refresh_tool_catalog("runtime perf catalog attribution", idempotency_key)
             .await
@@ -72,6 +73,7 @@ impl BenchmarkRuntime {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let delivery = loop {
             if let Some(delivery) = session
+                .admin()
                 .processes()
                 .list_all()
                 .await?
@@ -99,11 +101,13 @@ impl BenchmarkRuntime {
         };
         if !delivery.terminal {
             session
+                .admin()
                 .processes()
                 .await_output(delivery.process_id.as_str())
                 .await?;
         }
         let terminal_processes = [session
+            .admin()
             .processes()
             .get(delivery.process_id.as_str())
             .await?

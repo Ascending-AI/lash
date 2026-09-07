@@ -300,15 +300,6 @@ fn assistant_display_does_not_duplicate_matching_terminal_value() {
 mod ui_contract_tests;
 
 #[test]
-fn mail_received_event_type_matches_source_type() {
-    let resources = workbench_lashlang_resources();
-    let binding = resources
-        .resolve_trigger_source(MAIL_RECEIVED_SOURCE_TYPE)
-        .expect("mail.received source registered");
-    assert_eq!(binding.event_type_name(), "mail.Received");
-}
-
-#[test]
 fn mail_received_account_contract_uses_slugs() {
     const ACCOUNT_SLUG_CONTRACT: &str = "`mail.Received.account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries.";
 
@@ -987,6 +978,7 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
     let session = core.session(session_id).open().await.expect("open session");
 
     let tool_names = session
+        .admin()
         .tools()
         .active_manifests()
         .await
@@ -1184,6 +1176,7 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         .await
         .expect("reopen session");
     let tool_names = reopened
+        .admin()
         .tools()
         .active_manifests()
         .await
@@ -1216,7 +1209,7 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         .open()
         .await
         .expect("reopen session after account removal");
-    let tool_state = reopened.tools().state().await.expect("tool state");
+    let tool_state = reopened.admin().tools().state().await.expect("tool state");
     let send_tool_id = lash::tools::ToolId::from("tool:inbox__late_account__send");
     let send_entry = tool_state
         .iter()
@@ -1244,7 +1237,7 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         .open()
         .await
         .expect("reopen session after account re-add");
-    let tool_state = reopened.tools().state().await.expect("tool state");
+    let tool_state = reopened.admin().tools().state().await.expect("tool state");
     let send_entry = tool_state
         .iter()
         .find_map(|(id, entry)| (id == &send_tool_id).then_some(entry))
@@ -1658,6 +1651,7 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
             .open()
             .await
             .expect("open new session")
+            .admin()
             .processes()
             .list()
             .await

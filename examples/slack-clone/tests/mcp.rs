@@ -420,6 +420,7 @@ async fn bundled_mcp_tools_join_the_catalog_and_feed_the_standard_tool_loop() {
         .expect("open session");
 
     let names = session
+        .admin()
         .tools()
         .active_manifests()
         .await
@@ -655,6 +656,7 @@ async fn an_exact_native_name_collision_is_rejected_instead_of_shadowing_mcp() {
         .await
         .expect("open session");
     let error = session
+        .admin()
         .tools()
         .add_provider(Arc::new(CollidingTool))
         .await
@@ -665,6 +667,7 @@ async fn an_exact_native_name_collision_is_rejected_instead_of_shadowing_mcp() {
         "collision error must name the policy and tool: {message}"
     );
     let names = session
+        .admin()
         .tools()
         .active_manifests()
         .await
@@ -706,6 +709,7 @@ async fn catalog_names(core: &lash::LashCore, session_id: &str) -> Vec<String> {
         .open()
         .await
         .expect("open session")
+        .admin()
         .tools()
         .active_manifests()
         .await

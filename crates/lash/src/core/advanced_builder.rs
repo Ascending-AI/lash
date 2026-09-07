@@ -1,5 +1,5 @@
 use super::{LashCore, LashCoreBuilder};
-use crate::support::*;
+use crate::support::{PluginHost, Result};
 use lash_core::facade_support;
 
 /// Escape hatch for host-supplied runtime internals on [`LashCoreBuilder`].

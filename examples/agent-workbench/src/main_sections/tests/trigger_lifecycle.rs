@@ -62,6 +62,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     assert_eq!(trigger_records.len(), 1);
     let trigger_record = &trigger_records[0];
     let tool_names = session
+        .admin()
         .tools()
         .active_manifests()
         .await
@@ -151,7 +152,12 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     let deleted_report = emit_test_button_trigger(&core, ButtonChoice::Red).await;
     assert!(deleted_report.started_process_ids().is_empty());
 
-    let handles = session.processes().list_all().await.expect("list handles");
+    let handles = session
+        .admin()
+        .processes()
+        .list_all()
+        .await
+        .expect("list handles");
     assert_eq!(handles.len(), 3);
     assert!(handles.iter().all(|handle| handle.kind == "lashlang"));
     assert!(handles.iter().all(|handle| handle.label == "remember"));
@@ -163,6 +169,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .await
         .expect("reopen session");
     let reopened_handles = reopened
+        .admin()
         .processes()
         .list_all()
         .await

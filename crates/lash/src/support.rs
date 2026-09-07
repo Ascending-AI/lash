@@ -45,10 +45,14 @@ pub(crate) use lash_core::{TurnActivity, TurnInput};
 #[cfg(test)]
 pub(crate) use lash_core::{TurnActivityId, TurnEvent};
 
-pub(crate) use crate::admin::*;
-pub(crate) use crate::core::*;
-pub(crate) use crate::error::*;
-pub(crate) use crate::plugin_binding::*;
+pub(crate) use crate::admin::{PluginOperations, SessionAdmin};
+pub(crate) use crate::core::{LashCore, build_plugin_host};
+#[cfg(test)]
+pub(crate) use crate::error::SelectedQueuedWorkDrainRefusalCause;
+pub(crate) use crate::error::{EmbedError, Result};
+pub(crate) use crate::plugin_binding::{ActivePluginBinding, PluginBinding};
 pub(crate) use crate::prompt_layer::PromptLayerSink;
 pub(crate) use crate::session::{LashSession, ParkedSession, SessionBuilder};
-pub(crate) use crate::turn::*;
+pub(crate) use crate::turn::{QueuedTurnBuilder, TurnBuilder};
+#[cfg(test)]
+pub(crate) use crate::turn::{RunActivityCollector, TurnReport, message_text};

@@ -125,7 +125,7 @@ async fn session_operations_delegate_to_runtime() -> Result<()> {
         .refresh_tool_catalog("control admin test", "control-admin-refresh")
         .await?;
     session.refresh_background_graph().await?;
-    assert!(session.processes().list().await?.is_empty());
+    assert!(session.admin().processes().list().await?.is_empty());
     let err = session
         .admin()
         .state()
@@ -281,10 +281,12 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
     let session = core.session("command-idempotency").open().await?;
 
     let first = session
+        .admin()
         .commands()
         .refresh_tool_catalog("test refresh", "same-refresh")
         .await?;
     let second = session
+        .admin()
         .commands()
         .refresh_tool_catalog("test refresh", "same-refresh")
         .await?;
@@ -450,6 +452,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     let process_id = "observed-process";
 
     session
+        .admin()
         .processes()
         .start(
             lash_core::ProcessStartRequest::external(
@@ -462,6 +465,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         )
         .await?;
     session
+        .admin()
         .processes()
         .cancel(
             process_id,
@@ -607,7 +611,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
             query_output.get("ok").and_then(|value| value.as_bool()),
             Some(true)
         );
-        let _ = session.processes().list().await?;
+        let _ = session.admin().processes().list().await?;
         Result::<()>::Ok(())
     })
     .await
@@ -636,6 +640,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-cancel").open().await?;
     session
+        .admin()
         .processes()
         .start(
             lash_core::ProcessStartRequest::external(
@@ -649,6 +654,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
         .await?;
 
     let summary = session
+        .admin()
         .processes()
         .cancel(
             "host-process",
@@ -693,6 +699,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
     let session = core.session("host-filter-bypass").open().await?;
     for process_id in ["host-filter-signal", "host-filter-cancel"] {
         session
+            .admin()
             .processes()
             .start(
                 lash_core::ProcessStartRequest::external(
@@ -712,11 +719,12 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
     }
 
     assert_eq!(
-        session.processes().list_all().await?.len(),
+        session.admin().processes().list_all().await?.len(),
         2,
         "host list_all must retain the complete observer-edge view"
     );
     session
+        .admin()
         .processes()
         .signal(
             "host-filter-signal",
@@ -728,6 +736,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         .await?;
     assert!(
         session
+            .admin()
             .processes()
             .events("host-filter-signal", 0)
             .await?
@@ -736,6 +745,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         "host events must expose the signal hidden from model tools"
     );
     session
+        .admin()
         .processes()
         .cancel(
             "host-filter-cancel",
@@ -744,6 +754,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         .await?;
     assert!(
         session
+            .admin()
             .processes()
             .events("host-filter-cancel", 0)
             .await?
@@ -777,6 +788,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     let session = core.session("host-cancel-all").open().await?;
     for process_id in ["host-process-a", "host-process-b"] {
         session
+            .admin()
             .processes()
             .start(
                 lash_core::ProcessStartRequest::external(
@@ -791,6 +803,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     }
 
     let mut summaries = session
+        .admin()
         .processes()
         .cancel_all(runtime_operation_scope(&core, "host-cancel-all"))
         .await?;

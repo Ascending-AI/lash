@@ -574,7 +574,7 @@ async fn run_high_traffic_operation(
         let delivery_report = core.triggers().emit(request, controller).await?;
         let delivery_process_ids = delivery_report.started_process_ids();
         if delivery_process_ids.is_empty() {
-            let registrations = session.triggers().list_all().await?;
+            let registrations = session.admin().triggers().list_all().await?;
             anyhow::bail!(
                 "trigger high-traffic operation {ordinal} did not expose a delivery process: report={delivery_report:?}, registrations={registrations:?}"
             );

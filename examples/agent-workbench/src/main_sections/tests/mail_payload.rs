@@ -4,6 +4,15 @@ use lash::triggers::TriggerStore as _;
 use axum::extract::FromRequest;
 
 #[test]
+fn mail_received_event_type_matches_source_type() {
+    let resources = workbench_lashlang_resources();
+    let binding = resources
+        .resolve_trigger_source(MAIL_RECEIVED_SOURCE_TYPE)
+        .expect("mail.received source registered");
+    assert_eq!(binding.event_type_name(), "mail.Received");
+}
+
+#[test]
 fn wrong_field_mail_payload_is_rejected_as_unprocessable_entity() {
     run_async_test_on_stack_budget("workbench-mail-payload-rejection-test", || async {
         let request = axum::http::Request::builder()

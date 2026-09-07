@@ -6085,6 +6085,7 @@ async fn await_queued_work_batch_resolves_when_drained() -> Result<()> {
         .expect("core");
     let session = core.session("await-queued").open().await?;
     let receipt = session
+        .admin()
         .commands()
         .refresh_tool_catalog("await queued work test", "await-queued-refresh")
         .await?;
@@ -8735,7 +8736,7 @@ finish value"#,
         .expect("tool process should start")
         .expect("tool provider entered");
 
-    let processes = session.processes().list().await?;
+    let processes = session.admin().processes().list().await?;
     let running_app_lookup = processes.iter().any(|process| {
         process.kind == "lashlang" && process.label == "lookup" && !process.terminal
     });
@@ -8809,7 +8810,7 @@ finish value"#,
         .expect("tool process should start")
         .expect("tool provider entered");
 
-    let processes = session.processes().list().await?;
+    let processes = session.admin().processes().list().await?;
     let running = processes
         .iter()
         .find(|process| process.label == "lookup")

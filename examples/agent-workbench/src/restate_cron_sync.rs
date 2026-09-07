@@ -205,6 +205,7 @@ where
         .await
         .map_err(&classify_embed_error)?;
     let registrations = session
+        .admin()
         .triggers()
         .by_source_type(CRON_SCHEDULE_SOURCE_TYPE)
         .await
@@ -337,7 +338,10 @@ async fn schedule_next(
         .signed_duration_since(now)
         .to_std()
         .unwrap_or_else(|_| Duration::from_secs(0));
-    let handle = ctx.object_client::<WorkbenchCronJobClient>(ctx.key()).run().send_after(delay);
+    let handle = ctx
+        .object_client::<WorkbenchCronJobClient>(ctx.key())
+        .run()
+        .send_after(delay);
     let next_execution_id = handle.await?.invocation_id().to_owned();
     let state = WorkbenchCronState {
         request,

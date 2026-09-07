@@ -486,6 +486,7 @@ async fn external_process_port_composes_native_queued_port_and_refreshes_after_r
         .as_str()
         .to_string();
     session
+        .admin()
         .commands()
         .refresh_tool_catalog("native queue regression guard", "native-queue-refresh")
         .await?;

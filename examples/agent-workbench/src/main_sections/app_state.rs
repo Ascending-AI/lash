@@ -1059,7 +1059,9 @@ pub(crate) async fn apply_model_selection_to_session(
 ) -> Result<(), AppError> {
     state.set_selected_model(ModelSelection::from_spec(&model));
     session
-        .configure(lash::SessionConfigPatch {
+        .admin()
+        .config()
+        .update(lash::SessionConfigPatch {
             model: Some(model.clone()),
             ..lash::SessionConfigPatch::default()
         })

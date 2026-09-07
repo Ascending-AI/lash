@@ -1,4 +1,10 @@
-use crate::support::*;
+use crate::support::{
+    Arc, CancellationToken, EmbedError, InputItem, LashCore, LashRuntime, PluginMessage,
+    PromptContribution, PromptSlot, PromptTemplate, Result, RuntimeHandle, RuntimeSessionState,
+    ScopedEffectController, SessionCreateRequest, SessionError, SessionHandle,
+    SessionProcessEventKind, SessionStateService, ToolManifest, ToolProvider, ToolRestoreReport,
+    ToolSourceHandle, ToolState, TurnInput,
+};
 pub(crate) use lash_core::facade_support::SessionConfigPatch;
 use lash_core::facade_support::{ToolRegistryFacadeOps, ToolStateFacadeOps};
 // `PluginQuery` / `PluginCommand` / `PluginTask` bound the operation runners
@@ -906,12 +912,6 @@ pub struct ToolAdmin {
 }
 
 impl ToolAdmin {
-    pub(crate) fn new(control: SessionAdmin) -> Self {
-        Self { control }
-    }
-}
-
-impl ToolAdmin {
     /// Returns the current administration state.
     pub async fn state(&self) -> Result<ToolState> {
         self.control.tool_state().await
@@ -1118,10 +1118,6 @@ pub struct SessionProcessAdmin {
 /// model-facing handle summary ([`lash_core::ProcessHandleView`]), the one row
 /// type retained for the model/handle contract.
 impl SessionProcessAdmin {
-    pub(crate) fn new(control: SessionAdmin) -> Self {
-        Self { control }
-    }
-
     /// Observer-scoped read: the global observer filtered to this session.
     /// One home for the session's read logic — it calls the observer, never
     /// reimplements it.
