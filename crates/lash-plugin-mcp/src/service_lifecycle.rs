@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use http::{HeaderName, HeaderValue};
 use rmcp::ServiceError;
@@ -14,6 +14,7 @@ use rmcp::transport::async_rw::AsyncRwTransport;
 use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
 };
+use tokio::time::Instant;
 
 use crate::config::McpServerConfig;
 use crate::error::McpError;
@@ -206,11 +207,77 @@ pub(crate) fn equal_jitter(max: std::time::Duration) -> std::time::Duration {
     std::time::Duration::from_millis(fastrand::u64(min_ms..=max_ms))
 }
 
+/// Lifecycle transitions of one actor-owned child, reported to the owning
+/// entry's test observer. Deadlines are the runtime clock's instants, so a
+/// test that owns a paused clock can cross them exactly.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LifecycleEvent {
+    /// The actor took ownership of a freshly spawned stdio child.
+    Spawned { pid: u32 },
+    /// Graceful reaping began; the child is killed at `deadline` unless it
+    /// exits first.
+    GraceArmed { pid: u32, deadline: Instant },
+    /// The kill request was sent; the child is abandoned at `deadline` unless
+    /// it exits first.
+    KillIssued { pid: u32, deadline: Instant },
+    /// The child exited and was reaped.
+    Reaped { pid: u32 },
+    /// The guard dropped without reaping the child (killed, never waited).
+    Abandoned { pid: u32 },
+    /// An injected wedge holds the actor forever after a shutdown request.
+    Wedged { pid: u32 },
+    /// The bounded reconnect loop spent its final attempt.
+    ReconnectExhausted,
+}
+
+#[cfg(test)]
+pub(crate) type LifecycleObserver = tokio::sync::mpsc::UnboundedSender<LifecycleEvent>;
+
+/// Wakes the reaper whenever a child of this process changes state, so a
+/// child exit is observed as a rendezvous rather than by polling.
+#[cfg(unix)]
+struct ChildExits(tokio::signal::unix::Signal);
+
+#[cfg(unix)]
+impl ChildExits {
+    fn subscribe() -> std::io::Result<Self> {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::child()).map(Self)
+    }
+
+    async fn recv(&mut self) {
+        if self.0.recv().await.is_none() {
+            // The signal driver is gone; only the deadline can end the wait.
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+/// Without SIGCHLD the reaper polls on the runtime clock, which stays the
+/// deadline's clock.
+#[cfg(not(unix))]
+struct ChildExits;
+
+#[cfg(not(unix))]
+impl ChildExits {
+    fn subscribe() -> std::io::Result<Self> {
+        Ok(Self)
+    }
+
+    async fn recv(&mut self) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 /// Exact child-process handle retained outside rmcp's async service task.
 ///
 /// Explicit shutdown closes the child's stdin, gives it a grace period, and
 /// waits to reap it. Dropping the guard without that shutdown only kills and
 /// logs: waiting in `Drop` cannot be made reliably bounded.
+///
+/// Reap deadlines are runtime-clock instants (`tokio::time`), the same clock
+/// the lifecycle actor's own timers use; child exits arrive as a SIGCHLD
+/// rendezvous. Nothing here reads wall-clock time.
 pub(crate) struct StdioChildGuard {
     server_name: String,
     pid: u32,
@@ -220,6 +287,8 @@ pub(crate) struct StdioChildGuard {
     shutdown_requested: Arc<AtomicBool>,
     #[cfg(test)]
     never_finish_reap: bool,
+    #[cfg(test)]
+    observer: Option<LifecycleObserver>,
 }
 
 impl StdioChildGuard {
@@ -237,6 +306,8 @@ impl StdioChildGuard {
             shutdown_requested,
             #[cfg(test)]
             never_finish_reap: false,
+            #[cfg(test)]
+            observer: None,
         }
     }
 
@@ -246,38 +317,61 @@ impl StdioChildGuard {
         post_kill_wait: Duration,
     ) -> std::io::Result<()> {
         self.explicit_abandonment = true;
+        let mut exits = ChildExits::subscribe()?;
         let deadline = Instant::now() + graceful_period;
-        loop {
-            if self.try_wait()?.is_some() {
-                self.reaped = true;
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+        #[cfg(test)]
+        self.emit(LifecycleEvent::GraceArmed {
+            pid: self.pid,
+            deadline,
+        });
+        if self.exited_by(&mut exits, deadline).await? {
+            return Ok(());
         }
 
         let kill_error = self.child.kill().err();
         let reap_deadline = Instant::now() + post_kill_wait;
+        #[cfg(test)]
+        self.emit(LifecycleEvent::KillIssued {
+            pid: self.pid,
+            deadline: reap_deadline,
+        });
+        if self.exited_by(&mut exits, reap_deadline).await? {
+            return Ok(());
+        }
+        let kill_context = kill_error.map_or_else(String::new, |error| {
+            format!("; kill request failed: {error}")
+        });
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!(
+                "MCP stdio child PID {} did not exit within {post_kill_wait:?} after the kill request{kill_context}",
+                self.pid,
+            ),
+        ))
+    }
+
+    /// Reaps the child if it exits before `deadline` passes on the runtime
+    /// clock. `Ok(false)` means the deadline passed with the child still
+    /// running.
+    async fn exited_by(
+        &mut self,
+        exits: &mut ChildExits,
+        deadline: Instant,
+    ) -> std::io::Result<bool> {
+        let expiry = tokio::time::sleep_until(deadline);
+        tokio::pin!(expiry);
         loop {
             if self.try_wait()?.is_some() {
                 self.reaped = true;
-                return Ok(());
+                #[cfg(test)]
+                self.emit(LifecycleEvent::Reaped { pid: self.pid });
+                return Ok(true);
             }
-            if Instant::now() >= reap_deadline {
-                let kill_context = kill_error.map_or_else(String::new, |error| {
-                    format!("; kill request failed: {error}")
-                });
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    format!(
-                        "MCP stdio child PID {} did not exit within {post_kill_wait:?} after the kill request{kill_context}",
-                        self.pid,
-                    ),
-                ));
+            tokio::select! {
+                biased;
+                () = exits.recv() => {}
+                () = &mut expiry => return Ok(false),
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }
 
@@ -301,6 +395,20 @@ impl StdioChildGuard {
     pub(crate) fn never_finish_reap(&mut self) {
         self.never_finish_reap = true;
     }
+
+    /// Reports this child's lifecycle transitions to the owning entry's
+    /// observer.
+    #[cfg(test)]
+    pub(crate) fn observe(&mut self, observer: LifecycleObserver) {
+        self.observer = Some(observer);
+    }
+
+    #[cfg(test)]
+    fn emit(&self, event: LifecycleEvent) {
+        if let Some(observer) = &self.observer {
+            let _ = observer.send(event);
+        }
+    }
 }
 
 impl Drop for StdioChildGuard {
@@ -320,6 +428,135 @@ impl Drop for StdioChildGuard {
                     "MCP stdio child killed without explicit pool shutdown; call shutdown_all() to reap it"
                 );
             }
+            #[cfg(test)]
+            self.emit(LifecycleEvent::Abandoned { pid: self.pid });
         }
+    }
+}
+
+/// Real-clock witnesses: the default clock is unpaused runtime time, so the
+/// guard's observable sequence under production timing is pinned here
+/// without any test clock in play.
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+
+    fn observed_child(
+        script: &str,
+    ) -> (
+        StdioChildGuard,
+        tokio::sync::mpsc::UnboundedReceiver<LifecycleEvent>,
+    ) {
+        let child = Command::new("sh")
+            .args(["-c", script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn stdio child");
+        let mut guard = StdioChildGuard::new("witness", child, Arc::new(AtomicBool::new(false)));
+        let (observer, events) = tokio::sync::mpsc::unbounded_channel();
+        guard.observe(observer);
+        (guard, events)
+    }
+
+    fn drain(
+        events: &mut tokio::sync::mpsc::UnboundedReceiver<LifecycleEvent>,
+    ) -> Vec<LifecycleEvent> {
+        std::iter::from_fn(|| events.try_recv().ok()).collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn child_exiting_on_eof_is_reaped_inside_the_grace_period() {
+        let (mut guard, mut events) = observed_child("cat >/dev/null");
+        let pid = guard.pid();
+        guard.child.stdin.take();
+        let started = Instant::now();
+        guard
+            .reap_after_graceful_close(Duration::from_secs(30), Duration::from_secs(30))
+            .await
+            .expect("child exits on EOF");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(30),
+            "EOF exit must not consume the grace period: {elapsed:?}"
+        );
+        let observed = drain(&mut events);
+        assert_eq!(observed.len(), 2, "{observed:?}");
+        assert!(
+            matches!(observed[0], LifecycleEvent::GraceArmed { pid: armed, deadline }
+                if armed == pid && deadline >= started + Duration::from_secs(30))
+        );
+        assert_eq!(observed[1], LifecycleEvent::Reaped { pid });
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn close_ignoring_child_is_killed_at_the_grace_deadline() {
+        let (mut guard, mut events) = observed_child("trap '' TERM; while :; do sleep 1; done");
+        let pid = guard.pid();
+        guard.child.stdin.take();
+        let started = Instant::now();
+        guard
+            .reap_after_graceful_close(Duration::from_millis(50), Duration::from_secs(30))
+            .await
+            .expect("kill reaps the child");
+        assert!(
+            started.elapsed() >= Duration::from_millis(50),
+            "the kill request waits for the grace period to elapse"
+        );
+        let observed = drain(&mut events);
+        assert_eq!(observed.len(), 3, "{observed:?}");
+        let LifecycleEvent::GraceArmed {
+            deadline: grace, ..
+        } = observed[0]
+        else {
+            panic!("{observed:?}");
+        };
+        let LifecycleEvent::KillIssued {
+            pid: killed,
+            deadline: cleanup,
+        } = observed[1]
+        else {
+            panic!("{observed:?}");
+        };
+        assert_eq!(killed, pid);
+        assert!(
+            cleanup >= grace + Duration::from_secs(30),
+            "cleanup deadline is armed after the grace deadline passes"
+        );
+        assert_eq!(observed[2], LifecycleEvent::Reaped { pid });
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn unreapable_child_is_abandoned_at_the_cleanup_deadline() {
+        let (mut guard, mut events) = observed_child("cat >/dev/null");
+        let pid = guard.pid();
+        guard.never_finish_reap();
+        let started = Instant::now();
+        let error = guard
+            .reap_after_graceful_close(Duration::from_millis(20), Duration::from_millis(30))
+            .await
+            .expect_err("a child the reaper never observes is abandoned");
+        assert!(started.elapsed() >= Duration::from_millis(50));
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert_eq!(
+            error.to_string(),
+            format!("MCP stdio child PID {pid} did not exit within 30ms after the kill request")
+        );
+        let observed = drain(&mut events);
+        assert!(
+            matches!(
+                observed.as_slice(),
+                [
+                    LifecycleEvent::GraceArmed { .. },
+                    LifecycleEvent::KillIssued { .. },
+                    LifecycleEvent::Abandoned { pid: abandoned }
+                ] if *abandoned == pid
+            ),
+            "{observed:?}"
+        );
+        // The guard's Drop killed the child; like the pool-level abandonment
+        // scenarios, the unreaped zombie is the documented residue.
     }
 }
