@@ -1,3 +1,5 @@
+use super::*;
+
 // Structural validation of the durable handler and finally stacks. The VM
 // trusts their ordering absolutely — `throw_value` picks the catch target by
 // position and derives the cleanup set from it — so an authored blob whose

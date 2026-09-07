@@ -1,4 +1,6 @@
-fn take_canonical_integer(
+use super::*;
+
+pub(super) fn take_canonical_integer(
     bytes: &[u8],
     cursor: &mut usize,
     location: &str,
@@ -72,7 +74,7 @@ fn is_integer_marker(marker: u8) -> bool {
     matches!(marker, 0x00..=0x7f | 0xcc..=0xcf | 0xd0..=0xd3 | 0xe0..=0xff)
 }
 
-fn take_byte(bytes: &[u8], cursor: &mut usize) -> Result<u8, SnapshotDecodeError> {
+pub(super) fn take_byte(bytes: &[u8], cursor: &mut usize) -> Result<u8, SnapshotDecodeError> {
     let byte = bytes
         .get(*cursor)
         .copied()
@@ -81,12 +83,12 @@ fn take_byte(bytes: &[u8], cursor: &mut usize) -> Result<u8, SnapshotDecodeError
     Ok(byte)
 }
 
-fn take_u16(bytes: &[u8], cursor: &mut usize) -> Result<u16, SnapshotDecodeError> {
+pub(super) fn take_u16(bytes: &[u8], cursor: &mut usize) -> Result<u16, SnapshotDecodeError> {
     let value = take_array::<2>(bytes, cursor)?;
     Ok(u16::from_be_bytes(value))
 }
 
-fn take_u32(bytes: &[u8], cursor: &mut usize) -> Result<u32, SnapshotDecodeError> {
+pub(super) fn take_u32(bytes: &[u8], cursor: &mut usize) -> Result<u32, SnapshotDecodeError> {
     let value = take_array::<4>(bytes, cursor)?;
     Ok(u32::from_be_bytes(value))
 }
@@ -112,7 +114,11 @@ fn take_array<const N: usize>(
     Ok(value)
 }
 
-fn skip_bytes(bytes: &[u8], cursor: &mut usize, length: usize) -> Result<(), SnapshotDecodeError> {
+pub(super) fn skip_bytes(
+    bytes: &[u8],
+    cursor: &mut usize,
+    length: usize,
+) -> Result<(), SnapshotDecodeError> {
     let end = cursor
         .checked_add(length)
         .ok_or_else(|| invalid_messagepack("length overflow"))?;
@@ -133,33 +139,33 @@ fn take_slice<'a>(
     Ok(&bytes[start..*cursor])
 }
 
-fn usize_from_u32(value: u32) -> Result<usize, SnapshotDecodeError> {
+pub(super) fn usize_from_u32(value: u32) -> Result<usize, SnapshotDecodeError> {
     usize::try_from(value).map_err(|_| invalid_messagepack("length does not fit usize"))
 }
 
-fn invalid_messagepack(message: &str) -> SnapshotDecodeError {
+pub(super) fn invalid_messagepack(message: &str) -> SnapshotDecodeError {
     SnapshotDecodeError::InvalidEncoding(message.to_string())
 }
 
-fn invalid_at(location: &str, message: &str) -> SnapshotDecodeError {
+pub(super) fn invalid_at(location: &str, message: &str) -> SnapshotDecodeError {
     invalid_messagepack(&format!("at `{location}`: {message}"))
 }
 
-fn unexpected_marker(location: &str, expected: &str, marker: u8) -> SnapshotDecodeError {
+pub(super) fn unexpected_marker(location: &str, expected: &str, marker: u8) -> SnapshotDecodeError {
     invalid_at(
         location,
         &format!("expected {expected}, found marker 0x{marker:02x}"),
     )
 }
 
-fn non_canonical(location: &str, reason: &str) -> SnapshotDecodeError {
+pub(super) fn non_canonical(location: &str, reason: &str) -> SnapshotDecodeError {
     SnapshotDecodeError::NonCanonicalEncoding {
         location: location.to_string(),
         reason: reason.to_string(),
     }
 }
 
-fn expect_key(
+pub(super) fn expect_key(
     bytes: &[u8],
     cursor: &mut usize,
     expected: &str,
@@ -177,7 +183,7 @@ fn expect_key(
     Ok(())
 }
 
-fn take_canonical_string<'a>(
+pub(super) fn take_canonical_string<'a>(
     bytes: &'a [u8],
     cursor: &mut usize,
     location: &str,
@@ -221,7 +227,7 @@ fn take_canonical_string<'a>(
     std::str::from_utf8(value).map_err(|_| invalid_at(location, "string is not valid UTF-8"))
 }
 
-fn validate_f64(
+pub(super) fn validate_f64(
     bytes: &[u8],
     cursor: &mut usize,
     location: &str,
@@ -247,7 +253,7 @@ fn validate_f64(
     Err(unexpected_marker(location, "an f64", marker))
 }
 
-fn validate_json_number(
+pub(super) fn validate_json_number(
     bytes: &[u8],
     cursor: &mut usize,
     location: &str,
@@ -272,7 +278,7 @@ fn validate_json_number(
     take_canonical_integer(bytes, cursor, location, marker).map(|_| ())
 }
 
-fn validate_unsigned(
+pub(super) fn validate_unsigned(
     bytes: &[u8],
     cursor: &mut usize,
     location: &str,

@@ -1518,13 +1518,12 @@ fn take_array_length(
     }
 }
 
-include!("state/canonical_wire.rs");
+mod canonical_wire;
+use canonical_wire::*;
 
 #[cfg(test)]
 #[path = "state/fixes3_tests.rs"]
 mod fixes3_tests;
 
 #[cfg(test)]
-mod tests {
-    include!("state/tests.rs");
-}
+mod tests;

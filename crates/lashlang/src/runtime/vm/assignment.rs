@@ -1,9 +1,11 @@
+use super::*;
+
 // In-place assignment opcodes: compound `+=` forms and list appends. Each of
 // these writes a durable binding, so each is an isolation boundary: the value
 // that lands in the slot is exclusively owned by it.
 
 impl<H: ExecutionHost> Vm<'_, H> {
-    fn append_assign(&mut self, slot: usize) -> Result<(), RuntimeError> {
+    pub(super) fn append_assign(&mut self, slot: usize) -> Result<(), RuntimeError> {
         let item = self.pop_stack()?;
         self.slots
             .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
@@ -46,7 +48,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     #[inline(always)]
-    fn add_assign_value(&mut self, slot: usize, right: Value) -> Result<(), RuntimeError> {
+    pub(super) fn add_assign_value(
+        &mut self,
+        slot: usize,
+        right: Value,
+    ) -> Result<(), RuntimeError> {
         self.slots
             .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
         // A list accumulator grows in place. Every other holder of its old
@@ -108,7 +114,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     #[inline(always)]
-    fn add_assign_number(&mut self, slot: usize, right: f64) -> Result<(), RuntimeError> {
+    pub(crate) fn add_assign_number(
+        &mut self,
+        slot: usize,
+        right: f64,
+    ) -> Result<(), RuntimeError> {
         let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
         self.slots
             .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
@@ -137,7 +147,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     #[inline(always)]
-    fn add_assign_slot(&mut self, slot: usize, right: usize) -> Result<(), RuntimeError> {
+    pub(crate) fn add_assign_slot(
+        &mut self,
+        slot: usize,
+        right: usize,
+    ) -> Result<(), RuntimeError> {
         // The number fast path needs both sides to already be numbers: neither
         // slot is exported for this opcode, so a heap-backed accumulator has to
         // go the long way round rather than be asked for its numeric value.
@@ -152,7 +166,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     #[inline(always)]
-    fn add_assign_index_number(
+    pub(super) fn add_assign_index_number(
         &mut self,
         slot: usize,
         index: &Value,

@@ -1,5 +1,7 @@
+use super::*;
+
 impl Compiler {
-    fn try_compile_label_as_effect_step(
+    pub(super) fn try_compile_label_as_effect_step(
         &mut self,
         expr: &Expr,
         label: &LabelMetadata,
@@ -104,7 +106,7 @@ impl Compiler {
         self.compile_awaitable_effect_expr(expr, Some(site))
     }
 
-    fn compile_awaitable_effect_expr(
+    pub(super) fn compile_awaitable_effect_expr(
         &mut self,
         expr: &Expr,
         forced_site: Option<LashlangExecutionSite>,
@@ -381,7 +383,7 @@ impl Compiler {
         }
     }
 
-    fn compile_start_process_expr(&mut self, process: &ProcessStartExpr) -> usize {
+    pub(super) fn compile_start_process_expr(&mut self, process: &ProcessStartExpr) -> usize {
         for (_, expr) in &process.args {
             self.compile_expr(expr);
         }
@@ -392,7 +394,7 @@ impl Compiler {
         instruction
     }
 
-    fn compile_process_ref_expr(&mut self, process: &str) {
+    pub(super) fn compile_process_ref_expr(&mut self, process: &str) {
         let Some(module_context) = self.module_context.as_ref() else {
             self.emit_push_value(Value::Null);
             return;
@@ -455,13 +457,13 @@ impl Compiler {
         instruction
     }
 
-    fn emit_jump_if_false(&mut self) -> usize {
+    pub(super) fn emit_jump_if_false(&mut self) -> usize {
         let index = self.code.len();
         self.code.push(Instruction::JumpIfFalse(usize::MAX));
         index
     }
 
-    fn compile_condition_jump_if_false(&mut self, condition: &Expr) -> usize {
+    pub(super) fn compile_condition_jump_if_false(&mut self, condition: &Expr) -> usize {
         if !contains_type_literal(condition)
             && let Some(value) = self.fold_compile_time_expr(condition)
         {
@@ -527,19 +529,19 @@ impl Compiler {
         self.emit_jump_if_false()
     }
 
-    fn emit_jump_if_true(&mut self) -> usize {
+    pub(super) fn emit_jump_if_true(&mut self) -> usize {
         let index = self.code.len();
         self.code.push(Instruction::JumpIfTrue(usize::MAX));
         index
     }
 
-    fn emit_jump(&mut self) -> usize {
+    pub(super) fn emit_jump(&mut self) -> usize {
         let index = self.code.len();
         self.code.push(Instruction::Jump(usize::MAX));
         index
     }
 
-    fn compile_type_literal(&mut self, ty: &TypeExpr) {
+    pub(super) fn compile_type_literal(&mut self, ty: &TypeExpr) {
         self.compile_stats.borrow_mut().type_literals_total += 1;
 
         if let Some(schema) = self.fold_type_expr(ty) {
@@ -640,7 +642,7 @@ impl Compiler {
         }
     }
 
-    fn fold_type_expr(&self, ty: &TypeExpr) -> Option<Value> {
+    pub(super) fn fold_type_expr(&self, ty: &TypeExpr) -> Option<Value> {
         self.fold_type_expr_inner(ty, &mut SmallVec::new())
     }
 
@@ -709,7 +711,7 @@ impl Compiler {
         }
     }
 
-    fn patch_jump(&mut self, index: usize, target: usize) {
+    pub(super) fn patch_jump(&mut self, index: usize, target: usize) {
         match &mut self.code[index] {
             Instruction::Jump(slot)
             | Instruction::JumpIfFalse(slot)

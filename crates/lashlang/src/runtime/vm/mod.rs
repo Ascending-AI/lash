@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::ast::{BinaryOp, JavaScriptBinaryOp, JavaScriptUnaryOp, UnaryOp};
 use crate::lexer::Span;
+use crate::runtime::CompilationDialect;
 use crate::{
     LashlangExecutionChild, LashlangExecutionObservation, LashlangExecutionSite,
     ProcessBranchSelection,
@@ -1589,9 +1590,13 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         Ok((globals, self.heap))
     }
 }
-include!("functions.rs");
-include!("assignment.rs");
-include!("iteration.rs");
-include!("observations.rs");
-include!("roots.rs");
-include!("state_boundary.rs");
+mod functions;
+use functions::*;
+mod assignment;
+mod iteration;
+pub(crate) use iteration::*;
+mod observations;
+mod roots;
+use roots::*;
+mod state_boundary;
+use state_boundary::*;

@@ -1,3 +1,5 @@
+use super::*;
+
 impl Compiler {
     pub(crate) fn compile_program(program: &Program) -> (Chunk, CompileStats) {
         Self::compile_program_with_dialect(program, CompilationDialect::Lashlang)
@@ -105,7 +107,7 @@ impl Compiler {
         }
     }
 
-    fn emit_isolation(&mut self) {
+    pub(super) fn emit_isolation(&mut self) {
         if self.dialect == CompilationDialect::Lashlang {
             self.code.push(Instruction::DeepCopy);
         }
@@ -208,7 +210,7 @@ impl Compiler {
         }
     }
 
-    fn copy_expression_metadata(&mut self, original: &Expr, cloned: &Expr) {
+    pub(super) fn copy_expression_metadata(&mut self, original: &Expr, cloned: &Expr) {
         let original_key = original as *const Expr as usize;
         let cloned_key = cloned as *const Expr as usize;
         if let Some(span) = self.expression_source_spans.get(&original_key).copied() {
@@ -224,13 +226,13 @@ impl Compiler {
         }
     }
 
-    fn push_const(&mut self, value: Value) -> usize {
+    pub(super) fn push_const(&mut self, value: Value) -> usize {
         let index = self.constants.len();
         self.constants.push(value);
         index
     }
 
-    fn emit_push_value(&mut self, value: Value) {
+    pub(super) fn emit_push_value(&mut self, value: Value) {
         match value {
             Value::Null => self.code.push(Instruction::PushNull),
             Value::Undefined => self.code.push(Instruction::PushUndefined),
@@ -243,7 +245,7 @@ impl Compiler {
         }
     }
 
-    fn push_name(&mut self, name: &str) -> usize {
+    pub(super) fn push_name(&mut self, name: &str) -> usize {
         let symbol = intern_symbol(name);
         if let Some(index) = self.name_lookup.get(&symbol) {
             return *index;
@@ -258,7 +260,7 @@ impl Compiler {
         index
     }
 
-    fn push_slot(&mut self, name: &str) -> usize {
+    pub(super) fn push_slot(&mut self, name: &str) -> usize {
         let symbol = intern_symbol(name);
         let mut slots = self.slots.borrow_mut();
         if let Some(index) = slots.lookup.get(&symbol) {
@@ -278,7 +280,7 @@ impl Compiler {
         index
     }
 
-    fn push_key_list<'a>(&mut self, keys: impl Iterator<Item = &'a str>) -> usize {
+    pub(super) fn push_key_list<'a>(&mut self, keys: impl Iterator<Item = &'a str>) -> usize {
         let index = self.key_lists.len();
         let keys = keys
             .map(|key| self.push_name(key))
@@ -288,7 +290,7 @@ impl Compiler {
         index
     }
 
-    fn push_assign_path(&mut self, steps: &[AssignPathStep]) -> usize {
+    pub(super) fn push_assign_path(&mut self, steps: &[AssignPathStep]) -> usize {
         let index = self.assign_paths.len();
         let mut dynamic_index_count = 0;
         let steps = steps
@@ -311,20 +313,23 @@ impl Compiler {
         index
     }
 
-    fn push_resource_operation_batch(&mut self, batch: CompiledResourceOperationBatch) -> usize {
+    pub(super) fn push_resource_operation_batch(
+        &mut self,
+        batch: CompiledResourceOperationBatch,
+    ) -> usize {
         let index = self.resource_operation_batches.len();
         self.resource_operation_batches.push(batch);
         index
     }
 
-    fn push_format_template(&mut self, template: &str, argc: usize) -> usize {
+    pub(super) fn push_format_template(&mut self, template: &str, argc: usize) -> usize {
         let index = self.format_templates.len();
         self.format_templates
             .push(compile_format_template(template, argc));
         index
     }
 
-    fn push_compiled_schema(&mut self, schema: &Value) -> usize {
+    pub(super) fn push_compiled_schema(&mut self, schema: &Value) -> usize {
         let index = self.compiled_schemas.len();
         self.compiled_schemas.push(compile_schema_value(schema));
         index
@@ -336,20 +341,20 @@ impl Compiler {
         }
     }
 
-    fn set_const_slot(&mut self, slot: usize, value: Option<Value>) {
+    pub(super) fn set_const_slot(&mut self, slot: usize, value: Option<Value>) {
         self.ensure_const_slot(slot);
         self.const_slots[slot] = value;
     }
 
-    fn clear_const_slots(&mut self) {
+    pub(super) fn clear_const_slots(&mut self) {
         self.const_slots.fill(None);
     }
 
-    fn const_for_slot(&self, slot: usize) -> Option<Value> {
+    pub(super) fn const_for_slot(&self, slot: usize) -> Option<Value> {
         self.const_slots.get(slot).cloned().flatten()
     }
 
-    fn const_for_name(&self, name: &str) -> Option<Value> {
+    pub(super) fn const_for_name(&self, name: &str) -> Option<Value> {
         let symbol = lookup_symbol(name)?;
         let slots = self.slots.borrow();
         let slot = *slots.lookup.get(&symbol)?;
@@ -357,7 +362,7 @@ impl Compiler {
         self.const_for_slot(slot)
     }
 
-    fn resolve_intrinsic(&mut self, name: &str, argc: usize) -> IntrinsicOp {
+    pub(super) fn resolve_intrinsic(&mut self, name: &str, argc: usize) -> IntrinsicOp {
         // Unknown names are not arity-checked here; they fall through to
         // `IntrinsicOp::Unknown`. Known builtins must satisfy their registered
         // arity or compile to `InvalidArity`.
@@ -432,7 +437,7 @@ impl Compiler {
         }
     }
 
-    fn compile_block_value(&mut self, expressions: &[Expr]) {
+    pub(super) fn compile_block_value(&mut self, expressions: &[Expr]) {
         let Some((last, prefix)) = expressions.split_last() else {
             self.code.push(Instruction::PushNull);
             return;
@@ -515,7 +520,7 @@ impl Compiler {
         }
     }
 
-    fn mark_instruction_source_span(&mut self, instruction: usize, expr: &Expr) {
+    pub(super) fn mark_instruction_source_span(&mut self, instruction: usize, expr: &Expr) {
         let Some(span) = self.expression_source_span(expr) else {
             return;
         };
@@ -525,11 +530,15 @@ impl Compiler {
         self.spans[instruction] = Some(span);
     }
 
-    fn expression_source_span(&self, expr: &Expr) -> Option<Span> {
+    pub(super) fn expression_source_span(&self, expr: &Expr) -> Option<Span> {
         self.expression_source_spans.get(&expr_key(expr)).copied()
     }
 
-    fn mark_lashlang_execution_site(&mut self, instruction: usize, site: LashlangExecutionSite) {
+    pub(super) fn mark_lashlang_execution_site(
+        &mut self,
+        instruction: usize,
+        site: LashlangExecutionSite,
+    ) {
         let Some(tracking) = self.lashlang_execution.as_mut() else {
             return;
         };
@@ -539,7 +548,7 @@ impl Compiler {
         tracking.sites[instruction] = Some(site);
     }
 
-    fn lashlang_execution_site(
+    pub(super) fn lashlang_execution_site(
         &self,
         expression: &Expr,
         kind: &str,
@@ -550,7 +559,11 @@ impl Compiler {
         Some(tracking.context.builder().node_site(path, kind, label))
     }
 
-    fn emit_lashlang_execution_step(&mut self, expression: &Expr, label: &LabelMetadata) {
+    pub(super) fn emit_lashlang_execution_step(
+        &mut self,
+        expression: &Expr,
+        label: &LabelMetadata,
+    ) {
         let instruction = self.code.len();
         self.code.push(Instruction::ObserveStep);
         if let Some(site) = self.lashlang_execution_site(expression, "step", label.title.as_str()) {
@@ -558,7 +571,7 @@ impl Compiler {
         }
     }
 
-    fn branch_execution_site(&self, expression: &Expr) -> Option<LashlangExecutionSite> {
+    pub(super) fn branch_execution_site(&self, expression: &Expr) -> Option<LashlangExecutionSite> {
         let tracking = self.lashlang_execution.as_ref()?;
         let path = tracking.paths.get(&expr_key(expression))?;
         Some(tracking.context.builder().branch_site(path))
@@ -577,13 +590,18 @@ impl Compiler {
         }
     }
 
-    fn push_null_if(&mut self, leave_value: bool) {
+    pub(super) fn push_null_if(&mut self, leave_value: bool) {
         if leave_value {
             self.code.push(Instruction::PushNull);
         }
     }
 
-    fn compile_assignment_expr(&mut self, target: &AssignTarget, expr: &Expr, leave_value: bool) {
+    pub(super) fn compile_assignment_expr(
+        &mut self,
+        target: &AssignTarget,
+        expr: &Expr,
+        leave_value: bool,
+    ) {
         if target.is_simple() {
             let name = &target.root;
             let slot = self.push_slot(name);
@@ -720,7 +738,13 @@ impl Compiler {
         self.push_null_if(leave_value);
     }
 
-    fn compile_for_expr(&mut self, binding: &str, iterable: &Expr, body: &Expr, leave_value: bool) {
+    pub(super) fn compile_for_expr(
+        &mut self,
+        binding: &str,
+        iterable: &Expr,
+        body: &Expr,
+        leave_value: bool,
+    ) {
         let binding = self.push_slot(binding);
         if let Expr::BuiltinCall { name, args } = iterable
             && name.as_str() == "range"
@@ -774,7 +798,11 @@ impl Compiler {
         self.clear_const_slots();
     }
 
-    fn compile_list_comprehension(&mut self, element: &Expr, clauses: &[ListComprehensionClause]) {
+    pub(super) fn compile_list_comprehension(
+        &mut self,
+        element: &Expr,
+        clauses: &[ListComprehensionClause],
+    ) {
         self.code.push(Instruction::BuildList(0));
         self.compile_list_comprehension_clause(element, clauses, 0);
         self.clear_const_slots();
@@ -860,7 +888,7 @@ impl Compiler {
         self.clear_const_slots();
     }
 
-    fn compile_while_expr(&mut self, condition: &Expr, body: &Expr, leave_value: bool) {
+    pub(super) fn compile_while_expr(&mut self, condition: &Expr, body: &Expr, leave_value: bool) {
         self.clear_const_slots();
         let loop_start = self.code.len();
         let jump_to_end = self.compile_condition_jump_if_false(condition);
@@ -885,7 +913,7 @@ impl Compiler {
         self.push_null_if(leave_value);
     }
 
-    fn fold_compile_time_expr(&self, expr: &Expr) -> Option<Value> {
+    pub(super) fn fold_compile_time_expr(&self, expr: &Expr) -> Option<Value> {
         match expr {
             Expr::LabelAnnotated { expr, .. } => self.fold_compile_time_expr(expr),
             Expr::Null => Some(Value::Null),
@@ -893,10 +921,12 @@ impl Compiler {
             Expr::Bool(value) => Some(Value::Bool(*value)),
             Expr::Number(value) => Some(Value::Number(*value)),
             Expr::String(value) => Some(Value::String(value.clone())),
-            Expr::ResourceRef(resource) => Some(Value::Resource(super::ResourceHandle::new(
-                resource.resource_type.to_string(),
-                resource.alias.to_string(),
-            ))),
+            Expr::ResourceRef(resource) => {
+                Some(Value::Resource(crate::runtime::ResourceHandle::new(
+                    resource.resource_type.to_string(),
+                    resource.alias.to_string(),
+                )))
+            }
             Expr::ProcessRef { .. } | Expr::HostDescriptorConstructor { .. } => None,
             Expr::Variable(name) => self.const_for_name(name),
             Expr::Tuple(items) => Some(Value::Tuple(

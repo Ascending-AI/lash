@@ -1,8 +1,10 @@
+use super::*;
+
 #[derive(Clone)]
 pub(crate) struct IterState {
-    cursor: IterCursor,
-    binding: usize,
-    restore: LoopRestore,
+    pub(super) cursor: IterCursor,
+    pub(super) binding: usize,
+    pub(super) restore: LoopRestore,
     /// Whether this iterator's captured values have already been imported into
     /// the heap.
     ///
@@ -11,17 +13,17 @@ pub(crate) struct IterState {
     /// the values have been heapified they can never regress to inline
     /// compounds, so later instructions skip them instead of rescanning the
     /// whole sequence — which is what made iterating a long list quadratic.
-    heapified: bool,
+    pub(super) heapified: bool,
 }
 
 #[derive(Clone)]
-enum IterCursor {
+pub(super) enum IterCursor {
     List { values: ListValue, index: usize },
     Range { next: i64, end: i64, step: i64 },
 }
 
 impl IterCursor {
-    fn next_value(&mut self) -> Option<Value> {
+    pub(super) fn next_value(&mut self) -> Option<Value> {
         match self {
             Self::List { values, index } => {
                 let value = values.get(*index)?.clone();
@@ -41,8 +43,8 @@ impl IterCursor {
 }
 
 #[derive(Clone)]
-struct LoopRestore {
-    previous: Option<Value>,
+pub(super) struct LoopRestore {
+    pub(super) previous: Option<Value>,
 }
 
 pub(super) fn range_has_next(start: i64, end: i64, step: i64) -> bool {
@@ -50,7 +52,7 @@ pub(super) fn range_has_next(start: i64, end: i64, step: i64) -> bool {
 }
 
 impl<'a, H: ExecutionHost> Vm<'a, H> {
-    fn deep_copy_loop_binding(&mut self, binding: usize) -> Result<(), RuntimeError> {
+    pub(super) fn deep_copy_loop_binding(&mut self, binding: usize) -> Result<(), RuntimeError> {
         let source = self.load_slot(binding)?.clone();
         self.slots
             .assign_loop_binding(binding, self.heap.isolate_value(&source)?);

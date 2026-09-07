@@ -1,25 +1,24 @@
-use crate::ast::{AssignTarget, BinaryOp, FunctionExpr};
-use crate::runtime::entry_points::compile_program_internal;
+use super::*;
 
-fn variable(name: &str) -> Expr {
+pub(crate) fn variable(name: &str) -> Expr {
     Expr::Variable(name.into())
 }
 
-fn assign(name: &str, expr: Expr) -> Expr {
+pub(crate) fn assign(name: &str, expr: Expr) -> Expr {
     Expr::Assign {
         target: AssignTarget::variable(name.into()),
         expr: Box::new(expr),
     }
 }
 
-fn call(function: Expr, args: Vec<Expr>) -> Expr {
+pub(crate) fn call(function: Expr, args: Vec<Expr>) -> Expr {
     Expr::Call {
         function: Box::new(function),
         args,
     }
 }
 
-fn function(name: Option<&str>, params: &[&str], captures: &[&str], body: Expr) -> Expr {
+pub(crate) fn function(name: Option<&str>, params: &[&str], captures: &[&str], body: Expr) -> Expr {
     Expr::Function(Box::new(FunctionExpr {
         name: name.map(Into::into),
         params: params.iter().map(|name| (*name).into()).collect(),
@@ -1107,7 +1106,7 @@ fn independent_os_processes_dump_identical_mid_recursion_continuations() {
         let output = std::process::Command::new(&executable)
             .args([
                 "--exact",
-                "runtime::tests::function_recursion_determinism_process_probe",
+                "runtime::tests::function_cases::function_recursion_determinism_process_probe",
                 "--nocapture",
                 "--test-threads=1",
             ])

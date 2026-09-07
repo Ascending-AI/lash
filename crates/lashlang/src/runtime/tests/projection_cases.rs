@@ -1,3 +1,5 @@
+use super::*;
+
 fn test_image() -> Value {
     Value::Image(Box::new(ImageValue::new(
         "img-1",
@@ -413,7 +415,7 @@ fn projected_bindings_reject_duplicate_checked_insertions() {
     assert_eq!(err.name(), "history");
 }
 
-async fn exec_with_projected(
+pub(super) async fn exec_with_projected(
     source: &str,
     projected: &ProjectedBindings,
 ) -> Result<(Value, State), RuntimeError> {

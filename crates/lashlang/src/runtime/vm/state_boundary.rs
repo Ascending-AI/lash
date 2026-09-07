@@ -1,4 +1,4 @@
-use crate::runtime::CompilationDialect;
+use super::*;
 
 impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// Builds a VM from authored globals for an externally driven execution.
@@ -34,7 +34,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         }
     }
 }
-fn validation_plan_cache_entry(schema: &Value) -> Option<(usize, Arc<Record>)> {
+pub(super) fn validation_plan_cache_entry(schema: &Value) -> Option<(usize, Arc<Record>)> {
     match schema {
         Value::Record(record) => Some((Arc::as_ptr(record) as usize, record.clone())),
         _ => None,
