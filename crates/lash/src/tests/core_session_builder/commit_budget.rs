@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test]
 async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> Result<()> {
     const CONFIGURED_ROW_LIMIT: usize = 3;
@@ -29,7 +31,10 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
         .run()
         .await?;
 
-    let session = core.session("commit-adoption-row-budget-surface").open().await?;
+    let session = core
+        .session("commit-adoption-row-budget-surface")
+        .open()
+        .await?;
     let error = session
         .turn(TurnInput::text("adopt one attachment").with_attachment(
             lash_core::AttachmentSource::inline(

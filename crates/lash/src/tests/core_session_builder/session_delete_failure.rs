@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test]
 async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> Result<()> {
     let factory = Arc::new(DeletingStoreFactory::default());
@@ -33,7 +35,8 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
             assert_eq!(session_id, "delete-partial-report");
             match *failure {
                 lash_core::MaintenanceFailure {
-                    stop: lash_core::MaintenanceStop::Failed(lash_core::StoreError::Backend(message)),
+                    stop:
+                        lash_core::MaintenanceStop::Failed(lash_core::StoreError::Backend(message)),
                     partial,
                 } => {
                     assert_eq!(message, "injected facade delete failure");

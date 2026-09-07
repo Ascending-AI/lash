@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn turn_result_total_usage_sums_parent_and_children() {
     use lash_core::{

@@ -1,3 +1,5 @@
+use super::*;
+
 #[tokio::test]
 async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
