@@ -15,26 +15,6 @@ use object_store::{ObjectStore, ObjectStoreExt};
 use std::sync::Arc;
 use url::Url;
 
-/// An attachment id proven safe to use as one object-key component.
-///
-/// [`AttachmentId`] enforces that shape at construction, so a malformed id
-/// cannot exist to be turned into a key here. Requiring this private type in
-/// `content_path` keeps that dependency visible at every S3/MinIO call site: a
-/// raw string can only become a key segment by passing through
-/// `AttachmentId::parse` first.
-#[derive(Clone, Copy)]
-struct GuardedAttachmentId<'a>(&'a AttachmentId);
-
-impl<'a> GuardedAttachmentId<'a> {
-    fn new(id: &'a AttachmentId) -> Self {
-        Self(id)
-    }
-
-    fn as_str(self) -> &'a str {
-        self.0.as_str()
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct S3AttachmentStoreConfig {
     pub endpoint_url: Option<String>,
@@ -167,7 +147,7 @@ impl S3AttachmentStore {
 
     /// Flat, content-addressed key for a blob: `<prefix>/blake3/<first2>/<hash>`.
     /// No session namespace — identical bytes from any session share one object.
-    fn content_path(&self, id: GuardedAttachmentId<'_>) -> Result<Path, AttachmentStoreError> {
+    fn content_path(&self, id: &AttachmentId) -> Result<Path, AttachmentStoreError> {
         let hash = id.as_str();
         let first = hash.get(..2).unwrap_or(hash);
         let mut path = String::new();
@@ -213,21 +193,11 @@ impl S3AttachmentStore {
             .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?;
         let mut rows = Vec::with_capacity(metas.len());
         for meta in metas {
-            let Some(id) = meta.location.parts().next_back() else {
-                continue;
-            };
-            let id = match AttachmentId::parse(id.as_ref()) {
-                Ok(id) => id,
-                Err(err) => {
-                    tracing::warn!(
-                        key = %meta.location,
-                        reason = %err,
-                        "S3 attachment store is skipping an object key that cannot name an \
-                         attachment: it is unreachable and invisible to reclamation"
-                    );
-                    continue;
-                }
-            };
+            let segment = meta.location.parts().next_back().ok_or_else(|| {
+                AttachmentStoreError::Backend("missing attachment key component".into())
+            })?;
+            let id = AttachmentId::parse(segment.as_ref())
+                .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?;
             let bytes = self
                 .store
                 .get(&meta.location)
@@ -262,34 +232,19 @@ impl AttachmentStore for S3AttachmentStore {
             meta.type_metadata,
             meta.label,
         );
-        put_at_path(
-            &*self.store,
-            self.content_path(GuardedAttachmentId::new(&meta.id))?,
-            bytes,
-            meta,
-        )
-        .await
+        put_at_path(&*self.store, self.content_path(&meta.id)?, bytes, meta).await
     }
 
     async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        get_at_path(
-            &*self.store,
-            self.content_path(GuardedAttachmentId::new(id))?,
-            id,
-        )
-        .await
+        get_at_path(&*self.store, self.content_path(id)?, id).await
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
-        delete_at_path(
-            &*self.store,
-            self.content_path(GuardedAttachmentId::new(id))?,
-        )
-        .await
+        delete_at_path(&*self.store, self.content_path(id)?).await
     }
 
     async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
-        let content_path = self.content_path(GuardedAttachmentId::new(id))?;
+        let content_path = self.content_path(id)?;
         match self.store.head(&content_path).await {
             Ok(meta) => Ok(Some(StoredBlobRef {
                 id: id.clone(),
@@ -312,35 +267,22 @@ impl AttachmentStore for S3AttachmentStore {
             .map_err(|err| {
                 AttachmentStoreError::Backend(format!("failed to list S3 attachments: {err}"))
             })?;
-        Ok(metas
+        metas
             .into_iter()
-            .filter_map(|meta| {
-                // The object key's final segment is the content hash. A key
-                // this store never wrote cannot name an attachment, so it is
-                // not listed. It is also unreachable through `get` and
-                // invisible to reclamation, so say so rather than dropping it
-                // in silence.
-                let segment = meta.location.parts().next_back()?;
-                let id = match AttachmentId::parse(segment.as_ref()) {
-                    Ok(id) => id,
-                    Err(err) => {
-                        tracing::warn!(
-                            key = %meta.location,
-                            reason = %err,
-                            "S3 attachment store is skipping an object key that cannot name an \
-                             attachment: it is unreachable and invisible to reclamation"
-                        );
-                        return None;
-                    }
-                };
+            .map(|meta| {
+                let segment = meta.location.parts().next_back().ok_or_else(|| {
+                    AttachmentStoreError::Backend("missing attachment key component".into())
+                })?;
+                let id = AttachmentId::parse(segment.as_ref())
+                    .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?;
                 let last_modified_epoch_ms =
                     u64::try_from(meta.last_modified.timestamp_millis()).ok();
-                Some(StoredBlobRef {
+                Ok(StoredBlobRef {
                     id,
                     last_modified_epoch_ms,
                 })
             })
-            .collect())
+            .collect()
     }
 }
 
@@ -452,31 +394,14 @@ mod tests {
         }
     }
 
-    /// An object key whose final segment cannot be an attachment id is
-    /// unreachable through `get` and invisible to reclamation. It must not be
-    /// listed as an attachment, and the skip is announced by a `warn!` at the
-    /// same site (not asserted here: lash-core's tracing capture helper is
-    /// crate-private, and pulling a subscriber into this crate's dev-deps to
-    /// observe one line is not worth it — the file-store test covers the
-    /// announcement, this covers the omission).
+    /// Malformed stored ids fail listing instead of silently losing blobs.
     #[tokio::test]
-    async fn s3_store_does_not_list_a_key_it_cannot_name() {
+    async fn s3_store_rejects_a_key_it_cannot_name() {
         let object_store = Arc::new(object_store::memory::InMemory::new());
         let store = S3AttachmentStore::from_object_store(
             Arc::clone(&object_store) as Arc<dyn ObjectStore>,
             Some("skip".to_string()),
         );
-        let reference = store
-            .put(
-                vec![7, 7, 7],
-                AttachmentCreateMeta::new(
-                    MediaType::parse("image/png").expect("media type"),
-                    Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
-                    Some("pixel".to_string()),
-                ),
-            )
-            .await
-            .expect("put");
         // A key no `put` could have produced: the final segment is over the
         // attachment-id length bound.
         object_store
@@ -487,13 +412,12 @@ mod tests {
             .await
             .expect("seed stray object");
 
-        let listed = store.list().await.expect("list");
-
-        assert_eq!(
-            listed.iter().map(|blob| &blob.id).collect::<Vec<_>>(),
-            vec![&reference.id],
-            "a key segment that cannot be an attachment id must not be listed"
-        );
+        let error = store
+            .list()
+            .await
+            .expect_err("malformed id must fail listing");
+        assert!(matches!(error, AttachmentStoreError::Backend(_)));
+        assert!(store.raw_blobs_for_testing().await.is_err());
     }
 
     #[test]

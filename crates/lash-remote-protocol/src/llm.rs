@@ -959,7 +959,12 @@ pub struct RemoteAttachmentRef {
 
 impl RemoteAttachmentRef {
     pub(crate) fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteAttachmentRef", "id", &self.id)?;
+        lash_sansio::AttachmentId::parse(&self.id).map_err(|error| {
+            RemoteProtocolError::InvalidAttachmentRef {
+                id: self.id.clone(),
+                message: error.to_string(),
+            }
+        })?;
         require_non_empty("RemoteAttachmentRef", "media_type", &self.media_type)?;
         validate_media_type("RemoteAttachmentRef", &self.media_type)
     }

@@ -371,6 +371,11 @@ mod tests {
             "line\nbreak",
             "null\0byte",
             "tab\there",
+            "../x",
+            "/abs",
+            "é",
+            "e\u{301}",
+            "\u{ff0e}\u{ff0e}\u{ff0f}x",
             &"a".repeat(MAX_ATTACHMENT_ID_LEN + 1),
         ] {
             assert!(
