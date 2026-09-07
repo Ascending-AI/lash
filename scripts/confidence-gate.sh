@@ -969,9 +969,14 @@ run_sim_generated_lane() {
   elif [ "$lane" = "broad" ]; then
     cmd+=(--max-boundaries "${LASH_BROAD_SIM_MAX_BOUNDARIES:-128}")
   fi
+  if [ -n "${LASH_CONFIDENCE_STAGE:-}" ]; then
+    cmd+=(--shard "${LASH_SIM_SHARD:?generated stage requires a shard}")
+  fi
   "${cmd[@]}"
 
-  run_sim_search_lane
+  if [ "${LASH_CONFIDENCE_STAGE:-}" != "generated" ]; then
+    run_sim_search_lane
+  fi
 }
 
 minimizer_fixture_names() {
@@ -2768,6 +2773,13 @@ if [ "$lane" = "mutation" ]; then
   export LASH_AREA_MUTATION_SHARD=1/1
   run_area_targeted_mutation_evidence
   finalize_mutation_gate
+  exit 0
+fi
+
+if [ -n "${LASH_CONFIDENCE_STAGE:-}" ]; then
+  # CI stages reuse the same full-depth functions and one producer artifact.
+  # shellcheck source=scripts/ci/confidence-stage.sh
+  source "$repo/scripts/ci/confidence-stage.sh"
   exit 0
 fi
 
