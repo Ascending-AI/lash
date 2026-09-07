@@ -22,3 +22,4 @@ mod store_maintenance_outcome;
 mod turn_control_binding;
 
 mod attachment_owner_proof;
+mod boundary_retry;
