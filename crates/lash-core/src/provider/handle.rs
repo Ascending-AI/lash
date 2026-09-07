@@ -107,6 +107,14 @@ impl ProviderCompletionSideband {
 }
 
 /// Component bundle returned by provider factories.
+///
+/// Admission usage is shared across clones of this bundle, including resolved
+/// session bindings and per-turn overrides. A separately constructed bundle
+/// starts a separate scope. Each admission reads its provider's current options;
+/// changing a clock preserves the shared limiter and accumulated window usage.
+/// Clones with different options apply their own current limits to shared usage.
+/// Reconfiguring concurrency affects future acquisitions; issued permits live
+/// until their owners release them.
 #[derive(Debug)]
 pub struct ProviderComponents {
     pub provider: Box<dyn Provider>,
@@ -116,11 +124,10 @@ pub struct ProviderComponents {
 
 impl ProviderComponents {
     pub fn new(provider: Box<dyn Provider>) -> Self {
-        let options = provider.options();
         Self {
             provider,
             failure_classifier: Arc::new(DefaultProviderFailureClassifier),
-            rate_limiter: Arc::new(ProviderRateLimiter::new(options.reliability.rate_limits)),
+            rate_limiter: Arc::new(ProviderRateLimiter::new()),
         }
     }
 
@@ -141,12 +148,8 @@ impl ProviderComponents {
         self
     }
 
-    pub fn with_clock(mut self, clock: Arc<dyn crate::Clock>) -> Self {
-        let options = self.provider.options();
-        self.rate_limiter = Arc::new(ProviderRateLimiter::with_clock(
-            options.reliability.rate_limits,
-            clock,
-        ));
+    pub fn with_clock(self, clock: Arc<dyn crate::Clock>) -> Self {
+        self.rate_limiter.set_clock(clock);
         self
     }
 }
@@ -229,9 +232,6 @@ impl ProviderHandle {
     }
 
     pub fn set_options(&mut self, options: ProviderOptions) {
-        self.components
-            .rate_limiter
-            .configure(options.reliability.rate_limits.clone());
         self.components.provider.set_options(options)
     }
 
@@ -327,7 +327,11 @@ impl ProviderHandle {
         let call_id = LlmCallId(uuid::Uuid::new_v4().to_string());
         let mut records = Vec::new();
         loop {
-            let _permit = self.components.rate_limiter.admit(&request).await;
+            let _permit = self
+                .components
+                .rate_limiter
+                .admit(self.components.provider.as_ref(), &request)
+                .await;
             let clock = self.components.rate_limiter.clock();
             let started_at = clock.timestamp_ms();
             let started = clock.now();

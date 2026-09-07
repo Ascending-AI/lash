@@ -5733,7 +5733,6 @@ lash::provider::ProviderRateLimitPolicy::tokens_per_window
 lash::provider::ProviderRateLimiter
 lash::provider::ProviderRateLimiter::admit
 lash::provider::ProviderRateLimiter::clock
-lash::provider::ProviderRateLimiter::configure
 lash::provider::ProviderRateLimiter::new
 lash::provider::ProviderRateLimiter::with_clock
 lash::provider::ProviderReliability
