@@ -220,23 +220,26 @@ jobs:
       - name: Check example facade imports
         run: python3 scripts/check_facade_only_examples.py
 
-  # Sole writer of the shared linux-debug cache and the doctest gate. It builds
-  # the superset (`cargo check --workspace --all-targets` plus the doctest
-  # link) that every read-only debug-profile job restores. The nextest run is
-  # sharded out to the test-shard matrix below.
-  #
-  # This job is deliberately *only* the cache superset (which now includes the
-  # trybuild fixture graph, see the step) and the doctests. Every
-  # gate that neither warms nor needs that superset — the repository gates, the
-  # facade API gates, the package feature checks, the default-off runtime
-  # boundary — used to queue behind it as serial steps, which made this job the
-  # run's critical path (9m40s warm, 20m36s on a cold branch cache) for work
-  # that has no dependency on it. They are sibling jobs now; nothing was dropped
-  # or weakened.
+  # Separate matrix jobs run the workspace check/doctests and API seal in
+  # parallel. The matrix result remains the same required test-doc context.
   test-doc:
-    name: Test docs + build cache
+    name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Check workspace + doctests
+            lane: workspace
+            target: target
+          - name: Seal-test the API surface
+            lane: seal
+            target: target-seal
+    env:
+      # trybuild derives its fixture/output tree from Cargo's target directory.
+      # The seal job has no shared writable output with any other CI job.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/${{ matrix.target }}
 
     steps:
       - name: Check out repository
@@ -263,13 +266,19 @@ jobs:
 
 
       - name: Restore cargo cache
+        if: matrix.lane == 'workspace'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
-          # This job builds a superset of what the other debug-profile jobs
-          # (test shards, Postgres store, Restate E2E, the distributed-workers
-          # e2e workflow) need, so it is the sole writer of the shared cache.
           shared-key: linux-debug
+
+      - name: Restore isolated seal dependencies
+        if: matrix.lane == 'seal'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          shared-key: linux-seal
+          workspaces: . -> target-seal
 
       - name: Install protoc
         uses: ./.github/actions/install-tools
@@ -279,66 +288,30 @@ jobs:
       - name: Setup sccache
         uses: ./.github/actions/setup-sccache
 
-      # Compiles every target of every workspace crate — libs, bins, tests,
-      # examples, and benches. This subsumes the old standalone checks for
-      # docs-snippets and the runtime perf harness, which would otherwise only break post-merge. It also warms the
-      # dependency graph the test-shard matrix restores.
       - name: Check workspace (all targets)
+        if: matrix.lane == 'workspace'
         run: |
           # shellcheck disable=SC2086
           cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}
 
-      # nextest does not run doctests; keep them covered here (also builds the
-      # workspace crates as rlibs, warming the shared cache for the readers).
+      # nextest does not run doctests; keep the full workspace gate.
       - name: Test workspace doctests
+        if: matrix.lane == 'workspace'
         run: |
           # shellcheck disable=SC2086
           cargo test --doc --workspace --locked ${LASH_CI_FEATURES}
 
-      # The trybuild API-sealing suite (crates/lash/tests/ui.rs) compiles its
-      # fixtures in a private cargo project under `target/tests/trybuild` — a
-      # second full build of lash and its dependency graph, and the one part of
-      # the test suite the shared cache never carried. The shards restore that
-      # cache read-only, so whatever they build there dies with the job, and the
-      # three shards holding a `ui` test each paid the cold fixture build every
-      # run (184s, 106s and 103s of shard time).
-      #
-      # Building it here is what puts it in the cache: this job is the sole
-      # writer, and rust-cache already knows `target/tests/trybuild` is a target
-      # directory to keep rather than a stray file to sweep. trybuild rewrites
-      # the fixture manifest on every run, so a warm fixture directory is its
-      # normal operating mode, not a staleness hazard.
-      #
-      # What the shards get back is the fixture's *dependency* graph, not the
-      # whole build: rust-cache's save-time cleaning keeps only artifacts of
-      # packages from outside the workspace, so the fixture's copy of lash and
-      # its sibling crates is swept and rebuilt. Measured on the same machine —
-      # cold fixture 505s, cache-cleaned fixture 184s, untouched fixture 20s —
-      # which is why this buys most of the shard cost back and not all of it.
-      # The rest is sccache's job: the fixture compiles under a `--target`
-      # triple, so its rustc invocations are keyed apart from the ordinary host
-      # build and this step is the first to prime them for the shards.
-      #
-      # The cache only takes the fixture on a run whose cache key misses —
-      # rust-cache skips the save outright on a full key match — so the warming
-      # lands with the next toolchain, manifest or Cargo.lock change, not on the
-      # merge of this step.
-      #
-      # `--test ui` builds that one test target, not the workspace's other test
-      # binaries. The step is named for what it runs, not for the caching:
-      # compile_fail drift fails here, and a red step named for a cache would
-      # send the reader hunting a caching bug. This step is the sole per-push
-      # run of the ui suite: `profile.ci`'s default-filter excludes the ui
-      # binary from the shards, where the same tests were a second, slower
-      # report of the same defect.
-      - name: Seal-test the API surface (warms the trybuild fixture cache)
+      # Every existing compile-fail/pass fixture remains in the ui binary.
+      # Keep workspace feature unification and the original cargo test command.
+      - name: Seal-test the API surface
+        if: matrix.lane == 'seal'
         run: |
           # shellcheck disable=SC2086
           cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   # Python-only repository gates. These were serial steps of test-doc, where
   # they sat behind twelve minutes of compilation for no reason: nothing here
@@ -470,7 +443,7 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   # The API surface snapshot is ADVISORY: it must not be able to fail the
   # workflow until the future cutover release. FIG-2095.
@@ -585,7 +558,7 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   # Feature-set coverage the workspace check cannot reach, and the deliberately
   # non-default provider/protocol test features. Split out of test-doc: these
@@ -683,7 +656,7 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   # The default-off boundary lane: `lash-runtime` without its default features
   # compiles, tests, and pulls no RLM/Lashlang dependency. Its feature
@@ -761,24 +734,78 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
-  # The workspace test suite, sharded by nextest partitions so it drops off the
-  # critical path. Restore-only against the linux-debug cache the test-doc job
-  # writes; sccache absorbs the workspace test-binary codegen that rust-cache's
-  # read-only restore cannot save, sharing it across the shards and runs.
-  # --no-fail-fast so one failure never hides the rest (the alpha.82 lesson).
-  #
-  # Four partitions, not three: with the old three, shard 3 ran 30% longer than
-  # shard 1 (12m09s vs 9m20s) and set the wall time for the whole lane. nextest
-  # partitions by count, which balances test *numbers* and not test *durations*,
-  # so the residual skew is reduced by making each partition smaller rather than
-  # by hand-assigning tests to shards.
+  # Build the exact event SHA once; all four partitions execute these binaries.
+  # Service-backed jobs retain their independent feature graphs and services.
+  nextest-archive:
+    name: Build workspace test archive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Restore cargo cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          shared-key: linux-tests
+
+      - name: Install protoc and nextest
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc,nextest
+
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
+
+      - name: Archive workspace tests
+        run: |
+          # shellcheck disable=SC2086
+          cargo nextest archive --workspace --locked ${LASH_CI_FEATURES} \
+            --archive-file "${RUNNER_TEMP}/lash-nextest.tar.zst"
+
+      - name: Upload test archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nextest-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lash-nextest.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+      - name: Report sccache stats
+        if: always()
+        run: bash scripts/ci/report-cache.sh
+
   test-shard:
     name: Test shard ${{ matrix.shard }}/4
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    needs: plan
+    needs: [plan, nextest-archive]
     if: needs.plan.outputs.rust == 'true'
 
     strategy:
@@ -814,8 +841,7 @@ jobs:
         with:
           node-version: 24
 
-      # Same action and shared key as the test-doc writer so every shard reads
-      # the writer's GitHub cache instead of rebuilding the dependency graph.
+      # Runtime tests that invoke cargo still need the shared dependency cache.
       - name: Restore cargo cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -828,7 +854,7 @@ jobs:
         with:
           tool: protoc,nextest
 
-      - name: Setup sccache
+      - name: Setup compilation environment
         uses: ./.github/actions/setup-sccache
 
       # Workspace-wide: every crate's tests run, not a hand-maintained crate
@@ -840,15 +866,25 @@ jobs:
       # and the trybuild ui binary (run by test-doc's seal step every push):
       # each of those tests is a single 3-9 minute serial run, so any one of
       # them set the shard's wall-clock regardless of parallelism.
+      - name: Download test archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nextest-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/nextest-download
+
+      # Some tests embed CARGO_BIN_EXE paths at compile time. Keep archived
+      # non-test executables at the producer's workspace/target path too.
       - name: Test workspace shard
+        env:
+          # The archive is already compiled; runtime cargo subprocesses use
+          # the restored target cache directly, without a compiler wrapper.
+          RUSTC_WRAPPER: ""
         run: |
-          # shellcheck disable=SC2086
-          cargo nextest run --profile ci --workspace --locked ${LASH_CI_FEATURES} \
+          cargo nextest run --profile ci --workspace-remap "$GITHUB_WORKSPACE" \
+            --archive-file "${RUNNER_TEMP}/nextest-download/lash-nextest.tar.zst" \
+            --extract-to "$GITHUB_WORKSPACE" --extract-overwrite \
             --no-fail-fast --partition count:${{ matrix.shard }}/4
 
-      - name: Report sccache stats
-        if: always()
-        run: sccache --show-stats
 
   # The heavy suites excluded from the per-push shards by `profile.ci`'s
   # default-filter (see .config/nextest.toml): the fault-matrix chunk tests,
@@ -915,7 +951,7 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   lint:
     name: Lint
@@ -1212,7 +1248,7 @@ jobs:
 
       - name: Report sccache stats
         if: always()
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
 
   confidence-fast-summary:
     name: Confidence fast summary
@@ -1689,13 +1725,91 @@ jobs:
 
       - name: Report sccache stats
         if: always() && steps.detect.outputs.run == 'true'
-        run: sccache --show-stats
+        run: bash scripts/ci/report-cache.sh
+
+  worker-artifacts:
+    name: Build worker release artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    needs: plan
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers'))
+    env:
+      RUN_WORKER_ARTIFACTS: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.functional_e2e == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
+    steps:
+      - name: Explain plan deferral
+        if: env.RUN_WORKER_ARTIFACTS != 'true'
+        run: echo "Worker artifacts are not required by the CI plan."
+
+      - name: Check out repository
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Reclaim runner disk
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Install protoc
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Install mold
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        uses: ./.github/actions/setup-mold
+
+      - name: Restore worker release dependencies
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          shared-key: linux-worker-release
+
+      - name: Build worker binaries once
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        run: |
+          cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
+          mkdir -p "${RUNNER_TEMP}/worker-artifacts"
+          find target/release -maxdepth 1 -type f -name 'lash-e2e-*' -executable \
+            -exec cp '{}' "${RUNNER_TEMP}/worker-artifacts/" \;
+          tar -C "${RUNNER_TEMP}/worker-artifacts" -cf "${RUNNER_TEMP}/worker-binaries.tar" .
+
+      - name: Upload worker binaries
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/worker-binaries.tar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
 
   functional-e2e:
     name: Functional E2E (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
-    needs: plan
+    needs: [plan, worker-artifacts]
     # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
     # ruling; reassess after the FIG-2169 test-prune sweep.
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.functional_e2e == 'true'
@@ -1823,6 +1937,20 @@ jobs:
 
       # Each recipe owns its dependencies and any container lifecycle, so the
       # matrix legs run independently without cross-job coordination.
+      - name: Download worker binaries
+        if: matrix.name == 'process-operations'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/worker-download
+
+      - name: Extract worker binaries
+        if: matrix.name == 'process-operations'
+        run: |
+          mkdir -p "${RUNNER_TEMP}/worker-binaries"
+          tar -xf "${RUNNER_TEMP}/worker-download/worker-binaries.tar" -C "${RUNNER_TEMP}/worker-binaries"
+          echo "LASH_E2E_PREBUILT_BIN_DIR=${RUNNER_TEMP}/worker-binaries" >> "$GITHUB_ENV"
+
       - name: Run functional E2E
         env:
           LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
@@ -1859,7 +1987,7 @@ jobs:
     # The harness has grown to 24 workflows + turn-control gates; 30 minutes
     # was hit on 2026-07-20 (job-timeout shows as 'cancelled').
     timeout-minutes: 75
-    needs: plan
+    needs: [plan, worker-artifacts]
     env:
       RUN_WORKERS_E2E: ${{ needs.plan.outputs.workers_e2e == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
     strategy:
@@ -1927,6 +2055,20 @@ jobs:
       - name: Install mold
         if: env.RUN_WORKERS_E2E == 'true'
         uses: ./.github/actions/setup-mold
+
+      - name: Download worker binaries
+        if: env.RUN_WORKERS_E2E == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/worker-download
+
+      - name: Extract worker binaries
+        if: env.RUN_WORKERS_E2E == 'true'
+        run: |
+          mkdir -p "${RUNNER_TEMP}/worker-binaries"
+          tar -xf "${RUNNER_TEMP}/worker-download/worker-binaries.tar" -C "${RUNNER_TEMP}/worker-binaries"
+          echo "LASH_E2E_PREBUILT_BIN_DIR=${RUNNER_TEMP}/worker-binaries" >> "$GITHUB_ENV"
 
       - name: Run distributed backend E2E
         if: env.RUN_WORKERS_E2E == 'true'
@@ -2228,6 +2370,7 @@ jobs:
       - lashlang-git-consumer
       - package-feature-checks
       - runtime-feature-boundary
+      - nextest-archive
       - test-shard
       - heavy-tests
       - lint
@@ -2239,6 +2382,7 @@ jobs:
       - s3-store
       - stack-budget
       - functional-e2e
+      - worker-artifacts
       - restate-postgres-workers
       - restate-postgres-workers-summary
 
@@ -2262,4 +2406,4 @@ jobs:
         env:
           NEEDS_JSON: ${{ toJson(needs) }}
           WORKERS_E2E_ENABLED: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
-        run: python3 scripts/ci_plan.py conclusion
+        run: python3 scripts/ci/conclusion.py conclusion

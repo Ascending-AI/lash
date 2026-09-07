@@ -3,6 +3,19 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
+if [ -n "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
+  LASH_E2E_BIN_DIR="$(cd "$LASH_E2E_PREBUILT_BIN_DIR" && pwd)"
+  export LASH_E2E_BIN_DIR
+  for binary in lash-e2e-worker lash-e2e-mock-provider lash-e2e-runner lash-e2e-frame-crash lash-e2e-await-event-helper; do
+    if [ ! -x "$LASH_E2E_BIN_DIR/$binary" ]; then
+      echo "Missing executable prebuilt worker: $LASH_E2E_BIN_DIR/$binary" >&2
+      exit 1
+    fi
+  done
+else
+  export LASH_E2E_BIN_DIR="${CARGO_TARGET_DIR:-$repo/target}/release"
+fi
+
 # shellcheck source=scripts/worktree-gate-env.sh
 source "$repo/scripts/worktree-gate-env.sh"
 
@@ -10,7 +23,6 @@ compose_project="${LASH_RESTATE_WORKERS_COMPOSE_PROJECT:-lash-restate-workers-${
 compose=(docker compose -p "$compose_project" -f "$repo/runbooks/restate-postgres-workers/docker-compose.yml")
 minio_port="${LASH_E2E_MINIO_PORT:-$((LASH_E2E_PORT_BASE + 40))}"
 export LASH_E2E_MINIO_PORT="$minio_port"
-export LASH_E2E_BIN_DIR="${CARGO_TARGET_DIR:-$repo/target}/release"
 trace_volume="${compose_project}_trace-output"
 workflow_segment="${LASH_E2E_WORKFLOW_SEGMENT:-}"
 case "$workflow_segment" in
@@ -70,7 +82,9 @@ test_output="$(mktemp "${TMPDIR:-/tmp}/lash-restate-postgres-workers-e2e-${LASH_
 # Binaries are built on the host (sharing the normal cargo cache) and
 # bind-mounted into the compose services; see docker-compose.yml for the
 # glibc compatibility note.
-cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
+if [ -z "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
+  cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
+fi
 if [ -n "$manifest_name" ]; then
   "$LASH_E2E_BIN_DIR/lash-e2e-runner" --workflow-inventory \
     > "$manifest_dir/workflow-inventory.tsv"
