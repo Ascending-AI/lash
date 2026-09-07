@@ -403,7 +403,6 @@ impl AppState {
             )
         })?;
         let mut receipts = Vec::with_capacity(active.len());
-        let mut done_events = Vec::with_capacity(active.len());
         for address in active {
             let request_id = format!("workbench-stop-{}", uuid::Uuid::new_v4());
             let cancel = driver
@@ -470,48 +469,26 @@ impl AppState {
                     .remove(&address.session_id, &address.turn_id);
                 false
             };
+            let recorded_request_id = match &receipt {
+                TurnCancelReceipt::TerminalAttached { cancellation, .. }
+                | TurnCancelReceipt::CancellationRecordedTerminalPending { cancellation, .. } => {
+                    cancellation.evidence().request_id.as_str()
+                }
+                TurnCancelReceipt::CompletionWonRace { .. }
+                | TurnCancelReceipt::UnknownOrRevoked { .. } => request_id.as_str(),
+            };
             self.trace_for_session(
                 &address.session_id,
                 "turn.cancel_requested",
                 json!({
                     "session_id": address.session_id,
                     "turn_id": address.turn_id,
-                    "request_id": request_id,
+                    "request_id": recorded_request_id,
                     "receipt": receipt,
                     "routing_retained": routing_retained,
                 }),
             );
-            if !routing_retained {
-                let done_outcome = match &receipt {
-                    TurnCancelReceipt::TerminalAttached {
-                        terminal: lash::TurnTerminal::Committed { .. },
-                        ..
-                    }
-                    | TurnCancelReceipt::CompletionWonRace { .. } => TurnDoneOutcome::Completed,
-                    TurnCancelReceipt::TerminalAttached {
-                        terminal: lash::TurnTerminal::Failed { .. },
-                        ..
-                    }
-                    | TurnCancelReceipt::CancellationRecordedTerminalPending { .. }
-                    | TurnCancelReceipt::UnknownOrRevoked { .. } => TurnDoneOutcome::Failed,
-                };
-                done_events.push((
-                    format!("turn-cancel:{}:{request_id}:done", address.turn_id),
-                    address.turn_id.clone(),
-                    done_outcome,
-                ));
-            }
             receipts.push(receipt);
-        }
-        for (event_id, turn_id, outcome) in done_events {
-            self.publish_for_session_identified(
-                session_id,
-                event_id,
-                StreamItem::Done {
-                    turn_id: Some(turn_id),
-                    outcome,
-                },
-            );
         }
         Ok(receipts)
     }

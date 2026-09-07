@@ -443,14 +443,9 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
         }]
     ));
     assert!(state.active_turns.for_session(&session_id).is_empty());
-    let done = events.try_recv().expect("receive break-glass Done event");
-    assert_eq!(
-        serde_json::to_value(done.item).expect("serialize break-glass Done item"),
-        json!({
-            "type": "done",
-            "turn_id": "dangling-turn",
-            "outcome": "failed",
-        })
+    assert!(
+        events.try_recv().is_err(),
+        "pruning a route is not terminal evidence"
     );
     assert!(ui::INDEX_HTML.contains("cancellation_recorded_terminal_pending"));
     assert!(ui::INDEX_HTML.contains("turn route cleared · terminal outcome unknown"));
@@ -742,4 +737,128 @@ finish (await handle)?
     ));
     assert!(state.active_turns.for_session(&session_id).is_empty());
     let _ = std::fs::remove_dir_all(data_dir);
+}
+
+/// Hold both receipts at terminal attachment so both HTTP handlers have
+/// addressed the same gate before either can remove the active route.
+struct ConcurrentCancelTerminal {
+    state: AppState,
+    attached: tokio::sync::Barrier,
+}
+
+#[async_trait::async_trait]
+impl lash::TurnAttach for ConcurrentCancelTerminal {
+    async fn await_terminal(
+        &self,
+        address: &lash::TurnAddress,
+    ) -> Result<lash::TurnTerminal, lash::runtime::RuntimeError> {
+        let leader = self.attached.wait().await.is_leader();
+        let store = self
+            .state
+            .session_store_factory
+            .open_existing_store_by_id(&address.session_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let request = store
+            .turn_cancel_request(address)
+            .await
+            .unwrap()
+            .unwrap()
+            .request;
+        let evidence = lash::TurnCancellationEvidence {
+            request_id: request.request_id,
+            origin: request.origin,
+            reason: request.reason,
+            undelivered: request.undelivered,
+        };
+        // Exercise the product terminal publisher used by turn execution,
+        // exactly once, while both cancellation handlers are attached.
+        if leader {
+            self.state
+                .publish_turn_done(&address.session_id, &address.turn_id);
+        }
+        Ok(lash::TurnTerminal::Committed {
+            outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { evidence }),
+            session_revision: None,
+        })
+    }
+}
+
+#[test]
+fn concurrent_stops_publish_one_done_and_trace_winning_request() {
+    run_async_test_on_stack_budget("concurrent-stops", || async {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut state = turn_cancel_test_state(data_dir.path(), String::new()).await;
+        let trace_path = data_dir.path().join("cancel.jsonl");
+        state.trace_sink = Some(Arc::new(JsonlTraceSink::new(trace_path.clone())));
+        let session_id = state.current_session_id();
+        state.track_turn(&session_id, "concurrent-stop");
+        let mut events = state.event_tx.subscribe(&session_id);
+        let driver =
+            state
+                .core
+                .turn_work_driver()
+                .with_attach(Arc::new(ConcurrentCancelTerminal {
+                    state: state.clone(),
+                    attached: tokio::sync::Barrier::new(2),
+                }));
+        let cancel = || {
+            cancel_turn_with_driver(
+                state.clone(),
+                SessionQuery {
+                    session_id: Some(session_id.clone()),
+                },
+                &driver,
+            )
+        };
+        let (first, second) = tokio::join!(cancel(), cancel());
+        let responses = [first.unwrap().1.0, second.unwrap().1.0];
+        let cancellations = responses
+            .iter()
+            .map(|response| match response.cancellations.as_slice() {
+                [TurnCancelReceipt::TerminalAttached { cancellation, .. }] => cancellation,
+                other => panic!("expected terminal receipt: {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            cancellations
+                .iter()
+                .filter(|c| matches!(c, RecordedTurnCancellation::Requested(_)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            cancellations
+                .iter()
+                .filter(|c| matches!(c, RecordedTurnCancellation::AlreadyRequested(_)))
+                .count(),
+            1
+        );
+        let winner = &cancellations[0].evidence().request_id;
+        assert_eq!(winner, &cancellations[1].evidence().request_id);
+        let mut done_count = 0;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event.item, StreamItem::Done { .. }) {
+                done_count += 1;
+            }
+        }
+        assert_eq!(
+            done_count, 1,
+            "concurrent stops must publish one live terminal"
+        );
+        let traces = std::fs::read_to_string(trace_path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .filter(|record| record["name"] == "agent_workbench.turn.cancel_requested")
+            .collect::<Vec<_>>();
+        assert_eq!(traces.len(), 2);
+        for trace in traces {
+            assert_eq!(
+                trace["payload"]["request_id"], *winner,
+                "both traces must identify the winning request"
+            );
+        }
+    });
 }

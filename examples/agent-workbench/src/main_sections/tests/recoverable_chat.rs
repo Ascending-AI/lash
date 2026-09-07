@@ -2321,7 +2321,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
 }
 
 #[tokio::test]
-async fn workbench_sequential_settled_turn_cancels_each_emit_done() {
+async fn workbench_settled_turn_cancels_preserve_execution_done() {
     let data_dir = tempfile::tempdir().expect("workbench cancel identity tempdir");
     let state = recoverable_chat_test_state(data_dir.path(), 16).await;
     let session_id = state.current_session_id();
@@ -2341,6 +2341,7 @@ async fn workbench_sequential_settled_turn_cancels_each_emit_done() {
             .run()
             .await
             .expect("complete turn before stale cancel");
+        state.publish_turn_done(&session_id, turn_id);
         state.track_turn(&session_id, turn_id);
         let receipts = state
             .cancel_turns_for_session(&session_id)
@@ -2362,7 +2363,7 @@ async fn workbench_sequential_settled_turn_cancels_each_emit_done() {
     assert_eq!(
         done_ids.len(),
         2,
-        "distinct evidence-free cancel operations must not collide"
+        "stale cancels must not add terminal events to execution evidence"
     );
     assert_ne!(done_ids[0], done_ids[1]);
 }
