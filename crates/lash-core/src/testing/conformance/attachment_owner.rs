@@ -417,6 +417,7 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
     .await
     .expect("live process GC");
     assert_eq!(live_report.reclaimed_count, 0);
+    assert!(!live_report.owner_death_proof_degraded);
     assert_blob(
         &*backend.attachment_store,
         &reference.id,
@@ -455,6 +456,7 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
     .await
     .expect("pruned process GC");
     assert!(pruned_report.reclaimed_count >= 1);
+    assert!(!pruned_report.owner_death_proof_degraded);
     assert!(matches!(
         backend.attachment_store.get(&reference.id).await,
         Err(crate::AttachmentStoreError::NotFound(_))
@@ -540,4 +542,66 @@ async fn assert_blob(
         store.get(id).await.expect("attachment blob exists").bytes,
         expected
     );
+}
+
+/// An unwired authority retains process intents and reports incomplete proof,
+/// including when there is no physical attachment to reclaim.
+pub async fn attachment_owner_degraded_proof(factory: Arc<dyn crate::SessionStoreFactory>) {
+    use crate::store::MaintenanceReport;
+    assert!(!factory.can_prove_process_owner_death());
+    let backend = crate::attachments::InMemoryAttachmentStore::new();
+    let request = session_request("degraded-process-owner");
+    let store = factory.create_store(&request).await.expect("create store");
+    let reference = backend
+        .put(b"degraded-proof".to_vec(), attachment_meta("degraded"))
+        .await
+        .expect("put blob");
+    store
+        .record_intent(crate::AttachmentIntent {
+            attachment_id: reference.id.clone(),
+            session_id: request.session_id,
+            canonical_uri: format!("lash-attachment://{}", reference.id),
+            intent_at_epoch_ms: 0,
+            owner_kind: Some(crate::AttachmentOwnerKind::Process),
+            owner_id: Some("absent-process-owner".to_string()),
+        })
+        .expect("record process intent");
+    for empty in [false, true] {
+        if empty {
+            backend
+                .delete(&reference.id)
+                .await
+                .expect("remove physical blob");
+        }
+        let report = crate::reclaim_unreferenced_attachments(
+            &*factory,
+            &backend,
+            crate::AttachmentReclamationPolicy {
+                grace_period_ms: 0,
+                empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
+            },
+        )
+        .await
+        .expect("sweep unwired authority");
+        assert_eq!(report.reclaimed_count, 0);
+        assert!(
+            report.owner_death_proof_degraded,
+            "unwired process proof must be degraded"
+        );
+        assert_eq!(report.sweep(), crate::MaintenanceSweep::Incomplete);
+        assert_eq!(report.scanned_blob_count, usize::from(!empty));
+        assert!(
+            factory
+                .live_attachment_refs(u64::MAX)
+                .await
+                .expect("roots")
+                .contains(&reference.id)
+        );
+    }
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn memory_attachment_owner_degraded_proof_conformance() {
+    attachment_owner_degraded_proof(Arc::new(crate::InMemorySessionStoreFactory::new())).await;
 }

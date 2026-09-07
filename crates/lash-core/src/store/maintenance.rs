@@ -86,7 +86,9 @@ pub enum MaintenanceSweep {
     /// with no per-item failures.
     Swept,
     /// The pass completed its scope, but one or more destructive steps failed
-    /// or were deferred. The report carries their identities or counts.
+    /// or were deferred, or the root authority could not prove process-owner
+    /// death (see `owner_death_proof_degraded`). The report carries their
+    /// identities or counts.
     Incomplete,
     /// The pass enumerated its *whole* scope and found nothing reclaimable.
     ///

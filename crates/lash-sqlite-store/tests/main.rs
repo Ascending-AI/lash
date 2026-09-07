@@ -20,3 +20,5 @@ mod store_gc;
 mod store_maintenance_outcome;
 #[path = "turn_control_binding.rs"]
 mod turn_control_binding;
+
+mod attachment_owner_proof;

@@ -688,7 +688,11 @@ impl PostgresStorage {
     }
 
     pub fn session_store_factory(&self) -> PostgresSessionStoreFactory {
-        warn_postgres_process_registry_not_wired();
+        self.unwired_session_store_factory("PostgresStorage::session_store_factory")
+    }
+
+    fn unwired_session_store_factory(&self, path: &'static str) -> PostgresSessionStoreFactory {
+        warn_postgres_process_registry_not_wired(path);
         PostgresSessionStoreFactory {
             pool: self.pool.clone(),
             process_registry_shared: false,
@@ -788,7 +792,7 @@ impl PostgresStorage {
 
 impl PostgresSessionStoreFactory {
     pub fn new(storage: &PostgresStorage) -> Self {
-        storage.session_store_factory()
+        storage.unwired_session_store_factory("PostgresSessionStoreFactory::new")
     }
 
     pub fn new_with_shared_process_registry(storage: &PostgresStorage) -> Self {
@@ -801,8 +805,11 @@ impl PostgresSessionStoreFactory {
     }
 }
 
-fn warn_postgres_process_registry_not_wired() {
+fn warn_postgres_process_registry_not_wired(path: &'static str) {
     tracing::warn!(
+        store = "postgres",
+        path,
+        consequence = "process-owned uncommitted intents are never reclaimed",
         "PostgreSQL attachment GC process-owner liveness is not wired; process-owned intents will be retained indefinitely. Call PostgresStorage::session_store_factory_with_shared_process_registry()."
     );
 }

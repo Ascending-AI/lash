@@ -32,10 +32,12 @@ pub struct InMemorySessionStoreFactory {
 
 impl InMemorySessionStoreFactory {
     pub fn new() -> Self {
+        super::warn_process_owner_death_degraded("InMemorySessionStoreFactory::new");
         Self::with_clock(Arc::new(crate::SystemClock))
     }
 
     pub fn with_clock(clock: Arc<dyn crate::Clock>) -> Self {
+        super::warn_process_owner_death_degraded("InMemorySessionStoreFactory::with_clock");
         Self {
             clock,
             stores: Arc::new(Mutex::new(HashMap::new())),
@@ -93,6 +95,7 @@ fn retained_fork_config(
 
 impl Default for InMemorySessionStoreFactory {
     fn default() -> Self {
+        super::warn_process_owner_death_degraded("InMemorySessionStoreFactory::default");
         Self::new()
     }
 }
@@ -674,6 +677,10 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
 // suggest replacing their factory with this concrete implementation.
 #[diagnostic::do_not_recommend]
 impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
+    fn can_prove_process_owner_death(&self) -> bool {
+        false
+    }
+
     async fn live_attachment_refs(
         &self,
         intent_grace_cutoff_epoch_ms: u64,

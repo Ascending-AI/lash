@@ -212,6 +212,12 @@ pub trait AttachmentStore: Send + Sync {
 /// assertion.
 #[async_trait::async_trait]
 pub trait AttachmentRootSet: Send + Sync {
+    /// Whether this authority can prove process-owner death. Authorities without
+    /// a wired process registry conservatively retain process-owned intents.
+    fn can_prove_process_owner_death(&self) -> bool {
+        false
+    }
+
     /// The live root set, reconciled against `intent_grace_cutoff_epoch_ms`.
     ///
     /// A committed ref is always a root. An uncommitted intent remains a root
@@ -372,6 +378,9 @@ pub enum AttachmentGcFence {
 /// [`VacuumReport`](crate::VacuumReport) do for the store-side levers.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AttachmentReclamationReport {
+    /// True when process-owner death cannot be proven; the sweep is incomplete
+    /// even when it reclaims no blobs, because process intents remain rooted.
+    pub owner_death_proof_degraded: bool,
     /// Blobs enumerated from the backend and considered by the sweep.
     pub scanned_blob_count: usize,
     /// Blobs deleted: unreferenced by any session and past the grace window.
@@ -422,7 +431,10 @@ impl crate::store::MaintenanceReport for AttachmentReclamationReport {
     }
 
     fn sweep(&self) -> crate::store::MaintenanceSweep {
-        if !self.failed_ids.is_empty() || !self.condemn_deferred_ids.is_empty() {
+        if self.owner_death_proof_degraded
+            || !self.failed_ids.is_empty()
+            || !self.condemn_deferred_ids.is_empty()
+        {
             crate::store::MaintenanceSweep::Incomplete
         } else if self.reclaimed_count > 0 {
             crate::store::MaintenanceSweep::Swept
@@ -582,6 +594,7 @@ where
     let mut fence = root_set.fence();
     let mut report = AttachmentReclamationReport {
         scanned_blob_count: blobs.len(),
+        owner_death_proof_degraded: !root_set.can_prove_process_owner_death(),
         fence,
         ..AttachmentReclamationReport::default()
     };

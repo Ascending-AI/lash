@@ -41,24 +41,37 @@ impl Store {
     }
 
     pub async fn open(path: &Path) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_options(path, StoreOptions::default()).await
+        Self::open_direct(
+            path,
+            StoreOptions::default(),
+            Arc::new(lash_core::facade_support::SystemClock),
+            "Store::open",
+        )
+        .await
     }
 
     pub async fn open_with_clock(
         path: &Path,
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_options_and_clock(path, StoreOptions::default(), clock).await
+        Self::open_direct(
+            path,
+            StoreOptions::default(),
+            clock,
+            "Store::open_with_clock",
+        )
+        .await
     }
 
     pub async fn open_with_options(
         path: &Path,
         options: StoreOptions,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_options_and_clock(
+        Self::open_direct(
             path,
             options,
             Arc::new(lash_core::facade_support::SystemClock),
+            "Store::open_with_options",
         )
         .await
     }
@@ -68,7 +81,16 @@ impl Store {
         options: StoreOptions,
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_options_clock_and_process_registry(
+        Self::open_direct(path, options, clock, "Store::open_with_options_and_clock").await
+    }
+
+    async fn open_direct(
+        path: &Path,
+        options: StoreOptions,
+        clock: Arc<dyn lash_core::Clock>,
+        constructor: &'static str,
+    ) -> tokio_rusqlite::Result<Self> {
+        let store = Self::open_with_options_clock_and_process_registry(
             path,
             options,
             clock,
@@ -76,9 +98,12 @@ impl Store {
             #[cfg(feature = "testing")]
             None,
         )
-        .await
+        .await?;
+        warn_process_registry_not_wired(constructor);
+        Ok(store)
     }
 
+    // Internal opens inherit the factory's warning or the direct entry's warning.
     pub(crate) async fn open_with_options_clock_and_process_registry(
         path: &Path,
         options: StoreOptions,
@@ -168,6 +193,7 @@ impl Store {
 
     /// Open the local database read-only for internal read projections.
     pub(crate) async fn open_readonly(path: &Path) -> tokio_rusqlite::Result<Self> {
+        // Read-only projections cannot reconcile intents or run a reclamation sweep.
         let conn = SqliteConnection::open_readonly(path).await?;
         Ok(Self {
             conn,
@@ -198,30 +224,36 @@ impl Store {
     }
 
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options(StoreOptions {
-            blob_profile: BuiltinBlobProfile::LowLatency,
-            ..StoreOptions::default()
-        })
+        Self::memory_direct(
+            StoreOptions {
+                blob_profile: BuiltinBlobProfile::LowLatency,
+                ..StoreOptions::default()
+            },
+            Arc::new(lash_core::facade_support::SystemClock),
+            "Store::memory",
+        )
         .await
     }
 
     pub async fn memory_with_clock(
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options_and_clock(
+        Self::memory_direct(
             StoreOptions {
                 blob_profile: BuiltinBlobProfile::LowLatency,
                 ..StoreOptions::default()
             },
             clock,
+            "Store::memory_with_clock",
         )
         .await
     }
 
     pub async fn memory_with_options(options: StoreOptions) -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options_and_clock(
+        Self::memory_direct(
             options,
             Arc::new(lash_core::facade_support::SystemClock),
+            "Store::memory_with_options",
         )
         .await
     }
@@ -230,8 +262,17 @@ impl Store {
         options: StoreOptions,
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
+        Self::memory_direct(options, clock, "Store::memory_with_options_and_clock").await
+    }
+
+    async fn memory_direct(
+        options: StoreOptions,
+        clock: Arc<dyn lash_core::Clock>,
+        constructor: &'static str,
+    ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open_in_memory_with_policy(options.connection_policy).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
+        warn_process_registry_not_wired(constructor);
         Ok(Self {
             conn,
             session_id: OnceLock::new(),

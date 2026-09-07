@@ -2505,3 +2505,15 @@ async fn postgres_session_read_view_satisfies_conformance_when_configured() {
     .await;
     lash_core::testing::conformance::session_store_factory_read_session(factory).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_attachment_owner_degraded_proof_conformance() {
+    let Some((_database_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(&storage).await;
+    lash_core::testing::conformance::attachment_owner_degraded_proof(Arc::new(
+        storage.session_store_factory(),
+    ))
+    .await;
+}
