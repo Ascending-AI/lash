@@ -1,3 +1,5 @@
+use super::*;
+
 // Facade-level tests for the RLM source-dialect layer: how a session's dialect
 // is selected on the production path, what makes it durable, and what cannot
 // change it once it is.
