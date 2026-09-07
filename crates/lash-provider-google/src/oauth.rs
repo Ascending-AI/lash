@@ -12,7 +12,7 @@ const GOOGLE_SCOPES: &str = "https://www.googleapis.com/auth/cloud-platform http
 const GOOGLE_PROMPT: &str = "consent select_account";
 
 fn validate_client_credentials(oauth_client: &GoogleOAuthClient) -> Result<(), OAuthError> {
-    if oauth_client.id.trim().is_empty() || oauth_client.secret.trim().is_empty() {
+    if oauth_client.id.trim().is_empty() || oauth_client.secret.expose_secret().trim().is_empty() {
         Err(OAuthError::TokenExchange(
             "Google OAuth client id and client secret must both be non-empty.".to_string(),
         ))
@@ -70,7 +70,7 @@ pub async fn exchange_code(
             ("code", auth_code.as_str()),
             ("redirect_uri", GOOGLE_REDIRECT_URI),
             ("client_id", oauth_client.id.as_str()),
-            ("client_secret", oauth_client.secret.as_str()),
+            ("client_secret", oauth_client.secret.expose_secret()),
             ("code_verifier", verifier),
         ]))
         .send()
@@ -102,7 +102,7 @@ pub async fn refresh_tokens(
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh),
             ("client_id", oauth_client.id.as_str()),
-            ("client_secret", oauth_client.secret.as_str()),
+            ("client_secret", oauth_client.secret.expose_secret()),
         ]))
         .send()
         .await?;
@@ -124,11 +124,13 @@ pub async fn refresh_tokens(
         access_token: body["access_token"]
             .as_str()
             .ok_or_else(|| OAuthError::TokenExchange("missing access_token".into()))?
-            .to_string(),
+            .to_string()
+            .into(),
         refresh_token: body["refresh_token"]
             .as_str()
             .unwrap_or(refresh)
-            .to_string(),
+            .to_string()
+            .into(),
         expires_at: now + expires_in,
     })
 }
@@ -140,11 +142,13 @@ fn parse_token_response(body: &serde_json::Value) -> Result<OAuthTokens, OAuthEr
         access_token: body["access_token"]
             .as_str()
             .ok_or_else(|| OAuthError::TokenExchange("missing access_token".into()))?
-            .to_string(),
+            .to_string()
+            .into(),
         refresh_token: body["refresh_token"]
             .as_str()
             .ok_or_else(|| OAuthError::TokenExchange("missing refresh_token".into()))?
-            .to_string(),
+            .to_string()
+            .into(),
         expires_at: now + expires_in,
     })
 }

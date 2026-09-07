@@ -35,6 +35,7 @@ use lash_core::provider::{
 use lash_core::{facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose};
 use lash_llm_transport::LlmHttpTransport;
 use lash_provider_auth::{CredentialManager, Lease};
+use lash_sansio::Redacted;
 
 use credential::{CodexCredential, CodexCredentialRefresher};
 use failure::CodexFailureClassifier;
@@ -92,8 +93,8 @@ impl CodexProvider {
         expires_at: u64,
     ) -> Self {
         let credential = CodexCredential {
-            access_token: access_token.into(),
-            refresh_token: refresh_token.into(),
+            access_token: Redacted::new(access_token),
+            refresh_token: Redacted::new(refresh_token),
             expires_at,
             account_id: None,
         };
@@ -117,7 +118,7 @@ impl CodexProvider {
 
     pub fn with_account_id(mut self, account_id: Option<String>) -> Self {
         let mut credential = self.credentials.snapshot();
-        credential.account_id = account_id;
+        credential.account_id = account_id.map(Redacted::new);
         self.credentials = Arc::new(CredentialManager::new(
             credential,
             Arc::new(CodexCredentialRefresher),
@@ -301,3 +302,28 @@ impl CodexProvider {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn codex_tokens_are_redacted_from_debug_output() {
+        let provider = CodexProvider::new("codex-access-sentinel", "codex-refresh-sentinel", 7)
+            .with_account_id(Some("codex-account-sentinel".to_string()));
+        let debug = format!("{provider:?}");
+        assert!(!debug.contains("codex-access-sentinel"), "leaked: {debug}");
+        assert!(!debug.contains("codex-refresh-sentinel"), "leaked: {debug}");
+        assert!(!debug.contains("codex-account-sentinel"), "leaked: {debug}");
+        assert!(debug.contains("[redacted]"));
+
+        let tokens = oauth::CodexTokens {
+            access_token: Redacted::new("codex-access-sentinel"),
+            refresh_token: Redacted::new("codex-refresh-sentinel"),
+            expires_at: 7,
+            account_id: Some(Redacted::new("codex-account-sentinel")),
+        };
+        let debug = format!("{tokens:?}");
+        assert!(!debug.contains("sentinel"), "leaked: {debug}");
+    }
+}

@@ -9,6 +9,7 @@ use lash_core::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
     AttachmentStorePersistence, StoredAttachment, StoredBlobRef, facade_support::AttachmentMeta,
 };
+use lash_sansio::Redacted;
 use object_store::aws::AmazonS3Builder;
 use object_store::path::Path;
 use object_store::{ObjectStore, ObjectStoreExt};
@@ -22,7 +23,9 @@ pub struct S3AttachmentStoreConfig {
     pub bucket: String,
     pub prefix: Option<String>,
     pub access_key_id: Option<String>,
-    pub secret_access_key: Option<String>,
+    /// The secret key. Redacted in every `Debug` rendering; the plaintext
+    /// leaves the process only inside the signed S3 request.
+    pub secret_access_key: Option<Redacted>,
     pub path_style: bool,
 }
 
@@ -72,7 +75,7 @@ impl S3AttachmentStoreBuilder {
     }
 
     pub fn secret_access_key(mut self, secret_access_key: impl Into<String>) -> Self {
-        self.config.secret_access_key = Some(secret_access_key.into());
+        self.config.secret_access_key = Some(Redacted::new(secret_access_key));
         self
     }
 
@@ -125,7 +128,7 @@ impl S3AttachmentStore {
             builder = builder.with_access_key_id(access_key_id);
         }
         if let Some(secret_access_key) = config.secret_access_key {
-            builder = builder.with_secret_access_key(secret_access_key);
+            builder = builder.with_secret_access_key(secret_access_key.into_inner());
         }
 
         let store = builder.build().map_err(|err| {
@@ -591,9 +594,9 @@ mod tests {
             access_key_id: Some(
                 std::env::var("LASH_MINIO_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".into()),
             ),
-            secret_access_key: Some(
-                std::env::var("LASH_MINIO_SECRET_KEY").unwrap_or_else(|_| "minioadmin".into()),
-            ),
+            secret_access_key: Some(Redacted::new(
+                std::env::var("LASH_MINIO_SECRET_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
+            )),
             path_style: true,
         })
     }
@@ -616,5 +619,23 @@ mod tests {
                 .unwrap_or_default()
                 .as_nanos()
         )
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn s3_secret_access_key_is_redacted_from_debug_output() {
+        let builder = S3AttachmentStoreBuilder::new("bucket", "region")
+            .access_key_id("access-key-id")
+            .secret_access_key("s3-secret-sentinel");
+        let debug = format!("{builder:?}");
+        assert!(!debug.contains("s3-secret-sentinel"), "leaked: {debug}");
+        assert!(debug.contains("[redacted]"));
+
+        let debug = format!("{:?}", builder.config);
+        assert!(!debug.contains("s3-secret-sentinel"), "leaked: {debug}");
     }
 }

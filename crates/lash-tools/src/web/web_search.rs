@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 
 use lash_core::{ToolCall, ToolDefinition, ToolOutcome};
 
+use lash_sansio::Redacted;
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt, execution_failure,
     non_empty_string, object_schema, retryable_io_failure, typed_args, typed_ok,
@@ -21,15 +22,16 @@ struct WebSearchOutput {
 }
 
 /// Web search via Tavily API.
+#[derive(Debug)]
 pub struct WebSearch {
-    api_key: String,
+    api_key: Redacted,
     client: reqwest::Client,
 }
 
 impl WebSearch {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            api_key: api_key.into(),
+            api_key: Redacted::new(api_key),
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
@@ -55,7 +57,7 @@ impl StaticToolExecute for WebSearch {
         }
         let limit = args.limit.unwrap_or(5).clamp(1, 20);
 
-        if self.api_key.trim().is_empty() {
+        if self.api_key.expose_secret().trim().is_empty() {
             return execution_failure(
                 "tavily_api_key_missing",
                 "Tavily API key is required for web.search",
@@ -70,7 +72,7 @@ impl StaticToolExecute for WebSearch {
         let resp = self
             .client
             .post("https://api.tavily.com/search")
-            .bearer_auth(&self.api_key)
+            .bearer_auth(self.api_key.expose_secret())
             .json(&body)
             .send()
             .await;
@@ -294,5 +296,12 @@ mod tests {
         assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
         assert_eq!(failure.code, "invalid_tool_args");
         assert_eq!(failure.message, "Missing required parameter: query");
+    }
+    #[test]
+    fn web_search_api_key_is_redacted_from_debug_output() {
+        let tool = WebSearch::new("tavily-secret-key");
+        let rendered = format!("{tool:?}");
+        assert!(!rendered.contains("tavily-secret-key"), "{rendered}");
+        assert!(rendered.contains("[redacted]"), "{rendered}");
     }
 }

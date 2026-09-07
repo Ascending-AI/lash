@@ -345,13 +345,15 @@ impl CodexProvider {
         let headers = ws_request.headers_mut();
         headers.insert(
             "Authorization",
-            HeaderValue::from_str(&format!("Bearer {}", credential.access_token)).map_err(
-                |error| {
-                    CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
-                        "Invalid Codex WebSocket authorization header: {error}"
-                    )))
-                },
-            )?,
+            HeaderValue::from_str(&format!(
+                "Bearer {}",
+                credential.access_token.expose_secret()
+            ))
+            .map_err(|error| {
+                CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
+                    "Invalid Codex WebSocket authorization header: {error}"
+                )))
+            })?,
         );
         headers.insert(
             "OpenAI-Beta",
@@ -381,10 +383,10 @@ impl CodexProvider {
         })?;
         headers.insert("session-id", session_value);
         headers.insert("x-client-request-id", request_value);
-        if let Some(account_id) = credential.account_id.as_deref() {
+        if let Some(account_id) = credential.account_id.as_ref() {
             headers.insert(
                 "ChatGPT-Account-ID",
-                HeaderValue::from_str(account_id).map_err(|error| {
+                HeaderValue::from_str(account_id.expose_secret()).map_err(|error| {
                     CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
                         "Invalid Codex WebSocket account header: {error}"
                     )))

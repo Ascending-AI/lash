@@ -32,7 +32,7 @@ impl Provider for AnthropicProvider {
         let mut map = serde_json::Map::new();
         map.insert(
             "api_key".to_string(),
-            serde_json::Value::String(self.api_key.clone()),
+            serde_json::Value::String(self.api_key.expose_secret().to_string()),
         );
         if let Some(base_url) = &self.base_url {
             map.insert(
@@ -105,7 +105,7 @@ impl Provider for AnthropicProvider {
 
         let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
         let request = LlmHttpRequest::post(url.clone(), request_body_bytes)
-            .with_header("x-api-key", self.api_key.clone())
+            .with_header("x-api-key", self.api_key.expose_secret().to_string())
             .with_header("anthropic-version", ANTHROPIC_VERSION)
             .with_header("anthropic-beta", betas.join(","))
             .with_header("Content-Type", "application/json")

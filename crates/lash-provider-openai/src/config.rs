@@ -133,7 +133,9 @@ pub(crate) struct OpenAiResolvedCompat {
 
 #[derive(Clone, Debug)]
 pub struct OpenAiCompatibleProvider {
-    pub api_key: String,
+    /// The API key. Redacted in every `Debug`/`Display` rendering; the
+    /// plaintext leaves the process only on the authorization header.
+    pub api_key: Redacted,
     pub base_url: String,
     pub options: ProviderOptions,
     pub compat: OpenAiCompat,

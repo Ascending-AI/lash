@@ -2181,7 +2181,7 @@ async fn attachment_blob_store_differential_agrees() {
             .unwrap_or_else(|_| "lash-attachments".to_string()),
         prefix: Some(format!("cross-backend/{}", run_nonce())),
         access_key_id: Some("minioadmin".to_string()),
-        secret_access_key: Some("minioadmin".to_string()),
+        secret_access_key: Some("minioadmin".into()),
         path_style: true,
     })
     .unwrap();

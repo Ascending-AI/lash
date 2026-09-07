@@ -30,22 +30,11 @@ pub(crate) struct UploadedAttachmentRef {
     pub(crate) uri: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct GoogleCredential {
-    pub(crate) access_token: String,
-    pub(crate) refresh_token: String,
+    pub(crate) access_token: Redacted,
+    pub(crate) refresh_token: Redacted,
     pub(crate) expires_at: u64,
-}
-
-impl std::fmt::Debug for GoogleCredential {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("GoogleCredential")
-            .field("access_token", &"[REDACTED]")
-            .field("refresh_token", &"[REDACTED]")
-            .field("expires_at", &self.expires_at)
-            .finish()
-    }
 }
 
 impl std::fmt::Display for GoogleCredential {
@@ -66,24 +55,15 @@ impl Credential for GoogleCredential {
 ///
 /// Construct this with named fields so the client ID and secret cannot be
 /// confused with the provider's access and refresh tokens.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct GoogleOAuthClient {
     #[serde(rename = "oauth_client_id")]
     /// OAuth client ID issued for the host's Google application.
     pub id: String,
     #[serde(rename = "oauth_client_secret")]
     /// OAuth client secret issued for the host's Google application.
-    pub secret: String,
-}
-
-impl std::fmt::Debug for GoogleOAuthClient {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("GoogleOAuthClient")
-            .field("id", &self.id)
-            .field("secret", &"[REDACTED]")
-            .finish()
-    }
+    /// Redacted in every `Debug` rendering.
+    pub secret: Redacted,
 }
 
 #[derive(Debug)]
@@ -98,9 +78,10 @@ impl CredentialRefresher<GoogleCredential> for GoogleCredentialRefresher {
         current: &GoogleCredential,
         _cause: RefreshCause,
     ) -> Result<GoogleCredential, CredentialError> {
-        let tokens = crate::oauth::refresh_tokens(&self.oauth_client, &current.refresh_token)
-            .await
-            .map_err(classify_oauth_refresh_error)?;
+        let tokens =
+            crate::oauth::refresh_tokens(&self.oauth_client, current.refresh_token.expose_secret())
+                .await
+                .map_err(classify_oauth_refresh_error)?;
         Ok(GoogleCredential {
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token,
@@ -156,7 +137,7 @@ impl GoogleOAuthProvider {
             0,
             GoogleOAuthClient {
                 id: "oauth-client-id".to_string(),
-                secret: "oauth-client-secret".to_string(),
+                secret: "oauth-client-secret".into(),
             },
         )
     }
@@ -178,8 +159,8 @@ impl GoogleOAuthProvider {
         oauth_client: GoogleOAuthClient,
     ) -> Self {
         let credential = GoogleCredential {
-            access_token: access_token.into(),
-            refresh_token: refresh_token.into(),
+            access_token: Redacted::new(access_token),
+            refresh_token: Redacted::new(refresh_token),
             expires_at,
         };
         Self {
@@ -296,7 +277,7 @@ mod credential_tests {
             0,
             GoogleOAuthClient {
                 id: "oauth-client-id".to_string(),
-                secret: "oauth-client-secret".to_string(),
+                secret: "oauth-client-secret".into(),
             },
         );
         assert_eq!(
@@ -340,7 +321,7 @@ mod credential_tests {
             0,
             GoogleOAuthClient {
                 id: "oauth-client-id".to_string(),
-                secret: "oauth-client-secret-sentinel".to_string(),
+                secret: "oauth-client-secret-sentinel".into(),
             },
         );
         let debug = format!("{provider:?}");
@@ -356,7 +337,7 @@ mod credential_tests {
             0,
             GoogleOAuthClient {
                 id: "oauth-client-id".to_string(),
-                secret: "oauth-client-secret".to_string(),
+                secret: "oauth-client-secret".into(),
             },
         )
         .with_endpoint("https://code-assist.example")
@@ -367,5 +348,22 @@ mod credential_tests {
         assert_eq!(config["oauth_client_secret"], "oauth-client-secret");
         assert_eq!(config["endpoint"], "https://code-assist.example");
         assert_eq!(config["api_version"], "v2");
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn google_credential_tokens_are_redacted_from_debug_output() {
+        let credential = GoogleCredential {
+            access_token: Redacted::new("google-access-sentinel"),
+            refresh_token: Redacted::new("google-refresh-sentinel"),
+            expires_at: 7,
+        };
+        let debug = format!("{credential:?}");
+        assert!(!debug.contains("sentinel"), "leaked: {debug}");
+        assert!(debug.contains("[redacted]"));
     }
 }

@@ -9,6 +9,8 @@ use sha2::{Digest, Sha256};
 
 mod credential;
 
+pub use lash_sansio::Redacted;
+
 pub use credential::{
     Credential, CredentialCallError, CredentialError, CredentialErrorKind, CredentialExecuteError,
     CredentialManager, CredentialPolicy, CredentialRefresher, Lease, RefreshCause,
@@ -16,8 +18,8 @@ pub use credential::{
 
 #[derive(Debug)]
 pub struct OAuthTokens {
-    pub access_token: String,
-    pub refresh_token: String,
+    pub access_token: Redacted,
+    pub refresh_token: Redacted,
     pub expires_at: u64,
 }
 
@@ -400,5 +402,22 @@ mod tests {
 
         assert_eq!(error.kind, CredentialErrorKind::Transient);
         assert!(error.retryable);
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn oauth_tokens_are_redacted_from_debug_output() {
+        let tokens = OAuthTokens {
+            access_token: Redacted::new("oauth-access-sentinel"),
+            refresh_token: Redacted::new("oauth-refresh-sentinel"),
+            expires_at: 7,
+        };
+        let debug = format!("{tokens:?}");
+        assert!(!debug.contains("sentinel"), "leaked: {debug}");
+        assert!(debug.contains("[redacted]"));
     }
 }

@@ -321,7 +321,11 @@ pub(crate) async fn complete(
     let mut headers = vec![
         (
             provider.wire.auth_header_name.clone(),
-            format!("{}{}", provider.wire.auth_value_prefix, provider.api_key),
+            format!(
+                "{}{}",
+                provider.wire.auth_value_prefix,
+                provider.api_key.expose_secret()
+            ),
         ),
         ("Content-Type".to_string(), "application/json".to_string()),
         ("Accept".to_string(), "text/event-stream".to_string()),

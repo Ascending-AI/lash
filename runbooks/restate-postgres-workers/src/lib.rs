@@ -129,7 +129,7 @@ pub fn s3_store_from_env() -> Result<S3AttachmentStore> {
         bucket: env("MINIO_BUCKET", "lash-attachments"),
         prefix: Some(env("MINIO_PREFIX", "runbooks/restate-postgres-workers")),
         access_key_id: Some(env("MINIO_ACCESS_KEY", "minioadmin")),
-        secret_access_key: Some(env("MINIO_SECRET_KEY", "minioadmin")),
+        secret_access_key: Some(env("MINIO_SECRET_KEY", "minioadmin").into()),
         path_style: true,
     })
     .context("build S3 attachment store")
