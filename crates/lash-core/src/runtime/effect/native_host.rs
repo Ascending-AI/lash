@@ -150,6 +150,10 @@ impl EffectHost for NativeEffectHost {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for NativeEffectHost {
+    fn owns_commit_backpressure(&self) -> bool {
+        self.controller.owns_commit_backpressure()
+    }
+
     fn wants_segment_boundary(&self, progress: &SegmentProgress) -> Option<BoundaryReason> {
         self.controller.wants_segment_boundary(progress)
     }

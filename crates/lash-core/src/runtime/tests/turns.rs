@@ -10519,3 +10519,6 @@ async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does() {
         "an explicit replace still clears every option"
     );
 }
+
+#[path = "commit_placement.rs"]
+mod commit_placement;

@@ -36,6 +36,14 @@ because bounding it would double-bound work an engine already schedules. And
 no lash-side stampede control exists on engine tiers, because that is the
 engine's contractual job.
 
+This includes the same-session commit-admission FIFO, for both final turn
+commits and queued session-command commits. The controller explicitly declares
+whether an engine owns commit backpressure. Durable journal participation is
+not that discriminator: store-backed replay also journals effects and still
+uses the native FIFO. Turn-owned command drains carry the invocation controller;
+standalone command drains select the configured host controller. Storeless
+commits continue to bypass local admission.
+
 ## The reference substrate
 
 The in-process `DurableProcessWorker`, the SQLite and Postgres stores, and

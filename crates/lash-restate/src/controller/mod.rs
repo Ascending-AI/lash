@@ -593,6 +593,10 @@ impl<'ctx, C> RuntimeEffectController for RestateRuntimeEffectController<'ctx, C
 where
     C: RestateControllerContext<'ctx>,
 {
+    fn owns_commit_backpressure(&self) -> bool {
+        true
+    }
+
     fn supports_concurrent_effects(&self) -> bool {
         false
     }

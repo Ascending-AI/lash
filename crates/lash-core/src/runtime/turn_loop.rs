@@ -501,13 +501,16 @@ impl PreparedTurn {
         trace_turn_id: &str,
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
         cancellation: CancellationToken,
+        effect_controller: &dyn crate::RuntimeEffectController,
         turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     ) -> Result<CommittedTurn, crate::StoreError> {
         let has_durable_store = session
             .as_deref()
             .and_then(Session::history_store)
             .is_some();
-        if !has_durable_store {
+        if !has_durable_store
+            || !super::commit_admission::requires_local_commit_admission(effect_controller)
+        {
             return self
                 .commit_after_admission(
                     session,
@@ -1736,6 +1739,7 @@ impl LashRuntime {
                     .attachment_store
                     .recorded_turn_intent_ids(&trace_turn_id),
                 cancel_state.clone(),
+                scoped_effect_controller.controller(),
                 self.turn_phase_probe.clone(),
             ),
         )
@@ -2247,11 +2251,13 @@ impl LashRuntime {
                 .await?
         };
         if drain_commands_before_turn_input {
+            let command_controller = opts.scoped_effect_controller();
             loop {
                 match self
                     .drain_next_session_command_with_cancellation(
                         &session_execution_fence,
                         cancel.clone(),
+                        command_controller.controller(),
                     )
                     .await
                 {
@@ -2664,7 +2670,11 @@ impl LashRuntime {
             && let Some(lease) = session_execution_lease
         {
             while self
-                .drain_next_session_command_with_cancellation(&lease.fence(), cancel.clone())
+                .drain_next_session_command_with_cancellation(
+                    &lease.fence(),
+                    cancel.clone(),
+                    scoped_effect_controller.controller(),
+                )
                 .await?
                 .is_some()
             {}
