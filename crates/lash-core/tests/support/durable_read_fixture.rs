@@ -90,7 +90,7 @@ fn assert_fixture_schema_version(found: u32) {
 
 #[test]
 fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
-    const PREDECESSOR: u32 = 46;
+    const PREDECESSOR: u32 = 47;
     assert_eq!(
         PREDECESSOR + 1,
         DURABLE_READ_FIXTURE_SCHEMA_VERSION,
