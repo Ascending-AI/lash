@@ -54,6 +54,10 @@ pub(super) struct TurnBoundary {
     /// In-turn graph appends riding this turn's commit. Held here as well as
     /// on the draft so services created after finalization still share it.
     graph_appends: TurnGraphAppendDraft,
+    /// The reply as the protocol driver materialized it, recorded by the
+    /// driver when the turn finishes so the final commit recognizes it by
+    /// identity.
+    protocol_terminal_output: materialize::ProtocolTerminalOutput,
 }
 
 /// Explicit two-phase lifecycle for a turn commit.
@@ -131,7 +135,17 @@ impl TurnBoundary {
             operation_scope,
             commit_budget,
             graph_appends,
+            protocol_terminal_output: materialize::ProtocolTerminalOutput::default(),
         }
+    }
+
+    /// Records the ids of the assistant messages the protocol driver appended
+    /// after its final model call: the reply the driver materialized itself.
+    pub(super) fn record_protocol_terminal_output(
+        &mut self,
+        message_ids: impl IntoIterator<Item = String>,
+    ) {
+        self.protocol_terminal_output.record(message_ids);
     }
 
     pub(super) fn graph_appends(&self) -> &TurnGraphAppendDraft {
@@ -455,6 +469,7 @@ impl TurnBoundary {
         } = input;
         let clock = Arc::clone(&self.clock);
         let graph_appends = self.graph_appends.clone();
+        let protocol_terminal_output = self.protocol_terminal_output.clone();
         let turn_id = self.operation_scope.id().to_string();
         let terminal_message_id = format!("m_turn_{turn_id}_assistant");
         let state = self.final_state_mut();
@@ -475,6 +490,7 @@ impl TurnBoundary {
             clock.as_ref(),
             &turn_id,
             &terminal_message_id,
+            &protocol_terminal_output,
         );
         materialize_agent_frame_switch(
             state,

@@ -2,11 +2,34 @@ use crate::facade_support::AgentFrameReasonFacadeOps;
 use std::collections::BTreeSet;
 
 use crate::{
-    Message, MessageRole, OmittedToolCalls, Part, PartKind, ToolCallRecord, TurnFinish,
-    TurnOutcome, shared_parts,
+    Message, MessageRole, OmittedToolCalls, Part, ToolCallRecord, TurnFinish, TurnOutcome,
+    shared_parts,
 };
 
 use super::RuntimeSessionState;
+
+/// The turn's reply as the protocol driver materialized it: the assistant
+/// messages the driver appended after its final model call, named by id.
+///
+/// Terminal materialization recognizes an already-materialized reply through
+/// these ids (or the runtime's own terminal node id) and never through the
+/// position of the last message: finalize-turn hooks append after the reply
+/// and before the final commit, so the last message is not the reply.
+#[derive(Clone, Debug, Default)]
+pub(super) struct ProtocolTerminalOutput {
+    message_ids: BTreeSet<String>,
+}
+
+impl ProtocolTerminalOutput {
+    /// Replaces the recorded output with the ids the latest driver run named.
+    pub(super) fn record(&mut self, message_ids: impl IntoIterator<Item = String>) {
+        self.message_ids = message_ids.into_iter().collect();
+    }
+
+    fn names(&self, message_id: &str) -> bool {
+        self.message_ids.contains(message_id)
+    }
+}
 
 pub(super) fn agent_frame_switch_materializes(
     session_id: &str,
@@ -54,12 +77,16 @@ pub(super) fn committed_attachment_ids(
     attachment_ids.into_iter().collect()
 }
 
+/// Appends the runtime's terminal reply node unless the reply is already
+/// materialized: either the protocol appended it (identified through
+/// `protocol_output`) or this node already exists (identified by `message_id`).
 pub(super) fn materialize_terminal_output(
     state: &mut RuntimeSessionState,
     outcome: &TurnOutcome,
     clock: &dyn crate::Clock,
     turn_id: &str,
     message_id: &str,
+    protocol_output: &ProtocolTerminalOutput,
 ) {
     let TurnOutcome::Finished(TurnFinish::AssistantMessage { text }) = outcome else {
         return;
@@ -68,10 +95,7 @@ pub(super) fn materialize_terminal_output(
         .read_model()
         .messages
         .iter()
-        .rfind(|message| !message.is_transient())
-        .is_some_and(|message| {
-            message.role == MessageRole::Assistant && message_rendered_text(message) == *text
-        })
+        .any(|message| message.id == message_id || protocol_output.names(&message.id))
     {
         return;
     }
@@ -127,21 +151,6 @@ pub(super) fn materialize_agent_frame_switch(
         .with_initial_nodes(initial_nodes.clone()),
         clock,
     );
-}
-
-fn message_rendered_text(message: &Message) -> String {
-    message
-        .parts
-        .iter()
-        .filter(|part| {
-            matches!(
-                part.kind,
-                PartKind::Prose | PartKind::Text | PartKind::Attachment | PartKind::ToolResult
-            )
-        })
-        .map(|part| part.content.as_str())
-        .collect::<Vec<_>>()
-        .join("")
 }
 
 #[cfg(test)]
@@ -216,5 +225,201 @@ mod tests {
             ids,
             vec![crate::AttachmentId::parse("omitted-tool-output").expect("valid attachment id")]
         );
+    }
+
+    fn message(
+        id: &str,
+        role: MessageRole,
+        text: &str,
+        origin: Option<crate::MessageOrigin>,
+    ) -> Message {
+        Message {
+            id: id.to_string(),
+            role,
+            parts: shared_parts(vec![Part::prose(
+                format!("{id}.p0"),
+                text.to_string(),
+                None,
+            )]),
+            origin,
+        }
+    }
+
+    fn state_with_messages(messages: &[Message]) -> RuntimeSessionState {
+        let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
+        state.session_graph = crate::SessionGraph::from_active_read_state(messages);
+        state
+    }
+
+    fn reply(text: &str) -> TurnOutcome {
+        TurnOutcome::Finished(TurnFinish::AssistantMessage {
+            text: text.to_string(),
+        })
+    }
+
+    fn message_ids(state: &RuntimeSessionState) -> Vec<String> {
+        state
+            .read_model()
+            .messages
+            .iter()
+            .map(|message| message.id.clone())
+            .collect()
+    }
+
+    const TURN_ID: &str = "turn-1";
+    const TERMINAL_ID: &str = "m_turn_turn-1_assistant";
+
+    fn after_turn_enqueue_state() -> RuntimeSessionState {
+        state_with_messages(&[
+            message("m_ingress", MessageRole::User, "first request", None),
+            message(
+                "m_standard_turn-1_0_assistant",
+                MessageRole::Assistant,
+                "first response",
+                None,
+            ),
+            message(
+                "m_plugin_turn-1:after_turn_0",
+                MessageRole::User,
+                "enqueued after turn",
+                Some(crate::MessageOrigin::Plugin {
+                    plugin_id: "plugin".to_string(),
+                    transient: false,
+                }),
+            ),
+        ])
+    }
+
+    #[test]
+    fn terminal_output_recognizes_the_protocol_reply_by_identity_behind_an_enqueue() {
+        let mut state = after_turn_enqueue_state();
+        let mut protocol_output = ProtocolTerminalOutput::default();
+        protocol_output.record(["m_standard_turn-1_0_assistant".to_string()]);
+
+        materialize_terminal_output(
+            &mut state,
+            &reply("first response"),
+            &crate::SystemClock,
+            TURN_ID,
+            TERMINAL_ID,
+            &protocol_output,
+        );
+
+        assert_eq!(
+            message_ids(&state),
+            vec![
+                "m_ingress",
+                "m_standard_turn-1_0_assistant",
+                "m_plugin_turn-1:after_turn_0"
+            ]
+        );
+    }
+
+    #[test]
+    fn terminal_output_materializes_when_the_protocol_named_no_reply() {
+        // The retry prose predates the final model call, so it is not the
+        // protocol's terminal output even though it is this turn's last
+        // assistant message and shares the reply's text.
+        let mut state = state_with_messages(&[
+            message("m_ingress", MessageRole::User, "first request", None),
+            message(
+                "m_proto_turn-1_0_assistant_response",
+                MessageRole::Assistant,
+                "first response",
+                Some(crate::MessageOrigin::TurnOutput {
+                    turn_id: TURN_ID.to_string(),
+                    source: crate::TurnOutputSource::Plugin {
+                        plugin_id: "proto".to_string(),
+                    },
+                }),
+            ),
+            message(
+                "m_proto_turn-1_0_reminder",
+                MessageRole::System,
+                "close the cell",
+                None,
+            ),
+        ]);
+
+        materialize_terminal_output(
+            &mut state,
+            &reply("first response"),
+            &crate::SystemClock,
+            TURN_ID,
+            TERMINAL_ID,
+            &ProtocolTerminalOutput::default(),
+        );
+
+        let messages = state.read_model().messages.clone();
+        assert_eq!(
+            messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .next_back(),
+            Some(TERMINAL_ID)
+        );
+        let terminal = messages.last().expect("materialized reply");
+        assert_eq!(terminal.role, MessageRole::Assistant);
+        assert_eq!(
+            terminal.origin,
+            Some(crate::MessageOrigin::TurnOutput {
+                turn_id: TURN_ID.to_string(),
+                source: crate::TurnOutputSource::Runtime,
+            })
+        );
+        assert_eq!(terminal.parts[0].content, "first response");
+    }
+
+    #[test]
+    fn terminal_output_is_idempotent_on_its_own_node_id() {
+        let mut state = state_with_messages(&[
+            message("m_ingress", MessageRole::User, "first request", None),
+            message(
+                TERMINAL_ID,
+                MessageRole::Assistant,
+                "first response",
+                Some(crate::MessageOrigin::TurnOutput {
+                    turn_id: TURN_ID.to_string(),
+                    source: crate::TurnOutputSource::Runtime,
+                }),
+            ),
+            message(
+                "m_plugin_turn-1:after_turn_0",
+                MessageRole::User,
+                "enqueued after turn",
+                None,
+            ),
+        ]);
+
+        materialize_terminal_output(
+            &mut state,
+            &reply("first response"),
+            &crate::SystemClock,
+            TURN_ID,
+            TERMINAL_ID,
+            &ProtocolTerminalOutput::default(),
+        );
+
+        assert_eq!(
+            message_ids(&state),
+            vec!["m_ingress", TERMINAL_ID, "m_plugin_turn-1:after_turn_0"]
+        );
+    }
+
+    #[test]
+    fn terminal_output_ignores_non_reply_outcomes() {
+        let mut state = after_turn_enqueue_state();
+        let before = message_ids(&state);
+
+        materialize_terminal_output(
+            &mut state,
+            &TurnOutcome::Stopped(crate::TurnStop::MaxTurns),
+            &crate::SystemClock,
+            TURN_ID,
+            TERMINAL_ID,
+            &ProtocolTerminalOutput::default(),
+        );
+
+        assert_eq!(message_ids(&state), before);
     }
 }

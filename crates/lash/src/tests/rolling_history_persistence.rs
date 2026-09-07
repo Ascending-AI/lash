@@ -915,3 +915,82 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
     );
     Ok(())
 }
+
+/// FIG-2478: an after-turn `EnqueueMessages` directive lands the enqueued
+/// message after the reply inside the same final commit. Terminal
+/// materialization must recognize the reply the protocol already appended by
+/// identity, not by last-message position, or the reply is persisted twice
+/// and becomes durable ancestry for every later turn.
+#[tokio::test]
+async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "after-turn-enqueue-single-reply";
+    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+        dir.path().join("sessions"),
+    ));
+    let plugin = crate::plugins::StaticPluginFactory::new(
+        "after-turn-injection",
+        lash_core::facade_support::PluginSpec::new().with_after_turn(Arc::new(|_| {
+            Box::pin(async {
+                Ok(vec![
+                    lash_core::facade_support::AfterTurnPluginDirective::EnqueueMessages(
+                        lash_core::facade_support::EnqueueMessagesDirective {
+                            messages: vec![lash_core::PluginMessage::text(
+                                lash_core::MessageRole::User,
+                                "enqueued after turn",
+                            )],
+                        },
+                    ),
+                ])
+            })
+        })),
+    );
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(rolling_history_provider(vec![response_with_usage(
+            "first response",
+            1,
+        )]))
+        .model(model_spec("after-turn-model", None, 40_000))
+        .plugin(Arc::new(plugin))
+        .store_factory(store_factory.clone())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(session_id).open().await?;
+    session
+        .turn(TurnInput::text("first request"))
+        .turn_id("enqueue-once")
+        .run()
+        .await?;
+
+    let durable = sqlite_messages(store_factory.as_ref(), session_id);
+    let described = durable
+        .iter()
+        .map(|message| {
+            format!(
+                "{} {:?} {:?} {:?}",
+                message.id,
+                message.role,
+                message_text(message),
+                message.origin
+            )
+        })
+        .collect::<Vec<_>>();
+    let texts = durable.iter().map(message_text).collect::<Vec<_>>();
+    assert_eq!(
+        texts,
+        vec![
+            "first request".to_string(),
+            "first response".to_string(),
+            "enqueued after turn".to_string(),
+        ],
+        "durable messages must carry the reply exactly once: {described:?}"
+    );
+    let replies = durable
+        .iter()
+        .filter(|message| message.role == lash_core::MessageRole::Assistant)
+        .count();
+    assert_eq!(
+        replies, 1,
+        "exactly one durable reply node expected: {described:?}"
+    );
+    Ok(())
+}
