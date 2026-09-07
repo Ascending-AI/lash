@@ -146,7 +146,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 self.assertEqual("confidence-build", jobs[job]["needs"])
                 downloads = [s for s in jobs[job]["steps"] if "download-artifact@" in s.get("uses", "")]
                 self.assertEqual([artifact], [s["with"]["name"] for s in downloads])
-                self.assertIn("tar -xf", str(jobs[job]["steps"]))
+                self.assertIn("tar -xmf", str(jobs[job]["steps"]))
                 self.assertNotIn("rust-cache@", str(jobs[job]["steps"]))
                 self.assertNotIn("continue-on-error", jobs[job])
         for job in jobs.values():
