@@ -1,8 +1,10 @@
-use lash_core::TestProcessRegistryWriteExt;
+use super::*;
 
 const PROCESS_LIST_STRESS_BATCH: usize = 128;
 
-async fn run_once_process_list_stress(chat_turns: usize) -> anyhow::Result<RuntimePerfRunResult> {
+pub(super) async fn run_once_process_list_stress(
+    chat_turns: usize,
+) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::ProcessListStress;
     let total_started = Instant::now();
     let before_memory = process_memory_sample();
@@ -420,7 +422,7 @@ fn process_list_tool_payload(entries: &[lash_core::ProcessRecord]) -> serde_json
 const OPENAI_RESPONSES_SSE_CHUNK_COUNT: usize = 256;
 const OPENAI_RESPONSES_SSE_CHUNK_BYTES: usize = 96;
 
-fn openai_responses_sse_payload(turn_index: usize) -> String {
+pub(super) fn openai_responses_sse_payload(turn_index: usize) -> String {
     let alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
     let mut full_text = String::new();
     let mut body = String::new();
@@ -658,7 +660,7 @@ fn push_sse_event(body: &mut String, event: serde_json::Value) {
     body.push_str("\n\n");
 }
 
-fn direct_llm_client_request(turn_index: usize) -> lash::direct::DirectRequest {
+pub(super) fn direct_llm_client_request(turn_index: usize) -> lash::direct::DirectRequest {
     lash::direct::DirectRequest::json_schema(
         "mock-model",
         format!(
@@ -693,7 +695,10 @@ fn direct_llm_client_request(turn_index: usize) -> lash::direct::DirectRequest {
     )
 }
 
-fn validate_direct_llm_response(turn_index: usize, response: &LlmResponse) -> anyhow::Result<()> {
+pub(super) fn validate_direct_llm_response(
+    turn_index: usize,
+    response: &LlmResponse,
+) -> anyhow::Result<()> {
     let value: serde_json::Value = serde_json::from_str(&response.full_text())
         .with_context(|| format!("parse direct_llm_client turn {} JSON", turn_index + 1))?;
     if value.get("value").and_then(serde_json::Value::as_str) == Some("runtime perf benchmark ok") {

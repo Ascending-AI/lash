@@ -1,3 +1,5 @@
+use super::*;
+
 #[derive(Debug)]
 struct HighTrafficOperationResult {
     ordinal: usize,
@@ -43,7 +45,7 @@ impl PostgresStepNamespace {
 }
 
 async fn take_population_sessions(
-    runtime: &mut super::harness::BenchmarkRuntime,
+    runtime: &mut crate::runtime_perf::harness::BenchmarkRuntime,
     scenario: RuntimePerfScenario,
     population: usize,
 ) -> anyhow::Result<Vec<lash::LashSession>> {
@@ -64,7 +66,7 @@ async fn take_population_sessions(
     Ok(sessions)
 }
 
-async fn run_once_high_traffic(
+pub(super) async fn run_once_high_traffic(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
     config: &HighTrafficConfig,
@@ -548,10 +550,10 @@ async fn run_high_traffic_operation(
     };
     if kind == "trigger" {
         let source_key = lash_core::facade_support::empty_trigger_source_key(
-            super::providers::BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
+            crate::runtime_perf::providers::BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
         )?;
         let request = lash_core::TriggerOccurrenceRequest::new(
-            super::providers::BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
+            crate::runtime_perf::providers::BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
             source_key,
             serde_json::json!({
                 "account": "test",
@@ -706,15 +708,15 @@ fn average_micros(values: &[f64]) -> u64 {
     millis_to_micros(values.iter().sum::<f64>() / values.len() as f64)
 }
 
-fn rate_per_second(count: u64, elapsed_ms: f64) -> f64 {
+pub(super) fn rate_per_second(count: u64, elapsed_ms: f64) -> f64 {
     count as f64 * 1_000.0 / elapsed_ms.max(f64::EPSILON)
 }
 
-fn scaled_rate(rate: f64) -> u64 {
+pub(super) fn scaled_rate(rate: f64) -> u64 {
     (rate.max(0.0) * 1_000.0).round() as u64
 }
 
-fn millis_to_micros(value: f64) -> u64 {
+pub(super) fn millis_to_micros(value: f64) -> u64 {
     (value.max(0.0) * 1_000.0).round() as u64
 }
 

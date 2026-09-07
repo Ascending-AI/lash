@@ -1,3 +1,5 @@
+use super::*;
+
 #[derive(Clone, Copy)]
 enum WriterContentionOperation {
     Configure,
@@ -69,7 +71,7 @@ async fn run_contention_wave(
     operation: WriterContentionOperation,
     holder_session: lash::LashSession,
     target_sessions: &[lash::LashSession],
-    control: Arc<super::providers::BenchmarkProviderControl>,
+    control: Arc<crate::runtime_perf::providers::BenchmarkProviderControl>,
     expect_contention: bool,
 ) -> anyhow::Result<ContentionWave> {
     let mut execution_ms = Vec::with_capacity(target_sessions.len());

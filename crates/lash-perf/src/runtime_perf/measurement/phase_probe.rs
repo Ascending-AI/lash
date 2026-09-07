@@ -1,4 +1,5 @@
-use lash_sansio::sync::MutexExt;
+use super::*;
+
 #[derive(Clone, Copy)]
 struct PhaseStart {
     started_at: Instant,
@@ -891,7 +892,7 @@ async fn run_once_inner(
     })
 }
 
-fn configured_postgres_database_url() -> Option<String> {
+pub(super) fn configured_postgres_database_url() -> Option<String> {
     std::env::var("LASH_POSTGRES_DATABASE_URL")
         .ok()
         .filter(|url| !url.trim().is_empty())
@@ -902,11 +903,11 @@ fn configured_postgres_database_url() -> Option<String> {
         })
 }
 
-fn postgres_is_required() -> bool {
+pub(super) fn postgres_is_required() -> bool {
     std::env::var_os("LASH_REQUIRE_POSTGRES").is_some()
 }
 
-fn skipped_runtime_perf_result(
+pub(super) fn skipped_runtime_perf_result(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
 ) -> RuntimePerfRunResult {

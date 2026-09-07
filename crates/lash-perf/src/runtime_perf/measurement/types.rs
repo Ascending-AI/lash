@@ -1,3 +1,5 @@
+use super::*;
+
 const RUNTIME_PERF_TURN_TIMEOUT_ENV: &str = "LASH_RUNTIME_PERF_TURN_TIMEOUT_MS";
 const DEFAULT_RUNTIME_PERF_TURN_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -182,7 +184,7 @@ pub(crate) struct RuntimePerfTurnAllocationRunResult {
     pub(crate) total: RuntimePerfAllocationDelta,
 }
 
-async fn runtime_perf_timed<T, F>(
+pub(super) async fn runtime_perf_timed<T, F>(
     scenario: RuntimePerfScenario,
     turn_index: usize,
     phase: &str,
@@ -193,7 +195,7 @@ where
     F: Future<Output = anyhow::Result<T>>,
 {
     let timeout = runtime_perf_turn_timeout();
-    match super::smoke::with_budget(timeout, future).await {
+    match crate::runtime_perf::smoke::with_budget(timeout, future).await {
         Ok(result) => result,
         Err(_) => {
             if let Some(cancel) = cancel {
@@ -330,7 +332,7 @@ mod completion_smoke_tests {
     async fn smoke_waits_for_completion_beyond_the_unchanged_measurement_deadline() {
         for smoke in [true, false] {
             let cancel = CancellationToken::new();
-            let result = super::super::smoke::execute(
+            let result = crate::runtime_perf::smoke::execute(
                 smoke,
                 RuntimePerfScenario::Standard,
                 1,

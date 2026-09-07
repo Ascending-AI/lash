@@ -1,8 +1,12 @@
+use super::*;
+
 const LIVE_REPLAY_EVENTS_PER_TURN: usize = 96;
 const LIVE_REPLAY_MAIN_CAPACITY: usize = 256;
 const LIVE_REPLAY_TRIM_CAPACITY: usize = 8;
 
-async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<RuntimePerfRunResult> {
+pub(super) async fn run_once_live_replay_pressure(
+    chat_turns: usize,
+) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::LiveReplayPressure;
     let total_started = Instant::now();
     let before_memory = process_memory_sample();
@@ -110,7 +114,7 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                 };
                 let mut buffered_count = 0usize;
                 for _ in 1..LIVE_REPLAY_EVENTS_PER_TURN {
-                    super::smoke::with_budget(
+                    crate::runtime_perf::smoke::with_budget(
                         Duration::from_secs(1),
                         futures_util::StreamExt::next(&mut subscription),
                     )
@@ -126,7 +130,7 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                     Some(&turn_id),
                     live_replay_text_payload(format!("turn-{turn_index}-live-event")),
                 )?;
-                super::smoke::with_budget(
+                crate::runtime_perf::smoke::with_budget(
                     Duration::from_secs(1),
                     futures_util::StreamExt::next(&mut subscription),
                 )
@@ -358,7 +362,7 @@ fn publish_one(
         .ok_or_else(|| anyhow::anyhow!("published live replay batch was empty"))
 }
 
-async fn run_once_trace_jsonl(
+pub(super) async fn run_once_trace_jsonl(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {

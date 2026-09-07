@@ -1,4 +1,6 @@
-async fn run_once_openai_responses_sse_parse(
+use super::*;
+
+pub(super) async fn run_once_openai_responses_sse_parse(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::OpenAiResponsesSseParse;
@@ -156,7 +158,9 @@ async fn run_once_openai_responses_sse_parse(
     })
 }
 
-async fn run_once_direct_llm_client(chat_turns: usize) -> anyhow::Result<RuntimePerfRunResult> {
+pub(super) async fn run_once_direct_llm_client(
+    chat_turns: usize,
+) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::DirectLlmClient;
     let total_started = Instant::now();
     let before_memory = process_memory_sample();
@@ -164,7 +168,7 @@ async fn run_once_direct_llm_client(chat_turns: usize) -> anyhow::Result<Runtime
 
     let build_before_alloc = allocator_stats();
     let build_started = Instant::now();
-    let provider = super::providers::benchmark_provider(scenario).into_handle();
+    let provider = crate::runtime_perf::providers::benchmark_provider(scenario).into_handle();
     let mut client = lash::direct::DirectLlmClient::new(provider);
     let build_runtime_ms = elapsed_ms(build_started);
     let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());

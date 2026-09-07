@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use lash::usage::SessionUsageReport;
+use lash_core::TestProcessRegistryWriteExt;
 use lash_core::llm::types::{LlmResponse, LlmUsage};
 use lash_core::runtime::{
     DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkCompletion,
@@ -27,6 +28,7 @@ use lash_core::{
     facade_support::TurnOutcome, facade_support::shared_parts,
 };
 use lash_protocol_rlm::RlmTurnInputExt;
+use lash_sansio::sync::MutexExt;
 use serde::Serialize;
 use stats_alloc::Stats;
 use tokio_util::sync::CancellationToken;
@@ -49,14 +51,25 @@ use super::prompt::benchmark_prompt;
 use super::scenarios::RuntimePerfScenario;
 use super::store::{RuntimePerfStore, RuntimePerfStoreTiming};
 
-include!("measurement/types.rs");
-include!("measurement/phase_probe.rs");
-include!("measurement/contention.rs");
-include!("measurement/live_replay.rs");
-include!("measurement/provider_scenarios.rs");
-include!("measurement/process_stress.rs");
-include!("measurement/queued_work.rs");
-include!("measurement/checkpoint.rs");
-include!("measurement/checkpoint_curve.rs");
-include!("measurement/store_hardening.rs");
-include!("measurement/high_traffic.rs");
+mod types;
+pub(crate) use types::*;
+mod phase_probe;
+pub(crate) use phase_probe::*;
+mod contention;
+pub(crate) use contention::*;
+mod live_replay;
+use live_replay::*;
+mod provider_scenarios;
+use provider_scenarios::*;
+mod process_stress;
+use process_stress::*;
+mod queued_work;
+use queued_work::*;
+mod checkpoint;
+pub(crate) use checkpoint::*;
+mod checkpoint_curve;
+pub(crate) use checkpoint_curve::*;
+mod store_hardening;
+pub(crate) use store_hardening::*;
+mod high_traffic;
+use high_traffic::*;

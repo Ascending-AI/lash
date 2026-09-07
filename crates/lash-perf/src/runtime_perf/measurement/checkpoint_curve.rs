@@ -1,3 +1,5 @@
+use super::*;
+
 const CHECKPOINT_CURVE_SCALE: usize = 4;
 const CHECKPOINT_CURVE_COMMIT_BYTES: usize = 32 * 1024 * 1024;
 const CHECKPOINT_CURVE_COMMIT_ROWS: usize = 8_192;
@@ -129,7 +131,7 @@ struct DurableCheckpointCurveFixture {
     store: Arc<dyn lash_core::RuntimePersistence>,
 }
 
-pub(super) async fn run_once_durable_checkpoint_curve(
+pub(crate) async fn run_once_durable_checkpoint_curve(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
     config: &CheckpointCurveConfig,

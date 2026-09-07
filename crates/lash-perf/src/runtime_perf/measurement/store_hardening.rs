@@ -1,3 +1,5 @@
+use super::*;
+
 const HARDENING_IDENTITY_ITERATIONS: usize = 64;
 const HARDENING_OCCURRENCE_ITERATIONS: usize = 256;
 const HARDENING_PRUNE_BATCH: usize = 16;
@@ -44,7 +46,7 @@ const POSTGRES_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseN
     append_receipt_replay: "store_hardening.postgres.append_receipt_replay",
 };
 
-pub(super) async fn run_once_store_hardening_hot_paths(
+pub(crate) async fn run_once_store_hardening_hot_paths(
     chat_turns: usize,
     postgres_url: &str,
 ) -> anyhow::Result<RuntimePerfRunResult> {
@@ -592,7 +594,9 @@ async fn load_store_hardening_state(
     )
 }
 
-fn runtime_perf_session_create_request(session_id: &str) -> lash_core::SessionStoreCreateRequest {
+pub(super) fn runtime_perf_session_create_request(
+    session_id: &str,
+) -> lash_core::SessionStoreCreateRequest {
     lash_core::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
