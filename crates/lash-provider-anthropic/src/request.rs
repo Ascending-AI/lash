@@ -346,17 +346,13 @@ impl AnthropicProvider {
                 .with_kind(ProviderFailureKind::Validation)
                 .with_code("provider_file_media_type_required"));
             }
-            let supported = match source {
-                AttachmentSource::ProviderFile { provider_scope, .. } => {
-                    provider_scope.provider.eq_ignore_ascii_case("anthropic")
-                }
-                source => source.media_type().is_some_and(|mime| {
-                    ANTHROPIC_IMAGE_MIMES.contains(&mime.as_str())
-                        || ANTHROPIC_FILE_MIMES.contains(&mime.as_str())
-                }),
-            };
+            let supported = req
+                .model_capability
+                .attachment_acceptance
+                .accepts("Anthropic Messages", source);
             if !supported {
-                let accepted_by = known_attachment_acceptors(source);
+                let accepted_by =
+                    known_attachment_acceptors(&req.model_capability.attachment_acceptance, source);
                 return Err(unsupported_attachment_capability(
                     "Anthropic Messages",
                     source,

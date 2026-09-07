@@ -26,9 +26,11 @@ pub use handle::{
     UnconfiguredProvider,
 };
 pub use lash_sansio::llm::capability::{
-    CacheControlDialect, GoogleDialect, ModelCapability, ModelEffortValidationCategory,
-    ModelEffortValidationError, ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding,
-    ReasoningSelection, SamplingCapability, StreamTermination,
+    AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+    AttachmentMimeSource, CacheControlDialect, GoogleDialect, ModelCapability,
+    ModelEffortValidationCategory, ModelEffortValidationError, ReasoningCapability,
+    ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
+    StreamTermination,
 };
 pub use options::{
     CacheRetention, DEFAULT_CHUNK_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS,

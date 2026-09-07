@@ -164,6 +164,14 @@ pub struct SessionPolicy {
 }
 
 impl SessionPolicy {
+    pub(crate) fn replace_model_retaining_attachment_acceptance(&mut self, mut model: ModelSpec) {
+        model.capability.attachment_acceptance =
+            self.model.capability.attachment_acceptance.clone();
+        self.model = model;
+    }
+}
+
+impl SessionPolicy {
     /// Construct a policy with an explicit turn budget and otherwise neutral
     /// settings.
     pub fn new(turn_budget: TurnBudget) -> Self {

@@ -73,7 +73,11 @@ fn attachment_provider(requests: Arc<Mutex<Vec<crate::llm::types::LlmRequest>>>)
                     });
                 }
                 if let Some(source) = request.attachments().iter().find(|source| {
-                    crate::llm::transport::known_attachment_acceptors(source).is_empty()
+                    crate::llm::transport::known_attachment_acceptors(
+                        &request.model_capability.attachment_acceptance,
+                        source,
+                    )
+                    .is_empty()
                 }) {
                     return Err(crate::llm::transport::unsupported_attachment_capability(
                         "OpenAI Chat Completions",
@@ -121,17 +125,19 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
     ));
     let requests = Arc::new(Mutex::new(Vec::new()));
     let provider = attachment_provider(Arc::clone(&requests));
-    let mut runtime = runtime_with_plugins_and_tools_and_host(
-        Vec::new(),
-        Arc::new(AttachmentResultTool {
+    let mut runtime = TestRuntime::new(provider)
+        .plugins(Vec::new())
+        .attachment_acceptance(
+            crate::attachments::attachment_test_capability().attachment_acceptance,
+        )
+        .tools(Arc::new(AttachmentResultTool {
             media_type: "application/octet-stream",
             bytes: UNSUPPORTED_BYTES,
             label: "workspace_badge.bin",
-        }),
-        provider,
-        test_host_config_with_trace_path(trace_path.clone()),
-    )
-    .await;
+        }))
+        .host(test_host_config_with_trace_path(trace_path.clone()))
+        .build()
+        .await;
 
     let artifact_turn = runtime
         .run_turn_assembled(
@@ -205,16 +211,18 @@ async fn accepted_tool_attachment_round_trips_without_degradation() {
     const IMAGE_BYTES: &[u8] = b"accepted-image-bytes";
     let requests = Arc::new(Mutex::new(Vec::new()));
     let provider = attachment_provider(Arc::clone(&requests));
-    let mut runtime = runtime_with_plugins_and_tools(
-        Vec::new(),
-        Arc::new(AttachmentResultTool {
+    let mut runtime = TestRuntime::new(provider)
+        .plugins(Vec::new())
+        .attachment_acceptance(
+            crate::attachments::attachment_test_capability().attachment_acceptance,
+        )
+        .tools(Arc::new(AttachmentResultTool {
             media_type: "image/png",
             bytes: IMAGE_BYTES,
             label: "accepted.png",
-        }),
-        provider,
-    )
-    .await;
+        }))
+        .build()
+        .await;
 
     let turn = runtime
         .run_turn_assembled(

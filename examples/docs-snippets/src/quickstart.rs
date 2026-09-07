@@ -19,6 +19,7 @@ async fn main() -> anyhow::Result<()> {
     let model = ModelSpec::builder("anthropic/claude-sonnet-4.6")
         .context_window_tokens(200_000)
         .capability(lash::provider::ModelCapability {
+            attachment_acceptance: Default::default(),
             cache_control: Some(lash::provider::CacheControlDialect::Anthropic),
             ..Default::default()
         })

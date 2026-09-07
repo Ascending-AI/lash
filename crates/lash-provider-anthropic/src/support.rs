@@ -7,8 +7,8 @@ pub(crate) use base64::Engine;
 pub(crate) use serde_json::{Value, json};
 
 pub(crate) use lash_core::llm::transport::{
-    ANTHROPIC_FILE_MIMES, ANTHROPIC_IMAGE_MIMES, LlmTransportError, ProviderFailureKind,
-    TransportRetryVerdict, known_attachment_acceptors, unsupported_attachment_capability,
+    LlmTransportError, ProviderFailureKind, TransportRetryVerdict, known_attachment_acceptors,
+    unsupported_attachment_capability,
 };
 pub(crate) use lash_core::llm::types::{
     AttachmentSource, ExecutionEvidence, GenerationOptionOutcome, GenerationReceipt,

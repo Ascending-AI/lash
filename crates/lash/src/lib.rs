@@ -529,8 +529,10 @@ pub mod remote {
     /// output specs, and provider metadata.
     pub mod llm {
         pub use lash_remote_protocol::llm::{
-            RemoteAttachmentRef, RemoteAttachmentSource, RemoteAttachmentTypeMetadata,
-            RemoteAttemptOutcome, RemoteAttemptRecord, RemoteDiagnostic, RemoteExecutionEvidence,
+            RemoteAttachmentAcceptanceRule, RemoteAttachmentAcceptor,
+            RemoteAttachmentCapabilitySnapshot, RemoteAttachmentMimeSource, RemoteAttachmentRef,
+            RemoteAttachmentSource, RemoteAttachmentTypeMetadata, RemoteAttemptOutcome,
+            RemoteAttemptRecord, RemoteDiagnostic, RemoteExecutionEvidence,
             RemoteExecutionEvidenceCollectionInterruption, RemoteGenerationOptionOutcome,
             RemoteGenerationOptions, RemoteGenerationReceipt, RemoteGoogleDialect,
             RemoteLlmCallRecord, RemoteLlmContentBlock, RemoteLlmMessage, RemoteLlmOutputPart,
@@ -863,6 +865,14 @@ pub mod provider {
         ProviderRateLimitPolicy, ProviderRateLimiter, ProviderReliability, ProviderRetryPolicy,
         RequestTimeout,
     };
+    pub use lash_core::{
+        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+        AttachmentMimeSource, CacheControlDialect, GoogleDialect, ModelCapability,
+        ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,
+        SamplingCapability, StreamTermination, facade_support::GenerationRetryGuarantee,
+        facade_support::LlmTimeouts, facade_support::Provider, facade_support::ProviderComponents,
+        facade_support::ProviderHandle, facade_support::ProviderOptions,
+    };
     /// Request/response/error vocabulary of [`Provider::complete`],
     /// re-exported so hosts can implement provider decorators (admission
     /// gates, metrics taps) against the facade alone.
@@ -871,12 +881,5 @@ pub mod provider {
         ExecutionEvidenceMergeError, LlmRequest, LlmRequestScope, LlmResponse, LlmStreamEvidence,
         NormalizedError, ProtocolPosition, ProviderEndpointError,
         facade_support::LlmTransportError,
-    };
-    pub use lash_core::{
-        CacheControlDialect, GoogleDialect, ModelCapability, ReasoningCapability,
-        ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
-        StreamTermination, facade_support::GenerationRetryGuarantee, facade_support::LlmTimeouts,
-        facade_support::Provider, facade_support::ProviderComponents,
-        facade_support::ProviderHandle, facade_support::ProviderOptions,
     };
 }

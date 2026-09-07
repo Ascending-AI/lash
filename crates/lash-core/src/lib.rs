@@ -1076,7 +1076,8 @@ pub(crate) use plugin::{
 };
 
 pub use provider::{
-    CacheControlDialect, GoogleDialect, ModelCapability, ReasoningCapability,
+    AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+    AttachmentMimeSource, CacheControlDialect, GoogleDialect, ModelCapability, ReasoningCapability,
     ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
     StreamTermination,
 };

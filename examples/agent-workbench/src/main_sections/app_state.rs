@@ -1011,6 +1011,7 @@ pub(crate) fn with_workbench_model_capability(model: lash::ModelSpec) -> lash::M
 
 pub(crate) fn workbench_model_capability() -> lash::provider::ModelCapability {
     lash::provider::ModelCapability {
+        attachment_acceptance: workbench_attachment_acceptance().into(),
         google_dialect: Default::default(),
         reasoning: Some(lash::provider::ReasoningCapability {
             efforts: ["low", "medium", "high"]
@@ -1490,6 +1491,32 @@ impl IntoResponse for AppError {
             })),
         )
             .into_response()
+    }
+}
+
+fn workbench_attachment_acceptance() -> lash::provider::AttachmentCapabilitySnapshot {
+    use lash::provider::{
+        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+        AttachmentMimeSource,
+    };
+    // This example host owns its model catalogue and revision. Existing sessions
+    // retain the opening snapshot when this catalogue changes.
+    AttachmentCapabilitySnapshot {
+        revision: "workbench-attachments-1".into(),
+        acceptors: ["OpenAI Chat Completions"]
+            .into_iter()
+            .map(|provider| AttachmentAcceptor {
+                provider: provider.into(),
+                rules: [AttachmentMimeSource::Inline, AttachmentMimeSource::Stored]
+                    .into_iter()
+                    .map(|source| AttachmentAcceptanceRule::Mime {
+                        source,
+                        media_types: ["image/png"].into_iter().map(String::from).collect(),
+                        media_families: Vec::new(),
+                    })
+                    .collect(),
+            })
+            .collect(),
     }
 }
 

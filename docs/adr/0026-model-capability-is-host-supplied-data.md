@@ -34,3 +34,17 @@ row, not code. Every host supplies its own rows (or richer sources) the same way
 we accepted: hosts own the burden of knowing model facts — an unknown model simply has no
 effort controls, and an explicit effort on one is rejected as `effort_not_configurable`
 rather than guessed at.
+
+Attachment acceptance follows the same rule (FIG-2357). The host supplies an
+`AttachmentCapabilitySnapshot` with a revision and transport acceptance rules on
+`ModelCapability`. MIME rules distinguish inline bytes, stored bytes, and external
+URLs; provider-file rules carry the provider scope. Core and adapters consult that
+snapshot. There are no compiled MIME tables or fallback acceptance rules; an empty
+snapshot accepts no attachments.
+
+A session retains its opening snapshot, including the rule data, in its durable
+model policy. Explicit model/provider changes retain that snapshot; cold loading
+uses the stored model rather than refreshing capability facts from a host catalogue.
+Consequently changing the host catalogue cannot change historical attachment
+rendering. New sessions can adopt the new revision. The remote protocol mirrors
+all acceptance rule and source variants so workers use the same retained data.

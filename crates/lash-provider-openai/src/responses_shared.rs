@@ -26,7 +26,6 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 
 use crate::schema::{classify_openai_error, responses_error_retry_verdict};
-use crate::support::{OPENAI_FILE_MIMES, OPENAI_IMAGE_MIMES};
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
 use lash_core::llm::types::{
     AttachmentSource, ExecutionEvidence, LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse,
@@ -60,44 +59,28 @@ pub fn validate_responses_attachments(
     req: &LlmRequest,
     provider: &str,
 ) -> Result<(), LlmTransportError> {
-    for source in &req.attachments() {
-        match source {
-            AttachmentSource::ProviderFile { provider_scope, .. }
-                if provider_scope.provider.eq_ignore_ascii_case("openai") => {}
-            AttachmentSource::ProviderFile { .. } => {
-                let accepted_by = crate::support::known_attachment_acceptors(source);
-                return Err(
-                    lash_core::llm::transport::unsupported_attachment_capability(
-                        provider,
-                        source,
-                        &accepted_by,
-                    ),
-                );
-            }
-            source => {
-                let mime = source.media_type().expect("MIME-bearing source").as_str();
-                if !OPENAI_IMAGE_MIMES.contains(&mime) && !OPENAI_FILE_MIMES.contains(&mime) {
-                    let accepted_by = crate::support::known_attachment_acceptors(source);
-                    return Err(
-                        lash_core::llm::transport::unsupported_attachment_capability(
-                            provider,
-                            source,
-                            &accepted_by,
-                        ),
-                    );
-                }
-                if matches!(source, AttachmentSource::Stored { .. })
-                    && req.attachment_bytes(source).is_none()
-                {
-                    return Err(LlmTransportError::new(format!(
-                        "{provider} could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"
-                    ))
-                    .with_kind(ProviderFailureKind::Validation)
-                    .with_code("stored_attachment_not_resolved"));
-                }
-            }
+    for source in req.attachments() {
+        if !req
+            .model_capability
+            .attachment_acceptance
+            .accepts("OpenAI Responses", source)
+        {
+            let accepted = req.model_capability.attachment_acceptance.acceptors(source);
+            return Err(
+                lash_core::llm::transport::unsupported_attachment_capability(
+                    provider, source, &accepted,
+                ),
+            );
+        }
+        if matches!(source, AttachmentSource::Stored { .. })
+            && req.attachment_bytes(source).is_none()
+        {
+            let mime = source.media_type().expect("stored source MIME");
+            return Err(LlmTransportError::new(format!("{provider} could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"))
+                .with_kind(ProviderFailureKind::Validation).with_code("stored_attachment_not_resolved"));
         }
     }
+
     Ok(())
 }
 

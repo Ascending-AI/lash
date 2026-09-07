@@ -847,6 +847,7 @@ mod tests {
 
     fn reasoning_capability() -> ModelCapability {
         ModelCapability {
+            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(crate::ReasoningCapability {
                 efforts: ["low", "medium", "high", "max"]

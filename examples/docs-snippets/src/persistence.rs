@@ -359,6 +359,7 @@ async fn trigger_reenable(
 
 fn adaptive_reasoning_capability() -> lash::provider::ModelCapability {
     lash::provider::ModelCapability {
+        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(lash::provider::ReasoningCapability {
             efforts: ["low", "medium", "high"]

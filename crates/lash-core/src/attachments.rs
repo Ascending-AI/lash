@@ -1432,9 +1432,10 @@ pub async fn resolve_llm_request_attachments(
 }
 
 pub(crate) fn attachment_materialization_notice(
+    snapshot: &crate::provider::AttachmentCapabilitySnapshot,
     source: &crate::AttachmentSource,
 ) -> Option<crate::AttachmentMaterializationNotice> {
-    crate::llm::transport::known_attachment_acceptors(source)
+    crate::llm::transport::known_attachment_acceptors(snapshot, source)
         .is_empty()
         .then(|| crate::AttachmentMaterializationNotice::no_provider_accepts(source))
 }
@@ -1451,12 +1452,18 @@ pub(crate) fn degrade_unmaterializable_request_attachments(
     let notices = request
         .attachments()
         .into_iter()
-        .filter_map(attachment_materialization_notice)
+        .filter_map(|source| {
+            attachment_materialization_notice(
+                &request.model_capability.attachment_acceptance,
+                source,
+            )
+        })
         .collect::<Vec<_>>();
     if notices.is_empty() {
         return notices;
     }
     let request = Arc::make_mut(request);
+    let snapshot = &request.model_capability.attachment_acceptance;
     for message in &mut request.messages {
         let existing_placeholders = message
             .blocks
@@ -1472,7 +1479,7 @@ pub(crate) fn degrade_unmaterializable_request_attachments(
         if !message.blocks.iter().any(|block| {
             matches!(block,
             crate::llm::types::LlmContentBlock::Attachment { source }
-            if attachment_materialization_notice(source).is_some())
+            if attachment_materialization_notice(snapshot, source).is_some())
         }) {
             continue;
         }
@@ -1480,7 +1487,7 @@ pub(crate) fn degrade_unmaterializable_request_attachments(
             let crate::llm::types::LlmContentBlock::Attachment { source } = block else {
                 return true;
             };
-            let Some(notice) = attachment_materialization_notice(source) else {
+            let Some(notice) = attachment_materialization_notice(snapshot, source) else {
                 return true;
             };
             let placeholder = notice.model_placeholder();
@@ -1513,3 +1520,9 @@ mod fail_closed_tests;
 #[cfg(test)]
 #[path = "attachments/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "attachments/test_capability.rs"]
+mod test_capability;
+#[cfg(test)]
+pub(crate) use test_capability::attachment_test_capability;

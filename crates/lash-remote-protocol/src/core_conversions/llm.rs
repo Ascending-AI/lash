@@ -82,6 +82,7 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
 impl From<core_llm::ModelCapability> for RemoteModelCapability {
     fn from(value: core_llm::ModelCapability) -> Self {
         let core_llm::ModelCapability {
+            attachment_acceptance,
             google_dialect,
             reasoning,
             cache_control,
@@ -89,6 +90,7 @@ impl From<core_llm::ModelCapability> for RemoteModelCapability {
             sampling,
         } = value;
         Self {
+            attachment_acceptance: std::sync::Arc::unwrap_or_clone(attachment_acceptance).into(),
             google_dialect: google_dialect.into(),
             reasoning: reasoning.map(Into::into),
             cache_control: cache_control.map(Into::into),
@@ -101,6 +103,7 @@ impl From<core_llm::ModelCapability> for RemoteModelCapability {
 impl From<RemoteModelCapability> for core_llm::ModelCapability {
     fn from(value: RemoteModelCapability) -> Self {
         let RemoteModelCapability {
+            attachment_acceptance,
             google_dialect,
             reasoning,
             cache_control,
@@ -108,6 +111,7 @@ impl From<RemoteModelCapability> for core_llm::ModelCapability {
             sampling,
         } = value;
         Self {
+            attachment_acceptance: std::sync::Arc::new(attachment_acceptance.into()),
             google_dialect: google_dialect.into(),
             reasoning: reasoning.map(Into::into),
             cache_control: cache_control.map(Into::into),

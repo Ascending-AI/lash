@@ -1616,7 +1616,7 @@ fn attachment_request(
         tools: Arc::new(Vec::new()),
         tool_choice: crate::llm::types::LlmToolChoice::None,
         model_variant: crate::ReasoningSelection::ProviderDefault,
-        model_capability: crate::ModelCapability::default(),
+        model_capability: super::attachment_test_capability(),
         generation: crate::llm::types::GenerationOptions::default(),
         scope: crate::llm::types::LlmRequestScope::new(
             "attachment-session",
@@ -1803,4 +1803,48 @@ fn accepted_then_degraded_attachment_keeps_surviving_source() {
     };
     assert_eq!(surviving_source, &accepted_source);
     assert_typed_degradation_placeholder(&request.messages[0].blocks[1]);
+}
+
+#[test]
+fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
+    let source =
+        crate::AttachmentSource::inline(MediaType::parse("image/png").unwrap(), vec![1, 2, 3]);
+    let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+    policy.model.id = "attachment-model".into();
+    policy.model.capability = super::attachment_test_capability();
+    let mut upgraded_model = policy.model.clone();
+    upgraded_model.id = "upgraded-attachment-model".into();
+    upgraded_model.capability.attachment_acceptance =
+        crate::provider::AttachmentCapabilitySnapshot {
+            revision: "test-host-revision-2".to_string(),
+            acceptors: Vec::new(),
+        }
+        .into();
+    let changed_host = upgraded_model.capability.clone();
+    policy.replace_model_retaining_attachment_acceptance(upgraded_model);
+    assert_eq!(policy.model.id, "upgraded-attachment-model");
+    let restored: crate::SessionPolicy =
+        serde_json::from_slice(&serde_json::to_vec(&policy).unwrap()).unwrap();
+    let mut historical = attachment_request(vec![source.clone()]);
+    Arc::make_mut(&mut historical).model_capability = restored.model.capability;
+    let notices = degrade_unmaterializable_request_attachments(&mut historical);
+    assert!(
+        notices.is_empty(),
+        "the opening revision must preserve historical rendering"
+    );
+    assert_eq!(historical.attachments(), vec![&source]);
+    assert_eq!(
+        historical.model_capability.attachment_acceptance.revision,
+        "test-host-revision-1"
+    );
+    let mut unpinned = attachment_request(vec![source]);
+    Arc::make_mut(&mut unpinned).model_capability = changed_host;
+    assert_eq!(
+        degrade_unmaterializable_request_attachments(&mut unpinned).len(),
+        1
+    );
+    assert!(
+        unpinned.attachments().is_empty(),
+        "the changed table must be a meaningful counterexample"
+    );
 }

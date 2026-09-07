@@ -14,7 +14,6 @@ mod support;
 pub mod testing;
 
 pub use config::{AnthropicProvider, DEFAULT_BASE_URL};
-pub use lash_core::llm::transport::{ANTHROPIC_FILE_MIMES, ANTHROPIC_IMAGE_MIMES};
 
 #[cfg(test)]
 mod tests {
@@ -85,6 +84,7 @@ mod tests {
     // any variant absent from the map (e.g. "none").
     fn effort_capability(efforts: &[&str]) -> ModelCapability {
         ModelCapability {
+            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: efforts.iter().map(|e| e.to_string()).collect(),
@@ -107,6 +107,7 @@ mod tests {
             ("high".to_string(), 12_288u32),
         ]);
         ModelCapability {
+            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: ["low", "medium", "high"]
@@ -137,7 +138,7 @@ mod tests {
             tools: Arc::new(Vec::<LlmToolSpec>::new()),
             tool_choice: LlmToolChoice::Auto,
             model_variant: Default::default(),
-            model_capability: ModelCapability::default(),
+            model_capability: crate::attachment_test_capability(),
             scope: lash_core::LlmRequestScope::new(
                 "session-1",
                 "session-1:frame:test",
@@ -1601,3 +1602,8 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod attachment_capability_fixture;
+#[cfg(test)]
+pub(crate) use attachment_capability_fixture::attachment_test_capability;

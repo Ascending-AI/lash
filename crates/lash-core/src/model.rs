@@ -389,6 +389,7 @@ mod tests {
             .context_window_tokens(200_000)
             .output_token_capacity(8_192)
             .capability(ModelCapability {
+                attachment_acceptance: Default::default(),
                 reasoning: Some(crate::provider::ReasoningCapability {
                     efforts: vec!["high".to_string()],
                     ..Default::default()

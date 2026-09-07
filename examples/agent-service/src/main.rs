@@ -35,6 +35,7 @@ mod ui;
 
 fn default_openrouter_model_capability() -> lash::provider::ModelCapability {
     lash::provider::ModelCapability {
+        attachment_acceptance: service_attachment_acceptance().into(),
         google_dialect: Default::default(),
         reasoning: Some(lash::provider::ReasoningCapability {
             efforts: ["low", "medium", "high"]
@@ -580,5 +581,38 @@ async fn drain(state: &AppStateData, provider: &ProviderHandle) {
     // own TracerProvider here, which lash cannot do for it.
     if let Err(err) = state.core().flush_trace_sink() {
         eprintln!("agent-service: trace flush failed: {err}");
+    }
+}
+
+fn service_attachment_acceptance() -> lash::provider::AttachmentCapabilitySnapshot {
+    use lash::provider::{
+        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+        AttachmentMimeSource,
+    };
+    // This example host owns its model catalogue and revision. Existing sessions
+    // retain the opening snapshot when this catalogue changes.
+    AttachmentCapabilitySnapshot {
+        revision: "service-attachments-1".into(),
+        acceptors: ["OpenAI Chat Completions"]
+            .into_iter()
+            .map(|provider| AttachmentAcceptor {
+                provider: provider.into(),
+                rules: [
+                    AttachmentMimeSource::Inline,
+                    AttachmentMimeSource::Stored,
+                    AttachmentMimeSource::ExternalUrl,
+                ]
+                .into_iter()
+                .map(|source| AttachmentAcceptanceRule::Mime {
+                    source,
+                    media_types: ["image/jpeg", "image/png", "image/gif", "image/webp"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    media_families: Vec::new(),
+                })
+                .collect(),
+            })
+            .collect(),
     }
 }

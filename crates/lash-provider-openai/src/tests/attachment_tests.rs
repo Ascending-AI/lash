@@ -26,7 +26,7 @@ fn fixture_data_url(mime: &str) -> String {
 fn responses_image_allowlist_serializes_every_mime_as_input_image() {
     let provider = OpenAiProvider::new("key");
 
-    for &mime in OPENAI_IMAGE_MIMES {
+    for mime in ["image/jpeg", "image/png", "image/gif", "image/webp"] {
         let body = provider
             .build_responses_request_body(&request_with_inline_attachment(mime), false)
             .expect("allowlisted image MIME must serialize");
@@ -41,7 +41,20 @@ fn responses_image_allowlist_serializes_every_mime_as_input_image() {
 fn responses_file_allowlist_serializes_every_mime_as_input_file() {
     let provider = OpenAiProvider::new("key");
 
-    for &mime in OPENAI_FILE_MIMES {
+    for mime in [
+        "application/pdf",
+        "application/json",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "text/csv",
+        "text/html",
+        "text/markdown",
+        "text/plain",
+    ] {
         let body = provider
             .build_responses_request_body(&request_with_inline_attachment(mime), false)
             .expect("allowlisted file MIME must serialize");
@@ -56,7 +69,7 @@ fn responses_file_allowlist_serializes_every_mime_as_input_file() {
 fn chat_image_allowlist_serializes_every_mime_as_image_url() {
     let provider = openrouter_provider();
 
-    for &mime in OPENAI_IMAGE_MIMES {
+    for mime in ["image/jpeg", "image/png", "image/gif", "image/webp"] {
         let body = provider
             .build_chat_request_body(&request_with_inline_attachment(mime), false)
             .expect("allowlisted image MIME must serialize");
@@ -119,4 +132,36 @@ fn responses_provider_file_ignores_optional_media_type_hint() {
             json!({"type": "input_file", "file_id": "file-123"})
         );
     }
+}
+
+#[test]
+fn chat_refuses_unencodable_host_declared_provider_file_without_panicking() {
+    let attachment = AttachmentSource::provider_file(
+        lash_core::ProviderFileScope::new("openai", "credential"),
+        "file-123",
+        None,
+    );
+    let mut req = request(vec![LlmMessage::new(
+        LlmRole::User,
+        vec![LlmContentBlock::Attachment {
+            source: Box::new(attachment),
+        }],
+    )]);
+    Arc::make_mut(&mut req.model_capability.attachment_acceptance)
+        .acceptors
+        .push(lash_core::provider::AttachmentAcceptor {
+            provider: "OpenAI Chat Completions".into(),
+            rules: vec![
+                lash_core::provider::AttachmentAcceptanceRule::ProviderFile {
+                    provider: "openai".into(),
+                },
+            ],
+        });
+    let error = openrouter_provider()
+        .build_chat_request_body(&req, false)
+        .unwrap_err();
+    assert_eq!(
+        error.code.as_deref(),
+        Some("attachment_source_not_encodable")
+    );
 }

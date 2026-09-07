@@ -165,6 +165,7 @@ impl LlmHttpTransport for RecordingHttpTransport {
 
 fn reasoning_capability() -> ModelCapability {
     ModelCapability {
+        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
@@ -182,6 +183,7 @@ fn reasoning_capability() -> ModelCapability {
 
 fn budget_reasoning_capability() -> ModelCapability {
     ModelCapability {
+        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
@@ -200,6 +202,7 @@ fn budget_reasoning_capability() -> ModelCapability {
 
 fn toggle_false_reasoning_capability() -> ModelCapability {
     ModelCapability {
+        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string()],
@@ -221,7 +224,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
-        model_capability: ModelCapability::default(),
+        model_capability: crate::attachment_test_capability(),
         scope: LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",

@@ -4,7 +4,7 @@ use lash_core::llm::types::{
     LlmContentBlock, LlmEventSender, LlmMessage, LlmOutputPart, LlmRequest, LlmRole, LlmToolChoice,
     LlmToolSpec, LlmUsage, ProviderRouteIdentity,
 };
-use lash_core::provider::{ModelCapability, Provider};
+use lash_core::provider::Provider;
 use lash_sansio::sync::MutexExt;
 use serde_json::json;
 
@@ -44,7 +44,7 @@ fn request() -> LlmRequest {
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
-        model_capability: ModelCapability::default(),
+        model_capability: crate::attachment_test_capability(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",

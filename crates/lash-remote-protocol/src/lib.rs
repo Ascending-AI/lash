@@ -222,3 +222,6 @@ mod versioned_decode_tests;
 
 #[cfg(test)]
 mod prompt_body_tests;
+
+#[cfg(test)]
+mod attachment_capability_tests;
