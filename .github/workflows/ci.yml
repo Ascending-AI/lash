@@ -1809,7 +1809,7 @@ jobs:
     name: Functional E2E (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
-    needs: [plan, worker-artifacts]
+    needs: plan
     # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
     # ruling; reassess after the FIG-2169 test-prune sweep.
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.functional_e2e == 'true'
@@ -1840,12 +1840,6 @@ jobs:
             recipe: workflow-graph-integration-verify
             node: true
             artifact: none
-            browser: false
-            runner: ubuntu-24.04
-          - name: process-operations
-            recipe: process-operations-e2e
-            node: false
-            artifact: process-operations
             browser: false
             runner: ubuntu-24.04
           - name: version-bump-recreation
@@ -1935,22 +1929,6 @@ jobs:
         with:
           tool: just
 
-      # Each recipe owns its dependencies and any container lifecycle, so the
-      # matrix legs run independently without cross-job coordination.
-      - name: Download worker binaries
-        if: matrix.name == 'process-operations'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/worker-download
-
-      - name: Extract worker binaries
-        if: matrix.name == 'process-operations'
-        run: |
-          mkdir -p "${RUNNER_TEMP}/worker-binaries"
-          tar -xf "${RUNNER_TEMP}/worker-download/worker-binaries.tar" -C "${RUNNER_TEMP}/worker-binaries"
-          echo "LASH_E2E_PREBUILT_BIN_DIR=${RUNNER_TEMP}/worker-binaries" >> "$GITHUB_ENV"
-
       - name: Run functional E2E
         env:
           LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
@@ -1973,6 +1951,109 @@ jobs:
         with:
           name: slack-clone-full-host-e2e-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/slack-clone-full-host-e2e
+          if-no-files-found: warn
+
+  functional-e2e-process-operations:
+    name: Functional E2E (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    needs: [plan, worker-artifacts]
+    # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
+    # ruling; reassess after the FIG-2169 test-prune sweep.
+    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.functional_e2e == 'true'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: process-operations
+            recipe: process-operations-e2e
+            node: false
+            artifact: process-operations
+            browser: false
+            runner: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+
+      - name: Restore cargo cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          shared-key: linux-debug
+          save-if: false
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      # Provides the linker the workflow-level RUSTFLAGS names. This job
+      # restores the `linux-debug` cache without routing through the sccache
+      # action, so it installs mold directly rather than taking on a
+      # compilation cache it does not otherwise use.
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
+
+      # The repo-local installer uses checksum-pinned release archives instead
+      # of the GitHub releases API; merge-queue trains fan out enough jobs that
+      # the API-listing path (extractions/setup-just) hit rate limits and
+      # ejected whole trains.
+      - name: Install just
+        uses: ./.github/actions/install-tools
+        with:
+          tool: just
+
+      # Each recipe owns its dependencies and any container lifecycle, so the
+      # matrix legs run independently without cross-job coordination.
+      - name: Download worker binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/worker-download
+
+      - name: Extract worker binaries
+        run: |
+          mkdir -p "${RUNNER_TEMP}/worker-binaries"
+          tar -xf "${RUNNER_TEMP}/worker-download/worker-binaries.tar" -C "${RUNNER_TEMP}/worker-binaries"
+          echo "LASH_E2E_PREBUILT_BIN_DIR=${RUNNER_TEMP}/worker-binaries" >> "$GITHUB_ENV"
+
+      - name: Run functional E2E
+        env:
+          LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
+          LASH_VERSION_BUMP_ARTIFACT_DIR: target/functional-e2e-artifacts/version-bump-recreation
+          LASH_SESSION_LEASE_ARTIFACT_DIR: target/functional-e2e-artifacts/session-lease-triage
+          LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
+        run: just ${{ matrix.recipe }}
+
+      - name: Upload functional E2E failure artifacts
+        if: failure() && matrix.artifact != 'none'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: functional-e2e-${{ matrix.artifact }}-attempt-${{ github.run_attempt }}
+          path: target/functional-e2e-artifacts/${{ matrix.artifact }}
           if-no-files-found: warn
 
   restate-postgres-workers:
@@ -2382,6 +2463,7 @@ jobs:
       - s3-store
       - stack-budget
       - functional-e2e
+      - functional-e2e-process-operations
       - worker-artifacts
       - restate-postgres-workers
       - restate-postgres-workers-summary

@@ -226,6 +226,24 @@ class ProducerConclusionTests(unittest.TestCase):
                     needs[consumer]["result"] = "skipped"
                     self.assertTrue(any(consumer in p for p in self.evaluate(needs, event)))
 
+    def test_process_operations_consumer_failure_cancelled_and_skipped_rejected(self):
+        for event in ("push", "workflow_dispatch"):
+            for result in ("failure", "cancelled", "skipped"):
+                with self.subTest(event=event, result=result):
+                    needs = self.event_needs(event)
+                    needs["functional-e2e-process-operations"]["result"] = result
+                    self.assertTrue(any("functional-e2e-process-operations" in p
+                                        for p in self.evaluate(needs, event)))
+
+    def test_worker_producer_failure_cascading_to_process_operations_rejected(self):
+        for event in ("push", "workflow_dispatch"):
+            needs = self.event_needs(event)
+            needs["worker-artifacts"]["result"] = "failure"
+            needs["functional-e2e-process-operations"]["result"] = "skipped"
+            problems = self.evaluate(needs, event)
+            for job in ("worker-artifacts", "functional-e2e-process-operations"):
+                self.assertTrue(any(job in p for p in problems))
+
     def test_unlabeled_pr_worker_producer_skipped_accepted(self):
         needs = self.event_needs("pull_request", False)
         self.assertEqual("skipped", needs["worker-artifacts"]["result"])
@@ -241,6 +259,22 @@ class ProducerConclusionTests(unittest.TestCase):
 class WorkflowRegistrationTests(unittest.TestCase):
     def test_every_ci_job_is_registered_or_allowlisted(self) -> None:
         self.assertEqual(set(), unregistered_ci_jobs(CI_WORKFLOW.read_text(encoding="utf-8")))
+
+    def test_only_process_operations_waits_for_worker_artifacts(self):
+        jobs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
+        other = jobs["functional-e2e"]
+        consumer = jobs["functional-e2e-process-operations"]
+        self.assertEqual("plan", other["needs"])
+        self.assertEqual(["plan", "worker-artifacts"], consumer["needs"])
+        self.assertEqual(other["if"], consumer["if"])
+        self.assertEqual(["process-operations"],
+                         [leg["name"] for leg in consumer["strategy"]["matrix"]["include"]])
+        self.assertEqual({"agent-service", "agent-workbench", "effect-group-conformance",
+                          "workflow-graph-roundtrip", "version-bump-recreation",
+                          "session-lease-triage", "slack-clone-full-host"},
+                         {leg["name"] for leg in other["strategy"]["matrix"]["include"]})
+        self.assertFalse(any("worker binaries" in step.get("name", "") for step in other["steps"]))
+        self.assertTrue(any(step.get("name") == "Download worker binaries" for step in consumer["steps"]))
 
     def test_rogue_job_is_caught(self) -> None:
         workflow_copy = CI_WORKFLOW.read_text(encoding="utf-8").rstrip()
