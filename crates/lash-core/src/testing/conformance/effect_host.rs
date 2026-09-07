@@ -113,6 +113,10 @@ impl crate::AwaitEventResolver for RecordingEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for RecordingEffectHost {
+    fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
+        self
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,

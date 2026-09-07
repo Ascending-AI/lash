@@ -549,6 +549,10 @@ impl lash::runtime::AwaitEventResolver for SeededOutsideProtocolOutcome {}
 
 #[async_trait]
 impl lash::durability::EffectHost for SeededOutsideProtocolOutcome {
+    fn await_event_resolver(&self) -> &dyn lash::runtime::AwaitEventResolver {
+        self
+    }
+
     async fn prepare_tool_intent(
         &self,
         _sink: &dyn lash::runtime::ToolIntentOutcomeSink,

@@ -1318,6 +1318,7 @@ lash::durability::DurableProcessWorkerConfig::with_trigger_store
 lash::durability::DurableProcessWorkerConfig::with_turn_phase_probe_slot
 lash::durability::DurableProcessWorkerConfig::with_worker_slot_supplier
 lash::durability::EffectHost
+lash::durability::EffectHost::await_event_resolver
 lash::durability::EffectHost::prepare_tool_intent
 lash::durability::EffectHost::record_tool_intent_outcome
 lash::durability::EffectHost::retire_effect_journal

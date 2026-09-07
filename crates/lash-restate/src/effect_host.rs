@@ -123,6 +123,10 @@ impl AwaitEventResolver for RestateEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for RestateEffectHost {
+    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+        self
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,

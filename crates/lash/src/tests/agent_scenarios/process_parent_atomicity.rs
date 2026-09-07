@@ -270,6 +270,10 @@ impl lash_core::AwaitEventResolver for ParentEndFaultHost {
 
 #[async_trait::async_trait]
 impl EffectHost for ParentEndFaultHost {
+    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+        self
+    }
+
     async fn turn_control_binding<'a>(
         &'a self,
         scoped: &'a lash_core::ScopedEffectController<'_>,

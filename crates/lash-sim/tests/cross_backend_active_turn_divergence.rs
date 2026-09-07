@@ -148,6 +148,10 @@ impl RuntimeEffectController for YieldBeforeCancelWatchController {
 }
 
 impl EffectHost for YieldBeforeCancelWatchController {
+    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+        self
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,

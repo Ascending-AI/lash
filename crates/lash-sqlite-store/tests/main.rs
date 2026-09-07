@@ -18,3 +18,5 @@ mod store_effect_group_drain_conformance;
 mod store_gc;
 #[path = "store_maintenance_outcome.rs"]
 mod store_maintenance_outcome;
+#[path = "turn_control_binding.rs"]
+mod turn_control_binding;
