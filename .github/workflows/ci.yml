@@ -1774,6 +1774,8 @@ jobs:
         with:
           cache-bin: false
           shared-key: linux-worker-release
+          cache-workspace-crates: true
+          save-if: true
 
       - name: Build worker binaries once
         if: env.RUN_WORKER_ARTIFACTS == 'true'
@@ -2095,18 +2097,16 @@ jobs:
         if: env.RUN_WORKERS_E2E == 'true'
         uses: ./.github/actions/rust-toolchain
 
-      # The e2e binaries are built on the host by the just recipe and
-      # bind-mounted into the compose services, so the build reuses the
-      # workspace debug cache that the test-doc job saves — which means using
-      # the same cache action the writer uses, not a second backend that always
-      # missed.
+      # Release binaries come from worker-artifacts. Segment 1 also builds the
+      # S3 tests in debug; retain those workspace outputs in a dedicated cache.
       - name: Restore cargo cache
         if: env.RUN_WORKERS_E2E == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
-          shared-key: linux-debug
-          save-if: false
+          shared-key: linux-worker-tests
+          cache-workspace-crates: true
+          save-if: ${{ matrix.segment == 1 }}
 
       - name: Install protoc
         if: env.RUN_WORKERS_E2E == 'true'
@@ -2115,7 +2115,7 @@ jobs:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache and installs its linker directly.
+      # restores the `linux-worker-tests` cache and installs its linker directly.
       - name: Install mold
         if: env.RUN_WORKERS_E2E == 'true'
         uses: ./.github/actions/setup-mold

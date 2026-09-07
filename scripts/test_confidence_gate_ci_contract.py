@@ -127,6 +127,21 @@ def shell_logical_commands(script: str) -> list[str]:
 
 
 class ConfidenceGateCiContractTest(unittest.TestCase):
+    def test_worker_profiles_retain_workspace_outputs_without_changing_segments(self):
+        jobs = yaml.safe_load(WORKFLOW.read_text())["jobs"]
+        producer = jobs["worker-artifacts"]
+        workers = jobs["restate-postgres-workers"]
+        for job, key in ((producer, "linux-worker-release"), (workers, "linux-worker-tests")):
+            cache = next(s["with"] for s in job["steps"] if "rust-cache@" in s.get("uses", ""))
+            self.assertEqual(key, cache["shared-key"])
+            self.assertIs(True, cache["cache-workspace-crates"])
+            self.assertNotEqual(False, cache["save-if"])
+        self.assertEqual([1, 2], workers["strategy"]["matrix"]["segment"])
+        self.assertIn("worker-artifacts", workers["needs"])
+        self.assertIn("cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins",
+                      next(s["run"] for s in producer["steps"] if s["name"] == "Build worker binaries once"))
+        self.assertIn("LASH_E2E_PREBUILT_BIN_DIR", str(workers["steps"]))
+
     def test_confidence_schedule_matrix_declared_artifacts_have_writers(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
         marker = "confidence_schedule_table=(\n"
