@@ -1,3 +1,4 @@
+use super::*;
 
 /// What a granted probe's body does when the dispatch path reaches it.
 #[derive(Clone, Copy)]

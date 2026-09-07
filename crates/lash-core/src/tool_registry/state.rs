@@ -1,3 +1,5 @@
+use super::*;
+
 pub const PLUGIN_TOOL_SOURCE_ID: &str = "plugins";
 
 /// Ephemeral identity for a live tool-provider source.
@@ -9,7 +11,7 @@ pub const PLUGIN_TOOL_SOURCE_ID: &str = "plugins";
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ToolSourceHandle {
-    id: String,
+    pub(super) id: String,
 }
 
 impl ToolSourceHandle {
@@ -38,24 +40,27 @@ fn is_default_member(member: &bool) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolStateEntry {
-    manifest: ToolManifest,
+    pub(super) manifest: ToolManifest,
     /// True when this tool was not resolvable from any registered source at
     /// export time (e.g. a detached MCP server). Orphaned entries keep their
     /// last-known manifest, are excluded from the Tool Catalog (non-members
     /// until their source returns), and rebind automatically when a source
     /// re-advertises the same tool id.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    orphaned: bool,
+    pub(super) orphaned: bool,
     /// ToolId-keyed host curation intent. Authority exclusions are transient
     /// policy and never change this bit. Hosts toggle it via
     /// `set_tool_membership`.
-    #[serde(default = "is_member_default", skip_serializing_if = "is_default_member")]
-    member: bool,
+    #[serde(
+        default = "is_member_default",
+        skip_serializing_if = "is_default_member"
+    )]
+    pub(super) member: bool,
     /// Persisted registration-lane hint. Missing values from pre-cutover
     /// snapshots decode as leaf registrations; on rebind the live source is
     /// authoritative and re-derives the effective lane.
     #[serde(default, skip_serializing_if = "is_leaf_registration")]
-    registration_kind: ToolRegistrationKind,
+    pub(super) registration_kind: ToolRegistrationKind,
 }
 
 impl ToolStateEntry {
@@ -74,7 +79,7 @@ impl ToolStateEntry {
         self.manifest.clone()
     }
 
-    fn stored_manifest(&self) -> &ToolManifest {
+    pub(super) fn stored_manifest(&self) -> &ToolManifest {
         &self.manifest
     }
 
@@ -95,8 +100,8 @@ fn is_leaf_registration(kind: &ToolRegistrationKind) -> bool {
 
 #[derive(Clone, Debug, Default)]
 pub struct ToolState {
-    generation: u64,
-    tools: Arc<BTreeMap<ToolId, ToolStateEntry>>,
+    pub(super) generation: u64,
+    pub(super) tools: Arc<BTreeMap<ToolId, ToolStateEntry>>,
 }
 
 impl ToolState {

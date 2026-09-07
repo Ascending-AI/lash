@@ -1,5 +1,7 @@
-struct EffectControllerTestProtocolFactory {
-    code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
+use super::*;
+
+pub(super) struct EffectControllerTestProtocolFactory {
+    pub(super) code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
 }
 
 impl crate::PluginFactory for EffectControllerTestProtocolFactory {
@@ -45,7 +47,7 @@ struct EffectControllerTestProtocolSession;
 #[async_trait::async_trait]
 impl ProtocolSessionPlugin for EffectControllerTestProtocolSession {}
 
-struct EffectControllerTestCodeExecutor;
+pub(super) struct EffectControllerTestCodeExecutor;
 
 #[async_trait::async_trait]
 impl crate::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor {

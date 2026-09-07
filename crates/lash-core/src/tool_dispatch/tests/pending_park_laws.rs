@@ -1,3 +1,5 @@
+use super::*;
+
 /// A declared park announcement is the runtime's to append, so a failed append
 /// has to fail the call. Parking anyway would leave a durable wait whose
 /// announcement never happened — exactly the split the declaration exists to
@@ -35,4 +37,15 @@ async fn failed_park_announcement_fails_the_call_instead_of_parking() {
         "the failure must say the declared announcement could not be appended: {}",
         failure.message
     );
+}
+
+pub(super) fn pending_prepared_call() -> crate::PreparedToolCall {
+    crate::PreparedToolCall::from_parts(
+        "pending-call",
+        "tool:pending_probe",
+        "pending_probe",
+        json!({ "value": "runtime perf benchmark ok" }),
+        None,
+        serde_json::Value::Null,
+    )
 }

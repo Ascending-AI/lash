@@ -1453,16 +1453,7 @@ fn pending_dispatch_context(
     }
 }
 
-fn pending_prepared_call() -> crate::PreparedToolCall {
-    crate::PreparedToolCall::from_parts(
-        "pending-call",
-        "tool:pending_probe",
-        "pending_probe",
-        json!({ "value": "runtime perf benchmark ok" }),
-        None,
-        serde_json::Value::Null,
-    )
-}
+use pending_park_laws::pending_prepared_call;
 
 fn tool_context_for_prepared<'run>(
     context: &ToolDispatchContext<'run>,
@@ -2506,6 +2497,9 @@ async fn empty_batch_dispatches_v0_and_v2_to_a_typed_protocol_refusal() {
     }
 }
 
-include!("tests/granted_dispatch.rs");
-include!("tests/intent_laws.rs");
-include!("tests/pending_park_laws.rs");
+#[cfg(test)]
+mod granted_dispatch;
+#[cfg(test)]
+mod intent_laws;
+#[cfg(test)]
+mod pending_park_laws;

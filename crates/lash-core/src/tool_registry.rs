@@ -13,13 +13,55 @@ use crate::{
 use self::facade_ops::ToolRegistryFacadeOps;
 use self::facade_ops::ToolStateFacadeOps;
 
-include!("tool_registry/state.rs");
-include!("tool_registry/sources.rs");
-include!("tool_registry/registry_types.rs");
-include!("tool_registry/registry_impl.rs");
-include!("tool_registry/restore_execute.rs");
-include!("tool_registry/rebind.rs");
-include!("tool_registry/tests.rs");
+mod state;
+pub(crate) use state::ToolSourceExecutor;
+pub use state::{PLUGIN_TOOL_SOURCE_ID, ToolSourceHandle, ToolState, ToolStateEntry};
+mod sources;
+use sources::{OrchestratingToolSource, ToolBinding, ToolProviderSource};
+mod registry_types;
+pub use registry_types::{ReconfigureError, ToolRegistry, ToolRestoreReport};
+pub(crate) use registry_types::{ToolRegistrationKind, ToolSourceKey};
+use registry_types::{ToolRegistryEntry, ToolRegistryState, ToolSurface, ToolSurfaceInsertError};
+mod rebind;
+mod registry_impl;
+mod restore_execute;
+#[cfg(test)]
+use rebind::insert_result_entry;
+use rebind::{
+    ReconcileMode, export_tool_state_entries, insert_advertised_entry,
+    manifest_with_compact_contract, reconcile_tool_state_entries, validate_unique_manifests,
+};
+#[cfg(test)]
+mod tests;
+
+/// Project every catalog member to a JSON record for host-owned discovery
+/// (e.g. the production `tools.search` path in agent-workbench). The projection
+/// ranges over members and emits no tiered state.
+pub(crate) fn project_tool_catalog<I>(entries: I) -> Vec<serde_json::Value>
+where
+    I: IntoIterator<Item = crate::ToolCatalogEntry>,
+{
+    entries
+        .into_iter()
+        .map(|entry| {
+            let manifest = entry.manifest;
+            let mut projected = serde_json::json!({
+                "id": manifest.id,
+                "name": manifest.name,
+                "description": manifest.description,
+                "bindings": manifest.bindings,
+                "activation": manifest.activation,
+            });
+            if let Some(contract) = manifest.compact_contract {
+                projected
+                    .as_object_mut()
+                    .expect("projected tool catalog entry is an object")
+                    .insert("contract".to_string(), serde_json::json!(contract));
+            }
+            projected
+        })
+        .collect()
+}
 
 pub(crate) mod facade_ops {
     use super::*;

@@ -2448,4 +2448,8 @@ fn unique_trace_path(prefix: &str) -> PathBuf {
     ))
 }
 
-include!("effect_driver_support.rs");
+#[cfg(test)]
+mod effect_driver_support;
+use effect_driver_support::{
+    EffectControllerTestCodeExecutor, EffectControllerTestProtocolFactory,
+};

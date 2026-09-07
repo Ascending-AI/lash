@@ -1,7 +1,14 @@
 //! The runtime's settled-session persistence contract and shared store types.
 use crate::facade_support::SessionGraphFacadeOps;
 mod attachment_manifest;
-include!("checkpoint.rs");
+mod checkpoint;
+pub use checkpoint::{
+    CHECKPOINT_COMPONENT_ENCODING_VERSION, CheckpointComponentDescriptor,
+    EXECUTION_STATE_CHECKPOINT_COMPONENT, HydratedCheckpointComponent, HydratedSessionCheckpoint,
+    PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT, SESSION_CHECKPOINT_SCHEMA_VERSION, SessionCheckpoint,
+    TOOL_STATE_CHECKPOINT_COMPONENT, ensure_checkpoint_component_encoding_version,
+    ensure_checkpoint_component_hash_agreement,
+};
 mod claim_settlement;
 mod commit_budget;
 mod commit_identity;
