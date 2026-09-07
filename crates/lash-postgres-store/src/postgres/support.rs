@@ -9,6 +9,20 @@ use crate::*;
 pub(crate) async fn postgres_transaction_epoch_ms(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<u64, StoreError> {
+    #[cfg(any(test, feature = "testing"))]
+    {
+        let injected: Option<String> = sqlx::query_scalar(
+            "SELECT NULLIF(current_setting('lash.test_lease_epoch_ms', true), '')",
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if let Some(injected) = injected {
+            return injected
+                .parse()
+                .map_err(|error| StoreError::Backend(format!("invalid test lease time: {error}")));
+        }
+    }
     let now: i64 = sqlx::query_scalar(
         "SELECT floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint",
     )

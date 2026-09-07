@@ -361,6 +361,7 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
     let runtime = Arc::new(
         storage
             .session_store(fixture::SESSION_ID)
+            .with_lease_clock_for_testing(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
             .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
     );
     let processes = Arc::new(
@@ -383,6 +384,7 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
     let session_factory = Arc::new(
         storage
             .session_store_factory()
+            .with_lease_clock_for_testing(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
             .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
     );
     fixture::FixtureHandles {
