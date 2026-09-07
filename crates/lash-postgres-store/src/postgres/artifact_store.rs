@@ -59,6 +59,11 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         &self,
         artifact: &lashlang::ModuleArtifact,
     ) -> Result<(), lashlang::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(artifact.module_ref.as_str()) {
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "invalid module reference".into(),
+            ));
+        }
         let bytes = artifact
             .to_store_bytes()
             .map_err(lashlang::ArtifactStoreError::from)?;
@@ -75,6 +80,11 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         &self,
         module_ref: &lashlang::ModuleRef,
     ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(module_ref.as_str()) {
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "invalid module reference".into(),
+            ));
+        }
         let bytes = self
             .get_namespaced_bytes(MODULE_ARTIFACT_NAMESPACE, module_ref.as_str())
             .await
@@ -93,6 +103,11 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         owner_namespace: &str,
         artifact: &lashlang::ModuleArtifact,
     ) -> Result<lashlang::TriggerManifestReplacement, lashlang::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(owner_namespace) {
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "invalid artifact namespace key".into(),
+            ));
+        }
         let mut tx = self
             .pool
             .begin()
@@ -154,6 +169,11 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         &self,
         owner_namespace: &str,
     ) -> Result<Option<lashlang::CurrentTriggerKeyManifest>, lashlang::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(owner_namespace) {
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "invalid artifact namespace key".into(),
+            ));
+        }
         self.get_namespaced_bytes(CURRENT_TRIGGER_MANIFEST_NAMESPACE, owner_namespace)
             .await
             .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?
@@ -170,6 +190,11 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         _descriptor: &str,
         bytes: &[u8],
     ) -> Result<(), lashlang::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(artifact_ref) {
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "invalid artifact namespace key".into(),
+            ));
+        }
         self.put_namespaced_bytes(RAW_ARTIFACT_NAMESPACE, artifact_ref, bytes)
             .await
             .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))
@@ -179,6 +204,11 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         &self,
         artifact_ref: &str,
     ) -> Result<Option<Vec<u8>>, lashlang::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(artifact_ref) {
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "invalid artifact namespace key".into(),
+            ));
+        }
         self.get_namespaced_bytes(RAW_ARTIFACT_NAMESPACE, artifact_ref)
             .await
             .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))
@@ -192,6 +222,11 @@ impl lash_core::ProcessExecutionEnvStore for PostgresLashlangArtifactStore {
         env_ref: &lash_core::ProcessExecutionEnvRef,
         bytes: &[u8],
     ) -> Result<(), lash_core::PluginError> {
+        if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
+            return Err(lash_core::PluginError::Invoke(
+                "invalid process execution environment reference".into(),
+            ));
+        }
         self.put_namespaced_bytes(PROCESS_ENV_NAMESPACE, env_ref.as_str(), bytes)
             .await
             .map_err(|err| lash_core::PluginError::Session(err.to_string()))
@@ -201,6 +236,11 @@ impl lash_core::ProcessExecutionEnvStore for PostgresLashlangArtifactStore {
         &self,
         env_ref: &lash_core::ProcessExecutionEnvRef,
     ) -> Result<Option<Vec<u8>>, lash_core::PluginError> {
+        if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
+            return Err(lash_core::PluginError::Invoke(
+                "invalid process execution environment reference".into(),
+            ));
+        }
         self.get_namespaced_bytes(PROCESS_ENV_NAMESPACE, env_ref.as_str())
             .await
             .map_err(|err| lash_core::PluginError::Session(err.to_string()))

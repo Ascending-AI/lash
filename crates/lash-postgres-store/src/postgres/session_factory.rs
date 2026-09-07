@@ -109,6 +109,8 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+        lash_core::store::validate_session_id(&request.session_id)
+            .map_err(|error| error.to_string())?;
         Ok(self
             .open_existing_session_store(request)
             .await?
@@ -119,6 +121,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         &self,
         session_id: &str,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+        lash_core::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
         let store = self.store_for(session_id.to_string());
         if store
             .load_session_meta()
@@ -137,6 +140,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         request: &SessionStoreCreateRequest,
         now_epoch_ms: u64,
     ) -> Result<Option<bool>, StoreError> {
+        lash_core::store::validate_session_id(&request.session_id)?;
         sqlx::query_scalar(
             "SELECT EXISTS(
                 SELECT 1
@@ -160,6 +164,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     }
 
     async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+        lash_core::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
         sqlx::query_scalar(
             "SELECT EXISTS(
                 SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
@@ -175,6 +180,8 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         &self,
         session_id: &str,
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
+        lash_core::store::validate_session_id(session_id)
+            .map_err(lash_core::MaintenanceFailure::failed_before_any_work)?;
         let mut tx = self.pool.begin().await.map_err(|err| {
             lash_core::MaintenanceFailure::failed_before_any_work(store_sqlx_error(err))
         })?;

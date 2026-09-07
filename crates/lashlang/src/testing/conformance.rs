@@ -52,6 +52,7 @@ where
         "lashlang artifact store must report its declared durability tier"
     );
     module_artifact_round_trips(make()).await;
+    hostile_artifact_namespaces(make()).await;
     raw_artifact_round_trips(make()).await;
     raw_artifact_overwrite(make()).await;
     module_and_raw_namespaces_isolate(make()).await;
@@ -285,6 +286,67 @@ async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
         .expect("current trigger manifest survives reopen");
     assert_eq!(current.module_ref, trigger_artifact.module_ref);
     assert!(current.manifest.contains("reopen-key"));
+}
+
+async fn hostile_artifact_namespaces(store: Arc<dyn LashlangArtifactStore>) {
+    for raw in ["", "nul\0reference"] {
+        let module_ref: crate::ModuleRef = serde_json::from_value(serde_json::json!(raw)).unwrap();
+        assert!(
+            store.get_module_artifact(&module_ref).await.is_err(),
+            "malformed module reference must not reach lookup"
+        );
+        let mut artifact = trigger_artifact("hostile");
+        artifact.module_ref = module_ref;
+        assert!(
+            store.put_module_artifact(&artifact).await.is_err(),
+            "malformed module reference must not reach mutation"
+        );
+        assert!(
+            store
+                .put_artifact_bytes(raw, "opaque", b"hostile")
+                .await
+                .is_err(),
+            "malformed artifact reference must not reach blob mutation"
+        );
+        assert!(
+            store.get_artifact_bytes(raw).await.is_err(),
+            "malformed artifact reference must not reach blob lookup"
+        );
+        assert!(
+            store.get_current_trigger_manifest(raw).await.is_err(),
+            "malformed owner namespace must not reach manifest lookup"
+        );
+        assert!(
+            store
+                .replace_current_trigger_manifest(raw, &trigger_artifact("hostile"))
+                .await
+                .is_err(),
+            "malformed owner namespace must not reach manifest mutation"
+        );
+    }
+    for raw in [
+        "canary",
+        "../canary",
+        "'; DROP TABLE lash_artifact_blobs; --",
+    ] {
+        store
+            .put_artifact_bytes(raw, "opaque", raw.as_bytes())
+            .await
+            .expect("opaque reference write");
+    }
+    for raw in [
+        "canary",
+        "../canary",
+        "'; DROP TABLE lash_artifact_blobs; --",
+    ] {
+        assert_eq!(
+            store
+                .get_artifact_bytes(raw)
+                .await
+                .expect("opaque reference read"),
+            Some(raw.as_bytes().to_vec())
+        );
+    }
 }
 
 #[cfg(test)]

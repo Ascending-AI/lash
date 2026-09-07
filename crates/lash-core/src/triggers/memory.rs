@@ -228,9 +228,18 @@ impl TriggerStore for InMemoryTriggerStore {
         operation_id: &str,
         command: TriggerCommand,
     ) -> Result<TriggerEffectResult, PluginError> {
-        if operation_id.trim().is_empty() {
-            return Ok(Err(TriggerOperationError::Invalid {
-                message: "trigger operation id must be non-empty".to_string(),
+        let owner_valid = match command.owner_scope() {
+            crate::TriggerOwnerScope::Session { session_id } => {
+                crate::store::namespace::is_valid_opaque_key(session_id)
+            }
+            crate::TriggerOwnerScope::Host { binding_id } => {
+                crate::store::namespace::is_valid_opaque_key(binding_id.trim())
+            }
+            crate::TriggerOwnerScope::Platform => true,
+        };
+        if !crate::store::namespace::is_valid_opaque_key(operation_id.trim()) || !owner_valid {
+            return Ok(Err(crate::TriggerOperationError::Invalid {
+                message: "invalid trigger operation or owner identifier".into(),
             }));
         }
         let mut state = self.state.lock_recover();

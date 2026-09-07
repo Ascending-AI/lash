@@ -2,6 +2,8 @@
 use crate::facade_support::SessionGraphFacadeOps;
 mod attachment_manifest;
 mod checkpoint;
+pub(crate) mod namespace;
+pub(crate) mod process_key;
 pub use checkpoint::{
     CHECKPOINT_COMPONENT_ENCODING_VERSION, CheckpointComponentDescriptor,
     EXECUTION_STATE_CHECKPOINT_COMPONENT, HydratedCheckpointComponent, HydratedSessionCheckpoint,
@@ -151,7 +153,7 @@ impl SessionBinding {
         }
     }
 
-    /// Rejects an empty session ID before store implementors admit the binding.
+    /// Rejects an empty or NUL-containing session ID before store implementors admit the binding.
     pub fn validate(&self) -> Result<(), StoreError> {
         validate_session_id(&self.session_id)
     }
@@ -167,9 +169,9 @@ pub enum SessionAdmission {
 }
 
 pub fn validate_session_id(session_id: &str) -> Result<(), StoreError> {
-    if session_id.is_empty() {
+    if !namespace::is_valid_opaque_key(session_id) {
         Err(StoreError::InvalidSessionId {
-            reason: "session ids must not be empty",
+            reason: "session ids must not be empty or contain NUL",
         })
     } else {
         Ok(())

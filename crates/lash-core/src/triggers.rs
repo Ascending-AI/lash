@@ -544,7 +544,7 @@ impl TriggerSubscriptionDraft {
 pub const INTERNAL_TRIGGER_KEY_PREFIX: &str = "lash.internal/";
 
 pub fn validate_subscription_key(key: &str, internal: bool) -> Result<(), PluginError> {
-    if key.trim().is_empty() {
+    if !crate::store::namespace::is_valid_opaque_key(key.trim()) {
         return Err(PluginError::Session(
             "trigger subscription requires subscription_key".to_string(),
         ));
@@ -578,7 +578,7 @@ impl TriggerOwnerScope {
     /// so its durable namespace cannot collapse.
     pub fn host(binding_id: impl Into<String>) -> Result<Self, PluginError> {
         let binding_id = binding_id.into();
-        if binding_id.trim().is_empty() {
+        if !crate::store::namespace::is_valid_opaque_key(binding_id.trim()) {
             return Err(PluginError::Session(
                 "trigger host owner requires a non-empty binding id".to_string(),
             ));

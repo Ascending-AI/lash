@@ -11,6 +11,7 @@ where
     let second = make();
     assert_fresh_instances(&first, &second, "trigger_store");
     drop((first, second));
+    hostile_trigger_namespaces(make()).await;
     trigger_source_key_and_subscription_identity_are_stable();
     same_owner_key_definition_is_idempotent(make()).await;
     changed_register_conflicts_and_update_is_cas(make()).await;
@@ -1755,6 +1756,44 @@ async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTrigg
             .unwrap()
             .len(),
         1
+    );
+}
+
+async fn hostile_trigger_namespaces(store: Arc<dyn crate::TriggerStore>) {
+    for raw in ["", " ", "nul\0operation"] {
+        let command =
+            register_command("canary", sample_draft("canary", "key", "source", "process"));
+        assert!(
+            matches!(
+                store
+                    .execute_command(raw, command)
+                    .await
+                    .expect("domain refusal"),
+                Err(crate::TriggerOperationError::Invalid { .. })
+            ),
+            "malformed operation id must be rejected before receipt lookup"
+        );
+    }
+    for raw in ["", "nul\0owner"] {
+        let command = register_command(raw, sample_draft("canary", "key", "source", "process"));
+        assert!(
+            matches!(
+                store
+                    .execute_command("owner-probe", command)
+                    .await
+                    .expect("domain refusal"),
+                Err(crate::TriggerOperationError::Invalid { .. })
+            ),
+            "malformed owner id must be rejected before subscription lookup"
+        );
+    }
+    assert!(
+        store
+            .list_subscriptions(crate::TriggerSubscriptionFilter::default())
+            .await
+            .expect("list after refusals")
+            .is_empty(),
+        "hostile identifiers must not mutate subscription namespaces"
     );
 }
 

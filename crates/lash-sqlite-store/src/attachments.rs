@@ -104,6 +104,11 @@ impl lashlang::LashlangArtifactStore for Store {
         &self,
         artifact: &lashlang::ModuleArtifact,
     ) -> Result<(), lashlang::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(artifact.module_ref.as_str()) {
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "invalid module reference".into(),
+            ));
+        }
         let bytes = artifact
             .to_store_bytes()
             .map_err(|err| lashlang::ArtifactStoreError::Encode(err.to_string()))?;
@@ -126,6 +131,11 @@ impl lashlang::LashlangArtifactStore for Store {
         &self,
         module_ref: &lashlang::ModuleRef,
     ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(module_ref.as_str()) {
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "invalid module reference".into(),
+            ));
+        }
         if let Some(artifact) = self.artifact_cache.lock_recover().get(module_ref).cloned() {
             return Ok(Some(artifact));
         }
@@ -157,6 +167,11 @@ impl lashlang::LashlangArtifactStore for Store {
         owner_namespace: &str,
         artifact: &lashlang::ModuleArtifact,
     ) -> Result<lashlang::TriggerManifestReplacement, lashlang::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(owner_namespace) {
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "invalid artifact namespace key".into(),
+            ));
+        }
         let current = lashlang::CurrentTriggerKeyManifest {
             module_ref: artifact.module_ref.clone(),
             manifest: artifact.trigger_key_manifest.clone(),
@@ -233,6 +248,11 @@ impl lashlang::LashlangArtifactStore for Store {
         &self,
         owner_namespace: &str,
     ) -> Result<Option<lashlang::CurrentTriggerKeyManifest>, lashlang::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(owner_namespace) {
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "invalid artifact namespace key".into(),
+            ));
+        }
         let bytes = self
             .get_artifact_ref_blob(
                 CURRENT_TRIGGER_MANIFEST_NAMESPACE,
@@ -255,6 +275,11 @@ impl lashlang::LashlangArtifactStore for Store {
         descriptor: &str,
         bytes: &[u8],
     ) -> Result<(), lashlang::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(artifact_ref) {
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "invalid artifact namespace key".into(),
+            ));
+        }
         let artifact_ref = artifact_ref.to_string();
         let descriptor = match descriptor {
             "process_execution_env" => BlobArtifactDescriptor::process_execution_env(),
@@ -274,6 +299,11 @@ impl lashlang::LashlangArtifactStore for Store {
         &self,
         artifact_ref: &str,
     ) -> Result<Option<Vec<u8>>, lashlang::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(artifact_ref) {
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "invalid artifact namespace key".into(),
+            ));
+        }
         let artifact_ref = artifact_ref.to_string();
         self.get_artifact_ref_blob(
             RAW_ARTIFACT_NAMESPACE,
@@ -292,6 +322,11 @@ impl lash_core::ProcessExecutionEnvStore for Store {
         env_ref: &lash_core::ProcessExecutionEnvRef,
         bytes: &[u8],
     ) -> Result<(), lash_core::PluginError> {
+        if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
+            return Err(lash_core::PluginError::Invoke(
+                "invalid process execution environment reference".into(),
+            ));
+        }
         let artifact_ref = env_ref.as_str().to_string();
         self.put_artifact_ref_blob(
             PROCESS_ENV_NAMESPACE,
@@ -307,6 +342,11 @@ impl lash_core::ProcessExecutionEnvStore for Store {
         &self,
         env_ref: &lash_core::ProcessExecutionEnvRef,
     ) -> Result<Option<Vec<u8>>, lash_core::PluginError> {
+        if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
+            return Err(lash_core::PluginError::Invoke(
+                "invalid process execution environment reference".into(),
+            ));
+        }
         let artifact_ref = env_ref.as_str().to_string();
         self.get_artifact_ref_blob(
             PROCESS_ENV_NAMESPACE,

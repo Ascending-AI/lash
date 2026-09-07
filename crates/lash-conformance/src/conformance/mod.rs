@@ -35,6 +35,7 @@ mod effect_host;
 mod fence_integrity;
 mod graph_integrity;
 mod helpers;
+mod hostile_input;
 mod lineage;
 mod live_replay;
 mod observer_intent;

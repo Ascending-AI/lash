@@ -30,6 +30,9 @@
 //! [`PostgresStorage::schema_advisory_lock_key`] publishes the key so a host's
 //! migrations can participate.
 
+mod namespace;
+mod process_key;
+
 use std::sync::Arc;
 use std::time::Duration;
 
