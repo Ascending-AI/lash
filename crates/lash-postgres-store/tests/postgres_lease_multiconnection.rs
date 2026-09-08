@@ -33,12 +33,15 @@
 //! The two independent "hosts" whose local wall clocks are never consulted are
 //! themselves the skew evidence: only database time decides.
 
+use lash_core::{
+    ProcessLeases as _, ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _,
+};
 use std::time::{Duration, Instant};
 
 use lash_core::TestProcessRegistryWriteExt;
 use lash_core::{
     LeaseOwnerIdentity, ProcessAwaitOutput, ProcessInput, ProcessLeaseClaimOutcome,
-    ProcessProvenance, ProcessRegistration, ProcessRegistry, ProcessStarted, RecoveryContract,
+    ProcessProvenance, ProcessRegistration, ProcessStarted, RecoveryContract,
 };
 use lash_postgres_store::PostgresStorage;
 

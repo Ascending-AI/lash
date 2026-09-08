@@ -1527,9 +1527,13 @@ mod tests {
             .expect("emit session trigger");
         let process_id = &report.deliveries[0].process_id;
         assert!(
-            crate::ProcessRegistry::is_observer(registry.as_ref(), "session-owner", process_id)
-                .await
-                .expect("read initial observer"),
+            crate::ProcessObserverRegistry::is_observer(
+                registry.as_ref(),
+                "session-owner",
+                process_id
+            )
+            .await
+            .expect("read initial observer"),
             "the session that explicitly registered the trigger must observe its process"
         );
     }

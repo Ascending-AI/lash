@@ -4,6 +4,10 @@
 //! providing a configurable mock implementation plus a couple of small
 //! builders for common policy / turn fixtures.
 
+use crate::{
+    ProcessEventLog as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
+    ProcessRegistrar as _,
+};
 use lash_sansio::sync::MutexExt;
 // Each submodule documents itself in its own file. Adding an outer doc comment
 // here as well would merge two fragments written in different scopes, and
@@ -58,9 +62,8 @@ use crate::plugin::{PluginError, SessionCreateRequest, SessionHandle, SessionSna
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::session_model::{ConversationRecord, SessionHistoryRecord};
 use crate::{
-    AssembledTurn, AssistantOutput, ModelSpec, OutputState, ProcessRegistry, ProviderOptions,
-    RuntimeSessionState, SessionPolicy, TokenUsage, TurnExecutionMetrics, TurnFinish, TurnOutcome,
-    TurnStop,
+    AssembledTurn, AssistantOutput, ModelSpec, OutputState, ProviderOptions, RuntimeSessionState,
+    SessionPolicy, TokenUsage, TurnExecutionMetrics, TurnFinish, TurnOutcome, TurnStop,
 };
 
 /// Generous claim bounds for store/runtime conformance tests whose subject is

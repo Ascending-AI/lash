@@ -622,11 +622,11 @@ impl WakeDeliveryDriver {
 
 #[cfg(test)]
 mod tests {
+    use crate::{ProcessLifecycle as _, ProcessRegistrar as _, ProcessRetention as _};
     use std::sync::Arc;
     use std::time::Duration;
 
     use super::{WakeDeliveryDriver, WorkCadencePolicy, retry_delay_ms};
-    use crate::ProcessRegistry;
 
     fn external_registration(process_id: &str) -> crate::ProcessRegistration {
         crate::ProcessRegistration::new(

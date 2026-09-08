@@ -1022,6 +1022,7 @@ fn is_reserved_global_name(key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use lash_core::{ProcessObserverRegistry as _, ProcessQuery as _};
     mod step_trace;
     use super::*;
     use std::sync::Mutex;
@@ -1658,7 +1659,6 @@ mod tests {
         ProjectionRef, ProjectionRegistry, flow_record_to_json_value, flow_record_to_tool_args,
         flow_to_json_value, projected_index,
     };
-    use lash_core::ProcessRegistry;
     use lash_lashlang_runtime::ToolDefinitionBindingExt;
     use lash_rlm_types::PROJECTED_JSON_TAG;
     use lash_sansio::sync::MutexExt;
@@ -2893,7 +2893,7 @@ mod tests {
             options: lash_core::ProcessStartOptions,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessRecord, lash_core::PluginError> {
-            lash_core::ProcessRegistry::register_process_with_observers(
+            lash_core::ProcessRegistrar::register_process_with_observers(
                 self.registry.as_ref(),
                 registration,
                 &options.initial_observers,
@@ -2978,7 +2978,7 @@ mod tests {
                 )
                 .await?;
             let event = Box::new(event);
-            let ordinal = lash_core::ProcessRegistry::count_events_through(
+            let ordinal = lash_core::ProcessEventLog::count_events_through(
                 self.registry.as_ref(),
                 process_id,
                 event.event_type.as_str(),

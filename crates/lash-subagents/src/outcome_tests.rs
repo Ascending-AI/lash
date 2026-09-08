@@ -1,5 +1,6 @@
 use super::*;
-use lash_core::{ProcessAwaitOutput, ProcessRegistry, TestLocalProcessRegistry};
+use lash_core::{ProcessAwaitOutput, TestLocalProcessRegistry};
+use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _, ProcessRetention as _};
 use serde_json::json;
 
 async fn registry_result(output: ProcessAwaitOutput, prune: bool) -> Result<Value, String> {

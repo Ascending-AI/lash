@@ -1,4 +1,5 @@
 use super::*;
+use crate::ProcessLeases as _;
 
 fn assert_recovery_lease_lost_event(
     capture: &EventCapture,

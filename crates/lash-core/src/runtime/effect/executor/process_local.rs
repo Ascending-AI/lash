@@ -318,6 +318,7 @@ mod terminal_wait_tests {
 mod tests {
     use super::*;
     use crate::TestProcessRegistryWriteExt as _;
+    use crate::{ProcessEventLog as _, ProcessRegistrar as _};
 
     #[tokio::test]
     async fn signal_prefers_declared_wait_ordinal_when_event_count_diverges() {

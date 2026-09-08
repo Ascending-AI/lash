@@ -21,11 +21,12 @@ use lash_core::store::ConformanceSessionStoreFactory;
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
     ProcessCompletionAuthority, ProcessExecutionEnvStore, ProcessIdentity, ProcessInput,
-    ProcessListFilter, ProcessProvenance, ProcessRegistration, ProcessRegistry,
-    ProcessStatusFilter, RecoveryContract, Resolution, ResolveOutcome, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
-    RuntimePersistence, SessionCommitStore, SessionStoreFactory, TriggerStore,
+    ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessQuery as _,
+    ProcessRegistrar as _, ProcessRegistration, ProcessRegistry, ProcessStatusFilter,
+    RecoveryContract, Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimePersistence,
+    SessionCommitStore, SessionStoreFactory, TriggerStore,
 };
 use lash_sqlite_store::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteProcessRegistry,
@@ -2474,45 +2475,11 @@ async fn sqlite_effect_controller_satisfies_lease_fencing_conformance() {
     .await;
 }
 
-#[tokio::test]
-async fn sqlite_sleep_replay_returns_after_recorded_due_time() {
-    let (_controller_dir, controller) =
-        open_ephemeral_effect_controller(durable_turn_scope("session", "turn")).await;
-    let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::for_turn("session", "turn", 1, 0),
-            "sleep",
-            RuntimeEffectKind::Sleep,
-            "sleep-key",
-        ),
-        RuntimeEffectCommand::Sleep { duration_ms: 120 },
-    );
-
-    let started = std::time::Instant::now();
-    let first = controller
-        .execute_effect(envelope.clone(), RuntimeEffectLocalExecutor::unavailable())
-        .await
-        .expect("first sleep");
-    assert!(matches!(first, RuntimeEffectOutcome::Sleep));
-    assert!(
-        started.elapsed() >= std::time::Duration::from_millis(100),
-        "first sleep must wait until the recorded due_at"
-    );
-
-    controller.start_replay();
-    let replayed = tokio::time::timeout(
-        std::time::Duration::from_millis(50),
-        controller.execute_effect(envelope, failing_executor()),
-    )
-    .await
-    .expect("replay must not sleep the full original duration")
-    .expect("sleep replay");
-    assert!(matches!(replayed, RuntimeEffectOutcome::Sleep));
-}
-
 #[path = "conformance/attachment_owner_kind.rs"]
 mod attachment_owner_kind;
 #[path = "conformance/process_retention.rs"]
 mod process_retention;
+#[path = "conformance/sleep_replay.rs"]
+mod sleep_replay;
 
 include!("conformance/append_identity.rs");

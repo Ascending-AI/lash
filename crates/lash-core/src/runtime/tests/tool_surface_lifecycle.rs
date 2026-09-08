@@ -1681,7 +1681,7 @@ async fn started_row_identity(
     registry: &Arc<crate::TestLocalProcessRegistry>,
     process_id: &str,
 ) -> crate::ProcessIdentity {
-    crate::ProcessRegistry::get_process(registry.as_ref(), process_id)
+    crate::ProcessQuery::get_process(registry.as_ref(), process_id)
         .await
         .expect("read started row")
         .expect("started row exists")
@@ -1691,7 +1691,7 @@ async fn started_row_identity(
 async fn no_rows_registered(registry: &Arc<crate::TestLocalProcessRegistry>, process_ids: &[&str]) {
     for process_id in process_ids {
         assert!(
-            crate::ProcessRegistry::get_process(registry.as_ref(), process_id)
+            crate::ProcessQuery::get_process(registry.as_ref(), process_id)
                 .await
                 .expect("read refused row")
                 .is_none(),

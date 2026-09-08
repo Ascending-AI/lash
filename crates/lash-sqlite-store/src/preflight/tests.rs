@@ -266,6 +266,7 @@ mod walk {
         DurablePayload, DurableScan, DurableSurface, ScanCoverage, StorePreflight,
         store::EXECUTION_STATE_CHECKPOINT_COMPONENT,
     };
+    use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _};
 
     use super::super::SqliteStorePreflight;
     use crate::{SqliteProcessRegistry, Store};
@@ -305,7 +306,6 @@ mod walk {
     /// process that has already reached a terminal outcome.
     async fn park_segment(registry: &SqliteProcessRegistry, process_id: &str) {
         use lash_core::ProcessContinuationStore;
-        use lash_core::ProcessRegistry;
         registry
             .register_process(registration(process_id))
             .await
@@ -317,7 +317,6 @@ mod walk {
     }
 
     async fn complete(registry: &SqliteProcessRegistry, process_id: &str) {
-        use lash_core::ProcessRegistry;
         registry
             .complete_process(
                 process_id,

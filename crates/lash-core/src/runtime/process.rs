@@ -10,6 +10,8 @@ mod observer_intent;
 mod op_scope;
 mod references;
 mod registry;
+mod registry_concerns;
+mod registry_delegate;
 pub mod registry_transitions;
 mod service;
 #[cfg(any(test, feature = "testing"))]
@@ -65,8 +67,10 @@ pub use registry::reconcile_pruned_trigger_deliveries_interleaved;
 #[cfg(any(test, feature = "testing"))]
 pub use registry::{ConformanceProcessRegistry, ProcessRegistryTestSupport};
 pub use registry::{
-    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ProcessContinuationStore, ProcessParentEndPlan,
-    ProcessPruneReport, ProcessRegistry, ProcessWorklistCursor, ProcessWorklistPage,
+    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ProcessClockRebind, ProcessContinuationStore, ProcessEventLog,
+    ProcessLeases, ProcessLifecycle, ProcessObserverRegistry, ProcessParentEndPlan,
+    ProcessPruneReport, ProcessQuery, ProcessRegistrar, ProcessRegistry, ProcessRetention,
+    ProcessToolIntents, ProcessWakeOutbox, ProcessWorklistCursor, ProcessWorklistPage,
     ProjectionWatermark, WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
     WakeDeliveryState, WakeDiscardReason, reconcile_pruned_trigger_deliveries,

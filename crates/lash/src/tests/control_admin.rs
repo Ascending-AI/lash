@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::{ProcessEventLog as _, ProcessObserverRegistry as _};
 
 struct NoopProcessWork;
 
@@ -908,8 +909,6 @@ async fn session_control_manages_child_session_lifecycle() -> Result<()> {
 
 #[tokio::test]
 async fn managed_create_publishes_host_observers_before_returning() -> Result<()> {
-    use lash_core::ProcessRegistry as _;
-
     let sqlite_dir = tempfile::tempdir().expect("create managed-create SQLite directory");
     let cases: Vec<(&str, Option<Arc<dyn lash_core::SessionStoreFactory>>)> = vec![
         (

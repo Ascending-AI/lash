@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::{ProcessEventLog as _, ProcessRegistrar as _};
 
 /// The facade-level duplicate law on the real key-addressed journal: the first
 /// submission executes locally, the second returns the byte-equivalent recorded

@@ -1,4 +1,5 @@
 use super::*;
+use crate::{ProcessEventLog as _, ProcessLifecycle as _};
 
 fn recorded_event_intents(event_types: &[&str]) -> crate::ToolIntents {
     crate::ToolIntents::v1(

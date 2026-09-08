@@ -622,7 +622,7 @@ fn store_hardening_usage(turn_index: usize) -> lash_core::TokenLedgerEntry {
 #[cfg(test)]
 mod store_hardening_tests {
     use super::*;
-    use lash_core::ProcessRegistry;
+    use lash_core::{ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _};
 
     #[tokio::test]
     async fn process_prune_is_scoped_to_the_hardening_batch() {

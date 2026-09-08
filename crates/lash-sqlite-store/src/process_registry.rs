@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessQuery as _;
 use lash_core::facade_support;
 #[path = "process_registry/continuation_store.rs"]
 mod continuation_store;
@@ -81,23 +82,185 @@ const LIST_PROCESSES_RECENT_RETIRED_SQL: &str =
      ) ORDER BY process_id ASC";
 
 #[async_trait::async_trait]
-impl ProcessRegistry for SqliteProcessRegistry {
-    fn wake_delivery_config(&self) -> lash_core::WakeDeliveryConfig {
-        self.wake_delivery_config
-    }
-
-    fn with_runtime_clock(
+impl lash_core::ProcessQuery for SqliteProcessRegistry {
+    async fn get_process(
         &self,
-        clock: Arc<dyn lash_core::Clock>,
-    ) -> Option<Arc<dyn ProcessRegistry>> {
-        Some(Arc::new(Self {
-            conn: self.conn.clone(),
-            clock,
-            process_session_store_root: self.process_session_store_root.clone(),
-            wake_delivery_config: self.wake_delivery_config,
-        }))
+        process_id: &str,
+    ) -> Result<Option<ProcessRecord>, lash_core::PluginError> {
+        let process_id = process_id.to_string();
+        self.conn
+            .call(move |conn| {
+                Ok((|| {
+                    if let Some(record) = Self::load_process_conn(conn, &process_id)? {
+                        return Ok(Some(record));
+                    }
+                    let tombstone: Option<(String, i64)> = conn
+                        .query_row(
+                            "SELECT terminal_label, pruned_at_ms
+                             FROM process_tombstones WHERE process_id = ?1
+                             ORDER BY incarnation DESC LIMIT 1",
+                            params![process_id],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )
+                        .optional()
+                        .map_err(process_sqlite_error)?;
+                    if let Some((terminal_label, pruned_at_ms)) = tombstone {
+                        return Err(registry_transitions::process_no_longer_retained(
+                            registry_transitions::ProcessTombstoneStamp {
+                                terminal_label,
+                                pruned_at_ms: plugin_u64_from_sql(
+                                    "ProcessTombstone",
+                                    "pruned_at_ms",
+                                    pruned_at_ms,
+                                )?,
+                            },
+                        ));
+                    }
+                    Ok(None)
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
     }
 
+    async fn get_process_ref(
+        &self,
+        process_ref: &ProcessRef,
+    ) -> Result<Option<ProcessRecord>, lash_core::PluginError> {
+        let process_ref = process_ref.clone();
+        self.conn
+            .call(move |conn| Ok(Self::require_process_ref_conn(conn, &process_ref).map(Some)))
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn list_processes(
+        &self,
+        filter: &lash_core::ProcessListFilter,
+    ) -> Result<Vec<ProcessRecord>, lash_core::PluginError> {
+        if filter
+            .created_at_start_ms
+            .is_some_and(|value| value > i64::MAX as u64)
+        {
+            return Ok(Vec::new());
+        }
+        let filter = filter.clone();
+        let definition = filter
+            .definition
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(process_decode_error)?;
+        let status = filter
+            .status
+            .labels()
+            .map(|labels| serde_json::to_string(&labels))
+            .transpose()
+            .map_err(process_decode_error)?;
+        self.conn
+            .call(move |conn| {
+                Ok((|| {
+                    let sql = if filter.retired_since_ms.is_some() {
+                        LIST_PROCESSES_RECENT_RETIRED_SQL
+                    } else {
+                        LIST_PROCESSES_SQL
+                    };
+                    let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
+                    let created_at_start_ms = filter.created_at_start_ms.map(crate::clamp_epoch_ms);
+                    let created_at_end_ms = filter.created_at_end_ms.map(crate::clamp_epoch_ms);
+                    let retired_since_ms = filter.retired_since_ms.map(crate::clamp_epoch_ms);
+                    let mut values: Vec<&dyn rusqlite::ToSql> = vec![
+                        &status,
+                        &filter.originator_id,
+                        &filter.identity_kind,
+                        &filter.identity_label,
+                        &definition,
+                        &filter.caused_by_occurrence_id,
+                        &filter.caused_by_subscription_id,
+                        &created_at_start_ms,
+                        &created_at_end_ms,
+                    ];
+                    if retired_since_ms.is_some() {
+                        values.push(&retired_since_ms);
+                    }
+                    let rows = stmt
+                        .query_map(rusqlite::params_from_iter(values), |row| {
+                            row.get::<_, String>(0)
+                        })
+                        .map_err(process_sqlite_error)?;
+                    let mut records = Vec::new();
+                    for row in rows {
+                        let record: ProcessRecord =
+                            serde_json::from_str(&row.map_err(process_sqlite_error)?)
+                                .map_err(process_decode_error)?;
+                        // SQLite's JSON functions deliberately coerce some JSON
+                        // representations. The typed/canonical SQL predicate is
+                        // the pushdown; the Rust predicate is the exact
+                        // `serde_json::Value` equality fence.
+                        if filter.matches_record(&record) {
+                            records.push(record);
+                        }
+                    }
+                    Ok(records)
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn processes_changed_since(
+        &self,
+        cursor: ProcessChangeCursor,
+        limit: usize,
+    ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), lash_core::PluginError> {
+        self.conn
+            .call(move |conn| {
+                Ok(
+                    crate::process_registry_change::processes_changed_since_conn(
+                        conn, cursor, limit,
+                    ),
+                )
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn list_non_terminal_page(
+        &self,
+        limit: std::num::NonZeroUsize,
+        continuation: Option<lash_core::ProcessWorklistCursor>,
+    ) -> Result<lash_core::ProcessWorklistPage, lash_core::PluginError> {
+        worklist::list_non_terminal_page(self, limit, continuation).await
+    }
+
+    async fn filter_unregistered_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<String>, lash_core::PluginError> {
+        retention::filter_unregistered_process_ids(self, process_ids).await
+    }
+
+    async fn filter_tombstoned_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<String>, lash_core::PluginError> {
+        retention::filter_tombstoned_process_ids(self, process_ids).await
+    }
+
+    async fn live_reference_summary(
+        &self,
+    ) -> Result<Vec<ProcessLiveReferenceView>, lash_core::PluginError> {
+        let records = worklist::collect_non_terminal_records(self).await?;
+        Ok(ProcessLiveReferenceView::from_records(records.iter()))
+    }
+
+    async fn count_non_terminal_processes(&self) -> Result<usize, lash_core::PluginError> {
+        worklist::count_non_terminal_processes(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
     async fn register_process_with_observers(
         &self,
         registration: ProcessRegistration,
@@ -224,7 +387,10 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .map_err(process_sqlite_error)??;
         Ok(record)
     }
+}
 
+#[async_trait::async_trait]
+impl lash_core::ProcessObserverRegistry for SqliteProcessRegistry {
     async fn add_observer(
         &self,
         session_id: &str,
@@ -482,7 +648,10 @@ impl ProcessRegistry for SqliteProcessRegistry {
             cleared_subscription_count,
         })
     }
+}
 
+#[async_trait::async_trait]
+impl lash_core::ProcessEventLog for SqliteProcessRegistry {
     async fn append_event(
         &self,
         process_id: &str,
@@ -720,7 +889,10 @@ impl ProcessRegistry for SqliteProcessRegistry {
     ) -> Result<Vec<ProcessEvent>, lash_core::PluginError> {
         support::recent_events(self, process_id, limit).await
     }
+}
 
+#[async_trait::async_trait]
+impl lash_core::ProcessLifecycle for SqliteProcessRegistry {
     async fn complete_process(
         &self,
         process_id: &str,
@@ -806,36 +978,6 @@ impl ProcessRegistry for SqliteProcessRegistry {
         process_id: &str,
     ) -> Result<(), lash_core::PluginError> {
         parent_end::complete(self, process_id).await
-    }
-
-    async fn admit_tool_intent_submission(
-        &self,
-        submission: lash_core::ToolIntentSubmissionRecord,
-    ) -> Result<lash_core::ToolIntentSubmissionAdmission, lash_core::PluginError> {
-        tool_intent_submission::admit(self, submission).await
-    }
-
-    async fn complete_tool_intent_submission(
-        &self,
-        replay_key: &str,
-        outcome: lash_core::ToolIntentExecutionOutcome,
-    ) -> Result<lash_core::ToolIntentSubmissionRecord, lash_core::PluginError> {
-        tool_intent_submission::complete(self, replay_key, outcome).await
-    }
-
-    async fn pending_tool_intent_parent_end(
-        &self,
-        session_id: &str,
-        execution_scope_id: &str,
-    ) -> Result<Vec<lash_core::ToolIntentSubmissionRecord>, lash_core::PluginError> {
-        tool_intent_submission::pending_parent_end(self, session_id, execution_scope_id).await
-    }
-
-    async fn complete_tool_intent_parent_end(
-        &self,
-        replay_key: &str,
-    ) -> Result<(), lash_core::PluginError> {
-        tool_intent_submission::complete_parent_end(self, replay_key).await
     }
 
     async fn record_first_started_with_authority(
@@ -1053,174 +1195,45 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .await
             .map_err(process_sqlite_error)?
     }
+}
 
-    async fn get_process(
+#[async_trait::async_trait]
+impl lash_core::ProcessToolIntents for SqliteProcessRegistry {
+    async fn admit_tool_intent_submission(
         &self,
-        process_id: &str,
-    ) -> Result<Option<ProcessRecord>, lash_core::PluginError> {
-        let process_id = process_id.to_string();
-        self.conn
-            .call(move |conn| {
-                Ok((|| {
-                    if let Some(record) = Self::load_process_conn(conn, &process_id)? {
-                        return Ok(Some(record));
-                    }
-                    let tombstone: Option<(String, i64)> = conn
-                        .query_row(
-                            "SELECT terminal_label, pruned_at_ms
-                             FROM process_tombstones WHERE process_id = ?1
-                             ORDER BY incarnation DESC LIMIT 1",
-                            params![process_id],
-                            |row| Ok((row.get(0)?, row.get(1)?)),
-                        )
-                        .optional()
-                        .map_err(process_sqlite_error)?;
-                    if let Some((terminal_label, pruned_at_ms)) = tombstone {
-                        return Err(registry_transitions::process_no_longer_retained(
-                            registry_transitions::ProcessTombstoneStamp {
-                                terminal_label,
-                                pruned_at_ms: plugin_u64_from_sql(
-                                    "ProcessTombstone",
-                                    "pruned_at_ms",
-                                    pruned_at_ms,
-                                )?,
-                            },
-                        ));
-                    }
-                    Ok(None)
-                })())
-            })
-            .await
-            .map_err(process_sqlite_error)?
+        submission: lash_core::ToolIntentSubmissionRecord,
+    ) -> Result<lash_core::ToolIntentSubmissionAdmission, lash_core::PluginError> {
+        tool_intent_submission::admit(self, submission).await
     }
 
-    async fn get_process_ref(
+    async fn complete_tool_intent_submission(
         &self,
-        process_ref: &ProcessRef,
-    ) -> Result<Option<ProcessRecord>, lash_core::PluginError> {
-        let process_ref = process_ref.clone();
-        self.conn
-            .call(move |conn| Ok(Self::require_process_ref_conn(conn, &process_ref).map(Some)))
-            .await
-            .map_err(process_sqlite_error)?
+        replay_key: &str,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<lash_core::ToolIntentSubmissionRecord, lash_core::PluginError> {
+        tool_intent_submission::complete(self, replay_key, outcome).await
     }
 
-    async fn list_processes(
+    async fn pending_tool_intent_parent_end(
         &self,
-        filter: &lash_core::ProcessListFilter,
-    ) -> Result<Vec<ProcessRecord>, lash_core::PluginError> {
-        if filter
-            .created_at_start_ms
-            .is_some_and(|value| value > i64::MAX as u64)
-        {
-            return Ok(Vec::new());
-        }
-        let filter = filter.clone();
-        let definition = filter
-            .definition
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(process_decode_error)?;
-        let status = filter
-            .status
-            .labels()
-            .map(|labels| serde_json::to_string(&labels))
-            .transpose()
-            .map_err(process_decode_error)?;
-        self.conn
-            .call(move |conn| {
-                Ok((|| {
-                    let sql = if filter.retired_since_ms.is_some() {
-                        LIST_PROCESSES_RECENT_RETIRED_SQL
-                    } else {
-                        LIST_PROCESSES_SQL
-                    };
-                    let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
-                    let created_at_start_ms = filter.created_at_start_ms.map(crate::clamp_epoch_ms);
-                    let created_at_end_ms = filter.created_at_end_ms.map(crate::clamp_epoch_ms);
-                    let retired_since_ms = filter.retired_since_ms.map(crate::clamp_epoch_ms);
-                    let mut values: Vec<&dyn rusqlite::ToSql> = vec![
-                        &status,
-                        &filter.originator_id,
-                        &filter.identity_kind,
-                        &filter.identity_label,
-                        &definition,
-                        &filter.caused_by_occurrence_id,
-                        &filter.caused_by_subscription_id,
-                        &created_at_start_ms,
-                        &created_at_end_ms,
-                    ];
-                    if retired_since_ms.is_some() {
-                        values.push(&retired_since_ms);
-                    }
-                    let rows = stmt
-                        .query_map(rusqlite::params_from_iter(values), |row| {
-                            row.get::<_, String>(0)
-                        })
-                        .map_err(process_sqlite_error)?;
-                    let mut records = Vec::new();
-                    for row in rows {
-                        let record: ProcessRecord =
-                            serde_json::from_str(&row.map_err(process_sqlite_error)?)
-                                .map_err(process_decode_error)?;
-                        // SQLite's JSON functions deliberately coerce some JSON
-                        // representations. The typed/canonical SQL predicate is
-                        // the pushdown; the Rust predicate is the exact
-                        // `serde_json::Value` equality fence.
-                        if filter.matches_record(&record) {
-                            records.push(record);
-                        }
-                    }
-                    Ok(records)
-                })())
-            })
-            .await
-            .map_err(process_sqlite_error)?
+        session_id: &str,
+        execution_scope_id: &str,
+    ) -> Result<Vec<lash_core::ToolIntentSubmissionRecord>, lash_core::PluginError> {
+        tool_intent_submission::pending_parent_end(self, session_id, execution_scope_id).await
     }
 
-    async fn processes_changed_since(
+    async fn complete_tool_intent_parent_end(
         &self,
-        cursor: ProcessChangeCursor,
-        limit: usize,
-    ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), lash_core::PluginError> {
-        self.conn
-            .call(move |conn| {
-                Ok(
-                    crate::process_registry_change::processes_changed_since_conn(
-                        conn, cursor, limit,
-                    ),
-                )
-            })
-            .await
-            .map_err(process_sqlite_error)?
+        replay_key: &str,
+    ) -> Result<(), lash_core::PluginError> {
+        tool_intent_submission::complete_parent_end(self, replay_key).await
     }
+}
 
-    async fn compact_process_tombstones(
-        &self,
-        cutoff_epoch_ms: u64,
-        watermark: lash_core::ProjectionWatermark,
-        trigger_store: Option<&dyn lash_core::TriggerStore>,
-    ) -> Result<usize, lash_core::PluginError> {
-        let max_change_seq = crate::process_registry_change::max_change_sequence(watermark);
-        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        let outstanding_trigger_delivery_process_ids = match trigger_store {
-            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
-            None => Vec::new(),
-        };
-        self.conn
-            .write_flow(move |tx| {
-                Ok(tx_outcome(
-                    crate::process_registry_change::compact_process_tombstones_conn(
-                        tx,
-                        cutoff_epoch_ms,
-                        max_change_seq,
-                        &outstanding_trigger_delivery_process_ids,
-                    ),
-                ))
-            })
-            .await
-            .map_err(process_sqlite_error)?
+#[async_trait::async_trait]
+impl lash_core::ProcessWakeOutbox for SqliteProcessRegistry {
+    fn wake_delivery_config(&self) -> lash_core::WakeDeliveryConfig {
+        self.wake_delivery_config
     }
 
     async fn claim_pending_wake_deliveries(
@@ -1441,86 +1454,34 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .await
             .map_err(process_sqlite_error)?
     }
-
-    async fn list_non_terminal_page(
+}
+#[async_trait::async_trait]
+impl lash_core::ProcessRetention for SqliteProcessRegistry {
+    async fn compact_process_tombstones(
         &self,
-        limit: std::num::NonZeroUsize,
-        continuation: Option<lash_core::ProcessWorklistCursor>,
-    ) -> Result<lash_core::ProcessWorklistPage, lash_core::PluginError> {
-        worklist::list_non_terminal_page(self, limit, continuation).await
-    }
-
-    async fn filter_unregistered_process_ids(
-        &self,
-        process_ids: &[String],
-    ) -> Result<Vec<String>, lash_core::PluginError> {
-        retention::filter_unregistered_process_ids(self, process_ids).await
-    }
-
-    async fn filter_tombstoned_process_ids(
-        &self,
-        process_ids: &[String],
-    ) -> Result<Vec<String>, lash_core::PluginError> {
-        retention::filter_tombstoned_process_ids(self, process_ids).await
-    }
-
-    async fn live_reference_summary(
-        &self,
-    ) -> Result<Vec<ProcessLiveReferenceView>, lash_core::PluginError> {
-        let records = worklist::collect_non_terminal_records(self).await?;
-        Ok(ProcessLiveReferenceView::from_records(records.iter()))
-    }
-
-    async fn count_non_terminal_processes(&self) -> Result<usize, lash_core::PluginError> {
-        worklist::count_non_terminal_processes(self).await
-    }
-
-    async fn claim_process_lease(
-        &self,
-        process_id: &str,
-        owner: &LeaseOwnerIdentity,
-        lease_ttl_ms: u64,
-    ) -> Result<ProcessLeaseClaimOutcome, lash_core::PluginError> {
-        leases::claim_process_lease(self, process_id, owner, lease_ttl_ms).await
-    }
-
-    async fn reclaim_process_lease(
-        &self,
-        process_id: &str,
-        owner: &LeaseOwnerIdentity,
-        observed_holder: &ProcessLease,
-        lease_ttl_ms: u64,
-    ) -> Result<ProcessLeaseClaimOutcome, lash_core::PluginError> {
-        leases::reclaim_process_lease(self, process_id, owner, observed_holder, lease_ttl_ms).await
-    }
-
-    async fn renew_process_lease(
-        &self,
-        lease: &ProcessLease,
-        lease_ttl_ms: u64,
-    ) -> Result<ProcessLease, lash_core::PluginError> {
-        leases::renew_process_lease(self, lease, lease_ttl_ms).await
-    }
-
-    async fn get_process_lease(
-        &self,
-        process_id: &str,
-    ) -> Result<Option<ProcessLease>, lash_core::PluginError> {
-        leases::get_process_lease(self, process_id).await
-    }
-
-    async fn get_process_leases(
-        &self,
-        process_ids: &[String],
-    ) -> Result<Vec<Option<ProcessLease>>, lash_core::PluginError> {
-        leases::get_process_leases(self, process_ids).await
-    }
-
-    async fn complete_process_lease(
-        &self,
-        completion: &ProcessLeaseCompletion,
-    ) -> Result<(), lash_core::PluginError> {
-        leases::complete_process_lease(self, completion).await
+        cutoff_epoch_ms: u64,
+        watermark: lash_core::ProjectionWatermark,
+        trigger_store: Option<&dyn lash_core::TriggerStore>,
+    ) -> Result<usize, lash_core::PluginError> {
+        let max_change_seq = crate::process_registry_change::max_change_sequence(watermark);
+        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        let outstanding_trigger_delivery_process_ids = match trigger_store {
+            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
+            None => Vec::new(),
+        };
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome(
+                    crate::process_registry_change::compact_process_tombstones_conn(
+                        tx,
+                        cutoff_epoch_ms,
+                        max_change_seq,
+                        &outstanding_trigger_delivery_process_ids,
+                    ),
+                ))
+            })
+            .await
+            .map_err(process_sqlite_error)?
     }
 
     async fn prune_terminal_processes(
@@ -1530,6 +1491,20 @@ impl ProcessRegistry for SqliteProcessRegistry {
         watermark: lash_core::ProjectionWatermark,
     ) -> Result<ProcessPruneReport, lash_core::PluginError> {
         prune_api::prune_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
+    }
+}
+
+impl lash_core::ProcessClockRebind for SqliteProcessRegistry {
+    fn with_runtime_clock(
+        &self,
+        clock: Arc<dyn lash_core::Clock>,
+    ) -> Option<Arc<dyn ProcessRegistry>> {
+        Some(Arc::new(Self {
+            conn: self.conn.clone(),
+            clock,
+            process_session_store_root: self.process_session_store_root.clone(),
+            wake_delivery_config: self.wake_delivery_config,
+        }))
     }
 }
 

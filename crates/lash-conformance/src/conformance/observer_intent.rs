@@ -1,6 +1,7 @@
 //! Process-observer intent settlement conformance.
 
 use super::*;
+use crate::{ProcessObserverRegistry as _, ProcessRegistrar as _};
 
 /// A transient registry failure during fork-observer publication is best
 /// effort: it does not fail session creation and the durable intent is

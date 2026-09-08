@@ -1,4 +1,7 @@
 use super::*;
+use crate::{
+    ProcessEventLog as _, ProcessLeases as _, ProcessLifecycle as _, ProcessRegistrar as _,
+};
 
 #[tokio::test]
 async fn claim_cannot_interleave_between_authority_validation_and_append() {

@@ -1,6 +1,5 @@
+use lash_core::ProcessRegistrar as _;
 use std::sync::{Arc, Mutex};
-
-use lash::process::ProcessRegistry as _;
 
 const SESSION: &str = "intent-ingress-observability-session";
 const SCOPE: &str = "intent-ingress-observability-turn";

@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::{ProcessEventLog as _, ProcessQuery as _};
 
 const SESSION: &str = "intent-ingress-session";
 const SCOPE: &str = "intent-ingress-turn";

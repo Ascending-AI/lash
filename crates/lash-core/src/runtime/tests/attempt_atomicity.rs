@@ -16,12 +16,12 @@
 //! Intent laws separately pin exactly one attributed command per admitted
 //! declaration and zero commands for refused batches.
 
+use crate::ProcessRegistrar as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_sansio::sync::MutexExt as _;
 
-use crate::ProcessRegistry as _;
 use crate::testing::attempt_sentinel::{AttemptAtomicitySentinel, NestedJournalLedger};
 
 const SESSION: &str = "atomic-tool-test-session";

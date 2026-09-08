@@ -619,13 +619,13 @@ async fn seed(database_url: &str) -> Result<()> {
     // A live background process with a wake still pending: in-flight work the
     // recreation is about to destroy.
     let registry = storage.process_registry();
-    lash_core::ProcessRegistry::register_process(
+    lash_core::ProcessRegistrar::register_process(
         &registry,
         wake_registration(PROCESS_ID, SESSION_IDS[0]),
     )
     .await
     .context("register the live pre-bump process")?;
-    let pending_wake = lash_core::ProcessRegistry::append_event(
+    let pending_wake = lash_core::ProcessEventLog::append_event(
         &registry,
         PROCESS_ID,
         ProcessEventAppendRequest::new(WAKE_EVENT_TYPE, json!({"wake_input": "pre-bump"})),
@@ -636,7 +636,7 @@ async fn seed(database_url: &str) -> Result<()> {
     .context("pre-bump wake outbox row was not created")?;
 
     let trigger_report = fire_trigger(&storage, "seed").await?;
-    let live_process = lash_core::ProcessRegistry::get_process(&registry, PROCESS_ID)
+    let live_process = lash_core::ProcessQuery::get_process(&registry, PROCESS_ID)
         .await
         .context("read the live pre-bump process")?
         .context("live pre-bump process row is absent")?;

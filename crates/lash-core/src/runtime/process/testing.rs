@@ -20,7 +20,7 @@ use super::model::{
     ProcessStartOutcome, ProcessStarted, ProcessTombstone, SessionId, WaitState,
 };
 use super::references::ProcessLiveReferenceView;
-use super::registry::{ProcessPruneReport, ProcessRegistry, ProjectionWatermark};
+use super::registry::{ProcessPruneReport, ProjectionWatermark};
 use super::registry_transitions;
 use super::validation::{
     ProcessStartPlan, ProcessTransition, ProcessTransitionPlan, prepare_process_event_append,
@@ -162,11 +162,144 @@ impl TestLocalProcessRegistry {
 }
 
 #[async_trait::async_trait]
-impl ProcessRegistry for TestLocalProcessRegistry {
-    fn wake_delivery_config(&self) -> super::WakeDeliveryConfig {
-        self.wake_delivery_config
+impl super::registry::ProcessQuery for TestLocalProcessRegistry {
+    async fn get_process(&self, process_id: &str) -> Result<Option<ProcessRecord>, PluginError> {
+        if let Some(error) = self.process_read_error.lock().await.clone() {
+            return Err(error);
+        }
+        {
+            let mut scheduled = self.process_read_error_after.lock().await;
+            if let Some((remaining, error)) = scheduled.as_mut() {
+                if *remaining == 0 {
+                    let error = error.clone();
+                    *scheduled = None;
+                    return Err(error);
+                }
+                *remaining -= 1;
+            }
+        }
+        if *self.process_read_absent.lock().await {
+            return Ok(None);
+        }
+        if let Some(record) = self.process_read_override.lock().await.take() {
+            return Ok(Some(record));
+        }
+        if let Some(record) = self.managed.lock().await.get(process_id) {
+            return Ok(Some(record.record.clone()));
+        }
+        if self
+            .tombstones
+            .lock()
+            .await
+            .keys()
+            .any(|(tombstoned_process_id, _)| tombstoned_process_id == process_id)
+        {
+            return Err(self.process_miss(process_id).await);
+        }
+        Ok(None)
     }
 
+    async fn list_processes(
+        &self,
+        filter: &ProcessListFilter,
+    ) -> Result<Vec<ProcessRecord>, PluginError> {
+        let managed = self.managed.lock().await;
+        let mut records = managed
+            .values()
+            .map(|record| record.record.clone())
+            .filter(|record| filter.matches_record(record))
+            .collect::<Vec<_>>();
+        records.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(records)
+    }
+
+    async fn processes_changed_since(
+        &self,
+        cursor: ProcessChangeCursor,
+        limit: usize,
+    ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let horizon = *self.tombstone_compaction_horizon.lock().await;
+        if cursor.store_sequence() < horizon {
+            return Err(PluginError::ProcessChangeCursorPruned {
+                requested_cursor: cursor,
+                tombstone_compaction_horizon: ProcessChangeCursor::from_store_sequence(horizon),
+            });
+        }
+        if limit == 0 {
+            return Ok((Vec::new(), cursor));
+        }
+        let managed = self.managed.lock().await;
+        let mut rows = managed
+            .values()
+            .filter(|record| record.change_seq > cursor.store_sequence())
+            .map(|record| {
+                (
+                    record.change_seq,
+                    record.record.id.clone(),
+                    ProcessChange::Upsert {
+                        record: Box::new(record.record.clone()),
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        drop(managed);
+        rows.extend(
+            self.tombstones
+                .lock()
+                .await
+                .values()
+                .filter(|tombstone| tombstone.pruned_change_seq > cursor.store_sequence())
+                .map(|tombstone| {
+                    (
+                        tombstone.pruned_change_seq,
+                        tombstone.process_id.clone(),
+                        ProcessChange::Deleted {
+                            tombstone: tombstone.clone(),
+                        },
+                    )
+                }),
+        );
+        rows.sort_by(|(left_seq, left_id, _), (right_seq, right_id, _)| {
+            left_seq.cmp(right_seq).then_with(|| left_id.cmp(right_id))
+        });
+        rows.truncate(limit);
+        let next_cursor = rows
+            .last()
+            .map(|(change_seq, _, _)| ProcessChangeCursor::from_store_sequence(*change_seq))
+            .unwrap_or(cursor);
+        Ok((
+            rows.into_iter().map(|(_, _, change)| change).collect(),
+            next_cursor,
+        ))
+    }
+
+    async fn list_non_terminal_page(
+        &self,
+        limit: std::num::NonZeroUsize,
+        continuation: Option<super::ProcessWorklistCursor>,
+    ) -> Result<super::ProcessWorklistPage, PluginError> {
+        worklist::list_non_terminal_page(self, limit, continuation).await
+    }
+
+    async fn live_reference_summary(&self) -> Result<Vec<ProcessLiveReferenceView>, PluginError> {
+        let managed = self.managed.lock().await;
+        Ok(ProcessLiveReferenceView::from_records(
+            managed.values().map(|record| &record.record),
+        ))
+    }
+
+    async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
+        let managed = self.managed.lock().await;
+        Ok(managed
+            .values()
+            .filter(|record| !record.record.status.is_retired())
+            .count())
+    }
+}
+
+#[async_trait::async_trait]
+impl super::registry::ProcessRegistrar for TestLocalProcessRegistry {
     async fn register_process_with_observers(
         &self,
         registration: ProcessRegistration,
@@ -226,7 +359,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         }
         Ok(record.record.clone())
     }
+}
 
+#[async_trait::async_trait]
+impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
     async fn add_observer(
         &self,
         session_id: &str,
@@ -475,7 +611,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             cleared_subscription_count: cleared_processes.len(),
         })
     }
+}
 
+#[async_trait::async_trait]
+impl super::registry::ProcessEventLog for TestLocalProcessRegistry {
     async fn append_event(
         &self,
         process_id: &str,
@@ -558,7 +697,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .cloned()
             .collect())
     }
+}
 
+#[async_trait::async_trait]
+impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
     async fn complete_process(
         &self,
         process_id: &str,
@@ -783,6 +925,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         current.expires_at_epoch_ms = 0;
         Ok(ProcessCompletionOutcome::Committed(record.record.clone()))
     }
+
     async fn list_pending_parent_end_plans(
         &self,
         limit: std::num::NonZeroUsize,
@@ -796,82 +939,11 @@ impl ProcessRegistry for TestLocalProcessRegistry {
     ) -> Result<Option<crate::ProcessParentEndPlan>, PluginError> {
         parent_end::get(self, process_id).await
     }
+
     async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
         parent_end::complete(self, process_id).await
     }
-    async fn admit_tool_intent_submission(
-        &self,
-        submission: crate::ToolIntentSubmissionRecord,
-    ) -> Result<crate::ToolIntentSubmissionAdmission, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let replay_key = submission.identity.replay_key.clone();
-        let mut submissions = self.tool_intent_submissions.lock().await;
-        if let Some(existing) = submissions.get(&replay_key) {
-            return Ok(crate::ToolIntentSubmissionAdmission::Existing(Box::new(
-                existing.clone(),
-            )));
-        }
-        submissions.insert(replay_key, submission);
-        Ok(crate::ToolIntentSubmissionAdmission::Admitted)
-    }
 
-    async fn complete_tool_intent_submission(
-        &self,
-        replay_key: &str,
-        outcome: crate::ToolIntentExecutionOutcome,
-    ) -> Result<crate::ToolIntentSubmissionRecord, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let mut submissions = self.tool_intent_submissions.lock().await;
-        let submission = submissions.get_mut(replay_key).ok_or_else(|| {
-            PluginError::Session(format!("unknown tool-intent submission `{replay_key}`"))
-        })?;
-        if submission.outcome.is_none() {
-            submission.outcome = Some(outcome);
-        }
-        Ok(submission.clone())
-    }
-
-    async fn pending_tool_intent_parent_end(
-        &self,
-        session_id: &str,
-        execution_scope_id: &str,
-    ) -> Result<Vec<crate::ToolIntentSubmissionRecord>, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let mut pending = self
-            .tool_intent_submissions
-            .lock()
-            .await
-            .values()
-            .filter(|submission| {
-                submission.identity.session_id == session_id
-                    && submission.identity.execution_scope_id == execution_scope_id
-                    && !submission.parent_end_settled
-                    && matches!(
-                        submission.outcome,
-                        Some(crate::ToolIntentExecutionOutcome::Executed {
-                            parent_end: Some(_),
-                            ..
-                        })
-                    )
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        pending.sort_by_key(|submission| submission.identity.intent_index);
-        Ok(pending)
-    }
-
-    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError> {
-        let _transaction = self.transaction.lock().await;
-        if let Some(submission) = self
-            .tool_intent_submissions
-            .lock()
-            .await
-            .get_mut(replay_key)
-        {
-            submission.parent_end_settled = true;
-        }
-        Ok(())
-    }
     async fn record_first_started_with_authority(
         &self,
         process_id: &str,
@@ -1025,159 +1097,89 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         drop(leases);
         Ok(record.record.clone())
     }
+}
 
-    async fn get_process(&self, process_id: &str) -> Result<Option<ProcessRecord>, PluginError> {
-        if let Some(error) = self.process_read_error.lock().await.clone() {
-            return Err(error);
+#[async_trait::async_trait]
+impl super::registry::ProcessToolIntents for TestLocalProcessRegistry {
+    async fn admit_tool_intent_submission(
+        &self,
+        submission: crate::ToolIntentSubmissionRecord,
+    ) -> Result<crate::ToolIntentSubmissionAdmission, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let replay_key = submission.identity.replay_key.clone();
+        let mut submissions = self.tool_intent_submissions.lock().await;
+        if let Some(existing) = submissions.get(&replay_key) {
+            return Ok(crate::ToolIntentSubmissionAdmission::Existing(Box::new(
+                existing.clone(),
+            )));
         }
-        {
-            let mut scheduled = self.process_read_error_after.lock().await;
-            if let Some((remaining, error)) = scheduled.as_mut() {
-                if *remaining == 0 {
-                    let error = error.clone();
-                    *scheduled = None;
-                    return Err(error);
-                }
-                *remaining -= 1;
-            }
+        submissions.insert(replay_key, submission);
+        Ok(crate::ToolIntentSubmissionAdmission::Admitted)
+    }
+
+    async fn complete_tool_intent_submission(
+        &self,
+        replay_key: &str,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<crate::ToolIntentSubmissionRecord, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let mut submissions = self.tool_intent_submissions.lock().await;
+        let submission = submissions.get_mut(replay_key).ok_or_else(|| {
+            PluginError::Session(format!("unknown tool-intent submission `{replay_key}`"))
+        })?;
+        if submission.outcome.is_none() {
+            submission.outcome = Some(outcome);
         }
-        if *self.process_read_absent.lock().await {
-            return Ok(None);
-        }
-        if let Some(record) = self.process_read_override.lock().await.take() {
-            return Ok(Some(record));
-        }
-        if let Some(record) = self.managed.lock().await.get(process_id) {
-            return Ok(Some(record.record.clone()));
-        }
-        if self
-            .tombstones
+        Ok(submission.clone())
+    }
+
+    async fn pending_tool_intent_parent_end(
+        &self,
+        session_id: &str,
+        execution_scope_id: &str,
+    ) -> Result<Vec<crate::ToolIntentSubmissionRecord>, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let mut pending = self
+            .tool_intent_submissions
             .lock()
             .await
-            .keys()
-            .any(|(tombstoned_process_id, _)| tombstoned_process_id == process_id)
-        {
-            return Err(self.process_miss(process_id).await);
-        }
-        Ok(None)
-    }
-
-    async fn list_processes(
-        &self,
-        filter: &ProcessListFilter,
-    ) -> Result<Vec<ProcessRecord>, PluginError> {
-        let managed = self.managed.lock().await;
-        let mut records = managed
             .values()
-            .map(|record| record.record.clone())
-            .filter(|record| filter.matches_record(record))
-            .collect::<Vec<_>>();
-        records.sort_by(|a, b| a.id.cmp(&b.id));
-        Ok(records)
-    }
-
-    async fn processes_changed_since(
-        &self,
-        cursor: ProcessChangeCursor,
-        limit: usize,
-    ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let horizon = *self.tombstone_compaction_horizon.lock().await;
-        if cursor.store_sequence() < horizon {
-            return Err(PluginError::ProcessChangeCursorPruned {
-                requested_cursor: cursor,
-                tombstone_compaction_horizon: ProcessChangeCursor::from_store_sequence(horizon),
-            });
-        }
-        if limit == 0 {
-            return Ok((Vec::new(), cursor));
-        }
-        let managed = self.managed.lock().await;
-        let mut rows = managed
-            .values()
-            .filter(|record| record.change_seq > cursor.store_sequence())
-            .map(|record| {
-                (
-                    record.change_seq,
-                    record.record.id.clone(),
-                    ProcessChange::Upsert {
-                        record: Box::new(record.record.clone()),
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
-        drop(managed);
-        rows.extend(
-            self.tombstones
-                .lock()
-                .await
-                .values()
-                .filter(|tombstone| tombstone.pruned_change_seq > cursor.store_sequence())
-                .map(|tombstone| {
-                    (
-                        tombstone.pruned_change_seq,
-                        tombstone.process_id.clone(),
-                        ProcessChange::Deleted {
-                            tombstone: tombstone.clone(),
-                        },
+            .filter(|submission| {
+                submission.identity.session_id == session_id
+                    && submission.identity.execution_scope_id == execution_scope_id
+                    && !submission.parent_end_settled
+                    && matches!(
+                        submission.outcome,
+                        Some(crate::ToolIntentExecutionOutcome::Executed {
+                            parent_end: Some(_),
+                            ..
+                        })
                     )
-                }),
-        );
-        rows.sort_by(|(left_seq, left_id, _), (right_seq, right_id, _)| {
-            left_seq.cmp(right_seq).then_with(|| left_id.cmp(right_id))
-        });
-        rows.truncate(limit);
-        let next_cursor = rows
-            .last()
-            .map(|(change_seq, _, _)| ProcessChangeCursor::from_store_sequence(*change_seq))
-            .unwrap_or(cursor);
-        Ok((
-            rows.into_iter().map(|(_, _, change)| change).collect(),
-            next_cursor,
-        ))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        pending.sort_by_key(|submission| submission.identity.intent_index);
+        Ok(pending)
     }
 
-    async fn compact_process_tombstones(
-        &self,
-        cutoff_epoch_ms: u64,
-        watermark: ProjectionWatermark,
-        trigger_store: Option<&dyn crate::TriggerStore>,
-    ) -> Result<usize, PluginError> {
+    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError> {
         let _transaction = self.transaction.lock().await;
-        let max_change_seq = match watermark {
-            ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
-            ProjectionWatermark::NoProjector => None,
-        };
-        let outstanding_trigger_delivery_process_ids = match trigger_store {
-            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
-            None => Vec::new(),
-        };
-        let outstanding_trigger_delivery_process_ids = outstanding_trigger_delivery_process_ids
-            .iter()
-            .map(String::as_str)
-            .collect::<std::collections::HashSet<_>>();
-        let mut tombstones = self.tombstones.lock().await;
-        let before = tombstones.len();
-        let mut compacted_through = None;
-        tombstones.retain(|_, tombstone| {
-            let retained = tombstone.pruned_at_ms >= cutoff_epoch_ms
-                || max_change_seq
-                    .is_some_and(|max_change_seq| tombstone.pruned_change_seq > max_change_seq)
-                || outstanding_trigger_delivery_process_ids.contains(tombstone.process_id.as_str());
-            if !retained {
-                compacted_through = Some(
-                    compacted_through
-                        .unwrap_or(0)
-                        .max(tombstone.pruned_change_seq),
-                );
-            }
-            retained
-        });
-        if let Some(compacted_through) = compacted_through {
-            let mut horizon = self.tombstone_compaction_horizon.lock().await;
-            *horizon = (*horizon).max(compacted_through);
+        if let Some(submission) = self
+            .tool_intent_submissions
+            .lock()
+            .await
+            .get_mut(replay_key)
+        {
+            submission.parent_end_settled = true;
         }
-        Ok(before - tombstones.len())
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl super::registry::ProcessWakeOutbox for TestLocalProcessRegistry {
+    fn wake_delivery_config(&self) -> super::WakeDeliveryConfig {
+        self.wake_delivery_config
     }
 
     async fn claim_pending_wake_deliveries(
@@ -1371,87 +1373,50 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         delivery.next_attempt_at_ms = next_attempt_at_ms;
         Ok(super::WakeDeliveryClaimOutcome::Applied)
     }
-
-    async fn list_non_terminal_page(
+}
+#[async_trait::async_trait]
+impl super::registry::ProcessRetention for TestLocalProcessRegistry {
+    async fn compact_process_tombstones(
         &self,
-        limit: std::num::NonZeroUsize,
-        continuation: Option<super::ProcessWorklistCursor>,
-    ) -> Result<super::ProcessWorklistPage, PluginError> {
-        worklist::list_non_terminal_page(self, limit, continuation).await
-    }
-
-    async fn live_reference_summary(&self) -> Result<Vec<ProcessLiveReferenceView>, PluginError> {
-        let managed = self.managed.lock().await;
-        Ok(ProcessLiveReferenceView::from_records(
-            managed.values().map(|record| &record.record),
-        ))
-    }
-
-    async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
-        let managed = self.managed.lock().await;
-        Ok(managed
-            .values()
-            .filter(|record| !record.record.status.is_retired())
-            .count())
-    }
-
-    async fn claim_process_lease(
-        &self,
-        process_id: &str,
-        owner: &crate::LeaseOwnerIdentity,
-        lease_ttl_ms: u64,
-    ) -> Result<ProcessLeaseClaimOutcome, PluginError> {
-        leases::claim_process_lease(self, process_id, owner, lease_ttl_ms).await
-    }
-
-    async fn reclaim_process_lease(
-        &self,
-        process_id: &str,
-        owner: &crate::LeaseOwnerIdentity,
-        observed_holder: &ProcessLease,
-        lease_ttl_ms: u64,
-    ) -> Result<ProcessLeaseClaimOutcome, PluginError> {
-        leases::reclaim_process_lease(self, process_id, owner, observed_holder, lease_ttl_ms).await
-    }
-
-    async fn renew_process_lease(
-        &self,
-        lease: &ProcessLease,
-        lease_ttl_ms: u64,
-    ) -> Result<ProcessLease, PluginError> {
-        leases::renew_process_lease(self, lease, lease_ttl_ms).await
-    }
-
-    async fn get_process_lease(
-        &self,
-        process_id: &str,
-    ) -> Result<Option<ProcessLease>, PluginError> {
-        *self.process_lease_point_reads.lock().await += 1;
-        leases::get_process_lease(self, process_id).await
-    }
-
-    async fn get_process_leases(
-        &self,
-        process_ids: &[ProcessId],
-    ) -> Result<Vec<Option<ProcessLease>>, PluginError> {
-        *self.process_lease_batch_reads.lock().await += 1;
-        let leases = self.leases.lock().await;
-        Ok(process_ids
+        cutoff_epoch_ms: u64,
+        watermark: ProjectionWatermark,
+        trigger_store: Option<&dyn crate::TriggerStore>,
+    ) -> Result<usize, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let max_change_seq = match watermark {
+            ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
+            ProjectionWatermark::NoProjector => None,
+        };
+        let outstanding_trigger_delivery_process_ids = match trigger_store {
+            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
+            None => Vec::new(),
+        };
+        let outstanding_trigger_delivery_process_ids = outstanding_trigger_delivery_process_ids
             .iter()
-            .map(|process_id| {
-                leases
-                    .get(process_id)
-                    .filter(|lease| !lease.lease_token.is_empty())
-                    .cloned()
-            })
-            .collect())
-    }
-
-    async fn complete_process_lease(
-        &self,
-        completion: &ProcessLeaseCompletion,
-    ) -> Result<(), PluginError> {
-        leases::complete_process_lease(self, completion).await
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        let mut tombstones = self.tombstones.lock().await;
+        let before = tombstones.len();
+        let mut compacted_through = None;
+        tombstones.retain(|_, tombstone| {
+            let retained = tombstone.pruned_at_ms >= cutoff_epoch_ms
+                || max_change_seq
+                    .is_some_and(|max_change_seq| tombstone.pruned_change_seq > max_change_seq)
+                || outstanding_trigger_delivery_process_ids.contains(tombstone.process_id.as_str());
+            if !retained {
+                compacted_through = Some(
+                    compacted_through
+                        .unwrap_or(0)
+                        .max(tombstone.pruned_change_seq),
+                );
+            }
+            retained
+        });
+        if let Some(compacted_through) = compacted_through {
+            let mut horizon = self.tombstone_compaction_horizon.lock().await;
+            *horizon = (*horizon).max(compacted_through);
+        }
+        Ok(before - tombstones.len())
     }
 
     async fn prune_terminal_processes(
@@ -1569,3 +1534,5 @@ impl super::registry::ProcessRegistryTestSupport for TestLocalProcessRegistry {
             .copied())
     }
 }
+
+impl super::registry::ProcessClockRebind for TestLocalProcessRegistry {}
