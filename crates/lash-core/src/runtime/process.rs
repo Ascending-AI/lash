@@ -11,6 +11,7 @@ mod op_scope;
 mod references;
 mod registry;
 mod registry_concerns;
+mod registry_delegate;
 pub mod registry_transitions;
 mod service;
 #[cfg(any(test, feature = "testing"))]
