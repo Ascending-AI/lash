@@ -2897,6 +2897,8 @@ lash::persistence::StoreError::TurnInputClaimSuperseded::row_id
 lash::persistence::StoreError::TurnInputClaimSuperseded::session_id
 lash::persistence::StoreError::TurnInputClaimSuperseded::superseding_claim_id
 lash::persistence::StoreError::TurnInputClaimSuperseded::superseding_session_lease_generation
+lash::persistence::StoreError::TurnOutcomeMaterializationRefused
+lash::persistence::StoreError::TurnOutcomeMaterializationRefused::error
 lash::persistence::StoreError::UnclaimedTurnInputSettlementSuperseded
 lash::persistence::StoreError::UnclaimedTurnInputSettlementSuperseded::input_id
 lash::persistence::StoreError::UnclaimedTurnInputSettlementSuperseded::observed_state

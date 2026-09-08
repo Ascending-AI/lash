@@ -394,6 +394,163 @@ fn reopening_a_previous_frame_refuses_and_keeps_the_current_frame() {
     );
 }
 
+/// A turn outcome naming a persisted, non-current frame aborts the commit
+/// with the typed refusal, leaves resident state untouched, and writes
+/// nothing durable; the next turn on the same state commits normally.
+#[tokio::test]
+async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durable_write() {
+    let clock = crate::SystemClock;
+    let store = RecordingStore::default();
+    let mut state = state_with_graph(SessionGraph::default());
+    let frame_a = super::super::open_agent_frame_in_state_with_clock(
+        &mut state,
+        frame_request(frame_key("frame-a"), AgentFrameReason::new("frame-a")),
+        &clock,
+    )
+    .expect("open frame a");
+    assert!(frame_a.opened);
+    let frame_b = super::super::open_agent_frame_in_state_with_clock(
+        &mut state,
+        frame_request(frame_key("frame-b"), AgentFrameReason::new("frame-b")),
+        &clock,
+    )
+    .expect("open frame b");
+    assert!(frame_b.opened);
+    state.protocol_turn_options = crate::ProtocolTurnOptions {
+        payload: serde_json::json!({ "mode": "frame-b" }),
+    };
+    let expected_policy = state.policy.clone();
+    let expected_protocol_turn_options = state.protocol_turn_options.clone();
+    let expected_leaf = state.session_graph.leaf_node_id.clone();
+    let expected_head_revision = state.head_revision;
+    let expected_frames =
+        serde_json::to_value(&state.agent_frames).expect("agent frame records serialize");
+
+    let (mut pipeline, _lease) = leased_boundary(&store, state).await;
+    // The refused turn drafts no conversation of its own, so every resident
+    // fact below is attributable to the switch alone.
+    pipeline
+        .prepared_checkpoint(
+            SessionPolicy::new(UNBOUNDED),
+            0,
+            &MessageSequence::from_base(Vec::new().into()),
+            None,
+        )
+        .await
+        .expect("prepare checkpoint in memory");
+    let outcome = TurnOutcome::AgentFrameSwitch {
+        frame_key: frame_key("frame-a"),
+        task: "return to frame a".to_string(),
+        initial_nodes: vec![crate::SessionAppendNode::message(
+            crate::PluginMessage::text(MessageRole::Assistant, "new frame-a seed"),
+        )],
+    };
+    let returned_state = pipeline.export_state_for_assembly();
+    let error = pipeline
+        .final_commit_with_snapshots(FinalCommitInput {
+            returned_state: &returned_state,
+            tool_calls: &[],
+            omitted: None,
+            plugins: None,
+            execution_state_update: ExecutionStateUpdate::Clear,
+            agent_frame_switch_materializes: true,
+            store: Some(&store),
+            usage_deltas: &[],
+            failure_evidence: &[],
+            outcome: &outcome,
+            claim_settlement: TurnClaimSettlement::for_test(
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                std::collections::HashMap::new(),
+                std::collections::HashMap::new(),
+            ),
+            current_session_lease_generation: None,
+            enqueued_queue_batches: Vec::new(),
+            interrupted_turn_input_turn_id: None,
+            recorded_attachment_intent_ids: Default::default(),
+            session_execution_lease_completion: None,
+        })
+        .await
+        .expect_err("a historical frame switch outcome must refuse the commit");
+
+    let runtime_error = crate::runtime::runtime_error_from_store_commit(error);
+    assert_eq!(
+        runtime_error.code,
+        crate::RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
+    );
+    assert!(runtime_error.code.is_terminal());
+    assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
+
+    let state = pipeline.into_final_state();
+    assert_eq!(
+        state.current_frame_node_id.as_deref(),
+        Some(frame_b.frame_node_id.as_str())
+    );
+    assert_eq!(state.policy, expected_policy);
+    assert_eq!(state.protocol_turn_options, expected_protocol_turn_options);
+    assert_eq!(state.session_graph.leaf_node_id, expected_leaf);
+    assert_eq!(state.head_revision, expected_head_revision);
+    assert_eq!(
+        serde_json::to_value(&state.agent_frames).expect("agent frame records serialize"),
+        expected_frames
+    );
+    assert_eq!(
+        state
+            .session_graph
+            .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref()),
+        Some(frame_b.frame_node_id.as_str())
+    );
+
+    let mut next_turn = TurnBoundary::from_state(state);
+    let user = text_message("u0", MessageRole::User, "hello");
+    next_turn
+        .prepared_checkpoint(
+            SessionPolicy::new(UNBOUNDED),
+            0,
+            &MessageSequence::from_base(vec![user].into()),
+            None,
+        )
+        .await
+        .expect("prepare the next turn's checkpoint in memory");
+    let returned_state = next_turn.export_state_for_assembly();
+    next_turn
+        .final_commit_with_snapshots(FinalCommitInput {
+            returned_state: &returned_state,
+            tool_calls: &[],
+            omitted: None,
+            plugins: None,
+            execution_state_update: ExecutionStateUpdate::Clean,
+            agent_frame_switch_materializes: false,
+            store: Some(&store),
+            usage_deltas: &[],
+            failure_evidence: &[],
+            outcome: &cancelled_outcome(),
+            claim_settlement: TurnClaimSettlement::for_test(
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                std::collections::HashMap::new(),
+                std::collections::HashMap::new(),
+            ),
+            current_session_lease_generation: None,
+            enqueued_queue_batches: Vec::new(),
+            interrupted_turn_input_turn_id: None,
+            recorded_attachment_intent_ids: Default::default(),
+            session_execution_lease_completion: None,
+        })
+        .await
+        .expect("the next turn commits normally after the refused switch");
+    assert_eq!(*store.runtime_commit_count.lock_recover(), 1);
+    let stored_graph = stored_graph_with_head_leaf(&store);
+    assert_eq!(
+        stored_graph.nearest_frame_node_id(stored_graph.leaf_node_id.as_deref()),
+        Some(frame_b.frame_node_id.as_str())
+    );
+}
+
 #[tokio::test]
 async fn progress_boundaries_accumulate_protocol_events_in_the_draft() {
     let user = text_message("u0", MessageRole::User, "hello");

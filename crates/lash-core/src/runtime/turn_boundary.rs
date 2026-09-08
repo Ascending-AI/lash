@@ -482,8 +482,8 @@ impl TurnBoundary {
             clock.as_ref(),
             agent_frame_switch_materializes,
         )
-        .map_err(|err| StoreError::ExecutionStateCaptureFailed {
-            message: err.to_string(),
+        .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
+            error: Box::new(error),
         })?;
         // Appends recorded after finalization (finalize-turn hooks) land here,
         // after everything the turn materialized.

@@ -326,6 +326,9 @@ pub(super) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> 
             RuntimeErrorCode::ExecutionStateCaptureFailed,
             format!("failed to snapshot dirty execution state: {message}"),
         ),
+        // The refusal was typed when the commit aborted; hand it back unchanged
+        // so the caller classifies the turn by that code, not by the wrapper.
+        crate::store::StoreError::TurnOutcomeMaterializationRefused { error } => *error,
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
     }
 }
@@ -445,6 +448,25 @@ mod store_commit_error_tests {
         assert!(encoding.code.is_terminal());
         assert!(!encoding.code.is_retryable());
         assert!(encoding.message.contains("checkpoint root"));
+    }
+
+    #[test]
+    fn refused_turn_outcome_materialization_hands_back_the_typed_runtime_error() {
+        let refusal = super::RuntimeError::new(
+            RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported,
+            "frame `frame-a` is a persisted historical frame",
+        );
+        let mapped =
+            runtime_error_from_store_commit(StoreError::TurnOutcomeMaterializationRefused {
+                error: Box::new(refusal.clone()),
+            });
+        assert_eq!(
+            mapped.code,
+            RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
+        );
+        assert_eq!(mapped.message, refusal.message);
+        assert!(mapped.code.is_terminal());
+        assert!(!mapped.code.is_retryable());
     }
 
     #[test]
