@@ -7838,7 +7838,6 @@ lash::runtime::LashRuntime::session_graph_service
 lash::runtime::LashRuntime::session_id
 lash::runtime::LashRuntime::session_lifecycle_service
 lash::runtime::LashRuntime::session_state_service
-lash::runtime::LashRuntime::set_persisted_state
 lash::runtime::LashRuntime::set_prompt_template
 lash::runtime::LashRuntime::set_protocol_turn_options
 lash::runtime::LashRuntime::set_protocol_turn_options_all_frames
@@ -8281,6 +8280,7 @@ lash::runtime::RuntimeErrorCode::ExecutionScopeTurnIdMismatch
 lash::runtime::RuntimeErrorCode::ExecutionStateCaptureFailed
 lash::runtime::RuntimeErrorCode::ForeignCode
 lash::runtime::RuntimeErrorCode::ForeignCode::0
+lash::runtime::RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
 lash::runtime::RuntimeErrorCode::InvalidAwaitEventSessionId
 lash::runtime::RuntimeErrorCode::InvalidAwaitEventWaitIdentity
 lash::runtime::RuntimeErrorCode::InvalidTurnCancelRequest

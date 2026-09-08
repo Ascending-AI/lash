@@ -432,6 +432,31 @@ fn pending_park_state(session_id: &str, text: &str) -> RuntimeSessionState {
     state
 }
 
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn testing_set_persisted_replaces_resident_state_for_park_fixture() -> Result<()> {
+    let core = core_with_commit_budget(crate::CommitBudget::new(
+        crate::CommitBudgetLimit::Unbounded,
+        crate::CommitBudgetLimit::Unbounded,
+    ))?;
+    let session = core.session("testing-set-persisted-park").open().await?;
+    let fixture = pending_park_state("testing-set-persisted-park", "park fixture via testing");
+    let node_ids = |nodes: &[lash_core::SessionNodeRecord]| {
+        nodes.iter().map(|n| n.node_id.clone()).collect::<Vec<_>>()
+    };
+    let fixture_nodes = node_ids(&fixture.session_graph.nodes);
+    let fresh = node_ids(&session.admin().state().export().await.session_graph.nodes);
+    assert_ne!(fresh, fixture_nodes);
+    session.admin().state().set_persisted(fixture).await?;
+    let resident = session.admin().state().export().await;
+    assert_eq!(node_ids(&resident.session_graph.nodes), fixture_nodes);
+    assert_eq!(
+        session.park().await?.session_id(),
+        "testing-set-persisted-park"
+    );
+    Ok(())
+}
+
 fn assert_byte_budget_session_error(error: &EmbedError, configured_limit: usize) {
     assert!(
         matches!(

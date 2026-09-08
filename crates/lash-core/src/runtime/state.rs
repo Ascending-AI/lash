@@ -1494,7 +1494,7 @@ pub(super) fn open_agent_frame_in_state_with_clock(
     state: &mut RuntimeSessionState,
     request: crate::OpenAgentFrameRequest,
     clock: &dyn crate::Clock,
-) -> crate::OpenAgentFrameResult {
+) -> Result<crate::OpenAgentFrameResult, crate::RuntimeError> {
     state.ensure_agent_frame_initialized_with_clock(clock);
     let previous = state.current_agent_frame().cloned();
     let mut assignment = previous
@@ -1515,15 +1515,16 @@ pub(super) fn open_agent_frame_in_state_with_clock(
     );
     if !opened {
         if state.current_frame_node_id.as_deref() == Some(frame_node_id.as_str()) {
-            return crate::OpenAgentFrameResult {
+            return Ok(crate::OpenAgentFrameResult {
                 frame_node_id: frame_node_id.into_inner(),
                 opened: false,
                 initial_node_ids: Vec::new(),
-            };
+            });
         }
-        state
-            .session_graph
-            .set_leaf_node_id(Some(frame_node_id.to_string()));
+        return Err(crate::RuntimeError::new(
+            crate::RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported,
+            "switching to a persisted historical frame requires a commanded config patch, which is not supported",
+        ));
     }
     state.current_frame_node_id = Some(frame_node_id);
     state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
@@ -1543,7 +1544,7 @@ pub(super) fn open_agent_frame_in_state_with_clock(
         request.frame_key.as_str(),
         clock,
     );
-    crate::OpenAgentFrameResult {
+    Ok(crate::OpenAgentFrameResult {
         frame_node_id: state
             .current_frame_node_id
             .clone()
@@ -1551,7 +1552,7 @@ pub(super) fn open_agent_frame_in_state_with_clock(
             .unwrap_or_default(),
         opened: true,
         initial_node_ids,
-    }
+    })
 }
 
 /// Builds the node drafts an append request materializes, with fallback

@@ -38,15 +38,8 @@ async fn append_history(runtime: &mut LashRuntime, depth: usize) {
 }
 
 #[tokio::test]
-async fn frame_switch_refreshes_policy_readers_from_target_frame() {
-    let (mut runtime, _store) = freshness_runtime().await;
-    let initial_frame_node_id = runtime
-        .state
-        .current_frame_node_id
-        .clone()
-        .expect("runtime initializes the initial frame");
-    let initial_policy = runtime.state.effective_policy().clone();
-
+async fn historical_frame_switch_refuses_and_keeps_resident_config() {
+    let (mut runtime, store) = freshness_runtime().await;
     let opened = runtime
         .open_agent_frame(crate::OpenAgentFrameRequest::new(
             crate::FrameKey::from_caller_material("changed-policy-frame")
@@ -70,28 +63,66 @@ async fn frame_switch_refreshes_policy_readers_from_target_frame() {
         .expect("change the live policy on the second frame");
     assert_eq!(runtime.state.effective_policy().model, changed_model);
 
-    runtime
+    let resident_policy_before_refusal = runtime.state.effective_policy().clone();
+    let resident_protocol_options_before_refusal = runtime.state.protocol_turn_options.clone();
+    let resident_frame_before_refusal = runtime.state.current_frame_node_id.clone();
+    let durable_head_before_refusal = store
+        .load_session_head_meta()
+        .await
+        .expect("load durable head before historical-frame refusal");
+
+    let error = runtime
         .open_agent_frame(crate::OpenAgentFrameRequest::new(
             crate::FrameKey::from_caller_material("initial-frame")
                 .expect("non-empty frame material"),
             crate::AgentFrameReason::new("test"),
         ))
         .await
-        .expect("switch back to the pre-existing initial frame");
+        .expect_err("switching to a pre-existing historical frame must refuse");
 
     assert_eq!(
-        runtime.state.current_frame_node_id.as_deref(),
-        Some(initial_frame_node_id.as_str())
+        error.code,
+        crate::RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
     );
     assert_eq!(
         runtime.state.effective_policy(),
-        &initial_policy,
-        "the state accessor must expose the switched-to frame policy"
+        &resident_policy_before_refusal
     );
     assert_eq!(
-        runtime.session_policy(),
-        initial_policy,
-        "session_policy must expose the switched-to frame policy"
+        runtime.state.protocol_turn_options,
+        resident_protocol_options_before_refusal
+    );
+    assert_eq!(
+        runtime.state.current_frame_node_id,
+        resident_frame_before_refusal
+    );
+    let durable_head_after_refusal = store
+        .load_session_head_meta()
+        .await
+        .expect("load durable head after historical-frame refusal");
+    assert_eq!(
+        durable_head_after_refusal
+            .as_ref()
+            .map(|head| head.head_revision),
+        durable_head_before_refusal
+            .as_ref()
+            .map(|head| head.head_revision)
+    );
+    assert_eq!(
+        durable_head_after_refusal
+            .as_ref()
+            .and_then(|head| head.current_frame_node_id.as_ref()),
+        durable_head_before_refusal
+            .as_ref()
+            .and_then(|head| head.current_frame_node_id.as_ref())
+    );
+    assert_eq!(
+        durable_head_after_refusal
+            .as_ref()
+            .and_then(|head| head.leaf_node_id.as_deref()),
+        durable_head_before_refusal
+            .as_ref()
+            .and_then(|head| head.leaf_node_id.as_deref())
     );
 }
 

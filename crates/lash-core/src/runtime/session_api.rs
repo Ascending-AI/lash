@@ -153,6 +153,9 @@ impl LashRuntime {
         self.state.clone()
     }
 
+    /// Replaces resident state WITHOUT durable publication; test and recovery
+    /// tooling only, never a product path.
+    #[cfg(any(test, feature = "testing"))]
     pub fn apply_persistence_state(
         &mut self,
         state: RuntimeSessionState,
@@ -407,16 +410,22 @@ impl LashRuntime {
         self.session.as_ref().map(|s| Arc::clone(s.plugins()))
     }
 
+    /// Open a new Agent Frame, or replay the current one idempotently.
+    ///
+    /// Refuses with
+    /// [`RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported`] when the
+    /// key names a persisted frame that is not current: making it resident
+    /// would replace session configuration without a commanded config patch.
     pub async fn open_agent_frame(
         &mut self,
         request: crate::OpenAgentFrameRequest,
     ) -> Result<crate::OpenAgentFrameResult, RuntimeError> {
         self.reload_invalidated_resident_session_state().await?;
-        Ok(open_agent_frame_in_state_with_clock(
+        open_agent_frame_in_state_with_clock(
             &mut self.state,
             request,
             self.host.core.clock.as_ref(),
-        ))
+        )
     }
 
     /// Run the registered compaction provider and commit the resulting

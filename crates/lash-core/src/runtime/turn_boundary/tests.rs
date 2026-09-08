@@ -200,7 +200,8 @@ fn agent_frame_switch_materializes_outcome_seed_without_tool_call_event() {
         },
         &crate::SystemClock,
         true,
-    );
+    )
+    .expect("materialize a fresh frame switch");
     let expected_frame_node_id =
         crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
 
@@ -279,7 +280,8 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         frame_request(frame_key.clone(), AgentFrameReason::compaction())
             .with_initial_nodes(vec![seed_node.clone()]),
         &crate::SystemClock,
-    );
+    )
+    .expect("open a new compaction frame");
     assert!(opened.opened);
     assert_eq!(
         state.current_frame_node_id.as_deref(),
@@ -329,7 +331,8 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         frame_request(frame_key, AgentFrameReason::compaction())
             .with_initial_nodes(vec![seed_node]),
         &crate::SystemClock,
-    );
+    )
+    .expect("replay the current compaction frame");
     assert!(!replay.opened);
     let replay_read = state
         .session_graph
@@ -338,7 +341,7 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
 }
 
 #[test]
-fn reopening_a_previous_frame_switches_back_and_materializes_new_seed_nodes() {
+fn reopening_a_previous_frame_refuses_and_keeps_the_current_frame() {
     let clock = crate::SystemClock;
     let mut state = RuntimeSessionState {
         session_id: "frame-switch-back".to_string(),
@@ -349,16 +352,18 @@ fn reopening_a_previous_frame_switches_back_and_materializes_new_seed_nodes() {
         &mut state,
         frame_request(frame_key("frame-a"), AgentFrameReason::new("frame-a")),
         &clock,
-    );
+    )
+    .expect("open frame a");
     assert!(frame_a.opened);
     let frame_b = super::super::open_agent_frame_in_state_with_clock(
         &mut state,
         frame_request(frame_key("frame-b"), AgentFrameReason::new("frame-b")),
         &clock,
-    );
+    )
+    .expect("open frame b");
     assert!(frame_b.opened);
 
-    let switched = super::super::open_agent_frame_in_state_with_clock(
+    let error = super::super::open_agent_frame_in_state_with_clock(
         &mut state,
         frame_request(frame_key("frame-a"), AgentFrameReason::new("frame-a")).with_initial_nodes(
             vec![crate::SessionAppendNode::message(
@@ -366,24 +371,26 @@ fn reopening_a_previous_frame_switches_back_and_materializes_new_seed_nodes() {
             )],
         ),
         &clock,
-    );
+    )
+    .expect_err("switching to an existing non-current frame must refuse");
 
-    assert!(switched.opened);
-    assert_eq!(switched.frame_node_id, frame_a.frame_node_id);
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
+    );
     assert_eq!(
         state.current_frame_node_id.as_deref(),
-        Some(frame_a.frame_node_id.as_str())
+        Some(frame_b.frame_node_id.as_str())
     );
-    assert_eq!(switched.initial_node_ids.len(), 1);
     assert_ne!(
         state.session_graph.leaf_node_id.as_deref(),
-        Some(frame_b.frame_node_id.as_str())
+        Some(frame_a.frame_node_id.as_str())
     );
     assert_eq!(
         state
             .session_graph
             .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref()),
-        Some(frame_a.frame_node_id.as_str())
+        Some(frame_b.frame_node_id.as_str())
     );
 }
 
