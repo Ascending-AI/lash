@@ -247,6 +247,9 @@ CREATE TABLE IF NOT EXISTS session_meta_fork_inheritance_processes (
     FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
 );
 
+-- Identity families: all-NULL is a plain commit; hash+version+count is an
+-- append identity; hash+version without a count is a semantic-boundary
+-- identity (FIG-2480). A count without a hash is representable nowhere.
 CREATE TABLE IF NOT EXISTS runtime_turn_commits (
     session_id                  TEXT NOT NULL,
     turn_id                     TEXT NOT NULL,
@@ -257,9 +260,6 @@ CREATE TABLE IF NOT EXISTS runtime_turn_commits (
     requested_node_count        INTEGER,
     identity_encoding_version   INTEGER,
     PRIMARY KEY (session_id, turn_id),
-    -- Identity families: all-NULL is a plain commit; hash+version+count is an
-    -- append identity; hash+version without a count is a semantic-boundary
-    -- identity (FIG-2480). A count without a hash is representable nowhere.
     CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL) AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL))
 );
 

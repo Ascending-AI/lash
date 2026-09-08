@@ -128,25 +128,21 @@ pub(super) fn semantic_boundary_request_identity(
     operation: crate::store::SemanticBoundaryOperation,
 ) -> Result<(u32, String), StoreError> {
     use crate::store::SemanticBoundaryOperation as Operation;
-    let (encoding_version, domain) = match operation {
+    let encoded = semantic_boundary_request_intent_encoding(commit)?;
+    Ok(match operation {
         Operation::RecordConfig => (
             RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION,
-            "lash-record-config-request/v1",
+            crate::stable_hash::blake3_hex("lash-record-config-request/v1", encoded.as_bytes()),
         ),
         Operation::CreateSession => (
             CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION,
-            "lash-create-session-request/v1",
+            crate::stable_hash::blake3_hex("lash-create-session-request/v1", encoded.as_bytes()),
         ),
         Operation::UsageLedger => (
             USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION,
-            "lash-usage-ledger-request/v1",
+            crate::stable_hash::blake3_hex("lash-usage-ledger-request/v1", encoded.as_bytes()),
         ),
-    };
-    let encoded = semantic_boundary_request_intent_encoding(commit)?;
-    Ok((
-        encoding_version,
-        crate::stable_hash::blake3_hex(domain, encoded.as_bytes()),
-    ))
+    })
 }
 
 #[cfg(test)]
