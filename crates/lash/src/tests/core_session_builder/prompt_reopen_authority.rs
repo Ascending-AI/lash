@@ -548,3 +548,58 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_sqlite() -> Result<(
     assert_eq!(composition_events, 1, "the changed composition is emitted");
     Ok(())
 }
+
+#[tokio::test]
+async fn successive_reopens_with_distinct_host_prompts_each_recommit_sqlite() -> Result<()> {
+    let old = lash_core::PromptLayer::new().with_contribution(
+        lash_core::PromptContribution::guidance("Old", "SQLITE ORIGINAL PROMPT"),
+    );
+    let (_dir, _factory, store) = sqlite_prompt_probe_store("sqlite-reseed-twice", old).await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+
+    core.session("sqlite-reseed-twice")
+        .store(Arc::clone(&store))
+        .instructions("FIRST RECONCILED PROMPT")
+        .open()
+        .await?
+        .close()
+        .await?;
+
+    // A second reopen carrying a different reconciled seed is a new logical
+    // operation: the content-addressed identity admits it as a fresh commit
+    // instead of tripping the journaled-determinism guard (FIG-1875).
+    core.session("sqlite-reseed-twice")
+        .store(Arc::clone(&store))
+        .instructions("SECOND RECONCILED PROMPT")
+        .open()
+        .await?
+        .close()
+        .await?;
+
+    let head = store.load_session().await?.expect("reseeded SQLite head");
+    assert!(
+        format!("{:?}", head.config.prompt.as_ref().expect("present prompt"))
+            .contains("SECOND RECONCILED PROMPT"),
+        "the second reconciled seed is durable"
+    );
+
+    // Reopening with the seed the head already carries settles nothing.
+    let before = head.head_revision;
+    core.session("sqlite-reseed-twice")
+        .store(Arc::clone(&store))
+        .instructions("SECOND RECONCILED PROMPT")
+        .open()
+        .await?
+        .close()
+        .await?;
+    let after = store
+        .load_session()
+        .await?
+        .expect("unchanged SQLite head")
+        .head_revision;
+    assert_eq!(after, before, "a matching reopen seed settles nothing");
+    Ok(())
+}

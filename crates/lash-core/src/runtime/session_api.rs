@@ -263,28 +263,23 @@ impl LashRuntime {
             checkpoint_ref: read.checkpoint_ref.clone(),
             token_ledger: read.token_ledger,
         };
-        // A resident refresh reconciles durable graph/checkpoint progress. It
-        // must not undo live-owned policy mutations in this process before
-        // they reach the next commit boundary. Preserve prompt, model, and
-        // provider id as one authority unit; the provider resolver is already
-        // live-owned and is not part of the durable head.
-        let live_policy = self.state.effective_policy().clone();
-        apply_session_head(&mut self.state, &head);
-        self.state.policy.prompt = live_policy.prompt;
-        self.state.policy.model = live_policy.model;
-        self.state.policy.provider_id = live_policy.provider_id;
-        apply_session_checkpoint(&mut self.state, read.checkpoint).map_err(|source| {
-            SessionError::Store {
-                context: "failed to restore session checkpoint".to_string(),
-                source,
-            }
+        // Head-authoritative adoption (FIG-1875): the durable head wins for
+        // every fact it carries. Session config is durable (read + guarded
+        // write, FIG-1555/FIG-1895), so the head already holds any committed
+        // override; only the runtime-lease facts stay live-owned. The
+        // provider resolver is also live-owned and is not part of the
+        // durable head.
+        let live_owned = crate::runtime::state::LiveOwnedSessionFacts::of(&self.state.policy);
+        crate::runtime::state::adopt_durable_head(
+            &mut self.state,
+            &head,
+            read.checkpoint,
+            live_owned,
+        )
+        .map_err(|source| SessionError::Store {
+            context: "failed to restore session checkpoint".to_string(),
+            source,
         })?;
-        // The commanded head value is authoritative over the checkpoint's
-        // turn-state copy (FIG-2479); `None` means a pre-v6-content head, so
-        // the checkpoint fallback above stands.
-        if let Some(options) = head.config.protocol_turn_options.as_ref() {
-            self.state.protocol_turn_options = options.clone();
-        }
         self.resident_graph_head_stale
             .store(false, Ordering::Release);
         Ok(())
@@ -647,7 +642,6 @@ impl LashRuntime {
         patch: super::ApplyConfigPatch,
         idempotency_key: impl Into<String>,
     ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
-        let publish_patch = patch.clone();
         let accepted = match self
             .accept_session_command(
                 crate::SessionCommand::ApplyConfigPatch {
@@ -669,8 +663,7 @@ impl LashRuntime {
                 Ok(crate::runtime::SessionCommandSettlement::Durable(receipt))
             }
             AcceptedSessionCommand::Queued(handle) => {
-                self.await_session_command_settlement(handle, &publish_patch)
-                    .await
+                self.await_session_command_settlement(handle).await
             }
         }
     }
@@ -678,7 +671,6 @@ impl LashRuntime {
     async fn await_session_command_settlement(
         &mut self,
         handle: crate::runtime::SessionCommandSettlementHandle,
-        publish_patch: &super::ApplyConfigPatch,
     ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
         let store = self
             .session
@@ -719,11 +711,15 @@ impl LashRuntime {
                 self.refresh_session_graph_from_store()
                     .await
                     .map_err(runtime_error_from_session_command_refresh)?;
-                // The existing refresh path deliberately preserves three
-                // live-owned policy fields (FIG-1875's adoption half remains
-                // out of scope). Once this command's durable completion is
-                // observed, publish the exact settled patch locally.
-                publish_patch.apply_to_state(&mut self.state);
+                // The refresh adopts the durable head, which already carries
+                // this command's committed values — or newer ones from a
+                // later writer (head-authoritative adoption, FIG-1875). Every
+                // successful refresh path either confirms the resident state
+                // already carries the drain commit or fully hydrates the
+                // head, and probe failures propagate as errors, so there is
+                // no edge that needs the patch re-published residently.
+                // Reapplying it here would overwrite a newer settled head
+                // with this command's older values, resident-only.
                 return Ok(crate::runtime::SessionCommandSettlement::Durable(
                     handle.receipt,
                 ));

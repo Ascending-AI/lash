@@ -289,7 +289,7 @@ pub(crate) async fn session_observations(
             session_id: session_id.clone(),
         })?;
     let session = state
-        .open_session(&session_id)
+        .open_session_for_observation(&session_id)
         .await
         .map_err(|error| state.session_admission_error(&session_id, "api.observations", error))?;
     let cursor = match query
@@ -951,9 +951,12 @@ pub(crate) async fn list_queued_work(
         .authorize(WorkbenchAuthorizationAction::Observe {
             session_id: session_id.clone(),
         })?;
-    let session = state.open_session(&session_id).await.map_err(|error| {
-        state.session_admission_error(&session_id, "api.queued_work.list", error)
-    })?;
+    let session = state
+        .open_session_for_observation(&session_id)
+        .await
+        .map_err(|error| {
+            state.session_admission_error(&session_id, "api.queued_work.list", error)
+        })?;
     Ok(Json(
         session.queued_work().await.map_err(AppError::internal)?,
     ))

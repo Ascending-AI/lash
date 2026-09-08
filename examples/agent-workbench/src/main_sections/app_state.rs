@@ -25,7 +25,7 @@ impl AppState {
     ) -> Result<lash::rlm::RlmDialect, AppError> {
         use lash::rlm::RlmSessionExt as _;
 
-        let Ok(session) = self.open_session(session_id).await else {
+        let Ok(session) = self.open_session_for_observation(session_id).await else {
             return Ok(self.requested_dialect(session_id));
         };
         let recorded = session.rlm_config().map_err(AppError::internal)?.dialect;
@@ -53,14 +53,40 @@ impl AppState {
     /// ambient `LASH_RUNBOOK_DIALECT`.
     pub(crate) fn session_builder(&self, session_id: impl Into<String>) -> lash::SessionBuilder {
         let session_id = session_id.into();
-        let dialect = self.requested_dialect(&session_id);
         let model = model_spec_from_selection(self.selected_model());
-        self.core
-            .session(session_id)
+        self.session_builder_with_spec(
+            session_id,
             // Model selection is host authority on every open. Supplying it in
             // the spec also lets queued turns consume their existing FIFO head
             // without inserting a config command behind that same turn.
-            .session_spec(lash::SessionSpec::new().model(model))
+            lash::SessionSpec::new().model(model),
+        )
+    }
+
+    /// A builder for read-only projection opens: it states no model.
+    ///
+    /// A spec-stated model is durable authority — the open seed is settled
+    /// against the head (seed-then-write, FIG-1875) — so a GET projection
+    /// that restated the process-wide selection would *write* config over
+    /// whatever the session last settled. Observation must never mutate; the
+    /// dialect statement stays because it is a guarded set-if-unset write
+    /// that is a no-op once recorded.
+    pub(crate) fn observer_session_builder(
+        &self,
+        session_id: impl Into<String>,
+    ) -> lash::SessionBuilder {
+        self.session_builder_with_spec(session_id.into(), lash::SessionSpec::new())
+    }
+
+    fn session_builder_with_spec(
+        &self,
+        session_id: String,
+        spec: lash::SessionSpec,
+    ) -> lash::SessionBuilder {
+        let dialect = self.requested_dialect(&session_id);
+        self.core
+            .session(session_id)
+            .session_spec(spec)
             .plugin_option(
                 lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
                 lash::rlm::RlmCreateExtras {
@@ -78,6 +104,20 @@ impl AppState {
         session_id: &str,
     ) -> Result<lash::LashSession, lash::EmbedError> {
         open_session_with_bounded_retry(self, session_id).await
+    }
+
+    /// Opens a session for a read-only projection through
+    /// [`Self::observer_session_builder`]: no model statement, so observing
+    /// a session never writes config authority over its settled head.
+    pub(crate) async fn open_session_for_observation(
+        &self,
+        session_id: &str,
+    ) -> Result<lash::LashSession, lash::EmbedError> {
+        retry_session_open(
+            || self.observer_session_builder(session_id.to_string()).open(),
+            |event, payload| self.trace_for_session(session_id, event, payload),
+        )
+        .await
     }
 
     pub(crate) fn current_session_id(&self) -> String {

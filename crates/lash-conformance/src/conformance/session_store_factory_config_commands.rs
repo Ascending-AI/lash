@@ -445,3 +445,110 @@ pub(super) async fn cancelled_session_config_settlement_is_typed() {
         original_model
     );
 }
+
+/// Head-authoritative settlement (FIG-1875): when another writer supersedes a
+/// settled config command before the facade writer observes settlement, the
+/// facade writer adopts the newer durable head as-is — it never re-publishes
+/// its own older patch values over that head residently.
+#[cfg(test)]
+pub(super) async fn superseded_config_settlement_adopts_the_newer_head() {
+    let clock = Arc::new(ConfigSettlementClock::new(1_800_000_000_000));
+    let request = session_store_request(
+        "config-settlement-superseded",
+        "config-settlement-original",
+        crate::SessionRelation::Root,
+    );
+    let store = config_settlement_store(Arc::clone(&clock), &request).await;
+    let runtime =
+        runtime_for_config_settlement(Arc::clone(&store), &request, Arc::clone(&clock)).await;
+
+    // A second writer holds the session-execution lease for the whole test,
+    // so the facade writer can neither drain inline nor drain from its
+    // settlement wait loop.
+    let owner =
+        crate::LeaseOwnerIdentity::opaque("superseding-writer", "superseding-writer:incarnation");
+    let lease = store
+        .try_claim_session_execution_lease(
+            &request.session_id,
+            &owner,
+            "superseding-executor",
+            600_000,
+        )
+        .await
+        .expect("claim superseding session lease")
+        .acquired()
+        .expect("superseding session lease");
+
+    let setter = crate::task::spawn(async move {
+        let mut runtime = runtime;
+        let result = runtime
+            .update_session_config(config_settlement_patch("first-settled"))
+            .await;
+        (result, runtime)
+    });
+
+    let command_batch = loop {
+        if let Some(batch) = store
+            .list_queued_work(&request.session_id)
+            .await
+            .expect("list queued config command")
+            .into_iter()
+            .find(crate::QueuedWorkBatch::is_session_command_work)
+        {
+            break batch;
+        }
+        tokio::task::yield_now().await;
+    };
+
+    // The second writer drains the facade writer's command...
+    let claim = store
+        .claim_leading_ready_session_command(&request.session_id, &lease.fence(), &owner)
+        .await
+        .expect("claim facade config command")
+        .expect("facade config command claim");
+    assert!(
+        claim
+            .batches
+            .iter()
+            .any(|batch| batch.batch_id == command_batch.batch_id),
+        "the superseding writer drains the facade writer's command"
+    );
+    commit_session_command_claim(store.as_ref(), &request, claim).await;
+
+    // ...then advances the durable head again with a newer model before the
+    // facade writer observes settlement.
+    let superseding_model = crate::ModelSpec::builder("second-newer")
+        .context_window_tokens(32_000)
+        .build()
+        .expect("superseding model");
+    let mut newer = crate::load_persisted_session_state(store.as_ref())
+        .await
+        .expect("load superseding state")
+        .expect("superseding state present");
+    newer.policy.model = superseding_model.clone();
+    store
+        .commit_runtime_state(
+            crate::RuntimeCommit::persisted_state_with_operation_for_testing(
+                &newer,
+                &[],
+                crate::OperationId::new(
+                    crate::ExecutionScope::runtime_operation(format!(
+                        "session:{}:boundary:superseding-writer",
+                        request.session_id
+                    )),
+                    "supersede-config",
+                ),
+            ),
+        )
+        .await
+        .expect("commit superseding model");
+
+    let (result, runtime) = setter.await.expect("superseded setter task");
+    result.expect("superseded config setter settles durably");
+    assert_eq!(
+        runtime.export_persistence_state().policy.model,
+        superseding_model,
+        "settlement adopts the newer durable head instead of re-publishing \
+         the settled command's older values"
+    );
+}

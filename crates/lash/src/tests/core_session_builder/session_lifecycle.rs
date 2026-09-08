@@ -1741,8 +1741,16 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
     Ok(())
 }
 
+/// FIG-1875 (head-authoritative adoption): when a competing writer advances
+/// the durable head's provider id, the next turn's refresh adopts it — the
+/// recorded provider id is a durable fact and the head wins. A host that has
+/// not registered the adopted provider gets an explicit typed refusal naming
+/// it, instead of silently running on a resident copy that masks the
+/// stale-head race. (The adoption mapping itself is pinned by
+/// `resident_refresh_adopts_the_durable_head_provider_id` in lash-core; the
+/// failed turn does not commit, so this surface asserts the refusal.)
 #[tokio::test]
-async fn refreshed_head_provider_id_does_not_override_live_provider_before_commit() -> Result<()> {
+async fn refreshed_head_provider_id_overrides_the_resident_copy() -> Result<()> {
     let mut state = RuntimeSessionState {
         session_id: "refresh-provider-mismatch".to_string(),
         policy: lash_core::SessionPolicy {
@@ -1770,14 +1778,26 @@ async fn refreshed_head_provider_id_does_not_override_live_provider_before_commi
         .await?;
 
     store.set_head_provider_id("other-provider");
-    session
-        .turn(TurnInput::text("runs with the live provider"))
+    let error = session
+        .turn(TurnInput::text("runs against the adopted head provider"))
         .run()
-        .await?;
-    assert_eq!(
-        session.policy_snapshot().recorded_provider_id(),
-        "embed-test"
-    );
+        .await
+        .expect_err("the adopted head names a provider this host has not registered");
+    match &error {
+        crate::EmbedError::Runtime(runtime_error) => {
+            assert_eq!(
+                runtime_error.code,
+                lash_core::RuntimeErrorCode::LlmProvider,
+                "the refusal is the typed provider-resolution error"
+            );
+            assert!(
+                runtime_error.message.contains("other-provider"),
+                "the typed refusal names the adopted provider id: {}",
+                runtime_error.message
+            );
+        }
+        other => panic!("expected a typed provider-resolution refusal, got: {other:?}"),
+    }
     Ok(())
 }
 
@@ -2087,6 +2107,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
+        .session_spec(crate::SessionSpec::new().model(builder_model.clone()))
         .store(Arc::clone(&store))
         .open()
         .await?;
@@ -2186,9 +2207,10 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
 }
 
 #[tokio::test]
-async fn open_with_state_reconciles_live_policy_without_rewriting_frame_history() -> Result<()> {
+async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history() -> Result<()> {
     let session_id = "reconcile-open-with-state";
     let persisted = conflicting_reopen_state(session_id);
+    let supplied_model = persisted.policy.model.clone();
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let builder_model = model_spec("builder-model", None, 77_777);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
@@ -2204,7 +2226,9 @@ async fn open_with_state_reconciles_live_policy_without_rewriting_frame_history(
         .export_persisted_state()
         .await
         .expect("export persisted state");
-    assert_eq!(state.policy.model, builder_model);
+    // The spec named no model, so the supplied state's model survives:
+    // core defaults are construction fallbacks, not per-open seeds.
+    assert_eq!(state.policy.model, supplied_model);
     assert_eq!(
         state
             .current_agent_frame()
@@ -2231,9 +2255,10 @@ async fn open_with_state_reconciles_live_policy_without_rewriting_frame_history(
 }
 
 #[tokio::test]
-async fn queued_worker_state_load_reconciles_live_policy_without_rewriting_history() -> Result<()> {
+async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history() -> Result<()> {
     let session_id = "reconcile-queued-worker";
     let persisted = conflicting_reopen_state(session_id);
+    let durable_model = persisted.policy.model.clone();
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let store = SnapshotStore::with_state(persisted);
     let policy = lash_core::SessionPolicy {
@@ -2251,7 +2276,9 @@ async fn queued_worker_state_load_reconciles_live_policy_without_rewriting_histo
         60_000,
     )
     .await?;
-    assert_eq!(state.policy.model, policy.model);
+    // A stateless worker's load carries no host spec at all: the durable
+    // head's recorded model is authoritative over the resolved fallback.
+    assert_eq!(state.policy.model, durable_model);
     assert_eq!(
         state
             .current_agent_frame()

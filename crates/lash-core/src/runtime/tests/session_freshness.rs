@@ -172,28 +172,32 @@ async fn freshness_hydrates_when_revision_changed() {
     assert_eq!(runtime.state.head_revision, head.head_revision);
 }
 
+/// FIG-1875 (head-authoritative adoption): a resident refresh adopts the
+/// durable head's prompt. Session config settles through the commanded
+/// durable write (FIG-1555/FIG-1895), so the head already carries every
+/// committed override — no resident copy is preserved across adoption.
 #[tokio::test]
-async fn resident_refresh_preserves_live_prompt_under_existing_adoption_rule() {
+async fn resident_refresh_adopts_the_durable_head_prompt() {
     let (mut runtime, store) = freshness_runtime().await;
     append_history(&mut runtime, 2).await;
     runtime
         .add_prompt_contribution(crate::PromptContribution::guidance(
-            "Live host change",
-            "KEEP THIS LIVE PROMPT",
+            "Settled host change",
+            "COMMITTED THROUGH THE COMMANDED WRITE",
         ))
         .await
-        .expect("apply live prompt change");
-    let live_prompt = runtime.state.effective_policy().prompt.clone();
+        .expect("apply prompt change through the commanded write");
 
+    let head_prompt = crate::PromptLayer::new().with_contribution(
+        crate::PromptContribution::guidance("Advanced durable value", "THE HEAD WINS"),
+    );
     let mut durable_head = store
         .load_session_head_meta()
         .await
         .expect("read durable head")
         .expect("session head exists");
     durable_head.head_revision += 1;
-    durable_head.config.prompt = Some(crate::PromptLayer::new().with_contribution(
-        crate::PromptContribution::guidance("Stale durable value", "DO NOT RESTORE THIS"),
-    ));
+    durable_head.config.prompt = Some(head_prompt.clone());
     store.save_session_head_meta(durable_head).await;
 
     runtime
@@ -201,7 +205,11 @@ async fn resident_refresh_preserves_live_prompt_under_existing_adoption_rule() {
         .await
         .expect("refresh resident graph");
 
-    assert_eq!(runtime.state.effective_policy().prompt, live_prompt);
+    assert_eq!(
+        runtime.state.effective_policy().prompt,
+        head_prompt,
+        "adoption is head-authoritative: the durable head's prompt wins"
+    );
 }
 
 #[tokio::test]
@@ -244,32 +252,35 @@ async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_pat
     );
 }
 
+/// FIG-1875 (head-authoritative adoption): a resident refresh adopts the
+/// durable head's model — there is no live-model preservation carve-out.
 #[tokio::test]
-async fn resident_refresh_preserves_live_model_under_existing_adoption_rule() {
+async fn resident_refresh_adopts_the_durable_head_model() {
     let (mut runtime, store) = freshness_runtime().await;
     append_history(&mut runtime, 2).await;
-    let live_model = crate::ModelSpec::builder("settled-live-model")
+    let settled_model = crate::ModelSpec::builder("settled-live-model")
         .context_window_tokens(123_456)
         .build()
-        .expect("live model");
+        .expect("settled model");
     runtime
         .update_session_config(crate::SessionConfigPatch {
-            model: Some(live_model.clone()),
+            model: Some(settled_model.clone()),
             ..Default::default()
         })
         .await
-        .expect("apply live model change");
+        .expect("apply model change through the commanded write");
 
+    let head_model = crate::ModelSpec::builder("advanced-durable-model")
+        .context_window_tokens(65_536)
+        .build()
+        .expect("advanced durable model");
     let mut durable_head = store
         .load_session_head_meta()
         .await
         .expect("read durable head")
         .expect("session head exists");
     durable_head.head_revision += 1;
-    durable_head.config.model = crate::ModelSpec::builder("stale-durable-model")
-        .context_window_tokens(65_536)
-        .build()
-        .expect("stale durable model");
+    durable_head.config.model = head_model.clone();
     store.save_session_head_meta(durable_head).await;
 
     runtime
@@ -277,25 +288,33 @@ async fn resident_refresh_preserves_live_model_under_existing_adoption_rule() {
         .await
         .expect("refresh resident graph");
 
-    assert_eq!(runtime.state.effective_policy().model, live_model);
+    assert_eq!(
+        runtime.state.effective_policy().model,
+        head_model,
+        "adoption is head-authoritative: the durable head's model wins"
+    );
 }
 
+/// FIG-1875 (head-authoritative adoption): a resident refresh adopts the
+/// durable head's provider id. The provider *resolver* stays live-owned — it
+/// is not part of the durable head — but the recorded provider id is a
+/// durable fact and the head wins on it.
 #[tokio::test]
-async fn resident_refresh_preserves_live_provider_under_existing_adoption_rule() {
+async fn resident_refresh_adopts_the_durable_head_provider_id() {
     let (mut runtime, store) = freshness_runtime().await;
     append_history(&mut runtime, 2).await;
-    let live_provider = TestProvider::builder()
+    let settled_provider = TestProvider::builder()
         .kind("settled-live-provider")
         .complete_error("provider must not be called by refresh")
         .build()
         .into_handle();
     runtime
         .update_session_config(crate::SessionConfigPatch {
-            provider: Some(live_provider),
+            provider: Some(settled_provider),
             ..Default::default()
         })
         .await
-        .expect("apply live provider change");
+        .expect("apply provider change through the commanded write");
 
     let mut durable_head = store
         .load_session_head_meta()
@@ -303,7 +322,7 @@ async fn resident_refresh_preserves_live_provider_under_existing_adoption_rule()
         .expect("read durable head")
         .expect("session head exists");
     durable_head.head_revision += 1;
-    durable_head.config.provider_id = "stale-durable-provider".to_string();
+    durable_head.config.provider_id = "advanced-durable-provider".to_string();
     store.save_session_head_meta(durable_head).await;
 
     runtime
@@ -313,7 +332,8 @@ async fn resident_refresh_preserves_live_provider_under_existing_adoption_rule()
 
     assert_eq!(
         runtime.state.effective_policy().provider_id,
-        "settled-live-provider"
+        "advanced-durable-provider",
+        "adoption is head-authoritative: the durable head's provider id wins"
     );
 }
 
@@ -492,4 +512,205 @@ async fn protocol_turn_options_all_frames_setter_settles_durably() {
         .expect("read durable head")
         .expect("session head exists");
     assert_eq!(head.config.protocol_turn_options, Some(options));
+}
+
+/// FIG-1875 pin (a): a live policy override followed by an invalidation
+/// reload yields the durable head's values. The override settles through the
+/// commanded write; when a competing executor then advances the head, the
+/// reload adopts that head head-authoritatively — no resident-copy
+/// preservation masks the advance.
+#[tokio::test]
+async fn live_policy_override_then_invalidation_reload_yields_the_head_values() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+    let overridden_model = crate::ModelSpec::builder("live-override-model")
+        .context_window_tokens(123_456)
+        .build()
+        .expect("override model");
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            model: Some(overridden_model),
+            ..Default::default()
+        })
+        .await
+        .expect("apply the live override through the commanded write");
+    runtime
+        .add_prompt_contribution(crate::PromptContribution::guidance(
+            "Live override",
+            "SETTLED THROUGH THE COMMANDED WRITE",
+        ))
+        .await
+        .expect("apply the live prompt override");
+
+    let head_model = crate::ModelSpec::builder("advanced-head-model")
+        .context_window_tokens(65_536)
+        .build()
+        .expect("advanced head model");
+    let head_prompt = crate::PromptLayer::new().with_contribution(
+        crate::PromptContribution::guidance("Advanced durable value", "THE HEAD WINS"),
+    );
+    let mut durable_head = store
+        .load_session_head_meta()
+        .await
+        .expect("read durable head")
+        .expect("session head exists");
+    durable_head.head_revision += 1;
+    durable_head.config.model = head_model.clone();
+    durable_head.config.prompt = Some(head_prompt.clone());
+    store.save_session_head_meta(durable_head).await;
+
+    runtime.invalidate_resident_session_state();
+    runtime
+        .reload_invalidated_resident_session_state_for_session()
+        .await
+        .expect("reload invalidated resident session state");
+
+    assert_eq!(
+        runtime.state.effective_policy().model,
+        head_model,
+        "the invalidation reload must adopt the head's model"
+    );
+    assert_eq!(
+        runtime.state.effective_policy().prompt,
+        head_prompt,
+        "the invalidation reload must adopt the head's prompt"
+    );
+    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
+}
+
+/// FIG-1875 pin (b): a successful invalidation reload settles the freshness
+/// facts — `Valid` plus `graph_loaded_from_store` — so the turn that
+/// triggered it issues no second durable probe (`load_session_head_meta`)
+/// on top of the full reload it already performed.
+#[tokio::test]
+async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
+    let store = Arc::new(RecordingStore::default());
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "reload settled the freshness facts".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        }]),
+        test_host_config(),
+        store.clone() as Arc<dyn crate::RuntimePersistence>,
+    )
+    .await;
+    append_history(&mut runtime, 2).await;
+
+    runtime.invalidate_resident_session_state();
+    let head_probes_before = store.load_session_head_meta_count();
+    let full_loads_before = store.load_session_count();
+
+    let turn = runtime
+        .run_turn_assembled(
+            TurnInput::text("drive the invalidated turn"),
+            CancellationToken::new(),
+            named_turn_scope("root", "reload-settles-freshness"),
+        )
+        .await
+        .expect("the invalidated turn reloads and runs");
+    assert_eq!(
+        turn.assistant_output.safe_text,
+        "reload settled the freshness facts"
+    );
+
+    assert_eq!(
+        store.load_session_count() - full_loads_before,
+        1,
+        "the invalidation reload performs exactly one full durable read"
+    );
+    assert_eq!(
+        store.load_session_head_meta_count() - head_probes_before,
+        0,
+        "a successful reload settles freshness; no bounded head probe may follow it"
+    );
+    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
+    assert!(
+        runtime.graph_loaded_from_store,
+        "the reload settles graph_loaded_from_store"
+    );
+}
+
+fn reopen_prompt(label: &str) -> crate::PromptLayer {
+    crate::PromptLayer::new().with_contribution(crate::PromptContribution::guidance(label, label))
+}
+
+#[tokio::test]
+async fn reopen_seed_delayed_retry_adopts_advanced_head() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+    let base = store.load_session_head_meta().await.unwrap().unwrap();
+    runtime.state.policy.prompt = reopen_prompt("seed");
+    let retry = runtime.state.clone();
+    runtime
+        .settle_reopen_seeded_config(&base.config)
+        .await
+        .unwrap();
+    runtime
+        .update_session_config(crate::SessionConfigPatch::with_prompt(reopen_prompt(
+            "newer",
+        )))
+        .await
+        .unwrap();
+    let newer = store.load_session_head_meta().await.unwrap().unwrap();
+    runtime.state = retry;
+    runtime
+        .settle_reopen_seeded_config(&base.config)
+        .await
+        .unwrap();
+    assert_eq!(runtime.state.policy.prompt, reopen_prompt("newer"));
+    assert_eq!(runtime.state.head_revision, newer.head_revision);
+    let after = store.load_session_head_meta().await.unwrap().unwrap();
+    assert_eq!(after.head_revision, newer.head_revision);
+    assert_eq!(after.config, newer.config);
+}
+
+#[tokio::test]
+async fn reopen_seed_same_base_replay_is_idempotent() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+    let base = store.load_session_head_meta().await.unwrap().unwrap();
+    runtime.state.policy.prompt = reopen_prompt("seed");
+    let retry = runtime.state.clone();
+    runtime
+        .settle_reopen_seeded_config(&base.config)
+        .await
+        .unwrap();
+    let committed = store.load_session_head_meta().await.unwrap().unwrap();
+    runtime.state = retry;
+    runtime
+        .settle_reopen_seeded_config(&base.config)
+        .await
+        .unwrap();
+    assert_eq!(runtime.state.policy.prompt, reopen_prompt("seed"));
+    assert_eq!(runtime.state.head_revision, committed.head_revision);
+    let after = store.load_session_head_meta().await.unwrap().unwrap();
+    assert_eq!(after.head_revision, committed.head_revision);
+    assert_eq!(after.config, committed.config);
+}
+
+#[tokio::test]
+async fn reopen_seed_alternating_seeds_advance_without_panicking() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+    for label in ["a", "b", "a", "b"] {
+        let base = store.load_session_head_meta().await.unwrap().unwrap();
+        runtime.state.policy.prompt = reopen_prompt(label);
+        runtime
+            .settle_reopen_seeded_config(&base.config)
+            .await
+            .unwrap();
+        let head = store.load_session_head_meta().await.unwrap().unwrap();
+        assert!(head.head_revision > base.head_revision);
+        assert_eq!(head.config.prompt, Some(reopen_prompt(label)));
+        assert_eq!(runtime.state.head_revision, head.head_revision);
+    }
 }
