@@ -146,13 +146,18 @@ impl UsageCapability {
         if staged.deltas().is_empty() {
             return Ok(());
         }
-        let (commit, persisted_node_ids) =
+        let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
                 &mut state,
                 staged.deltas(),
                 operation,
                 current.host.core.durability.commit_budget,
             )
+            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        // Stamp last: the semantic-boundary identity hashes the commit's
+        // canonical request content, so every content edit must precede it.
+        commit
+            .stamp_semantic_boundary()
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         let result = super::super::state::commit_in_lane_context(
             current.held_session_execution_lease.as_ref(),
