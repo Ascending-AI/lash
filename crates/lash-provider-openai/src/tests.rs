@@ -1399,6 +1399,7 @@ fn openai_compat_config_serializes_when_non_default() {
             streaming_usage: Some(false),
             provider_routing: Some(ProviderRoutingPrefs {
                 require_parameters: true,
+                ..ProviderRoutingPrefs::default()
             }),
             ..OpenAiCompat::default()
         })

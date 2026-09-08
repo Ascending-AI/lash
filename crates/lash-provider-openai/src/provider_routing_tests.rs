@@ -6,12 +6,74 @@ use super::*;
 /// parameter-honoring routing. The preset alone does not opt in: that trade is
 /// the host's to make.
 fn host_configured_routing_provider() -> OpenAiCompatibleProvider {
+    provider_with_routing(ProviderRoutingPrefs {
+        require_parameters: true,
+        ..ProviderRoutingPrefs::default()
+    })
+}
+
+fn provider_with_routing(prefs: ProviderRoutingPrefs) -> OpenAiCompatibleProvider {
     OpenAiCompatibleProvider::new("key", OPENROUTER_BASE_URL).with_compat(OpenAiCompat {
-        provider_routing: Some(ProviderRoutingPrefs {
-            require_parameters: true,
-        }),
+        provider_routing: Some(prefs),
         ..OpenAiCompat::openrouter()
     })
+}
+
+#[test]
+fn openrouter_chat_body_emits_zdr_when_enabled() {
+    let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    let body = provider_with_routing(ProviderRoutingPrefs {
+        zdr: true,
+        ..ProviderRoutingPrefs::default()
+    })
+    .build_chat_request_body(&req, false)
+    .unwrap();
+
+    assert_eq!(
+        body["provider"],
+        json!({ "require_parameters": false, "zdr": true })
+    );
+}
+
+#[test]
+fn openrouter_chat_body_emits_only_allowlist_when_configured() {
+    let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    let body = provider_with_routing(ProviderRoutingPrefs {
+        only: vec!["deepinfra".to_string(), "fireworks".to_string()],
+        ..ProviderRoutingPrefs::default()
+    })
+    .build_chat_request_body(&req, false)
+    .unwrap();
+
+    assert_eq!(
+        body["provider"],
+        json!({
+            "require_parameters": false,
+            "only": ["deepinfra", "fireworks"],
+        })
+    );
+}
+
+#[test]
+fn openrouter_chat_body_emits_combined_provider_preferences() {
+    let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+
+    let body = provider_with_routing(ProviderRoutingPrefs {
+        require_parameters: true,
+        zdr: true,
+        only: vec!["deepinfra".to_string(), "fireworks".to_string()],
+    })
+    .build_chat_request_body(&req, false)
+    .unwrap();
+
+    assert_eq!(
+        body["provider"],
+        json!({
+            "require_parameters": true,
+            "zdr": true,
+            "only": ["deepinfra", "fireworks"],
+        })
+    );
 }
 
 #[test]
@@ -59,7 +121,9 @@ fn declared_empty_provider_routing_emits_require_parameters_false() {
     assert_eq!(
         compat.provider_routing,
         Some(ProviderRoutingPrefs {
-            require_parameters: false
+            require_parameters: false,
+            zdr: false,
+            only: Vec::new(),
         })
     );
 
