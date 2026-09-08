@@ -638,3 +638,79 @@ async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
         "the reload settles graph_loaded_from_store"
     );
 }
+
+fn reopen_prompt(label: &str) -> crate::PromptLayer {
+    crate::PromptLayer::new().with_contribution(crate::PromptContribution::guidance(label, label))
+}
+
+#[tokio::test]
+async fn reopen_seed_delayed_retry_adopts_advanced_head() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+    let base = store.load_session_head_meta().await.unwrap().unwrap();
+    runtime.state.policy.prompt = reopen_prompt("seed");
+    let retry = runtime.state.clone();
+    runtime
+        .settle_reopen_seeded_config(&base.config)
+        .await
+        .unwrap();
+    runtime
+        .update_session_config(crate::SessionConfigPatch::with_prompt(reopen_prompt(
+            "newer",
+        )))
+        .await
+        .unwrap();
+    let newer = store.load_session_head_meta().await.unwrap().unwrap();
+    runtime.state = retry;
+    runtime
+        .settle_reopen_seeded_config(&base.config)
+        .await
+        .unwrap();
+    assert_eq!(runtime.state.policy.prompt, reopen_prompt("newer"));
+    assert_eq!(runtime.state.head_revision, newer.head_revision);
+    let after = store.load_session_head_meta().await.unwrap().unwrap();
+    assert_eq!(after.head_revision, newer.head_revision);
+    assert_eq!(after.config, newer.config);
+}
+
+#[tokio::test]
+async fn reopen_seed_same_base_replay_is_idempotent() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+    let base = store.load_session_head_meta().await.unwrap().unwrap();
+    runtime.state.policy.prompt = reopen_prompt("seed");
+    let retry = runtime.state.clone();
+    runtime
+        .settle_reopen_seeded_config(&base.config)
+        .await
+        .unwrap();
+    let committed = store.load_session_head_meta().await.unwrap().unwrap();
+    runtime.state = retry;
+    runtime
+        .settle_reopen_seeded_config(&base.config)
+        .await
+        .unwrap();
+    assert_eq!(runtime.state.policy.prompt, reopen_prompt("seed"));
+    assert_eq!(runtime.state.head_revision, committed.head_revision);
+    let after = store.load_session_head_meta().await.unwrap().unwrap();
+    assert_eq!(after.head_revision, committed.head_revision);
+    assert_eq!(after.config, committed.config);
+}
+
+#[tokio::test]
+async fn reopen_seed_alternating_seeds_advance_without_panicking() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+    for label in ["a", "b", "a", "b"] {
+        let base = store.load_session_head_meta().await.unwrap().unwrap();
+        runtime.state.policy.prompt = reopen_prompt(label);
+        runtime
+            .settle_reopen_seeded_config(&base.config)
+            .await
+            .unwrap();
+        let head = store.load_session_head_meta().await.unwrap().unwrap();
+        assert!(head.head_revision > base.head_revision);
+        assert_eq!(head.config.prompt, Some(reopen_prompt(label)));
+        assert_eq!(runtime.state.head_revision, head.head_revision);
+    }
+}

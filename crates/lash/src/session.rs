@@ -170,7 +170,7 @@ impl SessionBuilder {
             Some(&supplied_prompt),
             self.spec.model.is_some(),
             Some(&supplied_model),
-            self.spec.generation.is_some(),
+            self.spec.generation.as_ref(),
             Some(&supplied_generation),
         );
         Box::pin(self.open_resolved(state, store, None)).await
@@ -218,7 +218,7 @@ impl SessionBuilder {
                     loaded.config.prompt.as_ref(),
                     self.spec.model.is_some(),
                     Some(&loaded.config.model),
-                    self.spec.generation.is_some(),
+                    self.spec.generation.as_ref(),
                     Some(&loaded.config.generation),
                 );
                 return Ok((state, Some(loaded.config)));
@@ -404,7 +404,7 @@ pub(crate) async fn load_state_from_store(
         loaded.config.prompt.as_ref(),
         false,
         Some(&loaded.config.model),
-        false,
+        None,
         Some(&loaded.config.generation),
     );
     Ok(state)
@@ -421,7 +421,9 @@ pub(crate) async fn load_state_from_store(
 /// with a default spec never reverts a settled mid-run
 /// [`update_session_config`](lash_core::facade_support::LashRuntime::update_session_config)
 /// change. The turn budget stays host/live-owned and always follows the
-/// resolved policy.
+/// resolved policy. A present generation overlay resolves against the durable
+/// options: merge preserves unspecified options, while replace/clear explicitly
+/// discard them. The already-resolved core defaults are not reopen intent.
 ///
 /// The recorded `provider_id` always survives. A present host prompt wins;
 /// otherwise a present persisted prompt fills the gap. Legacy heads with no
@@ -438,7 +440,7 @@ fn reconcile_loaded_state_policy(
     persisted_prompt: Option<&PromptLayer>,
     host_model_is_present: bool,
     persisted_model: Option<&lash_core::ModelSpec>,
-    host_generation_is_present: bool,
+    host_generation: Option<&lash_core::facade_support::GenerationOverlay>,
     persisted_generation: Option<&lash_core::GenerationOptions>,
 ) {
     let recorded_provider_id = state.policy.recorded_provider_id().to_string();
@@ -455,8 +457,11 @@ fn reconcile_loaded_state_policy(
     {
         state.policy.model = persisted_model.clone();
     }
-    if !host_generation_is_present && let Some(persisted_generation) = persisted_generation {
-        state.policy.generation = persisted_generation.clone();
+    if let Some(persisted_generation) = persisted_generation {
+        state.policy.generation = match host_generation {
+            Some(overlay) => overlay.resolve(persisted_generation),
+            None => persisted_generation.clone(),
+        };
     }
 }
 
@@ -1563,7 +1568,9 @@ mod reconcile_tests {
             Some(&persisted_prompt),
             true,
             Some(&persisted_model),
-            true,
+            Some(&lash_core::facade_support::GenerationOverlay::Merge(
+                host.generation.clone(),
+            )),
             Some(&persisted_generation),
         );
 
@@ -1614,7 +1621,7 @@ mod reconcile_tests {
             None,
             false,
             Some(&persisted_model),
-            false,
+            None,
             Some(&persisted_generation),
         );
 
@@ -1636,7 +1643,7 @@ mod reconcile_tests {
             None,
             false,
             Some(&empty_model),
-            false,
+            None,
             None,
         );
         assert_eq!(unrecorded.policy.model.id, "core-default-model");
@@ -1661,7 +1668,7 @@ mod reconcile_tests {
             ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
 
-        reconcile_loaded_state_policy(&mut state, &host, false, None, true, None, false, None);
+        reconcile_loaded_state_policy(&mut state, &host, false, None, true, None, None, None);
 
         assert_eq!(state.policy.provider_id, "host-provider");
         assert_eq!(state.policy.model.id, "host-model");

@@ -150,8 +150,8 @@ impl SessionConfigPatch {
 
 /// Content-addressed identity for the reopen seed commit (FIG-1875).
 ///
-/// The identity folds in the hash of the full commit intent — the reconciled
-/// seed config plus the head state it reconciled against — following the
+/// The identity pairs the base head revision with the hash of the commit
+/// intent — the reconciled seed config and graph — following the
 /// `initial-park` precedent in [`super::state::boundary_operation`]'s audit
 /// table: an exact retry of the same seed against the same head replays under
 /// the journaled-determinism guard, while different content (a later reopen
@@ -180,7 +180,7 @@ fn reopen_seed_operation(
     let content_hash = preview.turn_commit_hash()?;
     Ok(super::state::boundary_operation(
         &state.session_id,
-        &format!("content:{content_hash}"),
+        &format!("base:{}:content:{content_hash}", state.head_revision),
         "record-seeded-config",
     ))
 }
@@ -333,8 +333,17 @@ impl LashRuntime {
         .map_err(|source| {
             super::session_commit_error("failed to record the reopen-seeded session config", source)
         })?;
-        self.state.apply_persisted_commit_result(result);
-        self.state.mark_node_ids_persisted(persisted_node_ids);
+        if result.receipt_replayed {
+            // A receipt proves this seed settled once, not that its config is
+            // still current. A delayed retry may race a later config command;
+            // discard the local seed and adopt the durable head in full.
+            self.invalidate_resident_session_state();
+            self.reload_invalidated_resident_session_state_for_session()
+                .await?;
+        } else {
+            self.state.apply_persisted_commit_result(result);
+            self.state.mark_node_ids_persisted(persisted_node_ids);
+        }
         Ok(())
     }
 
@@ -524,8 +533,9 @@ mod reopen_seed_identity_tests {
         let first = reopen_seed_operation(&state, budget).expect("first seed identity");
 
         let mut retry_state = state.clone();
-        retry_state.head_revision = 41;
         let retry = reopen_seed_operation(&retry_state, budget).expect("retry seed identity");
+        retry_state.head_revision = 41;
+        let advanced = reopen_seed_operation(&retry_state, budget).expect("advanced seed identity");
 
         let mut changed_state = retry_state;
         changed_state.policy.prompt = crate::PromptLayer::new().with_contribution(
@@ -535,10 +545,14 @@ mod reopen_seed_identity_tests {
 
         assert_eq!(
             first, retry,
-            "optimistic head movement alone must not change replay identity"
+            "the same seed against the same base must retain replay identity"
         );
         assert_ne!(
-            first, changed,
+            first, advanced,
+            "a new base head must mint a fresh identity"
+        );
+        assert_ne!(
+            advanced, changed,
             "a different reconciled seed must not reuse the first receipt"
         );
     }

@@ -2450,3 +2450,6 @@ pub(crate) use session_open_admission_tests::{
 pub(crate) use session_open_admission_tests::arm_registered_session_open_admission_gate;
 
 pub(crate) use recoverable_chat_tests::recoverable_chat_test_state_with_store_factory_and_trigger_store;
+
+#[path = "tests/observation_config.rs"]
+mod observation_config_tests;

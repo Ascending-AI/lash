@@ -2107,6 +2107,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
+        .session_spec(crate::SessionSpec::new().model(builder_model.clone()))
         .store(Arc::clone(&store))
         .open()
         .await?;
