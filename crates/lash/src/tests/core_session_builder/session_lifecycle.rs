@@ -1741,8 +1741,16 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
     Ok(())
 }
 
+/// FIG-1875 (head-authoritative adoption): when a competing writer advances
+/// the durable head's provider id, the next turn's refresh adopts it — the
+/// recorded provider id is a durable fact and the head wins. A host that has
+/// not registered the adopted provider gets an explicit typed refusal naming
+/// it, instead of silently running on a resident copy that masks the
+/// stale-head race. (The adoption mapping itself is pinned by
+/// `resident_refresh_adopts_the_durable_head_provider_id` in lash-core; the
+/// failed turn does not commit, so this surface asserts the refusal.)
 #[tokio::test]
-async fn refreshed_head_provider_id_does_not_override_live_provider_before_commit() -> Result<()> {
+async fn refreshed_head_provider_id_overrides_the_resident_copy() -> Result<()> {
     let mut state = RuntimeSessionState {
         session_id: "refresh-provider-mismatch".to_string(),
         policy: lash_core::SessionPolicy {
@@ -1770,13 +1778,14 @@ async fn refreshed_head_provider_id_does_not_override_live_provider_before_commi
         .await?;
 
     store.set_head_provider_id("other-provider");
-    session
-        .turn(TurnInput::text("runs with the live provider"))
+    let error = session
+        .turn(TurnInput::text("runs against the adopted head provider"))
         .run()
-        .await?;
-    assert_eq!(
-        session.policy_snapshot().recorded_provider_id(),
-        "embed-test"
+        .await
+        .expect_err("the adopted head names a provider this host has not registered");
+    assert!(
+        format!("{error:?}").contains("other-provider"),
+        "the refusal names the adopted provider id: {error:?}"
     );
     Ok(())
 }

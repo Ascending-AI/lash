@@ -689,8 +689,8 @@ impl RuntimeSessionState {
     /// Builds a `RuntimeSessionState` from snapshot data for protocol and process-engine
     /// implementors while materializing or restoring protocol session state.
     pub fn from_snapshot(snapshot: SessionSnapshot) -> Self {
-        // Authority deliberately defaults here and must be restored by apply_session_head;
-        // consuming a snapshot without the subsequent head apply would widen authority.
+        // Authority deliberately defaults here and must be restored by adopt_durable_head;
+        // consuming a snapshot without the subsequent head adoption would widen authority.
         let checkpoint_components = RuntimeCheckpointComponents::from_snapshot(&snapshot);
         let agent_frames = snapshot
             .session_graph
@@ -1247,22 +1247,50 @@ pub(crate) fn apply_session_checkpoint(
     Ok(())
 }
 
-pub(super) fn apply_session_head(
+/// The runtime-lease facts that stay live-owned across a durable-head
+/// adoption (FIG-1875).
+///
+/// Everything the head carries is adopted head-authoritatively; only these
+/// process-local lease facts are installed by the caller. The provider
+/// resolver is also live-owned, but it lives outside `RuntimeSessionState`
+/// and is never touched by adoption.
+pub(crate) struct LiveOwnedSessionFacts {
+    pub(crate) session_id: Option<String>,
+    pub(crate) turn_budget: crate::TurnBudget,
+}
+
+impl LiveOwnedSessionFacts {
+    /// Capture the live-owned facts of the policy about to be overwritten.
+    pub(crate) fn of(policy: &SessionPolicy) -> Self {
+        Self {
+            session_id: policy.session_id.clone(),
+            turn_budget: policy.turn_budget,
+        }
+    }
+}
+
+/// Adopt a durable session head (and its checkpoint) as one total operation.
+///
+/// This is the single home of the head→state mapping (FIG-1875, ruled
+/// head-authoritative): on any adoption the durable head wins for every fact
+/// it carries — graph, frames, config, protocol turn options, checkpoint
+/// progress, authority, and ledger. No resident copy of a durable fact is
+/// preserved; the only survivors are the caller-supplied
+/// [`LiveOwnedSessionFacts`] plus whatever the target state carries for facts
+/// the head does not represent (for example the live-policy flags
+/// `autonomous` and `no_progress_budget`).
+pub(crate) fn adopt_durable_head(
     state: &mut RuntimeSessionState,
     head: &crate::store::SessionHead,
-) {
+    checkpoint: Option<crate::store::HydratedSessionCheckpoint>,
+    live_owned: LiveOwnedSessionFacts,
+) -> Result<(), crate::StoreError> {
+    state.session_id = head.session_id.clone();
     state.session_graph = head.graph.clone();
     state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
     state.current_frame_node_id = head.current_frame_node_id.clone();
     state.checkpoint_ref = head.checkpoint_ref.clone();
     state.token_ledger = head.token_ledger.clone();
-    state.checkpoint_components = if head.checkpoint_ref.is_some() {
-        RuntimeCheckpointComponents::unproven()
-    } else {
-        RuntimeCheckpointComponents::complete_empty()
-    };
-    state.plugin_snapshot_revision = None;
-    state.ensure_agent_frame_initialized();
     state.head_revision = head.head_revision;
     state.persisted_node_ids = head
         .graph
@@ -1273,6 +1301,20 @@ pub(super) fn apply_session_head(
     state.authority.tool_access = head.config.tool_access.clone();
     state.authority.subagent = head.config.subagent.clone();
     apply_persisted_session_config(&mut state.policy, &head.config);
+    state.policy.session_id = live_owned.session_id;
+    state.policy.turn_budget = live_owned.turn_budget;
+    // Adopt the commanded head value before the checkpoint restore (so a
+    // checkpointless graph's initial frame captures it) and again after (the
+    // head row is authoritative over the checkpoint's turn-state copy; `None`
+    // is a pre-v6-content head, which keeps the checkpoint fallback). FIG-2479.
+    if let Some(options) = head.config.protocol_turn_options.as_ref() {
+        state.protocol_turn_options = options.clone();
+    }
+    apply_session_checkpoint(state, checkpoint)?;
+    if let Some(options) = head.config.protocol_turn_options.as_ref() {
+        state.protocol_turn_options = options.clone();
+    }
+    Ok(())
 }
 
 pub fn append_session_nodes_to_state_with_clock(

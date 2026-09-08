@@ -7781,6 +7781,7 @@ lash::runtime::LashRuntime::set_protocol_turn_options
 lash::runtime::LashRuntime::set_protocol_turn_options_all_frames
 lash::runtime::LashRuntime::set_turn_phase_probe
 lash::runtime::LashRuntime::set_turn_phase_probe_if_changed
+lash::runtime::LashRuntime::settle_reopen_seeded_config
 lash::runtime::LashRuntime::snapshot_execution_state
 lash::runtime::LashRuntime::stream_next_queued_work
 lash::runtime::LashRuntime::stream_prepared_turn

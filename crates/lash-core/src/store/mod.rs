@@ -828,52 +828,14 @@ fn persisted_session_state_from_head(
     head: SessionHead,
     checkpoint: Option<HydratedSessionCheckpoint>,
 ) -> Result<crate::RuntimeSessionState, StoreError> {
-    let persisted_node_ids = head
-        .graph
-        .nodes
-        .iter()
-        .map(|node| node.node_id.clone())
-        .collect();
-    let graph = head.graph;
-    let agent_frames = graph.agent_frame_records(&head.session_id);
-    let mut state = crate::RuntimeSessionState {
-        session_id: head.session_id,
-        policy: crate::SessionPolicy::new(head.config.turn_budget),
-        agent_frames,
-        current_frame_node_id: head.current_frame_node_id,
-        session_graph: graph,
-        turn_index: 0,
-        token_usage: crate::TokenUsage::default(),
-        last_prompt_usage: None,
-        protocol_turn_options: crate::ProtocolTurnOptions::default(),
-        authority: Box::new(crate::runtime::state::RuntimeSessionAuthority {
-            tool_access: head.config.tool_access.clone(),
-            subagent: head.config.subagent.clone(),
-        }),
-        checkpoint_components: crate::runtime::state::RuntimeCheckpointComponents::unproven(),
-        plugin_snapshot_revision: None,
-        token_ledger: head.token_ledger,
-        checkpoint_ref: head.checkpoint_ref.clone(),
-        head_revision: head.head_revision,
-        persisted_node_ids,
-    };
-    state.policy.model = head.config.model.clone();
-    state.policy.provider_id = head.config.provider_id.clone();
-    if let Some(prompt) = head.config.prompt.as_ref() {
-        state.policy.prompt = prompt.clone();
-    }
-    state.policy.generation = head.config.generation.clone();
-    // Adopt the commanded head value before the checkpoint restore (so a
-    // checkpointless graph's initial frame captures it) and again after (the
-    // head row is authoritative over the checkpoint's turn-state copy; `None`
-    // is a pre-v6-content head, which keeps the checkpoint fallback).
-    if let Some(options) = head.config.protocol_turn_options.as_ref() {
-        state.protocol_turn_options = options.clone();
-    }
-    crate::runtime::state::apply_session_checkpoint(&mut state, checkpoint)?;
-    if let Some(options) = head.config.protocol_turn_options.as_ref() {
-        state.protocol_turn_options = options.clone();
-    }
+    // A cold load adopts the head onto a default state: every durable fact
+    // comes from the head (adoption is head-authoritative, FIG-1875), and the
+    // live-owned runtime-lease facts start from their defaults — the head's
+    // turn budget, and no live session-id binding yet.
+    let mut state =
+        crate::RuntimeSessionState::new(crate::SessionPolicy::new(head.config.turn_budget));
+    let live_owned = crate::runtime::state::LiveOwnedSessionFacts::of(&state.policy);
+    crate::runtime::state::adopt_durable_head(&mut state, &head, checkpoint, live_owned)?;
     Ok(state)
 }
 

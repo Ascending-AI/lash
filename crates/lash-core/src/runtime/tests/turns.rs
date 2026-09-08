@@ -5908,8 +5908,9 @@ async fn lost_lease_and_reacquisition_force_graph_reloads() {
     );
     assert_eq!(
         store.load_session_head_meta_count(),
-        2,
-        "the rebuilt turn must recheck the durable head without a second graph hydration"
+        1,
+        "the reload under the reacquired lease settles durable freshness itself \
+         (FIG-1875); the rebuilt turn issues no additional bounded head probe"
     );
 }
 

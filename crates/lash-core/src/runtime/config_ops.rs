@@ -231,6 +231,65 @@ impl LashRuntime {
         }
     }
 
+    /// Guard-write the facade's open-time seed to the durable head
+    /// (seed-then-write, FIG-1875).
+    ///
+    /// ADR 0030's reopen reconciliation is an explicit host-seed precedence
+    /// applied exactly once, before the runtime starts. Adoption is
+    /// head-authoritative with no preservation lists, so the seed must not
+    /// stay resident-only: this settles the difference between the persisted
+    /// head config and the freshly reconciled policy through the commanded
+    /// durable write, making the durable head true again by the end of open.
+    /// A reopen whose seed matches the head settles nothing. No turn can be
+    /// active this early, so the seed publishes as one direct fenced head
+    /// commit (the same guard-write shape as protocol materialization)
+    /// rather than a mid-run session command.
+    #[doc(hidden)]
+    pub async fn settle_reopen_seeded_config(
+        &mut self,
+        persisted: &crate::PersistedSessionConfig,
+    ) -> Result<(), SessionError> {
+        let policy = &self.state.policy;
+        let seed_differs = persisted.provider_id != policy.provider_id
+            || persisted.model != policy.model
+            || persisted.prompt.as_ref() != Some(&policy.prompt)
+            || persisted.generation != policy.generation;
+        if !seed_differs {
+            return Ok(());
+        }
+        let Some(store) = self.services.store.clone() else {
+            return Ok(());
+        };
+        let operation = super::state::boundary_operation(
+            &self.state.session_id,
+            "session-open",
+            "record-seeded-config",
+        );
+        let (commit, persisted_node_ids) =
+            crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
+                &mut self.state,
+                &[],
+                operation,
+                self.host.core.durability.commit_budget,
+            )
+            .map_err(|error| SessionError::Protocol(error.to_string()))?;
+        let result = super::commit_runtime_state_with_fresh_session_execution_lease(
+            store,
+            commit,
+            &self.runtime_lease_owner,
+            &self.runtime_lease_executor_id,
+            self.host.core.control.lease_timings,
+            std::sync::Arc::clone(&self.host.core.clock),
+        )
+        .await
+        .map_err(|source| {
+            super::session_commit_error("failed to record the reopen-seeded session config", source)
+        })?;
+        self.state.apply_persisted_commit_result(result);
+        self.state.mark_node_ids_persisted(persisted_node_ids);
+        Ok(())
+    }
+
     /// Override protocol-owned turn options for this session through the
     /// commanded durable write (FIG-2479).
     ///

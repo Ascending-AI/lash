@@ -794,6 +794,26 @@ impl LashRuntime {
         }
     }
 
+    /// Settle every resident-freshness fact after a full durable adoption
+    /// (FIG-1875): the resident state is valid, the graph is the one loaded
+    /// from the store, and no cross-process staleness is pending.
+    ///
+    /// `lease_continuity` is the continuity of the session-execution lease
+    /// held across the adoption, when the caller holds one: while that lease
+    /// stays live no other executor can advance the durable head, so the
+    /// freshly adopted resident graph is current under it and the turn loop
+    /// issues no second durable probe.
+    pub(super) fn mark_resident_adopted(
+        &mut self,
+        lease_continuity: Option<SessionExecutionLeaseContinuity>,
+    ) {
+        self.resident_session_state = ResidentSessionState::Valid;
+        self.graph_loaded_from_store = true;
+        self.resident_graph_head_stale
+            .store(false, Ordering::Release);
+        self.last_committed_lease_continuity = lease_continuity;
+    }
+
     pub(super) fn trace_synchronous_resident_state_refusal(
         &self,
         decision_id: &str,
@@ -842,6 +862,14 @@ impl LashRuntime {
 
     pub(super) async fn reload_invalidated_resident_session_state(
         &mut self,
+    ) -> Result<(), RuntimeError> {
+        self.reload_invalidated_resident_session_state_under_lease(None)
+            .await
+    }
+
+    pub(super) async fn reload_invalidated_resident_session_state_under_lease(
+        &mut self,
+        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<(), RuntimeError> {
         let decision_id = match &self.resident_session_state {
             ResidentSessionState::Valid => {
@@ -976,8 +1004,12 @@ impl LashRuntime {
                     )
                 })?;
             self.state = durable_state;
-            self.graph_loaded_from_store = false;
-            self.resident_session_state = ResidentSessionState::Valid;
+            // A successful reload is a full durable adoption: settle the
+            // freshness facts so the turn loop does not issue a second
+            // durable probe right after this reload (FIG-1875).
+            self.mark_resident_adopted(
+                session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity),
+            );
             Ok(())
         }
         .await;
@@ -3183,7 +3215,8 @@ impl LashRuntime {
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
         session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
-        self.reload_invalidated_resident_session_state().await?;
+        self.reload_invalidated_resident_session_state_under_lease(session_execution_lease)
+            .await?;
         let lease_continuity =
             session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity);
         let resident_graph_is_current = self.graph_loaded_from_store

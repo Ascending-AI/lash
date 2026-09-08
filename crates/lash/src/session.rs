@@ -122,10 +122,10 @@ impl SessionBuilder {
         let store = self.create_store(&policy).await?;
         self.reconcile_process_observer_intents(store.as_deref())
             .await?;
-        let state = self
+        let (state, reopened_persisted_config) = self
             .load_or_default_state(&policy, store.as_deref())
             .await?;
-        Box::pin(self.open_resolved(state, store)).await
+        Box::pin(self.open_resolved(state, store, reopened_persisted_config)).await
     }
 
     async fn reconcile_process_observer_intents(
@@ -167,7 +167,7 @@ impl SessionBuilder {
             self.spec.prompt.is_some(),
             Some(&supplied_prompt),
         );
-        Box::pin(self.open_resolved(state, store)).await
+        Box::pin(self.open_resolved(state, store, None)).await
     }
 
     fn session_policy(&self) -> SessionPolicy {
@@ -176,18 +176,26 @@ impl SessionBuilder {
         policy
     }
 
+    /// Resolve the state to open with, plus the persisted head config when
+    /// this open resumes an existing durable session. The persisted config is
+    /// what the open-time seed is later settled against (seed-then-write,
+    /// FIG-1875): the reconciled policy is the seed, and any difference from
+    /// the head is guard-written before the session handle is returned.
     async fn load_or_default_state(
         &self,
         policy: &SessionPolicy,
         store: Option<&dyn RuntimePersistence>,
-    ) -> Result<RuntimeSessionState> {
+    ) -> Result<(
+        RuntimeSessionState,
+        Option<lash_core::PersistedSessionConfig>,
+    )> {
         let state = match store {
             Some(store) => {
                 let loaded = self.load_persisted_state(store).await?;
                 let Some(loaded) = loaded else {
-                    return Ok(empty_runtime_session_state(
-                        self.session_id.clone(),
-                        policy.clone(),
+                    return Ok((
+                        empty_runtime_session_state(self.session_id.clone(), policy.clone()),
+                        None,
                     ));
                 };
                 let mut state = loaded.state;
@@ -203,11 +211,11 @@ impl SessionBuilder {
                     self.spec.prompt.is_some(),
                     loaded.config.prompt.as_ref(),
                 );
-                state
+                return Ok((state, Some(loaded.config)));
             }
             None => empty_runtime_session_state(self.session_id.clone(), policy.clone()),
         };
-        Ok(state)
+        Ok((state, None))
     }
 
     async fn load_persisted_state(
@@ -228,6 +236,7 @@ impl SessionBuilder {
         self,
         state: RuntimeSessionState,
         store: Option<Arc<dyn RuntimePersistence>>,
+        reopened_persisted_config: Option<lash_core::PersistedSessionConfig>,
     ) -> Result<LashSession> {
         let policy = state.effective_policy().clone();
         let storeless = store.is_none();
@@ -267,6 +276,16 @@ impl SessionBuilder {
             &self.plugin_options,
             self.parent_session_id.is_none(),
         )?;
+        // Seed-then-write (FIG-1875): the reopen reconciliation above is an
+        // explicit host-seed precedence applied once; guard-write any
+        // difference from the persisted head so the durable head is true
+        // again by the end of open. Adoption thereafter is head-wins with no
+        // preservation lists.
+        if let Some(persisted_config) = reopened_persisted_config.as_ref() {
+            runtime
+                .settle_reopen_seeded_config(persisted_config)
+                .await?;
+        }
         let process_work = env.process_work();
         if let Some(process_work) = process_work.as_ref() {
             drive_process_on_open(ports.drive_process_on_open, process_work.as_ref()).await?;
