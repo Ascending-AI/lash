@@ -375,9 +375,12 @@ def main(argv: list[str]) -> int:
             ],
             check=True,
             capture_output=True,
-            text=True,
         )
-        findings = classify_patch(result.stdout)
+        # Decode leniently: a committed file matching the pathspec may carry
+        # non-UTF-8 bytes, and a strict decode would crash the gate instead of
+        # classifying the change. The structural diff lines and Rust source
+        # lines the classifier inspects are always valid UTF-8.
+        findings = classify_patch(result.stdout.decode("utf-8", errors="replace"))
         print(render_findings(findings))
         if summary_path := os.environ.get("GITHUB_STEP_SUMMARY"):
             append_summary(summary_path, findings)

@@ -58,6 +58,7 @@ where
     let second = make();
     assert_fresh_instances(&first, &second, "process_registry");
     drop((first, second));
+    super::hostile_input::process_namespace(make()).await;
     process_registry_conformance(make()).await;
 }
 
@@ -66,6 +67,7 @@ pub async fn process_registry_reopenable<F>(make: F)
 where
     F: Fn() -> ReopenableProcessRegistry,
 {
+    super::hostile_input::process_namespace(make().open).await;
     let handles = make();
     assert_fresh_instances(
         &handles.open,

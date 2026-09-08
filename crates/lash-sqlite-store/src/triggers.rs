@@ -160,6 +160,20 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         operation_id: &str,
         command: lash_core::TriggerCommand,
     ) -> Result<lash_core::TriggerEffectResult, lash_core::PluginError> {
+        let owner_valid = match command.owner_scope() {
+            lash_core::TriggerOwnerScope::Session { session_id } => {
+                crate::namespace::is_valid_opaque_key(session_id)
+            }
+            lash_core::TriggerOwnerScope::Host { binding_id } => {
+                crate::namespace::is_valid_opaque_key(binding_id.trim())
+            }
+            lash_core::TriggerOwnerScope::Platform => true,
+        };
+        if !crate::namespace::is_valid_opaque_key(operation_id.trim()) || !owner_valid {
+            return Ok(Err(lash_core::TriggerOperationError::Invalid {
+                message: "invalid trigger operation or owner identifier".into(),
+            }));
+        }
         if let lash_core::TriggerCommand::List {
             owner_scope,
             mut filter,

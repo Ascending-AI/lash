@@ -1526,6 +1526,59 @@ jobs:
         if: always()
         run: docker rm -f lash-ci-minio
 
+  fuzz-smoke:
+    name: Fuzz smoke
+    runs-on: ubuntu-24.04
+    # Explicit budget: four bounded libFuzzer runs over the committed seed
+    # corpus plus one nightly build must never grow past this.
+    timeout-minutes: 45
+    needs: plan
+    # Off the pull-request critical path by design (FIG-878): the smoke run
+    # guards trunk pushes and dispatches only. scripts/test_ci_plan.py pins
+    # this shape.
+    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.rust == 'true'
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Check seed corpus integrity
+        run: python3 scripts/check_fuzz_corpus.py
+
+      - name: Install nightly Rust and cargo-fuzz
+        run: |
+          set -euo pipefail
+          rustup toolchain install nightly --profile minimal
+          cargo install cargo-fuzz --locked
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Run bounded fuzz smoke over the committed corpus
+        working-directory: fuzz
+        run: |
+          set -euo pipefail
+          for target in remote_wire_dto plugin_payload attachment_metadata lashlang_source; do
+            cargo +nightly fuzz run "$target" "corpus/$target" -- \
+              -max_total_time=60 -timeout=10 -rss_limit_mb=4096
+          done
+
   stack-budget:
     name: Stack budget
     runs-on: ubuntu-24.04
@@ -2448,6 +2501,7 @@ jobs:
       - confidence-fast-summary
       - postgres-store
       - s3-store
+      - fuzz-smoke
       - stack-budget
       - functional-e2e
       - functional-e2e-process-operations

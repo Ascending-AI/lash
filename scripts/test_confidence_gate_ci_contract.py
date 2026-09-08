@@ -473,6 +473,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "s3-store",
             "functional-e2e",
             "functional-e2e-process-operations",
+            "fuzz-smoke",
         }
         guard = (
             "github.event_name != 'pull_request' "

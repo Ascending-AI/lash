@@ -164,6 +164,9 @@ impl TestLocalProcessRegistry {
 #[async_trait::async_trait]
 impl super::registry::ProcessQuery for TestLocalProcessRegistry {
     async fn get_process(&self, process_id: &str) -> Result<Option<ProcessRecord>, PluginError> {
+        if let Some(reason) = crate::store::process_key::invalid_process_key_reason(process_id) {
+            return Err(PluginError::Session(reason.into()));
+        }
         if let Some(error) = self.process_read_error.lock().await.clone() {
             return Err(error);
         }

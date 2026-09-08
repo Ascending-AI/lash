@@ -6,6 +6,7 @@ mod frame_key;
 pub mod llm;
 pub mod plugin;
 pub mod prompt;
+mod redacted;
 pub mod sansio;
 pub mod schema_contract;
 pub mod session;
@@ -42,6 +43,7 @@ pub use prompt::{
     PromptFingerprint, build_prompt, build_prompt_cached, prompt_template_fingerprint,
     prompt_text_fingerprint, prompt_tool_names_fingerprint,
 };
+pub use redacted::Redacted;
 pub use sansio::{
     ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
     ContextProjector, DriverAction, DriverContextView, Effect, EffectId, LlmCallError,

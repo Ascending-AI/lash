@@ -430,11 +430,11 @@ impl Provider for GoogleOAuthProvider {
         let mut map = serde_json::Map::new();
         map.insert(
             "access_token".to_string(),
-            serde_json::Value::String(credential.access_token),
+            serde_json::Value::String(credential.access_token.expose_secret().to_string()),
         );
         map.insert(
             "refresh_token".to_string(),
-            serde_json::Value::String(credential.refresh_token),
+            serde_json::Value::String(credential.refresh_token.expose_secret().to_string()),
         );
         map.insert(
             "expires_at".to_string(),
@@ -446,7 +446,7 @@ impl Provider for GoogleOAuthProvider {
         );
         map.insert(
             "oauth_client_secret".to_string(),
-            serde_json::Value::String(self.oauth_client.secret.clone()),
+            serde_json::Value::String(self.oauth_client.secret.expose_secret().to_string()),
         );
         if self.endpoint != CODE_ASSIST_ENDPOINT {
             map.insert(
@@ -530,6 +530,10 @@ impl Provider for GoogleOAuthProvider {
             refresh_token,
             ..
         } = credential.value;
+        // The single deliberate exposure point: from here the plaintext only
+        // feeds request headers and the upload path.
+        let access_token = access_token.into_inner();
+        let refresh_token = refresh_token.into_inner();
         if self.project_id.is_none() {
             self.project_id = self.resolve_project_id(&access_token).await?;
         }

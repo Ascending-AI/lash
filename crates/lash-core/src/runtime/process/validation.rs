@@ -1077,16 +1077,8 @@ pub(super) fn ensure_core_event_types(registration: &mut ProcessRegistration) {
 pub(super) fn validate_process_registration(
     registration: &ProcessRegistration,
 ) -> Result<(), PluginError> {
-    if registration.id.trim().is_empty() {
-        return Err(PluginError::Session(
-            "process id must be a non-empty string".to_string(),
-        ));
-    }
-    if registration.id.contains('#') {
-        return Err(PluginError::Session(format!(
-            "process id `{}` contains reserved segment separator `#`",
-            registration.id
-        )));
+    if let Some(reason) = crate::store::process_key::invalid_process_key_reason(&registration.id) {
+        return Err(PluginError::Session(reason.into()));
     }
     if registration.max_attempts == Some(0) {
         return Err(PluginError::Session(format!(

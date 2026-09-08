@@ -551,11 +551,11 @@ impl Provider for CodexProvider {
         let mut map = serde_json::Map::new();
         map.insert(
             "access_token".to_string(),
-            serde_json::Value::String(credential.access_token),
+            serde_json::Value::String(credential.access_token.expose_secret().to_string()),
         );
         map.insert(
             "refresh_token".to_string(),
-            serde_json::Value::String(credential.refresh_token),
+            serde_json::Value::String(credential.refresh_token.expose_secret().to_string()),
         );
         map.insert(
             "expires_at".to_string(),
@@ -564,7 +564,7 @@ impl Provider for CodexProvider {
         if let Some(account_id) = &credential.account_id {
             map.insert(
                 "account_id".to_string(),
-                serde_json::Value::String(account_id.clone()),
+                serde_json::Value::String(account_id.expose_secret().to_string()),
             );
         } else {
             map.insert("account_id".to_string(), serde_json::Value::Null);
@@ -721,7 +721,7 @@ impl Provider for CodexProvider {
             LlmTransportError::new(format!("Failed to serialize Codex request: {e}"))
         })?;
         emit_provider_request_trace(provider_trace.as_ref(), "codex", "responses", &body_bytes);
-        let access_token = credential.access_token.clone();
+        let access_token = credential.access_token.expose_secret().to_string();
         let account_id = credential.account_id.clone();
         let mut headers = vec![
             (
@@ -742,8 +742,11 @@ impl Provider for CodexProvider {
                 req.scope.request_id.clone(),
             ),
         ];
-        if let Some(id) = account_id.as_deref() {
-            headers.push(("ChatGPT-Account-ID".to_string(), id.to_string()));
+        if let Some(id) = account_id.as_ref() {
+            headers.push((
+                "ChatGPT-Account-ID".to_string(),
+                id.expose_secret().to_string(),
+            ));
         }
         let http_request = LlmHttpRequest {
             method: LlmHttpMethod::Post,

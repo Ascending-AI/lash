@@ -16,6 +16,7 @@ where
     let second = make();
     assert_fresh_instances(&first, &second, "attachment_store");
     drop((first, second));
+    super::hostile_input::attachment_namespace(make()).await;
     attachment_put_get_round_trips_bytes_and_meta(make()).await;
     attachment_is_content_addressed(make()).await;
     attachment_head_reflects_put_and_refreshes_timestamp(make()).await;

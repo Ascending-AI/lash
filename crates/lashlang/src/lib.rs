@@ -1,3 +1,5 @@
+mod namespace;
+
 mod artifact;
 mod ast;
 mod builtins;

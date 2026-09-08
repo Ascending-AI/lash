@@ -48,6 +48,26 @@ diff --git a/crates/lash-core/tests/support/durable_read_fixture.rs b/crates/las
         valid, _ = MODULE.validate_patch(readme)
         self.assertTrue(valid)
 
+    def test_binary_diff_bytes_do_not_crash_or_loosen_the_gate(self) -> None:
+        import argparse
+        import tempfile
+
+        binary_hunk = (
+            b"diff --git a/fuzz/corpus/remote_wire_dto/seed b/fuzz/corpus/remote_wire_dto/seed\n"
+            b"--- /dev/null\n"
+            b"+++ b/fuzz/corpus/remote_wire_dto/seed\n"
+            b"@@ -0,0 +1 @@\n"
+            b"+\xe2\x28\xa1\xff\x00 raw seed bytes\n"
+        )
+        with tempfile.NamedTemporaryFile(suffix=".diff", delete=False) as handle:
+            handle.write(binary_hunk + FIXTURE_DIFF.encode("utf-8"))
+            diff_path = Path(handle.name)
+        self.addCleanup(diff_path.unlink)
+        args = argparse.Namespace(diff_file=diff_path, cached=False, revision_range=None)
+        patch = MODULE.load_patch(args)
+        valid, _ = MODULE.validate_patch(patch)
+        self.assertFalse(valid)
+
     def test_deleted_artifact_requires_bump(self) -> None:
         deletion = FIXTURE_DIFF.replace(
             "+++ b/fixtures/durable-read/v1/sqlite/expected.json", "+++ /dev/null"

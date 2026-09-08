@@ -13,27 +13,6 @@ use super::{
 /// staging file name.
 static STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// An attachment id proven safe to use as one filesystem path component.
-///
-/// [`AttachmentId`] enforces that shape at construction — non-empty, bounded,
-/// printable ASCII, no path separators, no relative-directory or
-/// drive-qualified form — so a malformed id cannot exist to be joined here.
-/// Requiring this private type in `path_for_id` keeps that dependency visible
-/// at every filesystem call site: a raw string can only become a path
-/// component by passing through `AttachmentId::parse` first.
-#[derive(Clone, Copy)]
-struct GuardedAttachmentId<'a>(&'a AttachmentId);
-
-impl<'a> GuardedAttachmentId<'a> {
-    fn new(id: &'a AttachmentId) -> Self {
-        Self(id)
-    }
-
-    fn as_str(self) -> &'a str {
-        self.0.as_str()
-    }
-}
-
 pub struct FileAttachmentStore {
     root: PathBuf,
 }
@@ -51,7 +30,7 @@ impl FileAttachmentStore {
         self.root.join("blake3")
     }
 
-    fn path_for_id(&self, id: GuardedAttachmentId<'_>) -> PathBuf {
+    fn path_for_id(&self, id: &AttachmentId) -> PathBuf {
         let id = id.as_str();
         let prefix = id.get(..2).unwrap_or(id);
         self.content_root().join(prefix).join(id)
@@ -132,20 +111,20 @@ impl AttachmentStore for FileAttachmentStore {
             meta.type_metadata,
             meta.label,
         );
-        let path = self.path_for_id(GuardedAttachmentId::new(&meta.id));
+        let path = self.path_for_id(&meta.id);
         put_at_path(path, bytes, meta)
     }
 
     async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        get_at_path(self.path_for_id(GuardedAttachmentId::new(id)), id)
+        get_at_path(self.path_for_id(id), id)
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
-        delete_at_path(self.path_for_id(GuardedAttachmentId::new(id)))
+        delete_at_path(self.path_for_id(id))
     }
 
     async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
-        head_at_path(self.path_for_id(GuardedAttachmentId::new(id)), id)
+        head_at_path(self.path_for_id(id), id)
     }
 
     async fn list(&self) -> Result<Vec<StoredBlobRef>, AttachmentStoreError> {
@@ -184,37 +163,15 @@ impl AttachmentStore for FileAttachmentStore {
                     source,
                 })?;
                 let file_name = entry.file_name();
-                let entry_path = entry.path();
-                // A file this store never wrote cannot name an attachment, so
-                // it is not listed. It is also unreachable through `get` and
-                // invisible to reclamation, so say so rather than dropping it
-                // in silence: an operator has to know an untracked file is
-                // sitting in the content root.
-                let Some(name) = file_name.to_str() else {
-                    tracing::warn!(
-                        path = %entry_path.display(),
-                        reason = "file name is not valid UTF-8",
-                        "attachment store is skipping a content-root entry that cannot name an \
-                         attachment: it is unreachable and invisible to reclamation"
-                    );
-                    continue;
-                };
+                let name = file_name.to_str().ok_or_else(|| {
+                    AttachmentStoreError::Backend("invalid attachment filename encoding".into())
+                })?;
                 // Skip any in-flight staging files.
                 if name.contains(".staging.") {
                     continue;
                 }
-                let id = match AttachmentId::parse(name) {
-                    Ok(id) => id,
-                    Err(err) => {
-                        tracing::warn!(
-                            path = %entry_path.display(),
-                            reason = %err,
-                            "attachment store is skipping a content-root entry that cannot name an \
-                             attachment: it is unreachable and invisible to reclamation"
-                        );
-                        continue;
-                    }
-                };
+                let id = AttachmentId::parse(name)
+                    .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?;
                 let last_modified_epoch_ms = entry
                     .metadata()
                     .ok()
@@ -324,7 +281,6 @@ fn delete_at_path(path: PathBuf) -> Result<(), AttachmentStoreError> {
 mod tests {
     use super::*;
     use crate::{AttachmentTypeMetadata, MediaType};
-    use lash_sansio::sync::MutexExt;
     use std::collections::BTreeSet;
 
     fn meta() -> AttachmentCreateMeta {
@@ -333,10 +289,6 @@ mod tests {
             Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
             Some("pixel".to_string()),
         )
-    }
-
-    fn guarded(id: &AttachmentId) -> GuardedAttachmentId<'_> {
-        GuardedAttachmentId::new(id)
     }
 
     /// `path_for_id` joins the id straight into the store root, so it depends
@@ -390,7 +342,7 @@ mod tests {
         let store = FileAttachmentStore::new(temp.path());
         let reference = store.put(vec![9, 8, 7, 6], meta()).await.expect("put");
 
-        let final_path = store.path_for_id(guarded(&reference.id));
+        let final_path = store.path_for_id(&reference.id);
         assert!(final_path.exists(), "content file must be in place");
 
         let mut staging_files = Vec::new();
@@ -416,39 +368,19 @@ mod tests {
         assert_eq!(stored.bytes, vec![9, 8, 7, 6]);
     }
 
-    /// A file in the content root whose name cannot be an attachment id is
-    /// unreachable through `get` and invisible to reclamation. Listing it is
-    /// wrong, but skipping it silently makes it a permanent invisible orphan,
-    /// so the skip is announced.
+    /// Malformed stored ids are errors; listing must not silently lose blobs.
     #[tokio::test]
-    async fn file_store_announces_a_content_root_entry_it_cannot_name() {
+    async fn file_store_rejects_a_content_root_entry_it_cannot_name() {
         let temp = tempfile::tempdir().expect("tempdir");
         let store = FileAttachmentStore::new(temp.path());
-        let reference = store.put(vec![4, 5, 6], meta()).await.expect("put");
-        let content_root = temp.path().join("blake3");
-        let stray_dir = content_root.join("zz");
+        let stray_dir = temp.path().join("blake3/zz");
         fs::create_dir_all(&stray_dir).expect("mkdir stray prefix");
-        // A name no `put` could have produced: over the id length bound.
-        let stray = stray_dir.join("z".repeat(200));
-        fs::write(&stray, b"not an attachment").expect("seed stray file");
-
-        let (blobs, capture) = crate::runtime::tests::trace_capture::capturing(|| async {
-            store.list().await.expect("list")
-        })
-        .await;
-
-        assert_eq!(
-            blobs.iter().map(|blob| &blob.id).collect::<Vec<_>>(),
-            vec![&reference.id],
-            "a name that cannot be an attachment id must not be listed"
-        );
-        let announced = capture
-            .events
-            .lock_recover()
-            .iter()
-            .filter(|event| event.level == "WARN" && event.field("path").contains(&"z".repeat(200)))
-            .count();
-        assert_eq!(announced, 1, "the skipped entry must be announced once");
+        fs::write(stray_dir.join("z".repeat(200)), b"not an attachment").expect("seed stray file");
+        let error = store
+            .list()
+            .await
+            .expect_err("malformed id must fail listing");
+        assert!(matches!(error, AttachmentStoreError::Backend(_)));
     }
 
     // A stale staging file left by a crashed prior write must not block a
@@ -461,7 +393,7 @@ mod tests {
         let content_id = content_id(&[1, 1, 1]);
         let id = AttachmentId::parse(content_id.to_string())
             .expect("content id is a valid attachment id");
-        let final_path = store.path_for_id(guarded(&id));
+        let final_path = store.path_for_id(&id);
         let parent = final_path.parent().expect("parent");
         fs::create_dir_all(parent).expect("mkdir");
         // Seed a stale staging file with a plausible prior-crash name.
@@ -495,7 +427,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let store = FileAttachmentStore::new(temp.path());
         let reference = store.put(vec![2, 4, 6], meta()).await.expect("put");
-        let path = store.path_for_id(guarded(&reference.id));
+        let path = store.path_for_id(&reference.id);
 
         // Age the blob far into the past to make the refresh observable.
         let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000);
@@ -536,10 +468,7 @@ mod tests {
         let first = store.put(vec![7, 7, 7], meta()).await.expect("put first");
         let second = store.put(vec![7, 7, 7], meta()).await.expect("put second");
         assert_eq!(first.id, second.id);
-        assert_eq!(
-            store.path_for_id(guarded(&first.id)),
-            store.path_for_id(guarded(&second.id))
-        );
+        assert_eq!(store.path_for_id(&first.id), store.path_for_id(&second.id));
 
         let listed: BTreeSet<AttachmentId> = store
             .list()

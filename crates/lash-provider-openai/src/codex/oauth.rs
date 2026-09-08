@@ -4,6 +4,7 @@
 use base64::Engine;
 
 use lash_provider_auth::{OAuthError, now_secs, url_form_encode};
+use lash_sansio::Redacted;
 
 const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const CODEX_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
@@ -33,10 +34,10 @@ pub struct DeviceCode {
 
 #[derive(Debug)]
 pub struct CodexTokens {
-    pub access_token: String,
-    pub refresh_token: String,
+    pub access_token: Redacted,
+    pub refresh_token: Redacted,
     pub expires_at: u64,
-    pub account_id: Option<String>,
+    pub account_id: Option<Redacted>,
 }
 
 /// Request a device code from OpenAI for the Codex auth flow.
@@ -163,10 +164,10 @@ pub async fn exchange_code(code: &str, code_verifier: &str) -> Result<CodexToken
         .or_else(|| extract_account_id(&access_token));
 
     Ok(CodexTokens {
-        access_token,
-        refresh_token,
+        access_token: Redacted::new(access_token),
+        refresh_token: Redacted::new(refresh_token),
         expires_at: now + expires_in,
-        account_id,
+        account_id: account_id.map(Redacted::new),
     })
 }
 
@@ -213,10 +214,10 @@ pub async fn refresh_tokens(refresh: &str) -> Result<CodexTokens, OAuthError> {
         .or_else(|| extract_account_id(&access_token));
 
     Ok(CodexTokens {
-        access_token,
-        refresh_token,
+        access_token: Redacted::new(access_token),
+        refresh_token: Redacted::new(refresh_token),
         expires_at: now + expires_in,
-        account_id,
+        account_id: account_id.map(Redacted::new),
     })
 }
 

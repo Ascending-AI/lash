@@ -450,6 +450,11 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         &self,
         artifact: &ModuleArtifact,
     ) -> Result<(), ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(artifact.module_ref.as_str()) {
+            return Err(ArtifactStoreError::Backend(
+                "invalid module reference".into(),
+            ));
+        }
         let mut modules = self.modules.lock_recover();
         modules.insert(artifact.module_ref.clone(), Arc::new(artifact.clone()));
         Ok(())
@@ -459,6 +464,11 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         &self,
         module_ref: &ModuleRef,
     ) -> Result<Option<Arc<ModuleArtifact>>, ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(module_ref.as_str()) {
+            return Err(ArtifactStoreError::Backend(
+                "invalid module reference".into(),
+            ));
+        }
         let modules = self.modules.lock_recover();
         Ok(modules.get(module_ref).cloned())
     }
@@ -468,6 +478,11 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         owner_namespace: &str,
         artifact: &ModuleArtifact,
     ) -> Result<TriggerManifestReplacement, ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(owner_namespace) {
+            return Err(ArtifactStoreError::Backend(
+                "invalid artifact namespace key".into(),
+            ));
+        }
         let mut manifests = self.current_trigger_manifests.lock_recover();
         let previous = manifests.insert(
             owner_namespace.to_string(),
@@ -489,6 +504,11 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         &self,
         owner_namespace: &str,
     ) -> Result<Option<CurrentTriggerKeyManifest>, ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(owner_namespace) {
+            return Err(ArtifactStoreError::Backend(
+                "invalid artifact namespace key".into(),
+            ));
+        }
         Ok(self
             .current_trigger_manifests
             .lock_recover()
@@ -502,6 +522,11 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         _descriptor: &str,
         bytes: &[u8],
     ) -> Result<(), ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(artifact_ref) {
+            return Err(ArtifactStoreError::Backend(
+                "invalid artifact namespace key".into(),
+            ));
+        }
         self.artifacts
             .lock_recover()
             .insert(artifact_ref.to_string(), bytes.to_vec());
@@ -512,6 +537,11 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         &self,
         artifact_ref: &str,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(artifact_ref) {
+            return Err(ArtifactStoreError::Backend(
+                "invalid artifact namespace key".into(),
+            ));
+        }
         Ok(self.artifacts.lock_recover().get(artifact_ref).cloned())
     }
 }

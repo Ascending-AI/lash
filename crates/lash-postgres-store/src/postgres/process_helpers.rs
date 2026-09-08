@@ -27,6 +27,9 @@ pub(crate) async fn load_process_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &str,
 ) -> Result<Option<ProcessRecord>, PluginError> {
+    if let Some(reason) = crate::process_key::invalid_process_key_reason(process_id) {
+        return Err(PluginError::Session(reason.into()));
+    }
     let json: Option<String> = sqlx::query_scalar(
         "SELECT record_json
              FROM lash_processes
@@ -45,6 +48,9 @@ pub(crate) async fn load_process(
     pool: &PgPool,
     process_id: &str,
 ) -> Result<Option<ProcessRecord>, PluginError> {
+    if let Some(reason) = crate::process_key::invalid_process_key_reason(process_id) {
+        return Err(PluginError::Session(reason.into()));
+    }
     let json: Option<String> =
         sqlx::query_scalar("SELECT record_json FROM lash_processes WHERE process_id = $1")
             .bind(process_id)

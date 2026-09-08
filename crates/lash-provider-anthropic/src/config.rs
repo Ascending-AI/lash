@@ -12,7 +12,9 @@ pub(crate) static DEFAULT_HTTP_TRANSPORT: LazyLock<Arc<dyn LlmHttpTransport>> =
 /// Anthropic API (Claude) provider state and transport.
 #[derive(Clone, Debug)]
 pub struct AnthropicProvider {
-    pub api_key: String,
+    /// The API key. Redacted in every `Debug`/`Display` rendering; the
+    /// plaintext leaves the process only on the `x-api-key` request header.
+    pub api_key: Redacted,
     pub base_url: Option<String>,
     pub options: ProviderOptions,
     pub stream_termination: StreamTermination,
@@ -22,7 +24,7 @@ pub struct AnthropicProvider {
 impl AnthropicProvider {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            api_key: api_key.into(),
+            api_key: Redacted::new(api_key),
             base_url: None,
             options: ProviderOptions::default(),
             stream_termination: StreamTermination::RequireTerminalEvidence,
@@ -61,5 +63,18 @@ impl AnthropicProvider {
 
     pub fn into_components(self) -> ProviderComponents {
         ProviderComponents::new(Box::new(self))
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn anthropic_api_key_is_redacted_from_debug_output() {
+        let provider = AnthropicProvider::new("sk-ant-secret-sentinel");
+        let debug = format!("{provider:?}");
+        assert!(!debug.contains("sk-ant-secret-sentinel"), "leaked: {debug}");
+        assert!(debug.contains("[redacted]"));
     }
 }

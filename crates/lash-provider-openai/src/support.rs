@@ -36,6 +36,7 @@ pub(crate) use lash_llm_transport::{
     LlmHttpBody, LlmHttpMethod, LlmHttpRequest, LlmHttpTransport, ResponseMetadataCapture,
     first_header_value, header_contains, http_error_envelope, read_http_body_text,
 };
+pub(crate) use lash_sansio::Redacted;
 
 pub(crate) use crate::chat::*;
 pub(crate) use crate::common::*;

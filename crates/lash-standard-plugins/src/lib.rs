@@ -6,6 +6,7 @@ use lash_core::plugin::{PluginSpec, StaticPluginFactory};
 use lash_core::{ToolProvider, facade_support::PluginStack};
 use lash_plugin_process_controls::SessionProcessAdminPluginFactory;
 use lash_plugin_tool_output_budget::{ToolOutputBudgetPluginFactory, tool_output_budget_stack};
+use lash_sansio::Redacted;
 use lash_tools::shell::StandardShellPluginFactory;
 use lash_tools::web::{fetch_url_provider, web_search_provider};
 use rolling_history::RollingHistoryPluginFactory;
@@ -39,7 +40,8 @@ impl StandardContextApproach {
 #[derive(Clone, Debug)]
 pub struct StandardToolStackOptions {
     pub standard_context_approach: Option<StandardContextApproach>,
-    pub tavily_api_key: Option<String>,
+    /// The Tavily key. Redacted in every `Debug` rendering of the options.
+    pub tavily_api_key: Option<Redacted>,
     pub include_cancel_process: bool,
 }
 
@@ -94,8 +96,8 @@ fn push_local_runtime_tools(stack: &mut PluginStack, include_cancel_process: boo
     stack.push(Arc::new(StandardShellPluginFactory::new()));
 }
 
-fn push_web_tools(stack: &mut PluginStack, tavily_api_key: String) {
-    let search_key = tavily_api_key.clone();
+fn push_web_tools(stack: &mut PluginStack, tavily_api_key: Redacted) {
+    let search_key = tavily_api_key.expose_secret().to_string();
     stack.push(Arc::new(StaticPluginFactory::new(
         "search_web",
         PluginSpec::new()
@@ -103,9 +105,9 @@ fn push_web_tools(stack: &mut PluginStack, tavily_api_key: String) {
     )));
     stack.push(Arc::new(StaticPluginFactory::new(
         "fetch_url",
-        PluginSpec::new().with_tool_provider(
-            Arc::new(fetch_url_provider(tavily_api_key)) as Arc<dyn ToolProvider>
-        ),
+        PluginSpec::new().with_tool_provider(Arc::new(fetch_url_provider(
+            tavily_api_key.into_inner(),
+        )) as Arc<dyn ToolProvider>),
     )));
 }
 
@@ -162,7 +164,7 @@ mod tests {
     fn web_tools_are_explicitly_keyed() {
         let without_web = stack_ids(&standard_tool_stack(StandardToolStackOptions::default()));
         let with_web = stack_ids(&standard_tool_stack(StandardToolStackOptions {
-            tavily_api_key: Some("key".to_string()),
+            tavily_api_key: Some(Redacted::new("key")),
             ..Default::default()
         }));
 
@@ -208,5 +210,21 @@ mod tests {
         assert!(standard_names.contains(&"cancel_process".to_string()));
         assert!(rlm_names.contains(&"list_process_handles".to_string()));
         assert!(!rlm_names.contains(&"cancel_process".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn tavily_api_key_is_redacted_from_debug_output() {
+        let options = StandardToolStackOptions {
+            tavily_api_key: Some(Redacted::new("tavily-secret-sentinel")),
+            ..Default::default()
+        };
+        let debug = format!("{options:?}");
+        assert!(!debug.contains("tavily-secret-sentinel"), "leaked: {debug}");
+        assert!(debug.contains("[redacted]"));
     }
 }

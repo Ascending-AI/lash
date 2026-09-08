@@ -13,29 +13,16 @@ use lash_provider_auth::{
     classify_oauth_refresh_error,
 };
 
+use lash_sansio::Redacted;
+
 use super::oauth;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct CodexCredential {
-    pub(super) access_token: String,
-    pub(super) refresh_token: String,
+    pub(super) access_token: Redacted,
+    pub(super) refresh_token: Redacted,
     pub(super) expires_at: u64,
-    pub(super) account_id: Option<String>,
-}
-
-impl std::fmt::Debug for CodexCredential {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("CodexCredential")
-            .field("access_token", &"[REDACTED]")
-            .field("refresh_token", &"[REDACTED]")
-            .field("expires_at", &self.expires_at)
-            .field(
-                "account_id",
-                &self.account_id.as_ref().map(|_| "[REDACTED]"),
-            )
-            .finish()
-    }
+    pub(super) account_id: Option<Redacted>,
 }
 
 impl std::fmt::Display for CodexCredential {
@@ -62,7 +49,7 @@ impl CredentialRefresher<CodexCredential> for CodexCredentialRefresher {
         current: &CodexCredential,
         _cause: RefreshCause,
     ) -> Result<CodexCredential, CredentialError> {
-        let tokens = oauth::refresh_tokens(&current.refresh_token)
+        let tokens = oauth::refresh_tokens(current.refresh_token.expose_secret())
             .await
             .map_err(classify_oauth_refresh_error)?;
         Ok(CodexCredential {

@@ -35,6 +35,7 @@ where
     let second = make();
     assert_fresh_instances(&first, &second, "process_execution_env_store");
     drop((first, second));
+    super::hostile_input::process_environment_namespace(make()).await;
     process_env_round_trips(make()).await;
     process_env_overwrite(make()).await;
 }

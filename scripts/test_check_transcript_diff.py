@@ -115,8 +115,25 @@ class TranscriptDiffTests(IsolatedEnvironmentTestCase):
             with self.subTest(variable=name):
                 self.assertNotIn(name, os.environ)
 
+    def test_binary_diff_bytes_do_not_crash_or_loosen_the_gate(self) -> None:
+        binary_hunk = (
+            b"diff --git a/crates/x/tests/blob.rs b/crates/x/tests/blob.rs\n"
+            b"--- a/crates/x/tests/blob.rs\n"
+            b"+++ b/crates/x/tests/blob.rs\n"
+            b"@@ -0,0 +1 @@\n"
+            b"+// \xe2\x28\xa1\xff\x00 raw bytes\n"
+        )
+        completed = mock.Mock(stdout=binary_hunk + DURABLE_DIFF.encode("utf-8"))
+        with (
+            mock.patch.object(MODULE.subprocess, "run", return_value=completed),
+            mock.patch.dict(MODULE.os.environ, {"GITHUB_EVENT_PATH": ""}),
+        ):
+            exit_code = MODULE.main(["--enforce", "base...head"])
+
+        self.assertEqual(exit_code, 1)
+
     def test_enforcement_fails_an_unacknowledged_durable_change(self) -> None:
-        completed = mock.Mock(stdout=DURABLE_DIFF)
+        completed = mock.Mock(stdout=DURABLE_DIFF.encode("utf-8"))
         with (
             mock.patch.object(MODULE.subprocess, "run", return_value=completed),
             mock.patch.dict(MODULE.os.environ, {"GITHUB_EVENT_PATH": ""}),
@@ -126,7 +143,7 @@ class TranscriptDiffTests(IsolatedEnvironmentTestCase):
         self.assertEqual(exit_code, 1)
 
     def test_enforcement_accepts_a_named_pr_justification(self) -> None:
-        completed = mock.Mock(stdout=DURABLE_DIFF)
+        completed = mock.Mock(stdout=DURABLE_DIFF.encode("utf-8"))
         with tempfile.TemporaryDirectory() as directory:
             event_path = Path(directory) / "event.json"
             event_path.write_text(
@@ -155,7 +172,7 @@ class TranscriptDiffTests(IsolatedEnvironmentTestCase):
         # A workflow_dispatch payload carries no pull request at all, which is
         # what made the sanctioned recovery path unable to pass a gate the PR
         # body already satisfied.
-        completed = mock.Mock(stdout=DURABLE_DIFF)
+        completed = mock.Mock(stdout=DURABLE_DIFF.encode("utf-8"))
         with tempfile.TemporaryDirectory() as directory:
             event_path = Path(directory) / "event.json"
             event_path.write_text(
@@ -289,7 +306,7 @@ class TranscriptDiffTests(IsolatedEnvironmentTestCase):
     def test_a_dispatched_run_still_fails_without_a_justification(self) -> None:
         # The fallback must not become a way through: an open PR whose body
         # says nothing is the same answer as no PR.
-        completed = mock.Mock(stdout=DURABLE_DIFF)
+        completed = mock.Mock(stdout=DURABLE_DIFF.encode("utf-8"))
         with (
             mock.patch.object(MODULE.subprocess, "run", return_value=completed),
             mock.patch.dict(
@@ -313,7 +330,7 @@ class TranscriptDiffTests(IsolatedEnvironmentTestCase):
         self.assertEqual(exit_code, 1)
 
     def test_an_unreachable_api_fails_closed(self) -> None:
-        completed = mock.Mock(stdout=DURABLE_DIFF)
+        completed = mock.Mock(stdout=DURABLE_DIFF.encode("utf-8"))
         with (
             mock.patch.object(MODULE.subprocess, "run", return_value=completed),
             mock.patch.dict(
@@ -394,7 +411,7 @@ class TranscriptDiffTests(IsolatedEnvironmentTestCase):
         return respond
 
     def test_advisory_mode_reports_without_failing(self) -> None:
-        completed = mock.Mock(stdout=DURABLE_DIFF)
+        completed = mock.Mock(stdout=DURABLE_DIFF.encode("utf-8"))
         with mock.patch.object(MODULE.subprocess, "run", return_value=completed):
             exit_code = MODULE.main(["--advisory", "base...head"])
 

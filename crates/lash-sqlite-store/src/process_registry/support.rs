@@ -394,6 +394,9 @@ impl SqliteProcessRegistry {
         conn: &Connection,
         process_id: &str,
     ) -> Result<Option<ProcessRecord>, lash_core::PluginError> {
+        if let Some(reason) = crate::process_key::invalid_process_key_reason(process_id) {
+            return Err(lash_core::PluginError::Session(reason.into()));
+        }
         let json: Option<String> = conn
             .query_row(
                 "SELECT record_json FROM processes WHERE process_id = ?1",

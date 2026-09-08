@@ -2508,6 +2508,7 @@ dependencies = [
  "futures-util",
  "lash-internal-conformance",
  "lash-internal-core",
+ "lash-internal-sansio",
  "object_store",
  "tokio",
  "tracing",

@@ -26,6 +26,7 @@ testing = []
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 lash-core = { workspace = true }
+lash-sansio = { workspace = true }
 object_store = { workspace = true, default-features = false, features = ["aws"] }
 tracing = { workspace = true }
 url = "2"

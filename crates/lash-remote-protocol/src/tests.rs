@@ -192,6 +192,53 @@ fn remote_attachment_media_types_are_validated_syntactically() {
         .expect("arbitrary valid MIME is accepted");
 }
 
+#[test]
+fn remote_attachment_ref_rejects_every_hostile_id_shape() {
+    for raw in [
+        "../x",
+        "/abs",
+        "",
+        "a\0b",
+        &"a".repeat(129),
+        "é",
+        "e\u{301}",
+        "．．／x",
+    ] {
+        let wire = RemoteAttachmentRef {
+            id: raw.to_string(),
+            media_type: "image/png".to_string(),
+            byte_len: 0,
+            type_metadata: None,
+            label: None,
+        };
+        let request = serde_json::json!({
+            "protocol_version": REMOTE_PROTOCOL_VERSION,
+            "request_id": "hostile",
+            "scope": { "session_id": "session", "agent_frame_id": "frame", "request_id": "hostile" },
+            "model_intent": { "model": "model" },
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "attachment",
+                    "source": { "source": "stored", "attachment_ref": &wire }
+                }]
+            }]
+        });
+        let error = RemoteLlmRequest::decode_json(&serde_json::to_vec(&request).unwrap())
+            .expect_err("hostile id must fail the wire decoder itself");
+        assert!(matches!(
+            error,
+            RemoteProtocolError::InvalidAttachmentRef { .. }
+        ));
+        let error = lash_core::AttachmentRef::try_from(wire)
+            .expect_err("hostile id must fail remote conversion");
+        assert!(matches!(
+            error,
+            RemoteProtocolError::InvalidAttachmentRef { .. }
+        ));
+    }
+}
+
 /// A peer-supplied attachment id is untrusted. Before validation moved into
 /// `AttachmentId`, this wire conversion built one straight from the peer string
 /// and a `../`-shaped id travelled on as a well-formed-looking value; now it is

@@ -90,15 +90,24 @@ def default_range() -> str:
     return f"origin/{base}...HEAD" if base else DEFAULT_RANGE
 
 
+def decode_patch(raw: bytes) -> str:
+    # Diffs may embed non-UTF-8 payload bytes (e.g. committed fuzz corpus
+    # seeds). Decode leniently: the lines this gate inspects ("diff --git ",
+    # "+++ ", and the DURABLE_READ_FIXTURE_SCHEMA_VERSION constant) are always
+    # valid UTF-8, so replacement characters in payload lines cannot mask a
+    # durable-read fixture change or a missing schema-version bump.
+    return raw.decode("utf-8", errors="replace")
+
+
 def load_patch(args: argparse.Namespace) -> str:
     if args.diff_file is not None:
-        return args.diff_file.read_text(encoding="utf-8")
+        return decode_patch(args.diff_file.read_bytes())
     command = ["git", "diff", "--no-color", "--no-ext-diff"]
     if args.cached:
         command.append("--cached")
     else:
         command.append(args.revision_range or default_range())
-    return subprocess.run(command, check=True, capture_output=True, text=True).stdout
+    return decode_patch(subprocess.run(command, check=True, capture_output=True).stdout)
 
 
 def main(argv: list[str]) -> int:

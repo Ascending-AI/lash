@@ -3,6 +3,7 @@ use serde_json::json;
 
 use lash_core::{ToolCall, ToolDefinition, ToolFailure, ToolFailureClass, ToolOutcome, ToolValue};
 
+use lash_sansio::Redacted;
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt, execution_failure,
     non_empty_string, object_schema, retryable_io_failure, typed_args, typed_ok,
@@ -20,15 +21,16 @@ struct FetchUrlOutput {
 }
 
 /// Fetch a URL and return its content as text.
+#[derive(Debug)]
 pub struct FetchUrl {
-    api_key: String,
+    api_key: Redacted,
     client: reqwest::Client,
 }
 
 impl FetchUrl {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            api_key: api_key.into(),
+            api_key: Redacted::new(api_key),
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
@@ -59,7 +61,7 @@ impl StaticToolExecute for FetchUrl {
             return err;
         }
 
-        if self.api_key.trim().is_empty() {
+        if self.api_key.expose_secret().trim().is_empty() {
             return execution_failure(
                 "tavily_api_key_missing",
                 "Tavily API key is required for web.fetch",
@@ -67,7 +69,7 @@ impl StaticToolExecute for FetchUrl {
         }
 
         let body = json!({
-            "api_key": self.api_key,
+            "api_key": self.api_key.expose_secret(),
             "urls": [&args.url],
         });
 
@@ -233,5 +235,12 @@ mod tests {
         assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
         assert_eq!(failure.code, "invalid_tool_args");
         assert_eq!(failure.message, "Missing required parameter: url");
+    }
+    #[test]
+    fn fetch_url_api_key_is_redacted_from_debug_output() {
+        let tool = FetchUrl::new("tavily-secret-key");
+        let rendered = format!("{tool:?}");
+        assert!(!rendered.contains("tavily-secret-key"), "{rendered}");
+        assert!(rendered.contains("[redacted]"), "{rendered}");
     }
 }

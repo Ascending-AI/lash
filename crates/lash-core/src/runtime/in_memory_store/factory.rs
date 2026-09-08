@@ -188,6 +188,8 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+        crate::store::validate_session_id(&request.session_id)
+            .map_err(|error| error.to_string())?;
         Ok(self
             .open_existing_in_memory_store(request)
             .map(|store| store as Arc<dyn RuntimePersistence>))
@@ -197,6 +199,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         &self,
         session_id: &str,
     ) -> Result<Option<crate::SessionReadView>, crate::StoreError> {
+        crate::store::validate_session_id(session_id)?;
         let store = self.stores.lock_recover().get(session_id).cloned();
         let Some(store) = store else {
             return Ok(None);
@@ -227,6 +230,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         &self,
         session_id: &str,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+        crate::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
         Ok(self
             .stores
             .lock_recover()
@@ -240,6 +244,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         request: &SessionStoreCreateRequest,
         now_epoch_ms: u64,
     ) -> Result<Option<bool>, crate::StoreError> {
+        crate::store::validate_session_id(&request.session_id)?;
         let store = self.stores.lock_recover().get(&request.session_id).cloned();
         let Some(store) = store else {
             return Ok(Some(false));
@@ -263,6 +268,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
     }
 
     async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+        crate::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
         Ok(self.deleted_session_ids.lock_recover().contains(session_id))
     }
 
@@ -270,6 +276,8 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         &self,
         session_id: &str,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
+        crate::store::validate_session_id(session_id)
+            .map_err(crate::MaintenanceFailure::failed_before_any_work)?;
         let _transaction = self.write_transaction.lock_recover();
         let store = self.stores.lock_recover().get(session_id).cloned();
         if let Some(store) = store {

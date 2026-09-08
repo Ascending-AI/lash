@@ -301,6 +301,66 @@ class ProducerConclusionTests(unittest.TestCase):
         self.assertEqual([], self.evaluate(needs, "merge_group", False))
 
 
+class FuzzSmokeTests(unittest.TestCase):
+    def test_fuzz_smoke_is_gated_rust_and_trunk_only(self) -> None:
+        self.assertEqual("rust", ci_plan.GATED_JOBS.get("fuzz-smoke"))
+        self.assertIn("fuzz-smoke", ci_plan.TRUNK_ONLY_JOBS)
+
+    def test_fuzz_smoke_job_is_bounded_and_off_the_pr_critical_path(self) -> None:
+        workflow = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
+        job = workflow["fuzz-smoke"]
+        self.assertIn("timeout-minutes", job, "fuzz smoke must carry an explicit timeout")
+        self.assertIn("github.event_name != 'pull_request'", job["if"])
+        self.assertIn("github.event_name != 'merge_group'", job["if"])
+        self.assertIn("fuzz-smoke", workflow["ci-conclusion"]["needs"])
+
+    def test_fuzz_smoke_must_be_skipped_on_deferred_events(self) -> None:
+        for event in ("pull_request", "merge_group"):
+            needs = successful_needs()
+            needs["fuzz-smoke"]["result"] = "success"
+            for job in ci_plan.TRUNK_ONLY_JOBS - {"fuzz-smoke"}:
+                needs[job]["result"] = "skipped"
+            problems = ci_plan.evaluate_conclusion(needs, event_name=event)
+            self.assertTrue(any("fuzz-smoke" in problem for problem in problems))
+            needs["fuzz-smoke"]["result"] = "skipped"
+            self.assertEqual([], ci_plan.evaluate_conclusion(needs, event_name=event))
+
+    def test_fuzz_paths_are_known_to_the_classifier(self) -> None:
+        plan = ci_plan.classify(
+            [
+                ("M", "fuzz/fuzz_targets/remote_wire_dto.rs"),
+                ("A", "fuzz/corpus/remote_wire_dto/seed-turn-input.json"),
+            ]
+        )
+        self.assertEqual("false", plan["fail_open"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+
+    def test_committed_seed_corpus_is_present_and_non_empty(self) -> None:
+        import check_fuzz_corpus
+
+        targets = check_fuzz_corpus.fuzz_targets(
+            check_fuzz_corpus.FUZZ_MANIFEST.read_text(encoding="utf-8")
+        )
+        self.assertGreaterEqual(len(targets), 4)
+        self.assertEqual(
+            [], check_fuzz_corpus.corpus_problems(targets, check_fuzz_corpus.CORPUS_ROOT)
+        )
+
+    def test_missing_or_empty_seed_is_detected(self) -> None:
+        import tempfile
+
+        import check_fuzz_corpus
+
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_root = Path(tmp)
+            problems = check_fuzz_corpus.corpus_problems(["absent"], corpus_root)
+            self.assertTrue(any("missing corpus directory" in problem for problem in problems))
+            (corpus_root / "hollow").mkdir()
+            (corpus_root / "hollow" / "seed-empty").write_bytes(b"")
+            problems = check_fuzz_corpus.corpus_problems(["hollow"], corpus_root)
+            self.assertTrue(any("empty seed files" in problem for problem in problems))
+
+
 class WorkflowRegistrationTests(unittest.TestCase):
     def test_every_ci_job_is_registered_or_allowlisted(self) -> None:
         self.assertEqual(set(), unregistered_ci_jobs(CI_WORKFLOW.read_text(encoding="utf-8")))

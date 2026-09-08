@@ -374,6 +374,11 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
         env_ref: &ProcessExecutionEnvRef,
         bytes: &[u8],
     ) -> Result<(), crate::PluginError> {
+        if !crate::store::namespace::is_valid_opaque_key(env_ref.as_str()) {
+            return Err(crate::PluginError::Invoke(
+                "invalid process execution environment reference".into(),
+            ));
+        }
         self.envs
             .lock_recover()
             .insert(env_ref.as_str().to_string(), bytes.to_vec());
@@ -384,6 +389,11 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
         &self,
         env_ref: &ProcessExecutionEnvRef,
     ) -> Result<Option<Vec<u8>>, crate::PluginError> {
+        if !crate::store::namespace::is_valid_opaque_key(env_ref.as_str()) {
+            return Err(crate::PluginError::Invoke(
+                "invalid process execution environment reference".into(),
+            ));
+        }
         Ok(self.envs.lock_recover().get(env_ref.as_str()).cloned())
     }
 }

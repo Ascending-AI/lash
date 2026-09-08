@@ -137,10 +137,20 @@ while IFS= read -r -d '' path; do
   added_paths+=("${path}")
 done < "${tmp_dir}/added-paths"
 
-if ((${#added_paths[@]} > 200)); then
-  printf -v added_list "'%s', " "${added_paths[@]}"
+# Check C counts added files to catch accidental bulk additions (vendored
+# trees, build output). Committed fuzz seed corpora under fuzz/corpus/ are a
+# deliberate many-small-files surface (FIG-878), so they are exempt from the
+# count ONLY — Checks A, B, and D still apply to every corpus path.
+declare -a counted_paths=()
+for path in ${added_paths[@]+"${added_paths[@]}"}; do
+  if [[ "${path}" != fuzz/corpus/* ]]; then
+    counted_paths+=("${path}")
+  fi
+done
+if ((${#counted_paths[@]} > 200)); then
+  printf -v added_list "'%s', " "${counted_paths[@]}"
   added_list="${added_list%, }"
-  failures+=("Check C (added-file count) failed for ${#added_paths[@]} added paths: ${added_list}; reduce the change or use Bypass-Diff-Hygiene: <reason> / DIFF_HYGIENE_BYPASS=1.")
+  failures+=("Check C (added-file count) failed for ${#counted_paths[@]} added paths: ${added_list}; reduce the change or use Bypass-Diff-Hygiene: <reason> / DIFF_HYGIENE_BYPASS=1.")
 fi
 
 declare -a submodule_paths=()

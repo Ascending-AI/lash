@@ -3,7 +3,7 @@ use crate::support::*;
 impl OpenAiCompatibleProvider {
     pub fn new(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
         Self {
-            api_key: api_key.into(),
+            api_key: Redacted::new(api_key),
             base_url: base_url.into(),
             options: ProviderOptions::default(),
             compat: OpenAiCompat::default(),
@@ -110,7 +110,7 @@ impl Provider for OpenAiCompatibleProvider {
         let mut map = serde_json::Map::new();
         map.insert(
             "api_key".to_string(),
-            serde_json::Value::String(self.api_key.clone()),
+            serde_json::Value::String(self.api_key.expose_secret().to_string()),
         );
         map.insert(
             "base_url".to_string(),
@@ -168,7 +168,7 @@ impl Provider for OpenAiProvider {
         let mut map = serde_json::Map::new();
         map.insert(
             "api_key".to_string(),
-            serde_json::Value::String(self.inner.api_key.clone()),
+            serde_json::Value::String(self.inner.api_key.expose_secret().to_string()),
         );
         if !self.inner.options.is_default() {
             map.insert(
@@ -199,5 +199,23 @@ impl Provider for OpenAiProvider {
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
         Box::new(self.clone())
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn openai_api_keys_are_redacted_from_debug_output() {
+        let compatible =
+            OpenAiCompatibleProvider::new("sk-oai-secret-sentinel", "https://example.test");
+        let debug = format!("{compatible:?}");
+        assert!(!debug.contains("sk-oai-secret-sentinel"), "leaked: {debug}");
+        assert!(debug.contains("[redacted]"));
+
+        let openai = OpenAiProvider::new("sk-oai-secret-sentinel");
+        let debug = format!("{openai:?}");
+        assert!(!debug.contains("sk-oai-secret-sentinel"), "leaked: {debug}");
     }
 }
