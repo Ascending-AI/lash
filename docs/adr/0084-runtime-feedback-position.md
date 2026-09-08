@@ -1,4 +1,4 @@
-# 0083: Separate initial instructions from positional runtime feedback
+# 0084: Separate initial instructions from positional runtime feedback
 
 Status: Accepted (FIG-2505, 2026-09-08)
 

@@ -8,7 +8,7 @@ Application's rendered retry outcome and captured outgoing request, not exact
 model prose. Use `deepseek/deepseek-v4-flash` through the Workbench's OpenRouter
 route and record the served model from evidence.
 
-**Contract:** [ADR 0083](../../docs/adr/0083-runtime-feedback-position.md).
+**Contract:** [ADR 0084](../../docs/adr/0084-runtime-feedback-position.md).
 Initial instructions stay unchanged while output-limit feedback follows the
 partial answer that caused it. The tag is fallback and has no native authority.
 
