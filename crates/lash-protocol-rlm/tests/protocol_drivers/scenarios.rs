@@ -309,7 +309,7 @@ fn rlm_protocol_scenario_typed_prose_only_response_requests_finish() {
             checkpoints: vec![CheckpointKind::AfterWork],
             llm_call_count: Some(2),
             done: Some(false),
-            system_message_contains: vec!["explicit final value", "finish <value>"],
+            system_message_contains: vec!["No code from that response executed.", "finish <value>"],
             system_message_omits: vec!["required output schema"],
             ..RlmProtocolExpectations::default()
         })
@@ -328,7 +328,7 @@ fn rlm_protocol_scenario_finish_required_prose_at_max_turns_stops_without_retry_
         .expect(RlmProtocolExpectations {
             llm_call_count: Some(1),
             done: Some(true),
-            system_message_omits: vec!["explicit final value", "finish <value>"],
+            system_message_omits: vec!["No code from that response executed.", "finish <value>"],
             turn_outcome: Some(lash_core::facade_support::TurnOutcome::Stopped(
                 lash_core::facade_support::TurnStop::MaxTurns,
             )),

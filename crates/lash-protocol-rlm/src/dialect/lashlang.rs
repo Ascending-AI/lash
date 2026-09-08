@@ -112,13 +112,10 @@ impl RlmDialect for LashlangDialect {
         ))
     }
 
-    fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> &'static str {
+    fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> String {
         match termination {
-            lash_rlm_types::RlmTermination::FinishRequired { schema: Some(_) } => {
-                "This turn uses finish-required termination. Prose-only does not end the turn. Every non-terminal response must contain a paired `<lashlang>...</lashlang>` block that performs the next step; prose before the block is commentary/status only. Never say you will continue, inspect, patch, wait, monitor, validate, or retry unless the same response also contains the block that does it. The terminal response must be a paired `<lashlang>...</lashlang>` block that calls `finish <value>`, and `<value>` must match the REQUIRED OUTPUT contract."
-            }
-            lash_rlm_types::RlmTermination::FinishRequired { schema: None } => {
-                "This turn uses finish-required termination. Prose-only does not end the turn. Every non-terminal response must contain a paired `<lashlang>...</lashlang>` block that performs the next step; prose before the block is commentary/status only. Never say you will continue, inspect, patch, wait, monitor, validate, or retry unless the same response also contains the block that does it. The terminal response must be a paired `<lashlang>...</lashlang>` block that calls `finish <value>`. Use `finish null` only when null is intentional."
+            lash_rlm_types::RlmTermination::FinishRequired { schema } => {
+                self.finish_required_finalization(schema.is_some())
             }
             lash_rlm_types::RlmTermination::Natural => {
                 r#"This turn uses natural termination. Each assistant response must choose exactly one of these shapes:
@@ -142,7 +139,7 @@ result = format("Checked: {}", preview)
 print(result)
 </lashlang>
 
-Done. I inspected the value and summarized the result."#
+Done. I inspected the value and summarized the result."#.to_string()
             }
         }
     }
@@ -167,9 +164,9 @@ Done. I inspected the value and summarized the result."#
 
     fn finish_required_copy(&self, requires_schema: bool) -> String {
         if requires_schema {
-            "Deliver the final answer from a paired `<lashlang>...</lashlang>` block by calling `finish <value>` with a value matching the required output schema. Plain text before the block is recorded only as progress.".to_string()
+            "Call `finish <value>` inside a paired `<lashlang>...</lashlang>` block when the task is complete, with a value matching the required output schema.".to_string()
         } else {
-            "Your prose was recorded, but this turn requires an explicit final value. Add a paired `<lashlang>...</lashlang>` block containing `finish <value>`. Use `finish null` only when null is intentional.".to_string()
+            "Call `finish <value>` inside a paired `<lashlang>...</lashlang>` block when the task is complete. Use `finish null` only when null is intentional.".to_string()
         }
     }
 

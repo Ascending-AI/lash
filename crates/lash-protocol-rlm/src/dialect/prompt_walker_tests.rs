@@ -332,6 +332,12 @@ fn assembled_prompt_fragments(dialect: &dyn RlmDialect) -> Vec<(&'static str, St
             .finalization_copy(&lash_rlm_types::RlmTermination::Natural)
             .to_string(),
     ));
+    fragments.push((
+        "finalization (schema)",
+        dialect.finalization_copy(&lash_rlm_types::RlmTermination::FinishRequired {
+            schema: Some(serde_json::json!({"type": "number"})),
+        }),
+    ));
     fragments.push(("turn limit", dialect.turn_limit_final_copy(8)));
     fragments.push(("finish required", dialect.finish_required_copy(false)));
     fragments.push(("finish schema", dialect.finish_required_copy(true)));
@@ -592,4 +598,17 @@ fn every_accepted_construct_family_is_named_in_the_assembled_prompt() {
         29,
         "adding or removing a construct family is a deliberate change"
     );
+}
+
+#[test]
+fn composed_typescript_prompt_has_no_markdown_fences() {
+    let dialect = crate::dialect::typescript_test_dialect();
+    // The full-assembly fixture includes tool signatures, contracts, examples,
+    // host operations, and both natural and finish-required finalization.
+    for (name, fragment) in assembled_prompt_fragments(&dialect) {
+        assert!(
+            !fragment.contains("```"),
+            "TypeScript prompt fragment `{name}` contains a Markdown fence"
+        );
+    }
 }

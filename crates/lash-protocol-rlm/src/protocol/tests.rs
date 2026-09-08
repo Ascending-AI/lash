@@ -244,7 +244,7 @@ fn execution_section_makes_paired_lashlang_tag_contract_explicit() {
     assert!(section.contains("tag lines must be standalone after trimming"));
     assert!(section.contains("terminates the cell even inside a multiline string"));
     assert!(
-        section.contains("When action is needed, place the Lashlang block after any visible prose")
+        section.contains("When action is needed, place the lashlang block after any visible prose")
     );
     assert!(!section.contains("exactly one Lashlang block"));
     assert!(!section.contains("NEVER have multiple `<lashlang>` blocks"));

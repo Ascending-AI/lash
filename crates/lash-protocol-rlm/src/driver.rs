@@ -4,8 +4,8 @@ pub(crate) mod history;
 use std::sync::{Arc, RwLock};
 
 #[cfg(any(test, feature = "testing"))]
-use lash_core::llm::types::LlmContentBlock;
-use lash_core::llm::types::{LlmMessage, LlmRequestScope, LlmToolChoice};
+use lash_core::llm::types::{LlmContentBlock, LlmMessage};
+use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
 use lash_core::{
     LlmRequest, ProjectorContext, PromptContribution, PromptUsage, ProtocolBuildInput,
@@ -324,7 +324,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
                 turn_causes: ctx.turn_causes,
                 max_output_chars: self.max_output_chars,
                 protocol_iteration: ctx.protocol_iteration + 1,
-                finalization,
+                finalization: &finalization,
                 required_output: required_output.as_deref(),
                 final_answer_format: final_answer_format.as_deref(),
                 budget_suffix: budget_suffix.as_deref(),
@@ -466,7 +466,7 @@ fn compact_doc_line(value: &serde_json::Value) -> Option<String> {
 }
 
 #[cfg(test)]
-fn rlm_finalization_prompt(termination: &RlmTermination) -> &'static str {
+fn rlm_finalization_prompt(termination: &RlmTermination) -> String {
     LashlangDialect::prompt_only(LashlangSurface::default()).finalization_copy(termination)
 }
 
@@ -836,7 +836,7 @@ mod tests {
             turn_causes: &[],
             max_output_chars: 1000,
             protocol_iteration: 1,
-            finalization: rlm_finalization_prompt(&RlmTermination::default()),
+            finalization: &rlm_finalization_prompt(&RlmTermination::default()),
             required_output: None,
             final_answer_format: None,
             budget_suffix: None,
@@ -1186,7 +1186,7 @@ mod tests {
             turn_causes: &[],
             max_output_chars: 1000,
             protocol_iteration: 1,
-            finalization: rlm_finalization_prompt(&RlmTermination::default()),
+            finalization: &rlm_finalization_prompt(&RlmTermination::default()),
             required_output: None,
             final_answer_format: None,
             budget_suffix: None,
@@ -1226,7 +1226,7 @@ mod tests {
             turn_causes: std::slice::from_ref(&cause),
             max_output_chars: 1000,
             protocol_iteration: 0,
-            finalization: rlm_finalization_prompt(&RlmTermination::default()),
+            finalization: &rlm_finalization_prompt(&RlmTermination::default()),
             required_output: None,
             final_answer_format: None,
             budget_suffix: None,
@@ -1288,7 +1288,7 @@ mod tests {
             turn_causes: &[],
             max_output_chars: 1000,
             protocol_iteration: 1,
-            finalization: rlm_finalization_prompt(&RlmTermination::default()),
+            finalization: &rlm_finalization_prompt(&RlmTermination::default()),
             required_output: None,
             final_answer_format: None,
             budget_suffix: None,
@@ -1332,7 +1332,7 @@ mod tests {
             turn_causes: &[],
             max_output_chars: 1000,
             protocol_iteration: 2,
-            finalization: rlm_finalization_prompt(&RlmTermination::default()),
+            finalization: &rlm_finalization_prompt(&RlmTermination::default()),
             required_output: None,
             final_answer_format: None,
             budget_suffix: None,

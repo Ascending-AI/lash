@@ -199,9 +199,9 @@ impl TypescriptDialect {
                     )
                 })
                 .collect::<Vec<_>>()
-                .join("\n");
+                .join("\n    ");
             section.push_str(&format!(
-                "\n\nAwaited runtime operations, called as `await <module>.<operation>(input)`:\n\n```typescript\n{lines}\n```"
+                "\n\nAwaited runtime operations, called as `await <module>.<operation>(input)`:\n\n    {lines}"
             ));
         }
         if !inventory.data_types.is_empty() {
@@ -210,16 +210,14 @@ impl TypescriptDialect {
                 .iter()
                 .map(|(name, ty)| {
                     format!(
-                        "// {name}\ntype {} = {};",
+                        "// {name}\n    type {} = {};",
                         name.replace('.', "_"),
                         typescript_type(ty)
                     )
                 })
                 .collect::<Vec<_>>()
-                .join("\n");
-            section.push_str(&format!(
-                "\n\nNamed host data types:\n\n```typescript\n{lines}\n```"
-            ));
+                .join("\n    ");
+            section.push_str(&format!("\n\nNamed host data types:\n\n    {lines}"));
         }
         if !inventory.constructors.is_empty() {
             let lines = inventory
@@ -234,9 +232,9 @@ impl TypescriptDialect {
                     )
                 })
                 .collect::<Vec<_>>()
-                .join("\n");
+                .join("\n    ");
             section.push_str(&format!(
-                "\n\nPure value constructors. Never `await` these; use them wherever an expression is allowed:\n\n```typescript\n{lines}\n```"
+                "\n\nPure value constructors. Never `await` these; use them wherever an expression is allowed:\n\n    {lines}"
             ));
         }
         if !inventory.trigger_sources.is_empty() {
@@ -361,41 +359,40 @@ impl RlmDialect for TypescriptDialect {
                 ))
             })
             .collect::<Vec<_>>()
-            .join("\n");
+            .join("\n    ");
         let tools = if tools.is_empty() {
             "\n\nNo host tools are available in this turn.".to_string()
         } else {
             format!(
-                "\n\n### Tools\n\nEvery call requires `await` and returns the declared `Promise<T>`:\n\n```typescript\n{tools}\n```"
+                "\n\n### Tools\n\nEvery call requires `await` and returns the declared `Promise<T>`:\n\n    {tools}"
             )
         };
         let host_surface = self.render_host_surface_section(tool_catalog)?;
+        let response_shape = super::cell_response_shape(self.cell_tags(), self.prompt_vocabulary());
         let host_api = r#"## TypeScript execution
 
-Write one script inside standalone `<typescript>` and `</typescript>` lines. Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
+Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
 
 ### Host API
 
-```typescript
-interface ProcessDefinition<Input, Output> { readonly name: string }
-interface ProcessHandle<Output> extends PromiseLike<Output> { readonly id: string }
-declare const console: {
-  log(...values: unknown[]): void;
-  warn(...values: unknown[]): void;
-  error(...values: unknown[]): void;
-  info(...values: unknown[]): void;
-  debug(...values: unknown[]): void;
-};
-declare function print(value: unknown): void;
-declare function finish(value: unknown): never;
-declare function sleep(milliseconds: number): Promise<void>;
-declare function waitSignal(name: string): Promise<unknown>; // inside a defineProcess run body only
-declare function defineProcess<Input, Output>(config: { name: string; signals: Record<string, null>; run: (input: Input) => Promise<Output> }): ProcessDefinition<Input, Output>;
-declare function start<Input, Output>(process: ProcessDefinition<Input, Output>, args?: Record<string, unknown>): ProcessHandle<Output>;
-declare function wake(progress: unknown): void;
-declare function wake(handle: ProcessHandle<unknown>, signal: string, payload: unknown): void;
-declare function registerTrigger(config: { source: unknown; target: ProcessDefinition<unknown, unknown>; inputs: Record<string, unknown>; name?: string }): Promise<unknown>;
-```
+    interface ProcessDefinition<Input, Output> { readonly name: string }
+    interface ProcessHandle<Output> extends PromiseLike<Output> { readonly id: string }
+    declare const console: {
+      log(...values: unknown[]): void;
+      warn(...values: unknown[]): void;
+      error(...values: unknown[]): void;
+      info(...values: unknown[]): void;
+      debug(...values: unknown[]): void;
+    };
+    declare function print(value: unknown): void;
+    declare function finish(value: unknown): never;
+    declare function sleep(milliseconds: number): Promise<void>;
+    declare function waitSignal(name: string): Promise<unknown>; // inside a defineProcess run body only
+    declare function defineProcess<Input, Output>(config: { name: string; signals: Record<string, null>; run: (input: Input) => Promise<Output> }): ProcessDefinition<Input, Output>;
+    declare function start<Input, Output>(process: ProcessDefinition<Input, Output>, args?: Record<string, unknown>): ProcessHandle<Output>;
+    declare function wake(progress: unknown): void;
+    declare function wake(handle: ProcessHandle<unknown>, signal: string, payload: unknown): void;
+    declare function registerTrigger(config: { source: unknown; target: ProcessDefinition<unknown, unknown>; inputs: Record<string, unknown>; name?: string }): Promise<unknown>;
 
 Declare durable work only as a top-level `const p = defineProcess({ name: "literal", signals: { signal: null }, run: async (...) => { ... } })`. The keys of `start`'s second argument are the `run` function's own parameter names, not a fixed `input` field — `run: async (request: unknown)` is started as `start(p, { request: value })`, and any other key rejects; `registerTrigger`'s `inputs` keys work the same way. `await start(...)` waits for its result; an un-awaited handle can be signalled. In `run`, `wake(value)` emits progress, `await waitSignal("literal")` and `await sleep(ms)` suspend durably, `return` succeeds after enclosing `finally` blocks, and an uncaught `throw` fails. `waitSignal` is the only primitive above that is scoped to a process body: outside one it is refused as "`waitSignal` can only be used inside a process body", while `await sleep(ms)` is also valid in a cell. `await registerTrigger(...)` requires a literal process target. `Promise.all`/`Promise.allSettled` accept top-level tool promises and resolved values; `Promise.all` reports the first-settled rejection (v1 waits for every leaf before reporting).
 
@@ -409,16 +406,20 @@ Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), names
 
 ### Deterministic standard library"#;
         let stdlib = lash_typescript::render_stdlib_contract();
-        Ok(format!("{host_api}\n\n{stdlib}{tools}{host_surface}"))
+        let example =
+            "### Example cell\n\n<typescript>\nconst total = 1 + 2;\nfinish(total);\n</typescript>";
+        Ok(format!(
+            "{response_shape}\n{example}\n\n{host_api}\n\n{stdlib}{tools}{host_surface}"
+        ))
     }
 
-    fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> &'static str {
+    fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> String {
         match termination {
-            lash_rlm_types::RlmTermination::FinishRequired { .. } => {
-                "This turn requires a final value. Reply with one paired `<typescript>...</typescript>` block that calls `finish(value)`."
+            lash_rlm_types::RlmTermination::FinishRequired { schema } => {
+                self.finish_required_finalization(schema.is_some())
             }
             lash_rlm_types::RlmTermination::Natural => {
-                "Continue with one paired `<typescript>...</typescript>` block, or finish with prose and no block. A call to `finish(value)` returns a computed final value."
+                "Continue with one paired `<typescript>...</typescript>` block, or finish with prose and no block. A call to `finish(value)` returns a computed final value.".to_string()
             }
         }
     }
@@ -439,9 +440,9 @@ Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), names
 
     fn finish_required_copy(&self, requires_schema: bool) -> String {
         if requires_schema {
-            "Call `finish(value)` from one paired `<typescript>...</typescript>` block with a value matching the required output schema.".to_string()
+            "Call `finish(value)` inside a paired `<typescript>...</typescript>` block when the task is complete, with a value matching the required output schema.".to_string()
         } else {
-            "Call `finish(value)` from one paired `<typescript>...</typescript>` block.".to_string()
+            "Call `finish(value)` inside a paired `<typescript>...</typescript>` block when the task is complete. Use `finish(null)` only when null is intentional.".to_string()
         }
     }
 
@@ -1103,14 +1104,15 @@ mod tests {
             .split_once("### Tools")
             .expect("a catalog with tools renders a Tools section")
             .1;
-        let block = tools
-            .split_once("```typescript\n")
-            .expect("the Tools section renders a TypeScript block")
-            .1
-            .split_once("\n```")
-            .expect("the TypeScript block is closed")
-            .0;
-        block.lines().map(str::to_string).collect()
+        tools
+            .split("\n### ")
+            .next()
+            .unwrap()
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("declare "))
+            .map(str::to_string)
+            .collect()
     }
 
     /// The call path a rendered declaration advertises.

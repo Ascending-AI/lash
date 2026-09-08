@@ -86,14 +86,17 @@ pub(super) fn finish_required_reminder_message(
     id: String,
     requires_schema: bool,
 ) -> Message {
+    let tags = dialect.cell_tags();
+    let repair = format!(
+        "No code from that response executed. Markdown code fences do not execute here. Resend the needed program between `{}` and `{}` on their own lines, without backticks. {}",
+        tags.open,
+        tags.close,
+        dialect.finish_required_copy(requires_schema),
+    );
     Message {
         id: id.clone(),
         role: MessageRole::System,
-        parts: shared_parts(vec![Part::text(
-            format!("{id}.p0"),
-            dialect.finish_required_copy(requires_schema),
-            None,
-        )]),
+        parts: shared_parts(vec![Part::text(format!("{id}.p0"), repair, None)]),
         origin: Some(lash_core::MessageOrigin::Plugin {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
