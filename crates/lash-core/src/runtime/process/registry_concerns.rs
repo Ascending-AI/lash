@@ -833,3 +833,266 @@ pub trait ProcessClockRebind: Send + Sync {
         None
     }
 }
+
+/// Structural proof that the concerns are separable: a decorator composing
+/// only the observer concern (plus its declared [`ProcessQuery`] read
+/// dependency) carries no other concern's obligations. Forcing such a wrapper
+/// into an unrelated concern is a compile error:
+///
+/// ```compile_fail,E0277
+/// use lash_core::{
+///     PluginError, ProcessChange, ProcessChangeCursor, ProcessLiveReferenceView,
+///     ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessSessionDeleteReport,
+///     ProcessWorklistCursor, ProcessWorklistPage, SessionId,
+/// };
+/// use lash_core::{ProcessLeases, ProcessObserverRegistry, ProcessQuery};
+/// use std::num::NonZeroUsize;
+///
+/// struct ObserverOnly;
+///
+/// #[async_trait::async_trait]
+/// impl ProcessQuery for ObserverOnly {
+///     async fn get_process(&self, _: &str) -> Result<Option<ProcessRecord>, PluginError> {
+///         unimplemented!()
+///     }
+///     async fn list_processes(
+///         &self,
+///         _: &ProcessListFilter,
+///     ) -> Result<Vec<ProcessRecord>, PluginError> {
+///         unimplemented!()
+///     }
+///     async fn processes_changed_since(
+///         &self,
+///         _: ProcessChangeCursor,
+///         _: usize,
+///     ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
+///         unimplemented!()
+///     }
+///     async fn list_non_terminal_page(
+///         &self,
+///         _: NonZeroUsize,
+///         _: Option<ProcessWorklistCursor>,
+///     ) -> Result<ProcessWorklistPage, PluginError> {
+///         unimplemented!()
+///     }
+///     async fn live_reference_summary(
+///         &self,
+///     ) -> Result<Vec<ProcessLiveReferenceView>, PluginError> {
+///         unimplemented!()
+///     }
+///     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
+///         unimplemented!()
+///     }
+/// }
+///
+/// #[async_trait::async_trait]
+/// impl ProcessObserverRegistry for ObserverOnly {
+///     async fn add_observer(
+///         &self,
+///         _: &str,
+///         _: &str,
+///         _: ProcessObserverBy,
+///     ) -> Result<(), PluginError> {
+///         unimplemented!()
+///     }
+///     async fn remove_observer(
+///         &self,
+///         _: &str,
+///         _: &str,
+///         _: ProcessObserverBy,
+///     ) -> Result<(), PluginError> {
+///         unimplemented!()
+///     }
+///     async fn transfer_observers(
+///         &self,
+///         _: &str,
+///         _: &str,
+///         _: &[String],
+///         _: ProcessObserverBy,
+///     ) -> Result<(), PluginError> {
+///         unimplemented!()
+///     }
+///     async fn list_observed_by(&self, _: &str) -> Result<Vec<ProcessRecord>, PluginError> {
+///         unimplemented!()
+///     }
+///     async fn observers_for_process(&self, _: &str) -> Result<Vec<SessionId>, PluginError> {
+///         unimplemented!()
+///     }
+///     async fn retarget_subscription(&self, _: &str, _: Option<&str>) -> Result<(), PluginError> {
+///         unimplemented!()
+///     }
+///     async fn delete_session_process_state(
+///         &self,
+///         _: &str,
+///     ) -> Result<ProcessSessionDeleteReport, PluginError> {
+///         unimplemented!()
+///     }
+/// }
+///
+/// fn requires_leases<T: ProcessLeases>(_: &T) {}
+///
+/// // ERROR: the trait bound `ObserverOnly: ProcessLeases` is not satisfied.
+/// // An observer-only wrapper is not draggable into the lease concern.
+/// fn deny(wrapper: &ObserverOnly) {
+///     requires_leases(wrapper);
+/// }
+/// ```
+///
+/// The identical wrapper compiles and answers observer reads when the
+/// offending bound is absent; `concern_isolation_tests` below exercises that
+/// positive twin against the in-memory registry double.
+#[allow(dead_code)]
+fn concern_isolation_witness_docs() {}
+
+#[cfg(test)]
+mod concern_isolation_tests {
+    use super::*;
+    use crate::runtime::process::testing::TestLocalProcessRegistry;
+    use std::sync::Arc;
+
+    /// The positive twin of the module's `compile_fail` witness: a decorator
+    /// that composes only the observer concern (plus its declared
+    /// [`ProcessQuery`] read dependency) over an inner registry, implementing
+    /// nothing else — no leases, no wake outbox, no lifecycle, no retention.
+    struct ObserverOnly {
+        inner: Arc<TestLocalProcessRegistry>,
+    }
+
+    #[async_trait::async_trait]
+    impl ProcessQuery for ObserverOnly {
+        async fn get_process(
+            &self,
+            process_id: &str,
+        ) -> Result<Option<ProcessRecord>, PluginError> {
+            self.inner.get_process(process_id).await
+        }
+        async fn list_processes(
+            &self,
+            filter: &ProcessListFilter,
+        ) -> Result<Vec<ProcessRecord>, PluginError> {
+            self.inner.list_processes(filter).await
+        }
+        async fn processes_changed_since(
+            &self,
+            cursor: ProcessChangeCursor,
+            limit: usize,
+        ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
+            self.inner.processes_changed_since(cursor, limit).await
+        }
+        async fn list_non_terminal_page(
+            &self,
+            limit: NonZeroUsize,
+            continuation: Option<ProcessWorklistCursor>,
+        ) -> Result<ProcessWorklistPage, PluginError> {
+            self.inner.list_non_terminal_page(limit, continuation).await
+        }
+        async fn live_reference_summary(
+            &self,
+        ) -> Result<Vec<ProcessLiveReferenceView>, PluginError> {
+            self.inner.live_reference_summary().await
+        }
+        async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
+            self.inner.count_non_terminal_processes().await
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ProcessObserverRegistry for ObserverOnly {
+        async fn add_observer(
+            &self,
+            session_id: &str,
+            process_id: &str,
+            by: ProcessObserverBy,
+        ) -> Result<(), PluginError> {
+            self.inner.add_observer(session_id, process_id, by).await
+        }
+        async fn remove_observer(
+            &self,
+            session_id: &str,
+            process_id: &str,
+            by: ProcessObserverBy,
+        ) -> Result<(), PluginError> {
+            self.inner.remove_observer(session_id, process_id, by).await
+        }
+        async fn transfer_observers(
+            &self,
+            from_session_id: &str,
+            to_session_id: &str,
+            process_ids: &[String],
+            by: ProcessObserverBy,
+        ) -> Result<(), PluginError> {
+            self.inner
+                .transfer_observers(from_session_id, to_session_id, process_ids, by)
+                .await
+        }
+        async fn list_observed_by(
+            &self,
+            session_id: &str,
+        ) -> Result<Vec<ProcessRecord>, PluginError> {
+            self.inner.list_observed_by(session_id).await
+        }
+        async fn observers_for_process(
+            &self,
+            process_id: &str,
+        ) -> Result<Vec<SessionId>, PluginError> {
+            self.inner.observers_for_process(process_id).await
+        }
+        async fn retarget_subscription(
+            &self,
+            process_id: &str,
+            target: Option<&str>,
+        ) -> Result<(), PluginError> {
+            self.inner.retarget_subscription(process_id, target).await
+        }
+        async fn delete_session_process_state(
+            &self,
+            session_id: &str,
+        ) -> Result<ProcessSessionDeleteReport, PluginError> {
+            self.inner.delete_session_process_state(session_id).await
+        }
+    }
+
+    #[tokio::test]
+    async fn an_observer_only_wrapper_composes_without_any_other_concern() {
+        use super::super::model::{ProcessInput, ProcessProvenance, ProcessRegistration};
+        use crate::runtime::process::registry_concerns::ProcessRegistrar as _;
+
+        let inner = Arc::new(TestLocalProcessRegistry::default());
+        inner
+            .register_process(ProcessRegistration::new(
+                "proc-observer-isolation",
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryContract::ExternallyOwned,
+                ProcessProvenance::host(),
+            ))
+            .await
+            .expect("register");
+        let wrapper = ObserverOnly {
+            inner: Arc::clone(&inner),
+        };
+
+        wrapper
+            .add_observer(
+                "session-a",
+                "proc-observer-isolation",
+                ProcessObserverBy::host("op-observer-isolation"),
+            )
+            .await
+            .expect("add observer through the observer-only wrapper");
+        assert!(
+            wrapper
+                .is_observer("session-a", "proc-observer-isolation")
+                .await
+                .expect("is_observer provided method resolves through ProcessQuery"),
+            "observer edge added through the wrapper must be visible through it"
+        );
+        let observed = wrapper
+            .list_observed_by("session-a")
+            .await
+            .expect("list observed");
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].id, "proc-observer-isolation");
+    }
+}
