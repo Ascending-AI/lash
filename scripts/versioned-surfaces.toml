@@ -189,6 +189,48 @@ symbols = [
 ]
 
 [[surface]]
+constant = "RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION"
+constant_path = "crates/lash-core/src/store/semantic_boundary.rs"
+description = "canonical record-config semantic-boundary request encoding (FIG-2480)"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/store/semantic_boundary.rs"]
+symbols = [
+  "SemanticBoundaryRequestIntent",
+  "semantic_boundary_request_intent_encoding",
+  "semantic_boundary_request_identity",
+]
+
+[[surface]]
+constant = "CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION"
+constant_path = "crates/lash-core/src/store/semantic_boundary.rs"
+description = "canonical create-session semantic-boundary request encoding (FIG-2480)"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/store/semantic_boundary.rs"]
+symbols = [
+  "SemanticBoundaryRequestIntent",
+  "semantic_boundary_request_intent_encoding",
+  "semantic_boundary_request_identity",
+]
+
+[[surface]]
+constant = "USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION"
+constant_path = "crates/lash-core/src/store/semantic_boundary.rs"
+description = "canonical usage-ledger semantic-boundary request encoding (FIG-2480)"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/store/semantic_boundary.rs"]
+symbols = [
+  "SemanticBoundaryRequestIntent",
+  "semantic_boundary_request_intent_encoding",
+  "semantic_boundary_request_identity",
+]
+
+[[surface]]
 constant = "PROCESS_REGISTRATION_FAMILY_VERSION"
 constant_path = "crates/lash-core/src/runtime/process/validation.rs"
 description = "stable process-registration definition fingerprint"

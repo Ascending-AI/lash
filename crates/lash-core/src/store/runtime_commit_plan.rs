@@ -250,6 +250,12 @@ impl RuntimeCommitPlanner {
                     operation_key: self.operation_key.clone(),
                 })
             }
+            RuntimeCommitReceiptDecision::SemanticBoundaryIdentityConflict => {
+                Err(StoreError::SemanticBoundaryIdentityConflict {
+                    session_id: self.commit.session_id.clone(),
+                    operation_key: self.commit.turn_commit.operation.key.clone(),
+                })
+            }
             RuntimeCommitReceiptDecision::RuntimeCommitConflict => {
                 Err(StoreError::RuntimeTurnCommitConflict {
                     session_id: self.commit.session_id.clone(),

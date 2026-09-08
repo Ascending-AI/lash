@@ -748,6 +748,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 // Fresh-append ancestor fencing continues below, after receipt adjudication.
                 let append_request_identity =
                     lash_core::store_backend_support::decode_append_request_identity(
+                        &commit.turn_commit.operation.key,
                         stored_identity,
                         stored_version.map(i64::from),
                         stored_requested_node_count,
@@ -4105,7 +4106,8 @@ fn requested_append_ancestor(stamp: &lash_core::RuntimeTurnCommitStamp) -> Optio
             requested_ancestor_node_id,
             ..
         } => requested_ancestor_node_id.as_deref(),
-        lash_core::AppendRequestIdentity::PlainCommit => None,
+        lash_core::AppendRequestIdentity::PlainCommit
+        | lash_core::AppendRequestIdentity::SemanticBoundary { .. } => None,
     }
 }
 
@@ -4114,17 +4116,28 @@ type AppendIdentityColumns<'a> = (Option<&'a str>, Option<i64>, Option<i32>);
 fn append_identity_columns(
     identity: &lash_core::AppendRequestIdentity,
 ) -> Result<AppendIdentityColumns<'_>, StoreError> {
-    let lash_core::AppendRequestIdentity::Append {
-        encoding_version,
-        request_hash,
-        requested_node_count,
-        ..
-    } = identity
-    else {
-        return Ok((None, None, None));
+    // A semantic-boundary identity persists without a node count; the NULL
+    // count is what distinguishes its family on decode (FIG-2480).
+    let (encoding_version, request_hash, requested_node_count) = match identity {
+        lash_core::AppendRequestIdentity::PlainCommit => return Ok((None, None, None)),
+        lash_core::AppendRequestIdentity::Append {
+            encoding_version,
+            request_hash,
+            requested_node_count,
+            ..
+        } => (
+            *encoding_version,
+            request_hash.as_str(),
+            Some(*requested_node_count as i64),
+        ),
+        lash_core::AppendRequestIdentity::SemanticBoundary {
+            operation: _,
+            encoding_version,
+            request_hash,
+        } => (*encoding_version, request_hash.as_str(), None),
     };
     let encoding_version =
-        i32::try_from(*encoding_version).map_err(|_| StoreError::RecordEncodingFailed {
+        i32::try_from(encoding_version).map_err(|_| StoreError::RecordEncodingFailed {
             record_kind: "RuntimeCommitReceipt append identity".to_string(),
             message: format!(
                 "identity_encoding_version `{}` does not fit PostgreSQL INTEGER",
@@ -4132,8 +4145,8 @@ fn append_identity_columns(
             ),
         })?;
     Ok((
-        Some(request_hash.as_str()),
-        Some(*requested_node_count as i64),
+        Some(request_hash),
+        requested_node_count,
         Some(encoding_version),
     ))
 }

@@ -582,7 +582,10 @@ pub struct RuntimeCommitReceipt {
 ///
 /// A plain commit carries no append identity. An append carries its canonical
 /// version, hash, and node count as one variant; only the ancestor fence is
-/// genuinely optional.
+/// genuinely optional. A semantic boundary carries the FIG-2480 request-identity
+/// receipt for exactly the record-config, create-session, and usage-ledger
+/// operations: the operation is a typed field beside the versioned canonical
+/// request hash, never recoverable only from the hash.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AppendRequestIdentity {
@@ -602,6 +605,67 @@ pub enum AppendRequestIdentity {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         requested_ancestor_node_id: Option<String>,
     },
+    /// A non-append boundary request with a comparable versioned identity.
+    ///
+    /// Receipts under this identity answer "same request retried?" for the
+    /// operation named by the typed tag and never reconstruct requests
+    /// (store-as-continuation doctrine). One generic variant serves every
+    /// adopting operation; per-operation variants were rejected in the
+    /// FIG-869 ratification.
+    SemanticBoundary {
+        /// Operation family that owns this receipt identity.
+        operation: SemanticBoundaryOperation,
+        /// Version of that operation's canonical request encoding.
+        #[serde(rename = "identity_encoding_version")]
+        encoding_version: u32,
+        /// BLAKE3 identity of the canonical semantic boundary request.
+        #[serde(rename = "request_identity_hash")]
+        request_hash: String,
+    },
+}
+
+/// Boundary operations that adjudicate retries through a semantic-boundary
+/// receipt identity (FIG-2480).
+///
+/// This vocabulary is persisted replay identity: variants serialize as the
+/// exact operation-key strings and must never be renamed (ADR 0063 discipline
+/// applies). `commit_identity` accepts the identity for exactly these
+/// operations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum SemanticBoundaryOperation {
+    /// `record-config`: persist the materialized protocol configuration.
+    #[serde(rename = "record-config")]
+    RecordConfig,
+    /// `create-session`: register a newly materialized child session.
+    #[serde(rename = "create-session")]
+    CreateSession,
+    /// `usage-ledger`: flush staged child usage after its turn.
+    #[serde(rename = "usage-ledger")]
+    UsageLedger,
+}
+
+impl SemanticBoundaryOperation {
+    /// The [`OperationId::key`] this identity family is valid for.
+    pub fn operation_key(self) -> &'static str {
+        match self {
+            Self::RecordConfig => "record-config",
+            Self::CreateSession => "create-session",
+            Self::UsageLedger => "usage-ledger",
+        }
+    }
+
+    /// Resolve the typed operation family from a stored operation key.
+    ///
+    /// Returns `None` for every key outside the adopted set; callers refuse
+    /// the identity rather than guessing a family.
+    pub fn from_operation_key(key: &str) -> Option<Self> {
+        match key {
+            "record-config" => Some(Self::RecordConfig),
+            "create-session" => Some(Self::CreateSession),
+            "usage-ledger" => Some(Self::UsageLedger),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -649,6 +713,35 @@ impl RuntimeTurnCommitStamp {
     }
 }
 
+impl RuntimeCommit {
+    /// Stamp the semantic-boundary replay identity derived from this commit's
+    /// operation and canonical request content (FIG-2480).
+    ///
+    /// Call this as the final step of building a record-config,
+    /// create-session, or usage-ledger commit, after every semantic field is
+    /// in place: the identity hash is computed from the commit itself, and
+    /// store validation refuses a stamp that no longer matches the content it
+    /// rides with. Refuses every operation outside the adopted set.
+    pub fn stamp_semantic_boundary(&mut self) -> Result<(), StoreError> {
+        let operation =
+            SemanticBoundaryOperation::from_operation_key(&self.turn_commit.operation.key)
+                .ok_or_else(|| {
+                    StoreError::Backend(format!(
+                        "semantic-boundary receipt identity is not defined for operation `{}`",
+                        self.turn_commit.operation.key
+                    ))
+                })?;
+        let (encoding_version, request_hash) =
+            super::semantic_boundary::semantic_boundary_request_identity(self, operation)?;
+        self.turn_commit.append_request_identity = AppendRequestIdentity::SemanticBoundary {
+            operation,
+            encoding_version,
+            request_hash,
+        };
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -670,5 +763,64 @@ mod tests {
 
         serde_json::from_value::<RuntimeTurnCommitStamp>(json)
             .expect_err("append identity without its hash must be refused");
+    }
+
+    #[test]
+    fn semantic_boundary_wire_values_match_the_persisted_receipt_encoding() {
+        // Hand-spelled wire literals: this vocabulary is persisted replay
+        // identity, and a serde-rename drift would be globally self-consistent
+        // while silently orphaning every stored receipt.
+        for (operation, wire_operation) in [
+            (SemanticBoundaryOperation::RecordConfig, "record-config"),
+            (SemanticBoundaryOperation::CreateSession, "create-session"),
+            (SemanticBoundaryOperation::UsageLedger, "usage-ledger"),
+        ] {
+            let identity = AppendRequestIdentity::SemanticBoundary {
+                operation,
+                encoding_version: 1,
+                request_hash: "boundary-hash".to_string(),
+            };
+            let encoded = serde_json::to_value(&identity).expect("encode semantic identity");
+            assert_eq!(
+                encoded,
+                serde_json::json!({
+                    "kind": "semantic_boundary",
+                    "operation": wire_operation,
+                    "identity_encoding_version": 1,
+                    "request_identity_hash": "boundary-hash",
+                }),
+                "semantic-boundary wire shape moved for {wire_operation}"
+            );
+            let decoded: AppendRequestIdentity =
+                serde_json::from_value(encoded).expect("decode semantic identity");
+            assert_eq!(decoded, identity, "operation tag must round-trip");
+            assert_eq!(operation.operation_key(), wire_operation);
+            assert_eq!(
+                SemanticBoundaryOperation::from_operation_key(wire_operation),
+                Some(operation)
+            );
+        }
+    }
+
+    #[test]
+    fn semantic_boundary_identity_refuses_unknown_operations() {
+        assert_eq!(
+            SemanticBoundaryOperation::from_operation_key("append-session-nodes"),
+            None,
+            "append must never resolve to a semantic-boundary family"
+        );
+        serde_json::from_value::<AppendRequestIdentity>(serde_json::json!({
+            "kind": "semantic_boundary",
+            "operation": "initial-park",
+            "identity_encoding_version": 1,
+            "request_identity_hash": "boundary-hash",
+        }))
+        .expect_err("an unadopted operation tag must be refused at deserialization");
+        serde_json::from_value::<AppendRequestIdentity>(serde_json::json!({
+            "kind": "semantic_boundary",
+            "operation": "record-config",
+            "identity_encoding_version": 1,
+        }))
+        .expect_err("a semantic-boundary identity without its hash must be refused");
     }
 }

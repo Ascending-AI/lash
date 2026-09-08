@@ -1299,15 +1299,16 @@ pub fn append_session_nodes_to_state_with_clock(
 /// | append-session-nodes (turn draft) | Deduplicate within one physical turn draft | Local identity returns recorded outcome; enclosing turn owns persistence | No independent boundary receipt; outside non-append adoption |
 /// | preview (initial park) | Local hash input, never submitted | No store operation to replay | No speculative receipt |
 /// | initial-park | Persist dirty state on consuming park | Exact commit replays; changed content gets a different operation | Keep content-addressed identity; no rebuilt-request promise |
-/// | record-config | Persist materialized protocol configuration | Exact commit replays; rebuilt commit conflicts | Needs semantic receipt for lost-response rebuild; shape guard stops adoption |
+/// | record-config | Persist materialized protocol configuration | Semantic-boundary receipt replays same-request rebuilds; a differing canonical encoding is refused (FIG-2480) | Adopted: `SemanticBoundary` identity with a typed operation tag |
 /// | create-session | Create a new child; registered IDs are rejected | Exact commit replays; rebuilt commit conflicts | Needs semantic receipt plus host result recovery; shape guard stops adoption |
 /// | usage-ledger | Flush staged child usage after its turn | Exact commit replays; rebuilt commit conflicts | Needs semantic receipt for unconfirmed usage; shape guard stops adoption |
 ///
-/// Non-append writes currently require the original canonical commit for replay,
-/// excluding the optimistic head revision. Reconstructing from changed durable
-/// content is not supported by their plain-commit receipts. Do not infer host retry
-/// safety from this operation's stable scope. The existing serialized identity
-/// is an append-specific tagged union, not a generic request receipt.
+/// Plain-commit writes still require the original canonical commit for replay,
+/// excluding the optimistic head revision. Operations adopting the FIG-2480
+/// `SemanticBoundary` identity replay a rebuilt same-request retry from receipt
+/// evidence instead; a non-retry with a differing canonical encoding is refused,
+/// never silently deduplicated. Do not infer host retry safety from a stable
+/// scope alone: only the identity a commit carries decides.
 ///
 /// Frame open and extension apply are no longer callers of this seam. Remaining
 /// references are test helpers and witnesses, not additional production operations.

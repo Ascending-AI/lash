@@ -1201,14 +1201,15 @@ pub use store::{
     MaintenanceResult, MaintenanceStop, MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION,
     OperationId, OrphanedTurnInputScope, QueuedWorkClaimOutcome, QueuedWorkClaimRefusal,
     QueuedWorkStore, RuntimeCommit, RuntimePersistence, RuntimeTurnCommitStamp, RuntimeUsageDelta,
-    RuntimeUsageDeltaIdentity, ScanCoverage, SelectedQueuedWorkClaimOutcome, SessionAdmission,
-    SessionBinding, SessionBlobReclaimReport, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
-    SessionExecutionLeaseObservation, SessionExecutionLeaseRenewalInstallMismatch,
-    SessionExecutionLeaseStore, SessionMeta, SessionStateAdmission, StoreBackend, StoreError,
-    StoreMaintenance, StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-    StoreSchemaVerdict, TurnId, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
+    RuntimeUsageDeltaIdentity, ScanCoverage, SelectedQueuedWorkClaimOutcome,
+    SemanticBoundaryOperation, SessionAdmission, SessionBinding, SessionBlobReclaimReport,
+    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
+    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
+    SessionExecutionLeaseDisplacement, SessionExecutionLeaseObservation,
+    SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
+    SessionStateAdmission, StoreBackend, StoreError, StoreMaintenance, StorePreflight,
+    StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnId,
+    TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

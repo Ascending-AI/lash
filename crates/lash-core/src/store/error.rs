@@ -128,6 +128,19 @@ pub enum StoreError {
         session_id: String,
         operation_key: String,
     },
+    /// One semantic-boundary operation id was reused for different canonical
+    /// request content (FIG-2480).
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
+    /// return this refusal so a non-retry with a differing canonical encoding
+    /// is never silently deduplicated into a receipt replay.
+    #[error(
+        "semantic-boundary operation `{operation_key}` for session `{session_id}` was reused with different request content"
+    )]
+    SemanticBoundaryIdentityConflict {
+        session_id: String,
+        operation_key: String,
+    },
     /// A matching append receipt carries contradictory requested-node counts.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
@@ -501,6 +514,7 @@ impl StoreError {
                 "RuntimeCommitLeaseAuthorityConflict"
             }
             Self::AppendOperationIdentityConflict { .. } => "AppendOperationIdentityConflict",
+            Self::SemanticBoundaryIdentityConflict { .. } => "SemanticBoundaryIdentityConflict",
             Self::AppendReceiptRequestedNodeCountCorrupt { .. } => {
                 "AppendReceiptRequestedNodeCountCorrupt"
             }

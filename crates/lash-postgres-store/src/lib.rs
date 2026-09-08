@@ -292,7 +292,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 77 removes the unread process waiting projection and gives the whole
 // process registry family byte-order identifiers. Component-76 stores must be
 // recreated; there is no migration into this generation.
-const SCHEMA_VERSION: i32 = 77;
+// Version 78 admits semantic-boundary receipt identities (FIG-2480): the
+// runtime-turn-commit identity CHECK now accepts a populated hash and version
+// with a NULL requested-node count. Component-77 stores must be recreated;
+// there is no migration into this generation.
+const SCHEMA_VERSION: i32 = 78;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

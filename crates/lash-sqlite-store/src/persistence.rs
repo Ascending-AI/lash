@@ -683,6 +683,7 @@ impl SessionCommitStore for Store {
                             // The ancestor stays write-only because the request hash binds it.
                             let append_request_identity =
                                 lash_core::store_backend_support::decode_append_request_identity(
+                                    &commit.turn_commit.operation.key,
                                     stored_identity,
                                     stored_version,
                                     stored_requested_node_count,
@@ -4083,7 +4084,8 @@ fn requested_append_ancestor(stamp: &lash_core::RuntimeTurnCommitStamp) -> Optio
             requested_ancestor_node_id,
             ..
         } => requested_ancestor_node_id.as_deref(),
-        lash_core::AppendRequestIdentity::PlainCommit => None,
+        lash_core::AppendRequestIdentity::PlainCommit
+        | lash_core::AppendRequestIdentity::SemanticBoundary { .. } => None,
     }
 }
 
@@ -4100,6 +4102,17 @@ fn append_identity_columns(
         } => (
             Some(request_hash.as_str()),
             Some(*requested_node_count as i64),
+            Some(i64::from(*encoding_version)),
+        ),
+        // A semantic-boundary identity persists without a node count; the
+        // NULL count is what distinguishes its family on decode (FIG-2480).
+        lash_core::AppendRequestIdentity::SemanticBoundary {
+            operation: _,
+            encoding_version,
+            request_hash,
+        } => (
+            Some(request_hash.as_str()),
+            None,
             Some(i64::from(*encoding_version)),
         ),
     }

@@ -568,6 +568,9 @@ pub enum RuntimePersistenceLaw {
     append_request_receipt_rejects_changed_content,
     append_request_exact_hash_rejects_changed_ancestor,
     append_request_receipt_rejects_corrupt_node_count,
+    semantic_boundary_receipt_replays_after_head_advance,
+    semantic_boundary_receipt_rejects_changed_content,
+    semantic_boundary_receipt_rejects_mislabeled_identity,
     concurrent_same_append_operation_applies_exactly_once,
     legacy_append_receipt_keeps_exact_hash_semantics,
     append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics,
@@ -680,6 +683,9 @@ async fn runtime_persistence_suite<F>(
         RuntimePersistenceLaw::append_request_receipt_rejects_changed_content => { append_request_receipt_rejects_changed_content(make("root")).await; },
         RuntimePersistenceLaw::append_request_exact_hash_rejects_changed_ancestor => { append_request_exact_hash_rejects_changed_ancestor(make("root")).await; },
         RuntimePersistenceLaw::append_request_receipt_rejects_corrupt_node_count => { append_request_receipt_rejects_corrupt_node_count(make("root")).await; },
+        RuntimePersistenceLaw::semantic_boundary_receipt_replays_after_head_advance => { semantic_boundary_receipt_replays_after_head_advance(make("root")).await; },
+        RuntimePersistenceLaw::semantic_boundary_receipt_rejects_changed_content => { semantic_boundary_receipt_rejects_changed_content(make("root")).await; },
+        RuntimePersistenceLaw::semantic_boundary_receipt_rejects_mislabeled_identity => { semantic_boundary_receipt_rejects_mislabeled_identity(make("root")).await; },
         RuntimePersistenceLaw::concurrent_same_append_operation_applies_exactly_once => { concurrent_same_append_operation_applies_exactly_once(make("root")).await; },
         RuntimePersistenceLaw::legacy_append_receipt_keeps_exact_hash_semantics => { legacy_append_receipt_keeps_exact_hash_semantics(make("root")).await; },
         RuntimePersistenceLaw::append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics => { append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics(make("root")).await; },
@@ -1822,6 +1828,236 @@ async fn append_request_receipt_rejects_corrupt_node_count(store: Arc<dyn Runtim
             ..
         }
     ));
+}
+
+/// Adopted FIG-2480 semantic-boundary operations, paired with a distinct
+/// boundary id so each iteration owns its own receipt row.
+const SEMANTIC_BOUNDARY_OPERATIONS: [(&str, &str); 3] = [
+    ("record-config", "protocol-materialization"),
+    ("create-session", "semantic-child"),
+    ("usage-ledger", "semantic-child-turn"),
+];
+
+fn semantic_boundary_commit(
+    state: &RuntimeSessionState,
+    boundary_id: &str,
+    operation_key: &str,
+) -> RuntimeCommit {
+    let operation = lash_core::testing::conformance_support::boundary_operation(
+        &state.session_id,
+        boundary_id,
+        operation_key,
+    );
+    let mut commit =
+        RuntimeCommit::persisted_state_with_operation_for_testing(state, &[], operation);
+    commit
+        .stamp_semantic_boundary()
+        .expect("stamp semantic-boundary receipt identity");
+    commit
+}
+
+async fn semantic_boundary_receipt_replays_after_head_advance(store: Arc<dyn RuntimePersistence>) {
+    seed_append_receipt_state(&store).await;
+    for (key, boundary) in SEMANTIC_BOUNDARY_OPERATIONS {
+        let state = loaded_conformance_state(&store).await;
+        let first_commit = semantic_boundary_commit(&state, boundary, key);
+        let first_hash = first_commit
+            .turn_commit_hash()
+            .expect("first semantic hash");
+        let first = commit_runtime_state_for_test(&store, first_commit, "semantic-first")
+            .await
+            .expect("first semantic-boundary commit");
+
+        let mut advanced = loaded_conformance_state(&store).await;
+        let nodes = vec![crate::SessionAppendNode::plugin(
+            "semantic-boundary-advance",
+            serde_json::json!({ "advance": key }),
+        )];
+        let (advance_commit, _) =
+            append_request_commit(&mut advanced, &format!("advance-{key}"), &nodes, None);
+        commit_runtime_state_for_test(&store, advance_commit, "semantic-advance")
+            .await
+            .expect("advance head between semantic-boundary attempts");
+
+        let retry_state = loaded_conformance_state(&store).await;
+        let retry_commit = semantic_boundary_commit(&retry_state, boundary, key);
+        assert_ne!(
+            retry_commit
+                .turn_commit_hash()
+                .expect("retry semantic hash"),
+            first_hash,
+            "head movement must change the whole-commit hash; only the semantic identity replays"
+        );
+        let retry = store
+            .commit_runtime_state(retry_commit)
+            .await
+            .expect("rebuilt same-request semantic retry must replay");
+        assert!(
+            retry.receipt_replayed,
+            "{key} rebuilt retry must be answered from receipt evidence"
+        );
+        assert_eq!(retry.head_revision, first.head_revision);
+        assert_eq!(retry.checkpoint_ref, first.checkpoint_ref);
+    }
+}
+
+async fn semantic_boundary_receipt_rejects_changed_content(store: Arc<dyn RuntimePersistence>) {
+    seed_append_receipt_state(&store).await;
+    for (key, boundary) in SEMANTIC_BOUNDARY_OPERATIONS {
+        let state = loaded_conformance_state(&store).await;
+        let first = semantic_boundary_commit(&state, boundary, key);
+        commit_runtime_state_for_test(&store, first, "semantic-changed-first")
+            .await
+            .expect("first semantic-boundary commit");
+        let before = store
+            .load_session()
+            .await
+            .expect("load before semantic conflict")
+            .expect("semantic conflict session");
+
+        let retry_state = loaded_conformance_state(&store).await;
+        let operation = lash_core::testing::conformance_support::boundary_operation(
+            &retry_state.session_id,
+            boundary,
+            key,
+        );
+        let mut changed =
+            RuntimeCommit::persisted_state_with_operation_for_testing(&retry_state, &[], operation);
+        changed.config.provider_id = format!("changed-{key}");
+        changed
+            .stamp_semantic_boundary()
+            .expect("stamp changed semantic-boundary identity");
+        let error = store
+            .commit_runtime_state(changed)
+            .await
+            .expect_err("semantic-boundary reuse with different request content must be refused");
+        assert!(
+            matches!(
+                error,
+                StoreError::SemanticBoundaryIdentityConflict {
+                    ref session_id,
+                    ref operation_key,
+                } if session_id == "root" && operation_key == key
+            ),
+            "{key} differing canonical encoding must refuse, got {error:?}"
+        );
+        let after = store
+            .load_session()
+            .await
+            .expect("load after semantic conflict")
+            .expect("semantic conflict session");
+        assert_eq!(after.head_revision, before.head_revision);
+    }
+}
+
+async fn semantic_boundary_receipt_rejects_mislabeled_identity(store: Arc<dyn RuntimePersistence>) {
+    seed_append_receipt_state(&store).await;
+    for (key, boundary) in SEMANTIC_BOUNDARY_OPERATIONS {
+        // An Append-labeled identity on a semantic-boundary operation is refused.
+        let state = loaded_conformance_state(&store).await;
+        let operation = lash_core::testing::conformance_support::boundary_operation(
+            &state.session_id,
+            boundary,
+            key,
+        );
+        let mut appendish = RuntimeCommit::persisted_state_with_operation_for_testing(
+            &state,
+            &[],
+            operation.clone(),
+        );
+        appendish.turn_commit.append_request_identity = lash_core::AppendRequestIdentity::Append {
+            encoding_version: 1,
+            request_hash: "mislabeled-append".into(),
+            requested_node_count: 0,
+            requested_ancestor_node_id: None,
+        };
+        let error = store
+            .commit_runtime_state(appendish)
+            .await
+            .expect_err("append identity is operation-specific");
+        assert!(
+            matches!(
+                error,
+                StoreError::Backend(ref message)
+                    if message
+                        == &format!("append receipt identity metadata is invalid for operation `{key}`")
+            ),
+            "{key} append-labeled identity must refuse, got {error:?}"
+        );
+
+        // A semantic identity carrying a foreign operation tag is refused.
+        let mut foreign = semantic_boundary_commit(&state, boundary, key);
+        let lash_core::AppendRequestIdentity::SemanticBoundary {
+            operation: tag,
+            encoding_version,
+            request_hash,
+        } = foreign.turn_commit.append_request_identity.clone()
+        else {
+            panic!("semantic identity");
+        };
+        let wrong = match tag {
+            lash_core::SemanticBoundaryOperation::RecordConfig => {
+                lash_core::SemanticBoundaryOperation::CreateSession
+            }
+            lash_core::SemanticBoundaryOperation::CreateSession => {
+                lash_core::SemanticBoundaryOperation::UsageLedger
+            }
+            lash_core::SemanticBoundaryOperation::UsageLedger => {
+                lash_core::SemanticBoundaryOperation::RecordConfig
+            }
+        };
+        foreign.turn_commit.append_request_identity =
+            lash_core::AppendRequestIdentity::SemanticBoundary {
+                operation: wrong,
+                encoding_version,
+                request_hash,
+            };
+        let error = store
+            .commit_runtime_state(foreign)
+            .await
+            .expect_err("a foreign semantic-boundary operation tag must be refused");
+        assert!(
+            matches!(
+                error,
+                StoreError::Backend(ref message)
+                    if message
+                        == &format!(
+                            "semantic-boundary receipt identity `{}` is invalid for operation `{key}`",
+                            wrong.operation_key()
+                        )
+            ),
+            "{key} foreign tag must refuse, got {error:?}"
+        );
+    }
+
+    // A non-adopting operation cannot claim a semantic identity.
+    let state = loaded_conformance_state(&store).await;
+    let operation = lash_core::testing::conformance_support::boundary_operation(
+        &state.session_id,
+        "semantic-park",
+        "initial-park",
+    );
+    let mut park =
+        RuntimeCommit::persisted_state_with_operation_for_testing(&state, &[], operation);
+    park.turn_commit.append_request_identity = lash_core::AppendRequestIdentity::SemanticBoundary {
+        operation: lash_core::SemanticBoundaryOperation::RecordConfig,
+        encoding_version: 1,
+        request_hash: "foreign-family".into(),
+    };
+    let error = store
+        .commit_runtime_state(park)
+        .await
+        .expect_err("non-adopting operations must refuse semantic-boundary identities");
+    assert!(
+        matches!(
+            error,
+            StoreError::Backend(ref message)
+                if message
+                    == "semantic-boundary receipt identity `record-config` is invalid for \
+                        operation `initial-park`"
+        ),
+        "non-adopting operation must refuse the semantic family, got {error:?}"
+    );
 }
 
 /// Prove that a SQL backend refuses a receipt whose stored append-identity

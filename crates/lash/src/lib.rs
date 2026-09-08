@@ -308,8 +308,9 @@ pub mod persistence {
         HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId,
         OrphanedTurnInputScope, PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt,
         RuntimePersistenceDecorator, RuntimeTurnCommitStamp, RuntimeUsageDelta,
-        RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionHead, SessionHeadMeta,
-        SessionHeadPayload, commit_runtime_state_verified, load_persisted_session_state,
+        RuntimeUsageDeltaIdentity, SemanticBoundaryOperation, SessionCheckpoint, SessionHead,
+        SessionHeadMeta, SessionHeadPayload, commit_runtime_state_verified,
+        load_persisted_session_state,
     };
     /// Test-only store hooks and the conformance-suite handle types that
     /// carry them (`testing` feature only; no production trait requires them).

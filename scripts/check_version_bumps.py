@@ -71,6 +71,19 @@ REGISTRATION_BASELINES = {
     "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
         "sha256:bcb22b869fe0b86eb9a507b5f1841b733360cfba1164a407d189648998cf1dc9"
     ),
+    # FIG-2480: enrolment of the three semantic-boundary canonical request
+    # encodings, born at version 1 in the change that introduced them. The
+    # three constants share one guarded shape (the shared request projection
+    # hashed under operation-owned domains), so they carry one fingerprint.
+    "crates/lash-core/src/store/semantic_boundary.rs:RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:effaa339e47be7ee88a905552f405a8eb75d0ac2e22c0c0fa099251964140614"
+    ),
+    "crates/lash-core/src/store/semantic_boundary.rs:CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:effaa339e47be7ee88a905552f405a8eb75d0ac2e22c0c0fa099251964140614"
+    ),
+    "crates/lash-core/src/store/semantic_boundary.rs:USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:effaa339e47be7ee88a905552f405a8eb75d0ac2e22c0c0fa099251964140614"
+    ),
 }
 
 # Burned one-time proofs that a change moved Rust identifiers across a guarded

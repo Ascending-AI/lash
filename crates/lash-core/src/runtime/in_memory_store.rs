@@ -1162,7 +1162,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             | crate::AppendRequestIdentity::Append {
                 requested_ancestor_node_id: None,
                 ..
-            } => true,
+            }
+            | crate::AppendRequestIdentity::SemanticBoundary { .. } => true,
         };
         let mut proposed = self.global_session_graph.lock_recover().clone();
         proposed.extend_node_records(commit.graph.nodes.iter().cloned());

@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 77.
+-- lash-postgres-store schema, component version 78.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -171,9 +171,12 @@ CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits (
     requested_node_count BIGINT,
     identity_encoding_version INTEGER,
     PRIMARY KEY (session_id, turn_id),
+    -- Identity families: all-NULL is a plain commit; hash+version+count is an
+    -- append identity; hash+version without a count is a semantic-boundary
+    -- identity (FIG-2480). A count without a hash is representable nowhere.
     CHECK (
-        (request_identity_hash IS NULL) = (requested_node_count IS NULL)
-        AND (request_identity_hash IS NULL) = (identity_encoding_version IS NULL)
+        (request_identity_hash IS NULL) = (identity_encoding_version IS NULL)
+        AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL)
     )
 );
 
@@ -593,7 +596,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 77)
+VALUES ('lash-postgres-store', 78)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

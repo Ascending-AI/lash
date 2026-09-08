@@ -689,4 +689,90 @@ pub(crate) fn store_area_facade_witnesses() {
     fn method_witness_0644<T: lash::persistence::TurnInputStore>() {
         member_witness(T::turn_cancel_request);
     }
+    // FIG-2105-WITNESS-0645: lash::persistence::AppendRequestIdentity::SemanticBoundary [variant]
+    variant_witness(|value: &lash::persistence::AppendRequestIdentity| {
+        matches!(
+            value,
+            lash::persistence::AppendRequestIdentity::SemanticBoundary { .. }
+        )
+    });
+    // FIG-2105-WITNESS-0646: lash::persistence::AppendRequestIdentity::SemanticBoundary::operation [field]
+    field_witness(|value: &lash::persistence::AppendRequestIdentity| {
+        if let lash::persistence::AppendRequestIdentity::SemanticBoundary { operation, .. } = value
+        {
+            let _ = operation;
+        }
+    });
+    // FIG-2105-WITNESS-0647: lash::persistence::AppendRequestIdentity::SemanticBoundary::encoding_version [field]
+    field_witness(|value: &lash::persistence::AppendRequestIdentity| {
+        if let lash::persistence::AppendRequestIdentity::SemanticBoundary {
+            encoding_version, ..
+        } = value
+        {
+            let _ = encoding_version;
+        }
+    });
+    // FIG-2105-WITNESS-0648: lash::persistence::AppendRequestIdentity::SemanticBoundary::request_hash [field]
+    field_witness(|value: &lash::persistence::AppendRequestIdentity| {
+        if let lash::persistence::AppendRequestIdentity::SemanticBoundary { request_hash, .. } =
+            value
+        {
+            let _ = request_hash;
+        }
+    });
+    // FIG-2105-WITNESS-0649: lash::persistence::SemanticBoundaryOperation [enum]
+    type_witness::<lash::persistence::SemanticBoundaryOperation>();
+    // FIG-2105-WITNESS-0650: lash::persistence::SemanticBoundaryOperation::RecordConfig [variant]
+    variant_witness(|value: &lash::persistence::SemanticBoundaryOperation| {
+        matches!(
+            value,
+            lash::persistence::SemanticBoundaryOperation::RecordConfig
+        )
+    });
+    // FIG-2105-WITNESS-0651: lash::persistence::SemanticBoundaryOperation::CreateSession [variant]
+    variant_witness(|value: &lash::persistence::SemanticBoundaryOperation| {
+        matches!(
+            value,
+            lash::persistence::SemanticBoundaryOperation::CreateSession
+        )
+    });
+    // FIG-2105-WITNESS-0652: lash::persistence::SemanticBoundaryOperation::UsageLedger [variant]
+    variant_witness(|value: &lash::persistence::SemanticBoundaryOperation| {
+        matches!(
+            value,
+            lash::persistence::SemanticBoundaryOperation::UsageLedger
+        )
+    });
+    // FIG-2105-WITNESS-0653: lash::persistence::SemanticBoundaryOperation::operation_key [function]
+    member_witness(lash::persistence::SemanticBoundaryOperation::operation_key);
+    // FIG-2105-WITNESS-0654: lash::persistence::SemanticBoundaryOperation::from_operation_key [function]
+    member_witness(lash::persistence::SemanticBoundaryOperation::from_operation_key);
+    // FIG-2105-WITNESS-0655: lash::persistence::RuntimeCommit::stamp_semantic_boundary [function]
+    member_witness(lash::persistence::RuntimeCommit::stamp_semantic_boundary);
+    // FIG-2105-WITNESS-0656: lash::persistence::StoreError::SemanticBoundaryIdentityConflict [variant]
+    variant_witness(|value: &lash::persistence::StoreError| {
+        matches!(
+            value,
+            lash::persistence::StoreError::SemanticBoundaryIdentityConflict { .. }
+        )
+    });
+    // FIG-2105-WITNESS-0657: lash::persistence::StoreError::SemanticBoundaryIdentityConflict::session_id [field]
+    field_witness(|value: &lash::persistence::StoreError| {
+        if let lash::persistence::StoreError::SemanticBoundaryIdentityConflict {
+            session_id, ..
+        } = value
+        {
+            let _ = session_id;
+        }
+    });
+    // FIG-2105-WITNESS-0658: lash::persistence::StoreError::SemanticBoundaryIdentityConflict::operation_key [field]
+    field_witness(|value: &lash::persistence::StoreError| {
+        if let lash::persistence::StoreError::SemanticBoundaryIdentityConflict {
+            operation_key,
+            ..
+        } = value
+        {
+            let _ = operation_key;
+        }
+    });
 }

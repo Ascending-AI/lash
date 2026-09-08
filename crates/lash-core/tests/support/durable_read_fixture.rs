@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 51;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 52;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -73,6 +73,7 @@ pub struct ExpectedFixture {
     pub node_ids_in_read_order: Vec<String>,
     pub current_append_retry: RuntimeCommit,
     pub legacy_commit_retry: RuntimeCommit,
+    pub record_config_retry: RuntimeCommit,
     pub queue_batch_id: String,
     pub pending_input_id: String,
     pub process_env_ref: ProcessExecutionEnvRef,
@@ -90,7 +91,7 @@ fn assert_fixture_schema_version(found: u32) {
 
 #[test]
 fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
-    const PREDECESSOR: u32 = 50;
+    const PREDECESSOR: u32 = 51;
     assert_eq!(
         PREDECESSOR + 1,
         DURABLE_READ_FIXTURE_SCHEMA_VERSION,
@@ -179,6 +180,25 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .commit_runtime_state(legacy_commit_retry.clone())
         .await
         .expect("commit supported NULL-identity legacy-shaped receipt");
+
+    let record_config_state =
+        lash_core::store::load_persisted_session_state(handles.runtime.as_ref())
+            .await
+            .expect("load fixture state before semantic-boundary commit")
+            .expect("fixture session exists before semantic-boundary commit");
+    let mut record_config_retry = RuntimeCommit::persisted_state_with_operation_for_testing(
+        &record_config_state,
+        &[],
+        fixture_record_config_operation(),
+    );
+    record_config_retry
+        .stamp_semantic_boundary()
+        .expect("stamp fixture semantic-boundary identity");
+    handles
+        .runtime
+        .commit_runtime_state(record_config_retry.clone())
+        .await
+        .expect("commit fixture semantic-boundary receipt");
 
     let committed = handles
         .runtime
@@ -532,6 +552,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             .collect(),
         current_append_retry,
         legacy_commit_retry,
+        record_config_retry,
         queue_batch_id: queued.batch_id,
         pending_input_id: pending.input_id,
         process_env_ref,
@@ -731,6 +752,60 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
                 .clone()
         ],
         "durable fixture identity drift: usage receipt identity changed"
+    );
+    let semantic_replay = handles
+        .runtime
+        .commit_runtime_state(expected.record_config_retry.clone())
+        .await
+        .expect("durable fixture identity drift: semantic-boundary receipt no longer replays");
+    assert!(
+        semantic_replay.receipt_replayed,
+        "durable fixture identity drift: semantic-boundary receipt was applied instead of replayed"
+    );
+    // FIG-2480: a same-request retry REBUILT at today's (advanced) head must be
+    // answered from the durable receipt evidence, not refused for its moved
+    // whole-commit hash.
+    let rebuilt_state = lash_core::store::load_persisted_session_state(handles.runtime.as_ref())
+        .await
+        .expect("durable fixture drift: reload for semantic-boundary rebuild failed")
+        .expect("durable fixture drift: session disappeared before semantic-boundary rebuild");
+    let mut rebuilt_retry = RuntimeCommit::persisted_state_with_operation_for_testing(
+        &rebuilt_state,
+        &[],
+        fixture_record_config_operation(),
+    );
+    rebuilt_retry
+        .stamp_semantic_boundary()
+        .expect("stamp rebuilt fixture semantic-boundary identity");
+    let rebuilt_replay = handles
+        .runtime
+        .commit_runtime_state(rebuilt_retry)
+        .await
+        .expect(
+            "durable fixture identity drift: rebuilt semantic-boundary retry no longer replays",
+        );
+    assert!(
+        rebuilt_replay.receipt_replayed,
+        "durable fixture identity drift: rebuilt semantic-boundary retry was applied instead of \
+         replayed"
+    );
+    let mut changed_retry = RuntimeCommit::persisted_state_with_operation_for_testing(
+        &rebuilt_state,
+        &[],
+        fixture_record_config_operation(),
+    );
+    changed_retry.config.provider_id = "durable-read-changed-provider".to_string();
+    changed_retry
+        .stamp_semantic_boundary()
+        .expect("stamp changed fixture semantic-boundary identity");
+    let refused = handles.runtime.commit_runtime_state(changed_retry).await;
+    assert!(
+        matches!(
+            refused,
+            Err(StoreError::SemanticBoundaryIdentityConflict { .. })
+        ),
+        "durable fixture identity drift: differing semantic-boundary content was not refused: \
+         {refused:?}"
     );
 
     let queued = handles
@@ -1367,6 +1442,15 @@ fn fixture_effect_envelope() -> RuntimeEffectEnvelope {
             language: "fixture".to_string(),
             code: "return 887".to_string(),
         },
+    )
+}
+
+fn fixture_record_config_operation() -> OperationId {
+    OperationId::new(
+        ExecutionScope::runtime_operation(format!(
+            "session:{SESSION_ID}:boundary:protocol-materialization"
+        )),
+        "record-config",
     )
 }
 
