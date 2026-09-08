@@ -259,7 +259,7 @@ pub(crate) async fn complete(
     // Clone only request-building configuration, never a retained resume state
     // or the request's resolved attachment buffers. Move the request to work.
     let builder = OpenAiCompatibleProvider {
-        api_key: String::new(),
+        api_key: String::new().into(),
         base_url: provider.base_url.clone(),
         options: provider.options.clone(),
         compat: provider.compat.clone(),
