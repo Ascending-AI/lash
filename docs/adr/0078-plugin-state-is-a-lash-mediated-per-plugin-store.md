@@ -206,10 +206,8 @@ Two edges, both ruled:
 - **`set` never compares values.** Writing an identical value bumps. This is
   salsa's conservatism, adopted deliberately: value equality on arbitrary JSON
   is a cost paid on every write to avoid a cost paid at most once per boundary,
-  and the content-addressed component (section 6) already collapses the
-  identical-bytes case to an unchanged reference. A spurious bump costs one
-  re-encode and yields the same `BlobRef`, the same descriptor, and the same
-  commit identity.
+  and the generation is encoded in the component body (section 6). An equal
+  write therefore changes the `BlobRef`, descriptor, and commit identity.
 - **`remove` of an absent key is a no-op** and does not bump, returning the
   unchanged generation. This is a membership check, not a value comparison — it
   is free, exact, and prevents a plugin's idempotent cleanup path from forcing a

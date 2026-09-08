@@ -178,6 +178,7 @@ where
     Ok(out)
 }
 
+#[derive(Clone)]
 pub struct PluginSession {
     pub(super) state: Arc<std::sync::Mutex<PluginStateRegistry>>,
     pub(super) host: PluginHost,
@@ -646,8 +647,16 @@ impl PluginSession {
         policy
     }
 
-    /// Capture every namespace, including state belonging to absent plugins.
+    /// Host handles capture every namespace. Plugin-facing handles export none.
     pub fn export_state(&self) -> PluginState {
+        if self.host.export_plugin_namespaces {
+            self.capture_state()
+        } else {
+            PluginState::default()
+        }
+    }
+
+    pub(crate) fn capture_state(&self) -> PluginState {
         self.state.lock_recover().data.clone()
     }
 
@@ -687,7 +696,7 @@ impl PluginSession {
         session_id: impl Into<String>,
         config: super::SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
-        let snapshot = self.export_state();
+        let snapshot = self.capture_state();
         self.host.build_forked_session_with_parent_and_overlay(
             session_id,
             None,
@@ -704,7 +713,7 @@ impl PluginSession {
         parent_session_id: Option<String>,
         config: super::SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
-        let snapshot = self.export_state();
+        let snapshot = self.capture_state();
         self.host.build_forked_session_with_parent_and_overlay(
             session_id,
             parent_session_id,
@@ -721,7 +730,7 @@ impl PluginSession {
         tool_catalog_overlay: ToolCatalogContribution,
         config: super::SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
-        let snapshot = self.export_state();
+        let snapshot = self.capture_state();
         self.host.build_forked_session_with_parent_and_overlay(
             session_id,
             None,

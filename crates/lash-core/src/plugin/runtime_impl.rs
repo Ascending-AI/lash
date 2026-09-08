@@ -9,6 +9,7 @@ use super::*;
 #[derive(Clone)]
 pub struct PluginHost {
     factories: Arc<Vec<Arc<dyn PluginFactory>>>,
+    pub(super) export_plugin_namespaces: bool,
     extensions: PluginExtensions,
     sessions: Arc<StdMutex<BTreeMap<String, Weak<PluginSession>>>>,
 }
@@ -76,6 +77,13 @@ impl RecordedSessionConfig {
 }
 
 impl PluginHost {
+    fn plugin_view(&self) -> Self {
+        Self {
+            export_plugin_namespaces: false,
+            ..self.clone()
+        }
+    }
+
     pub fn empty() -> Self {
         Self::new(Vec::new())
     }
@@ -95,6 +103,7 @@ impl PluginHost {
         );
         Self {
             factories: Arc::new(all_factories),
+            export_plugin_namespaces: true,
             extensions,
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
         }
@@ -108,6 +117,7 @@ impl PluginHost {
     pub fn isolated_registry(&self) -> Self {
         Self {
             factories: Arc::clone(&self.factories),
+            export_plugin_namespaces: self.export_plugin_namespaces,
             extensions: self.extensions.clone(),
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
         }
@@ -381,7 +391,7 @@ impl PluginHost {
         for plugin in &session.plugins {
             plugin.session_ready(SessionReadyContext {
                 session_id: session.session_id.clone(),
-                host: self.clone(),
+                host: self.plugin_view(),
                 state: PluginStateStore::bind(
                     &session.session_id,
                     plugin.id(),
@@ -490,7 +500,15 @@ impl PluginHost {
             ));
         };
         match weak.upgrade() {
-            Some(session) => Ok(session),
+            Some(session) => {
+                if self.export_plugin_namespaces == session.host.export_plugin_namespaces {
+                    Ok(session)
+                } else {
+                    let mut view = (*session).clone();
+                    view.host = self.clone();
+                    Ok(Arc::new(view))
+                }
+            }
             None => {
                 sessions.remove(session_id);
                 Err(PluginOperationInvokeError::UnknownSession(

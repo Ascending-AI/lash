@@ -401,3 +401,153 @@ fn state_handle_debug_does_not_expose_other_namespaces() {
     assert!(!rendered.contains("neighbor-value"));
     assert_eq!(first.get("secret"), None);
 }
+
+#[test]
+fn register_remove_rebuilt_generation_five() {
+    let snapshot = PluginState {
+        plugins: BTreeMap::from([(
+            "mock".into(),
+            PluginNamespaceState {
+                generation: 5,
+                values: BTreeMap::from([("seed".into(), Value::Bool(true))]),
+            },
+        )]),
+    };
+    let registry = Arc::new(Mutex::new(PluginStateRegistry::registering(Some(
+        &snapshot,
+    ))));
+    let state = PluginStateStore::bind("rebuilt", "mock", registry.clone());
+    state.remove("seed").unwrap();
+    registry.lock_recover().initialize(Some(&snapshot)).unwrap();
+    assert_eq!(
+        state.get("seed"),
+        None,
+        "register remove must delete the durable key"
+    );
+    assert_eq!(state.generation(), 6);
+}
+
+#[tokio::test]
+async fn plugin_context_host_exports_cannot_escape_namespaces() {
+    #[derive(Clone)]
+    struct Fixture {
+        id: &'static str,
+        hosts: Arc<Mutex<Vec<(String, crate::PluginHost)>>>,
+    }
+    impl crate::plugin::PluginFactory for Fixture {
+        fn id(&self) -> &'static str {
+            self.id
+        }
+        fn build(
+            &self,
+            _: &crate::plugin::PluginSessionContext,
+        ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, crate::PluginError> {
+            Ok(Arc::new(self.clone()))
+        }
+    }
+    impl crate::plugin::SessionPlugin for Fixture {
+        fn id(&self) -> &'static str {
+            self.id
+        }
+        fn register(
+            &self,
+            reg: &mut crate::plugin::PluginRegistrar,
+        ) -> Result<(), crate::PluginError> {
+            let state = reg.state();
+            state.set(self.id, serde_json::json!(self.id))?;
+            let hosts = self.hosts.clone();
+            reg.turn().before(Arc::new(move |ctx| {
+                let hosts = hosts.clone();
+                let state = state.clone();
+                Box::pin(async move {
+                    assert_eq!(state.keys(), vec![state.plugin_id().to_string()]);
+                    for (id, host) in hosts.lock_recover().iter() {
+                        assert!(host.session(id).unwrap().export_state().plugins.is_empty());
+                    }
+                    let snapshot = serde_json::to_string(&ctx.state.to_snapshot()).unwrap();
+                    assert!(!snapshot.contains("neighbor-secret-key"));
+                    Ok(Vec::new())
+                })
+            }));
+            Ok(())
+        }
+        fn session_ready(
+            &self,
+            ctx: crate::plugin::SessionReadyContext,
+        ) -> Result<(), crate::PluginError> {
+            assert_eq!(ctx.state.keys(), vec![self.id.to_string()]);
+            let session = ctx.host.session(&ctx.session_id).unwrap();
+            assert!(session.export_state().plugins.is_empty());
+            assert!(
+                session
+                    .host()
+                    .session(&ctx.session_id)
+                    .unwrap()
+                    .export_state()
+                    .plugins
+                    .is_empty()
+            );
+            self.hosts.lock_recover().push((ctx.session_id, ctx.host));
+            Ok(())
+        }
+    }
+    struct Sessions;
+    #[async_trait::async_trait]
+    impl crate::plugin::SessionStateService for Sessions {}
+    let hosts = Arc::new(Mutex::new(Vec::new()));
+    let host = crate::PluginHost::new(vec![
+        Arc::new(Fixture {
+            id: "observer",
+            hosts: hosts.clone(),
+        }),
+        Arc::new(Fixture {
+            id: "neighbor-secret-key",
+            hosts: hosts.clone(),
+        }),
+    ]);
+    let parent = host.build_session("private-parent").unwrap();
+    assert!(
+        parent.export_state().plugins["neighbor-secret-key"]
+            .values
+            .contains_key("neighbor-secret-key")
+    );
+    let restricted = hosts.lock_recover()[0].1.session("private-parent").unwrap();
+    let child = restricted
+        .fork_for_session("private-child", Default::default())
+        .unwrap();
+    assert!(child.export_state().plugins.is_empty());
+    assert!(
+        host.session("private-child")
+            .unwrap()
+            .export_state()
+            .plugins
+            .contains_key("neighbor-secret-key")
+    );
+    assert!(
+        child
+            .host()
+            .session("private-parent")
+            .unwrap()
+            .export_state()
+            .plugins
+            .is_empty()
+    );
+    let mut runtime_state =
+        crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    runtime_state.refresh_plugin_states(&child);
+    assert!(
+        runtime_state.plugin_state().unwrap().plugins["neighbor-secret-key"]
+            .values
+            .contains_key("neighbor-secret-key"),
+        "restricted exports must not strip runtime checkpoint or fork state"
+    );
+    parent
+        .before_turn(crate::plugin::TurnHookContext {
+            session_id: "private-parent".into(),
+            state: crate::plugin::SessionReadView::from_persisted_state(&runtime_state),
+            sessions: Arc::new(Sessions),
+            turn_context: Default::default(),
+        })
+        .await
+        .unwrap();
+}

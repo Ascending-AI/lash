@@ -8,9 +8,18 @@ use lash_core::{PluginError, PluginStateEdit, PluginStateError, PluginStateStore
 use lash_sansio::sync::MutexExt;
 use std::sync::Mutex;
 
+#[derive(Clone, Copy, Default)]
+enum Registration {
+    #[default]
+    None,
+    Remove,
+    Admission,
+}
+
 #[derive(Clone, Default)]
 struct MockPlugin {
     writes_on_ready: bool,
+    registration: Registration,
     ready_values: Arc<Mutex<std::collections::BTreeMap<String, Option<serde_json::Value>>>>,
     handles: Arc<Mutex<std::collections::BTreeMap<String, PluginStateStore>>>,
 }
@@ -28,6 +37,29 @@ impl SessionPlugin for MockPlugin {
     }
     fn register(&self, registrar: &mut PluginRegistrar) -> Result<(), PluginError> {
         let state = registrar.state();
+        match self.registration {
+            Registration::None => {}
+            Registration::Remove => {
+                assert_eq!(state.remove("counter")?, 6);
+                assert_eq!(state.remove("absent")?, 6);
+                assert_eq!(state.get("counter"), None);
+            }
+            Registration::Admission => {
+                assert!(
+                    matches!(
+                        state.set("overflow", serde_json::json!("x".repeat(32766))),
+                        Err(PluginStateError::StoreTooLarge { .. })
+                    ),
+                    "oversize register write must be rejected at registration"
+                );
+                assert_eq!(state.generation(), 5);
+                assert_eq!(state.get("overflow"), None);
+                assert_eq!(
+                    state.set("accepted", serde_json::json!("x".repeat(1024)))?,
+                    6
+                );
+            }
+        }
         self.handles
             .lock_recover()
             .insert(state.session_id().into(), state.clone());
@@ -84,6 +116,18 @@ async fn commit(store: &Arc<dyn RuntimePersistence>, state: &mut RuntimeSessionS
 }
 
 pub(super) async fn plugin_state_boundary_law(make: impl Fn(&str) -> Arc<dyn RuntimePersistence>) {
+    registration_state_law(
+        make("plugin-state-register-remove"),
+        "plugin-state-register-remove",
+        Registration::Remove,
+    )
+    .await;
+    registration_state_law(
+        make("plugin-state-register-admission"),
+        "plugin-state-register-admission",
+        Registration::Admission,
+    )
+    .await;
     plugin_state_boundary_trace(
         make("plugin-state-parent"),
         "plugin-state-parent",
@@ -340,4 +384,69 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimePersistence>) {
         generation + 1,
         "an otherwise idle park persists accepted ready writes"
     );
+}
+
+// Seed generation five durably, then exercise registration on a cold rebuild.
+async fn registration_state_law(
+    store: Arc<dyn RuntimePersistence>,
+    id: &str,
+    registration: Registration,
+) {
+    let fixture = MockPlugin::default();
+    let plugins = fixture.host().build_session(id).unwrap();
+    let handle = fixture.state(id);
+    handle.set("counter", serde_json::json!(true)).unwrap();
+    for key in ["large-a", "large-b", "large-c"] {
+        handle
+            .set(key, serde_json::json!("x".repeat(32766)))
+            .unwrap();
+    }
+    handle
+        .set("padding", serde_json::json!("x".repeat(100)))
+        .unwrap();
+    assert_eq!(handle.generation(), 5);
+    let mut state = RuntimeSessionState {
+        session_id: id.into(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    state.refresh_plugin_states(&plugins);
+    commit(&store, &mut state).await;
+    drop(plugins);
+    let mut durable = crate::store::load_persisted_session_state(store.as_ref())
+        .await
+        .unwrap()
+        .unwrap();
+    let rebuilt = MockPlugin {
+        registration,
+        ..Default::default()
+    };
+    let plugins = rebuilt
+        .host()
+        .rematerialize_session(
+            id,
+            durable.plugin_state().unwrap(),
+            RecordedSessionConfig::new(Default::default()),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.state(id).generation(), 6);
+    durable.refresh_plugin_states(&plugins);
+    commit(&store, &mut durable).await;
+    let final_state = crate::store::load_persisted_session_state(store.as_ref())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(final_state.plugin_state(), Some(&plugins.export_state()));
+    let namespace = &final_state.plugin_state().unwrap().plugins["mock-state"];
+    assert_eq!(namespace.generation, 6);
+    match registration {
+        Registration::Remove => assert!(!namespace.values.contains_key("counter")),
+        Registration::Admission => {
+            assert!(!namespace.values.contains_key("overflow"));
+            assert_eq!(
+                namespace.values["accepted"],
+                serde_json::json!("x".repeat(1024))
+            );
+        }
+        Registration::None => unreachable!(),
+    }
 }

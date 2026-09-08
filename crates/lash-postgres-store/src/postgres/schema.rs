@@ -376,8 +376,6 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         introduced_relations: &[],
         statements: &[],
     },
-    // removes the column. It is inapplicable at open because no row targets
-    // component 78.
     SchemaMigration {
         from: 71,
         to: 78,

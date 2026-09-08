@@ -312,25 +312,11 @@ impl Default for PluginStateRegistry {
     }
 }
 impl PluginStateRegistry {
-    // Registration sees the durable generation, but values hydrate only before
-    // readiness. Accepted registration tokens therefore remain valid on rebuild.
+    // Hydrate before admission so register calls validate durable membership and
+    // size. Replay preserves accepted generations without a late size rejection.
     pub(super) fn registering(snapshot: Option<&PluginState>) -> Self {
         Self {
-            data: PluginState {
-                plugins: snapshot
-                    .into_iter()
-                    .flat_map(|s| &s.plugins)
-                    .map(|(id, ns)| {
-                        (
-                            id.clone(),
-                            PluginNamespaceState {
-                                generation: ns.generation,
-                                values: BTreeMap::new(),
-                            },
-                        )
-                    })
-                    .collect(),
-            },
+            data: snapshot.cloned().unwrap_or_default(),
             ..Self::default()
         }
     }

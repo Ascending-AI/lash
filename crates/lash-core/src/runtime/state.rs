@@ -1013,7 +1013,7 @@ impl RuntimeSessionState {
         if !generations.is_empty()
             && (self.plugin_state_ref().is_none() || captured != Some(&generations))
         {
-            self.set_plugin_state(Some(plugins.export_state()));
+            self.set_plugin_state(Some(plugins.capture_state()));
         }
     }
 }
@@ -1302,7 +1302,6 @@ pub(crate) fn adopt_durable_head(
     } else {
         RuntimeCheckpointComponents::complete_empty()
     };
-    state.ensure_agent_frame_initialized();
     state.head_revision = head.head_revision;
     state.persisted_node_ids = head
         .graph
