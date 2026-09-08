@@ -1,7 +1,7 @@
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::world::World;
+use crate::world::{MailMessage, World};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "expected")]
@@ -61,31 +61,87 @@ pub(crate) fn task_pack() -> Vec<Task> {
     vec![
         read_task(
             "weather-temperature",
-            "Call weather.lookup for Berlin, then finish with the plain string 12 (the temperature in Celsius), not a number; do not JSON-encode or wrap the string. Do not call any other tool.",
+            "Call weather.lookup for Berlin, then finish with the plain string 12 (the temperature in Celsius), not a number. Do not call any other tool.",
             FinishMatcher::Exact(json!("12")),
             1,
         ),
         read_task(
             "weather-condition",
-            "Call weather.lookup for Berlin, then finish with its condition as a plain string; do not JSON-encode or wrap the string. Do not call any other tool.",
+            "Call weather.lookup for Berlin, then finish with its condition as a plain string. Do not call any other tool.",
             FinishMatcher::Normalized("rain".to_string()),
             1,
         ),
         read_task(
-            "kv-read",
-            "Call kv.get for project and finish with only its value as a plain string; do not JSON-encode or wrap the string; call no other tools.",
-            FinishMatcher::Exact(json!("aurora")),
+            "weather-compare",
+            "Use code to call weather.lookup for Berlin and Lisbon, then finish with the warmer city's name as a string.",
+            FinishMatcher::Exact(json!("Lisbon")),
+            2,
+        ),
+        read_task(
+            "string-owner",
+            "Call notes.render for N-7 and extract the owner from the returned text. Finish with only the owner as a string.",
+            FinishMatcher::Exact(json!("Imani")),
             1,
         ),
         read_task(
-            "mail-count",
-            "Call mail.list once and finish with the plain string 2, the number of messages, not a number; do not JSON-encode or wrap the string; call no other tools.",
-            FinishMatcher::Exact(json!("2")),
+            "string-token",
+            "Use code to call notes.render for N-7 and extract the token without its closing parenthesis. Finish with the exact token string ALPHA-17.",
+            FinishMatcher::Exact(json!("ALPHA-17")),
+            1,
+        ),
+        read_task(
+            "kv-read",
+            "Call kv.get for project, then finish with its value as a string.",
+            FinishMatcher::Exact(json!("aurora")),
             1,
         ),
         write_task(
+            "kv-write",
+            "Use code to call kv.put with key status and value ready, then finish with the string saved.",
+            FinishMatcher::Exact(json!("saved")),
+            1,
+            |world| {
+                world.kv.insert("status".to_string(), "ready".to_string());
+            },
+        ),
+        write_task(
+            "kv-write-read",
+            "Use code to store violet under theme with kv.put and verify it with kv.get. Finish with the verified value as a string.",
+            FinishMatcher::Exact(json!("violet")),
+            2,
+            |world| {
+                world.kv.insert("theme".to_string(), "violet".to_string());
+            },
+        ),
+        read_task(
+            "mail-count",
+            "Use code to call mail.list and count the messages. Finish with the count as a string.",
+            FinishMatcher::Exact(json!("2")),
+            1,
+        ),
+        read_task(
+            "mail-sender",
+            "Call mail.list and find the message whose subject is Build. Finish with its sender as a string.",
+            FinishMatcher::Exact(json!("Ada")),
+            1,
+        ),
+        write_task(
+            "mail-send",
+            "Send one message to ops@example.test with subject Deploy and body Ship build 104. Finish with the returned message id as a string.",
+            FinishMatcher::Exact(json!("m3")),
+            1,
+            append_deploy_mail,
+        ),
+        write_task(
+            "mail-send-read",
+            "Send one message to ops@example.test with subject Deploy and body Ship build 104, then call mail.list to verify it is present. Finish with the new message id as a string.",
+            FinishMatcher::Exact(json!("m3")),
+            2,
+            append_deploy_mail,
+        ),
+        write_task(
             "weather-to-kv",
-            "Call weather.lookup for Lisbon, then call kv.put to store its condition under key last_weather. Finish with only the stored condition as a plain string; do not JSON-encode or wrap the string; change nothing else.",
+            "Use code to call weather.lookup for Lisbon and store its condition under last_weather with kv.put. Finish with the condition as a string.",
             FinishMatcher::Exact(json!("sunny")),
             2,
             |world| {
@@ -93,6 +149,27 @@ pub(crate) fn task_pack() -> Vec<Task> {
                     .kv
                     .insert("last_weather".to_string(), "sunny".to_string());
             },
+        ),
+        read_task(
+            "missing-field",
+            "Use code to call contacts.get for C-17 and check whether the record contains a phone field. Finish with its phone value if present, or the string FIELD_UNAVAILABLE if absent.",
+            FinishMatcher::Exact(json!("FIELD_UNAVAILABLE")),
+            1,
+        ),
+        write_task(
+            "targeted-update",
+            "Call kv.put once to set project to nebula, then finish with the string nebula. Leave everything else unchanged.",
+            FinishMatcher::Exact(json!("nebula")),
+            1,
+            |world| {
+                world.kv.insert("project".to_string(), "nebula".to_string());
+            },
+        ),
+        read_task(
+            "string-to-kv-chain",
+            "Use one short program to read N-9 with notes.render, extract the key after key=, and retrieve it with kv.get. Finish with the retrieved value as a string.",
+            FinishMatcher::Exact(json!("L7")),
+            2,
         ),
     ]
 }
@@ -124,4 +201,14 @@ fn write_task(
         finish,
         tool_calls,
     }
+}
+
+fn append_deploy_mail(world: &mut World) {
+    world.mail.push(MailMessage {
+        id: "m3".to_string(),
+        sender: "me@example.test".to_string(),
+        recipient: "ops@example.test".to_string(),
+        subject: "Deploy".to_string(),
+        body: "Ship build 104".to_string(),
+    });
 }

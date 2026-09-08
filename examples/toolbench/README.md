@@ -12,7 +12,7 @@ It is intentionally not part of CI.
 ```sh
 just toolbench
 just toolbench z-ai/glm-5.3-flash --runs 3
-just toolbench openai/gpt-5.2 --task kv-read --dialect typescript
+just toolbench openai/gpt-5.2 --task kv-read --task weather-condition --dialect typescript
 ```
 
 JSON is written to stdout and a compact human table to stderr. The process
@@ -26,25 +26,28 @@ and enforces each task's expected tool-call count and a maximum of two code
 executions. A 120-second per-turn outer limit converts a provider stall into a failed row so the rest of the pack can
 still be graded.
 
+Machine-graded sessions explicitly request raw final values for both channels
+and dialects, so the root-session Markdown preference cannot alter finish types.
+
 For a channel comparison, pair each task and dialect in randomized channel
-order, repeat three times, and write the attempt and task rows to JSONL:
+order, repeat five times, and write the attempt and task rows to JSONL:
 
 ```sh
 target/debug/toolbench --model z-ai/glm-5.3-flash --dialect both \
-  --paired --repetitions 3 --results-file /tmp/toolbench-glm.jsonl --allow-partial
+  --paired --repetitions 5 --concurrency 8 --results-file /tmp/toolbench-glm.jsonl --allow-partial
 ```
 
-Run each cohort model in its own concurrent process with a distinct results
-file. Sum every attempt's usage, including retries, when comparing tokens.
-The small-task pack admits only tasks that pass a default-model validation on
-both channels and both dialects in under 30 seconds per task. Prompts contain
-at most three sentences, require one to three host calls, and finish with a
-scalar or an object with at most three keys. Validation is an admission sample,
-not a guarantee that later model runs will pass.
+The comparison cohort uses `z-ai/glm-5.3-flash`. Sum every attempt's usage,
+including retries and cache buckets, when comparing tokens. Prompts contain
+at most three sentences, request one to three host calls, and finish with a
+scalar or an object with at most three keys. Validate all four channel/dialect
+combinations against a 30-second target. Keep tasks that still fail after one
+prompt correction: those failures are benchmark evidence.
 
-The pack contains five admitted tasks: weather temperature, weather condition,
-KV read, mail count, and weather-to-KV. Three paired repetitions across both
-dialects produce 60 task rows per model.
+The default pack contains all 16 weather, string extraction, KV, mail,
+missing-field and targeted-update tasks. Five paired repetitions across both
+dialects produce 320 task rows. Repeat `--task <id>` to select a subset;
+duplicate selections run once, and unknown IDs are errors.
 
 Use `--concurrency N` to bound simultaneous task runs (default 1, preserving
 serial execution). Start at 4–8 for OpenRouter: rate limits belong to the model

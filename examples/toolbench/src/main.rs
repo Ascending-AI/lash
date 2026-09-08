@@ -81,9 +81,9 @@ struct Args {
     /// Run both dialects or select one.
     #[arg(long, value_enum, default_value_t = DialectSelection::Both)]
     dialect: DialectSelection,
-    /// Run only one task id.
+    /// Run only these task ids; repeat --task to select a subset.
     #[arg(long)]
-    task: Option<String>,
+    task: Vec<String>,
     /// Exit successfully even when one or more task rows fail.
     #[arg(long)]
     allow_partial: bool,
@@ -138,7 +138,7 @@ async fn main() -> Result<()> {
         bail!("OPENROUTER_API_KEY is not set; load the repository .env before running toolbench");
     }
 
-    let tasks = selected_tasks(args.task.as_deref())?;
+    let tasks = selected_tasks(&args.task)?;
     if args.concurrency == 0 {
         bail!("--concurrency must be at least 1");
     }
@@ -320,19 +320,17 @@ async fn run_work_list<T, F: std::future::Future<Output = Result<T>>>(
     Ok(results)
 }
 
-fn selected_tasks(task_id: Option<&str>) -> Result<Vec<Task>> {
+fn selected_tasks(task_ids: &[String]) -> Result<Vec<Task>> {
     let tasks = task_pack();
-    let Some(task_id) = task_id else {
-        return Ok(tasks);
-    };
-    let selected = tasks
-        .into_iter()
-        .filter(|task| task.id == task_id)
-        .collect::<Vec<_>>();
-    if selected.is_empty() {
-        bail!("unknown task `{task_id}`");
+    for task_id in task_ids {
+        if !tasks.iter().any(|task| task.id == task_id) {
+            bail!("unknown task `{task_id}`");
+        }
     }
-    Ok(selected)
+    Ok(tasks
+        .into_iter()
+        .filter(|task| task_ids.is_empty() || task_ids.iter().any(|id| id == task.id))
+        .collect())
 }
 
 fn print_table(results: &[TaskResult]) {
@@ -400,6 +398,27 @@ mod tests {
             item.task_index,
             item.channel.name(),
         )
+    }
+
+    #[test]
+    fn task_selection_defaults_to_full_pack_and_accepts_repeated_flags() {
+        let defaults = Args::parse_from(["toolbench"]);
+        assert_eq!(selected_tasks(&defaults.task).unwrap().len(), 16);
+        let args = Args::parse_from([
+            "toolbench",
+            "--task",
+            "kv-read",
+            "--task",
+            "weather-condition",
+            "--task",
+            "kv-read",
+        ]);
+        let selected = selected_tasks(&args.task).unwrap();
+        assert_eq!(
+            selected.iter().map(|task| task.id).collect::<Vec<_>>(),
+            ["weather-condition", "kv-read"]
+        );
+        assert!(selected_tasks(&["kv-read".to_string(), "unknown".to_string()]).is_err());
     }
 
     #[test]
