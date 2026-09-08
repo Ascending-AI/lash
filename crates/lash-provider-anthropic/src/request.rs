@@ -251,6 +251,27 @@ impl AnthropicProvider {
             }));
         }
 
+        // A coalesced user turn may start with feedback injected between a
+        // tool call and its results. Anthropic requires every result first.
+        for (message_index, message) in out.iter_mut().enumerate() {
+            if message["role"] != "user" {
+                continue;
+            }
+            let blocks = message["content"].as_array_mut().expect("content blocks");
+            let is_result = |block: &Value| block["type"] == "tool_result";
+            if let Some(address) = breakpoint.as_mut()
+                && address.message_index == message_index
+            {
+                let old = address.block_index;
+                address.block_index = if is_result(&blocks[old]) {
+                    blocks[..old].iter().filter(|b| is_result(b)).count()
+                } else {
+                    blocks.iter().filter(|b| is_result(b)).count()
+                        + blocks[..old].iter().filter(|b| !is_result(b)).count()
+                };
+            }
+            blocks.sort_by_key(|block| !is_result(block));
+        }
         (system_prompt, out, breakpoint)
     }
 
@@ -393,43 +414,57 @@ impl AnthropicProvider {
         let serving_route = self.route_identity(&req.model);
         let safe_request = req.replay_safe_for(&serving_route);
         let req = safe_request.as_ref();
-        for source in &req.attachments() {
-            if matches!(
-                source,
-                AttachmentSource::ProviderFile {
-                    provider_scope,
-                    media_type: None,
-                    ..
-                } if provider_scope.provider.eq_ignore_ascii_case("anthropic")
-            ) {
-                return Err(LlmTransportError::new(
+        for (message_index, message) in req.messages.iter().enumerate() {
+            for source in message.blocks.iter().filter_map(|block| match block {
+                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
+                _ => None,
+            }) {
+                let validation = (|| {
+                    if matches!(
+                        source,
+                        AttachmentSource::ProviderFile {
+                            media_type: None,
+                            ..
+                        }
+                    ) {
+                        return Err(LlmTransportError::new(
                     "Anthropic Messages requires the media type for provider file ids in order to choose the image/document modality; supply `media_type` on `ProviderFile`",
                 )
                 .with_kind(ProviderFailureKind::Validation)
                 .with_code("provider_file_media_type_required"));
-            }
-            let supported = req
-                .model_capability
-                .attachment_acceptance
-                .accepts("Anthropic Messages", source);
-            if !supported {
-                let accepted_by =
-                    known_attachment_acceptors(&req.model_capability.attachment_acceptance, source);
-                return Err(unsupported_attachment_capability(
-                    "Anthropic Messages",
-                    source,
-                    &accepted_by,
-                ));
-            }
-            if matches!(source, AttachmentSource::Stored { .. })
-                && req.attachment_bytes(source).is_none()
-            {
-                let mime = source.media_type().expect("stored source MIME");
-                return Err(LlmTransportError::new(format!(
+                    }
+                    let supported = req
+                        .model_capability
+                        .attachment_acceptance
+                        .accepts("Anthropic Messages", source);
+                    if !supported {
+                        let accepted_by = known_attachment_acceptors(
+                            &req.model_capability.attachment_acceptance,
+                            source,
+                        );
+                        return Err(unsupported_attachment_capability(
+                            "Anthropic Messages",
+                            source,
+                            &accepted_by,
+                        ));
+                    }
+                    if matches!(source, AttachmentSource::Stored { .. })
+                        && req.attachment_bytes(source).is_none()
+                    {
+                        let mime = source.media_type().expect("stored source MIME");
+                        return Err(LlmTransportError::new(format!(
                     "Anthropic Messages could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"
                 ))
                 .with_kind(ProviderFailureKind::Validation)
                 .with_code("stored_attachment_not_resolved"));
+                    }
+
+                    Ok(())
+                })();
+                validation.map_err(|mut error: LlmTransportError| {
+                    error.message = format!("message index {message_index}: {}", error.message);
+                    error
+                })?;
             }
         }
         let (system_text, mut messages, breakpoint) = self.build_messages(req);

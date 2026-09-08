@@ -27,8 +27,8 @@ use std::collections::HashMap;
 use crate::schema::{classify_openai_error, responses_error_retry_verdict};
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
 use lash_core::llm::types::{
-    AttachmentSource, ExecutionEvidence, LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse,
-    LlmRole, LlmToolChoice, LlmUsage, ProviderReasoningReplay, ProviderReplayMeta,
+    AttachmentSource, ExecutionEvidence, LlmContentBlock, LlmMessage, LlmOutputPart, LlmRequest,
+    LlmResponse, LlmRole, LlmToolChoice, LlmUsage, ProviderReasoningReplay, ProviderReplayMeta,
     ResponseTextMeta,
 };
 use lash_core::{
@@ -58,25 +58,38 @@ pub fn validate_responses_attachments(
     req: &LlmRequest,
     provider: &str,
 ) -> Result<(), LlmTransportError> {
-    for source in req.attachments() {
-        if !req
-            .model_capability
-            .attachment_acceptance
-            .accepts("OpenAI Responses", source)
-        {
-            let accepted = req.model_capability.attachment_acceptance.acceptors(source);
-            return Err(
-                lash_core::llm::transport::unsupported_attachment_capability(
-                    provider, source, &accepted,
-                ),
-            );
-        }
-        if matches!(source, AttachmentSource::Stored { .. })
-            && req.attachment_bytes(source).is_none()
-        {
-            let mime = source.media_type().expect("stored source MIME");
-            return Err(LlmTransportError::new(format!("{provider} could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"))
+    for (message_index, message) in req.messages.iter().enumerate() {
+        for source in message.blocks.iter().filter_map(|block| match block {
+            LlmContentBlock::Attachment { source } => Some(source.as_ref()),
+            _ => None,
+        }) {
+            let validation = (|| {
+                if !req
+                    .model_capability
+                    .attachment_acceptance
+                    .accepts("OpenAI Responses", source)
+                {
+                    let accepted = req.model_capability.attachment_acceptance.acceptors(source);
+                    return Err(
+                        lash_core::llm::transport::unsupported_attachment_capability(
+                            provider, source, &accepted,
+                        ),
+                    );
+                }
+                if matches!(source, AttachmentSource::Stored { .. })
+                    && req.attachment_bytes(source).is_none()
+                {
+                    let mime = source.media_type().expect("stored source MIME");
+                    return Err(LlmTransportError::new(format!("{provider} could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"))
                 .with_kind(ProviderFailureKind::Validation).with_code("stored_attachment_not_resolved"));
+                }
+
+                Ok(())
+            })();
+            validation.map_err(|mut error: LlmTransportError| {
+                error.message = format!("message index {message_index}: {}", error.message);
+                error
+            })?;
         }
     }
 
@@ -374,10 +387,86 @@ fn reasoning_replay_item(text: &str, replay: Option<&ProviderReasoningReplay>) -
     Some(item)
 }
 
+// Only attachment-bearing feedback loses native instruction authority. Keep its
+// complete text in one tag and carry every attachment in the same user item.
+pub(crate) fn attachment_feedback(msg: &LlmMessage) -> Option<LlmMessage> {
+    if !matches!(msg.role, LlmRole::System)
+        || !msg
+            .blocks
+            .iter()
+            .any(|block| matches!(block, LlmContentBlock::Attachment { .. }))
+    {
+        return None;
+    }
+    let mut blocks = vec![LlmContentBlock::Text {
+        text: format!(
+            "<runtime_feedback>{}</runtime_feedback>",
+            msg.blocks
+                .iter()
+                .filter_map(|block| match block {
+                    LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+                    _ => None,
+                })
+                .collect::<String>()
+        )
+        .into(),
+        response_meta: None,
+        cache_breakpoint: msg.blocks.iter().any(|block| {
+            matches!(
+                block,
+                LlmContentBlock::Text {
+                    cache_breakpoint: true,
+                    ..
+                }
+            )
+        }),
+    }];
+    blocks.extend(
+        msg.blocks
+            .iter()
+            .filter(|block| !matches!(block, LlmContentBlock::Text { .. }))
+            .cloned(),
+    );
+    Some(LlmMessage::new(LlmRole::User, blocks))
+}
+
+// Tool outputs are separate wire items, but belong before the feedback in
+// their user turn. Preserve the order of both outputs and feedback items.
+pub(crate) fn push_tool_output(
+    items: &mut Vec<Value>,
+    item: Value,
+    feedback_start: &mut Option<usize>,
+) {
+    if let Some(index) = feedback_start {
+        items.insert(*index, item);
+        *index += 1;
+    } else {
+        items.push(item);
+    }
+}
+
+pub(crate) fn feedback_boundary(msg: &LlmMessage, item_count: usize, start: &mut Option<usize>) {
+    match msg.role {
+        LlmRole::System => {
+            start.get_or_insert(item_count);
+        }
+        LlmRole::User
+            if msg
+                .blocks
+                .iter()
+                .any(|block| matches!(block, LlmContentBlock::ToolResult { .. })) => {}
+        _ => *start = None,
+    }
+}
+
 /// Build ordered Responses input shared by the direct provider and Codex.
 pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> Vec<Value> {
     let mut input: Vec<Value> = Vec::new();
+    let mut feedback_start = None;
     for (message_index, msg) in req.messages.iter().enumerate() {
+        feedback_boundary(msg, input.len(), &mut feedback_start);
+        let fallback = attachment_feedback(msg);
+        let msg = fallback.as_ref().unwrap_or(msg);
         let role = if matches!(msg.role, LlmRole::System) {
             req.model_capability.instruction_role.as_str()
         } else {
@@ -457,7 +546,7 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
                         &mut pending_content,
                         &mut input,
                         role,
-                        is_user,
+                        is_user && fallback.is_none(),
                         &opts,
                         pending_meta.take(),
                         message_index,
@@ -478,7 +567,7 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
                         &mut pending_content,
                         &mut input,
                         role,
-                        is_user,
+                        is_user && fallback.is_none(),
                         &opts,
                         pending_meta.take(),
                         message_index,
@@ -504,7 +593,7 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
                         &mut pending_content,
                         &mut input,
                         role,
-                        is_user,
+                        is_user && fallback.is_none(),
                         &opts,
                         pending_meta.take(),
                         message_index,
@@ -515,11 +604,15 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
                         .cloned()
                         .unwrap_or_default();
                     if image_parts.is_empty() {
-                        input.push(json!({
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": content,
-                        }));
+                        push_tool_output(
+                            &mut input,
+                            json!({
+                                "type": "function_call_output",
+                                "call_id": call_id,
+                                "output": content,
+                            }),
+                            &mut feedback_start,
+                        );
                     } else {
                         let mut parts: Vec<Value> = Vec::new();
                         if !content.is_empty() {
@@ -529,11 +622,15 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
                             }));
                         }
                         parts.extend(image_parts);
-                        input.push(json!({
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": parts,
-                        }));
+                        push_tool_output(
+                            &mut input,
+                            json!({
+                                "type": "function_call_output",
+                                "call_id": call_id,
+                                "output": parts,
+                            }),
+                            &mut feedback_start,
+                        );
                     }
                 }
             }
@@ -542,14 +639,14 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
             &mut pending_content,
             &mut input,
             role,
-            is_user,
+            is_user && fallback.is_none(),
             &opts,
             pending_meta.take(),
             message_index,
             pending_part_index,
         );
 
-        if opts.fold_tool_result_images && is_user {
+        if opts.fold_tool_result_images && is_user && fallback.is_none() {
             fold_tool_result_images(&mut input);
         }
     }

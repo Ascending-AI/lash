@@ -243,9 +243,7 @@ impl CodexProvider {
                 "verbosity": "medium",
             },
         });
-        if let Some(instructions) = &req.instructions {
-            body["instructions"] = json!(instructions);
-        }
+        body["instructions"] = json!(req.instructions.as_deref().unwrap_or(""));
         // `tool_choice` is only meaningful when the request advertises tools.
         // In RLM mode we intentionally send `tools: []` because tools are
         // documented in the prompt body and invoked via `lashlang`, not the

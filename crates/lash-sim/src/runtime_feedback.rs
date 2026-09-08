@@ -99,6 +99,7 @@ impl Wire {
         };
         match expected {
             Some(text) => assert_eq!(value, Some(&json!(text))),
+            None if matches!(self, Self::Codex) => assert_eq!(value, Some(&json!(""))),
             None => assert!(value.is_none(), "{self:?}: {body}"),
         }
     }
@@ -651,4 +652,285 @@ fn runtime_feedback_native_prefix_changes_when_a_later_user_makes_the_slot_illeg
         json!([{"role":"user","content":[{"type":"text","text":"U"},{"type":"text","text":"<runtime_feedback>F</runtime_feedback>"},{"type":"text","text":"later"}]}])
     );
     assert_ne!(before["messages"][0], after["messages"][0]);
+}
+
+fn feedback_tool_results(wire: Wire) {
+    use lash_core::llm::types::LlmContentBlock as B;
+    for (count, split) in [(1, false), (2, false), (2, true)] {
+        let calls = (0..count)
+            .map(|i| B::ToolCall {
+                call_id: format!("call{i}"),
+                tool_name: "lookup".into(),
+                input_json: "{}".into(),
+                replay: None,
+            })
+            .collect::<Vec<_>>();
+        let results = (0..count)
+            .map(|i| B::ToolResult {
+                call_id: format!("call{i}"),
+                tool_name: Some("lookup".into()),
+                content: format!("RESULT{i}"),
+            })
+            .collect::<Vec<_>>();
+        let mut messages = vec![
+            text(LlmRole::User, "U"),
+            LlmMessage::new(LlmRole::Assistant, calls),
+        ];
+        if split {
+            messages.push(LlmMessage::new(LlmRole::User, vec![results[0].clone()]));
+        }
+        messages.push(text(LlmRole::System, "F"));
+        messages.push(LlmMessage::new(
+            LlmRole::User,
+            if split {
+                vec![results[1].clone()]
+            } else {
+                results
+            },
+        ));
+        messages.push(text(LlmRole::Assistant, "AFTER"));
+        let body = wire.body(&request(messages));
+        let serialized = wire.messages(&body).to_string();
+        let feedback = serialized
+            .find(if wire.tagged() {
+                "<runtime_feedback>F</runtime_feedback>"
+            } else {
+                "\"F\""
+            })
+            .expect("feedback");
+        for i in 0..count {
+            assert!(
+                serialized.find(&format!("RESULT{i}")).unwrap() < feedback,
+                "{wire:?}, split={split}: {body}"
+            );
+        }
+        assert!(feedback < serialized.find("AFTER").unwrap());
+        if wire.tagged() {
+            let turn = &wire.messages(&body)[2];
+            assert_eq!(turn["role"], "user", "{wire:?}: {body}");
+            let parts = turn
+                .get("content")
+                .or_else(|| turn.get("parts"))
+                .unwrap()
+                .as_array()
+                .unwrap();
+            assert_eq!(
+                parts.len(),
+                count + 1,
+                "feedback belongs in the result turn: {body}"
+            );
+            for part in &parts[..count] {
+                assert!(
+                    part["type"] == "tool_result" || part.get("functionResponse").is_some(),
+                    "{body}"
+                );
+            }
+            assert_eq!(
+                parts[count]["text"],
+                "<runtime_feedback>F</runtime_feedback>"
+            );
+        }
+    }
+}
+
+fn feedback_image(wire: Wire) {
+    use lash_core::llm::types::{
+        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+        AttachmentMimeSource, LlmContentBlock as B,
+    };
+    for role in [
+        lash_core::InstructionRole::System,
+        lash_core::InstructionRole::Developer,
+    ] {
+        for (bytes, encoded) in [(vec![1, 2, 3], "AQID"), (vec![4, 5, 6], "BAUG")] {
+            let mut req = request(vec![
+                text(LlmRole::User, "U"),
+                LlmMessage::new(
+                    LlmRole::System,
+                    vec![
+                        text(LlmRole::System, "F").blocks[0].clone(),
+                        B::Attachment {
+                            source: Box::new(lash_core::AttachmentSource::inline(
+                                lash_core::MediaType::parse("image/png").unwrap(),
+                                bytes,
+                            )),
+                        },
+                    ],
+                ),
+                text(LlmRole::System, "NATIVE"),
+                text(LlmRole::Assistant, "AFTER"),
+            ]);
+            req.model_capability.instruction_role = role;
+            req.model_capability.attachment_acceptance = Arc::new(AttachmentCapabilitySnapshot {
+                revision: "feedback-image".into(),
+                acceptors: [
+                    "OpenAI Responses",
+                    "OpenAI Chat Completions",
+                    "Anthropic Messages",
+                    "Google Gemini",
+                ]
+                .into_iter()
+                .map(|provider| AttachmentAcceptor {
+                    provider: provider.into(),
+                    rules: vec![AttachmentAcceptanceRule::Mime {
+                        source: AttachmentMimeSource::Inline,
+                        media_types: vec!["image/png".into()],
+                        media_families: vec![],
+                    }],
+                })
+                .collect(),
+            });
+            let body = wire.body(&req);
+            wire.assert_instructions(&body, Some("I"));
+            let messages = wire.messages(&body).as_array().unwrap();
+            let message = messages
+                .iter()
+                .find(|m| {
+                    m.to_string()
+                        .contains("<runtime_feedback>F</runtime_feedback>")
+                })
+                .expect("image feedback must be tagged");
+            assert_eq!(message["role"], "user");
+            assert!(
+                message.to_string().contains(encoded),
+                "attachment bytes lost on {wire:?}: {body}"
+            );
+            let serialized = messages.iter().map(Value::to_string).collect::<String>();
+            assert!(serialized.find(encoded).unwrap() < serialized.find("AFTER").unwrap());
+            if matches!(wire, Wire::Responses | Wire::Codex | Wire::Chat) {
+                assert!(
+                    flattened(wire.messages(&body))
+                        .contains(&(role.as_str().into(), "NATIVE".into())),
+                    "only the attachment-bearing feedback downgrades"
+                );
+            }
+        }
+    }
+}
+macro_rules! feedback_contract_test {
+    ($name:ident, $wire:ident, $witness:ident) => {
+        #[test]
+        fn $name() {
+            $witness(Wire::$wire);
+        }
+    };
+}
+feedback_contract_test!(
+    runtime_feedback_tool_results_responses,
+    Responses,
+    feedback_tool_results
+);
+feedback_contract_test!(
+    runtime_feedback_tool_results_codex,
+    Codex,
+    feedback_tool_results
+);
+feedback_contract_test!(
+    runtime_feedback_tool_results_chat,
+    Chat,
+    feedback_tool_results
+);
+feedback_contract_test!(
+    runtime_feedback_tool_results_anthropic_native,
+    AnthropicNative,
+    feedback_tool_results
+);
+feedback_contract_test!(
+    runtime_feedback_tool_results_anthropic_fallback,
+    AnthropicFallback,
+    feedback_tool_results
+);
+feedback_contract_test!(
+    runtime_feedback_tool_results_gemini,
+    Gemini,
+    feedback_tool_results
+);
+feedback_contract_test!(
+    runtime_feedback_tool_results_code_assist,
+    CodeAssist,
+    feedback_tool_results
+);
+feedback_contract_test!(runtime_feedback_image_responses, Responses, feedback_image);
+feedback_contract_test!(runtime_feedback_image_codex, Codex, feedback_image);
+feedback_contract_test!(runtime_feedback_image_chat, Chat, feedback_image);
+feedback_contract_test!(
+    runtime_feedback_image_anthropic_native,
+    AnthropicNative,
+    feedback_image
+);
+feedback_contract_test!(
+    runtime_feedback_image_anthropic_fallback,
+    AnthropicFallback,
+    feedback_image
+);
+feedback_contract_test!(runtime_feedback_image_gemini, Gemini, feedback_image);
+feedback_contract_test!(
+    runtime_feedback_image_code_assist,
+    CodeAssist,
+    feedback_image
+);
+
+#[test]
+fn runtime_feedback_unresolved_attachment_errors_retain_message_index() {
+    use lash_core::llm::types::{
+        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+        AttachmentMimeSource, LlmContentBlock,
+    };
+    let source = lash_core::AttachmentSource::stored(lash_core::AttachmentRef {
+        id: lash_core::AttachmentId::parse("feedback-image").unwrap(),
+        media_type: lash_core::MediaType::parse("image/png").unwrap(),
+        byte_len: 3,
+        type_metadata: None,
+        label: None,
+    });
+    let mut req = request(vec![
+        text(LlmRole::User, "U"),
+        LlmMessage::new(
+            LlmRole::System,
+            vec![LlmContentBlock::Attachment {
+                source: Box::new(source),
+            }],
+        ),
+    ]);
+    req.model_capability.attachment_acceptance = Arc::new(AttachmentCapabilitySnapshot {
+        revision: "feedback-stored".into(),
+        acceptors: [
+            "OpenAI Responses",
+            "OpenAI Chat Completions",
+            "Anthropic Messages",
+            "Google Gemini",
+        ]
+        .into_iter()
+        .map(|provider| AttachmentAcceptor {
+            provider: provider.into(),
+            rules: vec![AttachmentAcceptanceRule::Mime {
+                source: AttachmentMimeSource::Stored,
+                media_types: vec!["image/png".into()],
+                media_families: vec![],
+            }],
+        })
+        .collect(),
+    });
+    for native in [false, true] {
+        req.model_capability.native_mid_conversation_system = native;
+        for error in [
+            lash_provider_openai::testing::serialize_responses_request(&req, CacheRetention::None)
+                .unwrap_err(),
+            lash_provider_openai::testing::serialize_codex_request(&req, CacheRetention::None)
+                .unwrap_err(),
+            lash_provider_openai::testing::serialize_chat_request(&req, CacheRetention::None)
+                .unwrap_err(),
+            lash_provider_anthropic::testing::serialize_request(&req, CacheRetention::None)
+                .unwrap_err(),
+            lash_provider_google::testing::serialize_request(&req, CacheRetention::None)
+                .unwrap_err(),
+        ] {
+            assert_eq!(error.kind, lash_core::ProviderFailureKind::Validation);
+            assert_eq!(
+                error.code.as_deref(),
+                Some("stored_attachment_not_resolved")
+            );
+            assert!(error.message.contains("message index 1"), "{error}");
+        }
+    }
 }

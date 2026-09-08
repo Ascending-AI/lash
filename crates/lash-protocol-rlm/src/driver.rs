@@ -340,8 +340,8 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         generation.suppress_stop_sequences_for_protocol();
 
         Arc::new(LlmRequest {
-            instructions: (!ctx.config.system_prompt.is_empty())
-                .then(|| Arc::clone(&ctx.config.system_prompt)),
+            instructions: (!ctx.config.system_prompt.trim().is_empty())
+                .then(|| Arc::from(ctx.config.system_prompt.trim())),
             model: ctx.config.model.clone(),
             messages,
             resolved_stored: Default::default(),
@@ -625,7 +625,7 @@ mod tests {
         })
     }
 
-    fn projector(max_output_chars: usize) -> RlmContextProjector {
+    pub(super) fn projector(max_output_chars: usize) -> RlmContextProjector {
         let mut bound_variables_cache = crate::rlm_support::BoundVariableRenderCache::default();
         RlmContextProjector {
             max_output_chars,
@@ -683,7 +683,23 @@ mod tests {
         generation: lash_core::GenerationOptions,
         max_context_tokens: Option<usize>,
     ) -> Arc<LlmRequest> {
-        let config = lash_core::TurnMachineConfig {
+        let config = projection_test_config(model, generation, max_context_tokens);
+        projector.project(ProjectorContext {
+            config: &config,
+            messages: &lash_core::facade_support::MessageSequence::default(),
+            events,
+            turn_causes: &[],
+            protocol_iteration,
+            use_tools: false,
+        })
+    }
+
+    pub(super) fn projection_test_config(
+        model: &str,
+        generation: lash_core::GenerationOptions,
+        max_context_tokens: Option<usize>,
+    ) -> lash_core::TurnMachineConfig {
+        lash_core::TurnMachineConfig {
             protocol_driver: Arc::new(crate::protocol::RlmDriver::default()),
             projector: Arc::new(lash_core::sansio::ChatContextProjector),
             sync_execution_environment: true,
@@ -706,15 +722,7 @@ mod tests {
                 let dialect = LashlangDialect::prompt_only(LashlangSurface::default());
                 crate::protocol::turn_limit_final_message(&dialect, message_id, max_turns)
             }),
-        };
-        projector.project(ProjectorContext {
-            config: &config,
-            messages: &lash_core::facade_support::MessageSequence::default(),
-            events,
-            turn_causes: &[],
-            protocol_iteration,
-            use_tools: false,
-        })
+        }
     }
 
     #[test]
@@ -1584,3 +1592,7 @@ mod tests {
         assert!(extended.contains("<lashlang>\nprint 2\n</lashlang>"));
     }
 }
+
+#[cfg(test)]
+#[path = "driver_runtime_feedback_tests.rs"]
+mod runtime_feedback_tests;

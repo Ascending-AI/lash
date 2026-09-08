@@ -43,29 +43,44 @@ impl GoogleOAuthProvider {
     }
 
     pub(crate) fn validate_attachments(req: &LlmRequest) -> Result<(), LlmTransportError> {
-        for source in &req.attachments() {
-            let supported = req
-                .model_capability
-                .attachment_acceptance
-                .accepts("Google Gemini", source);
-            if !supported {
-                let accepted_by =
-                    known_attachment_acceptors(&req.model_capability.attachment_acceptance, source);
-                return Err(unsupported_attachment_capability(
-                    "Google Gemini",
-                    source,
-                    &accepted_by,
-                ));
-            }
-            if matches!(source, AttachmentSource::Stored { .. })
-                && req.attachment_bytes(source).is_none()
-            {
-                let mime = source.media_type().expect("stored source MIME");
-                return Err(LlmTransportError::new(format!(
+        for (message_index, message) in req.messages.iter().enumerate() {
+            for source in message.blocks.iter().filter_map(|block| match block {
+                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
+                _ => None,
+            }) {
+                let validation = (|| {
+                    let supported = req
+                        .model_capability
+                        .attachment_acceptance
+                        .accepts("Google Gemini", source);
+                    if !supported {
+                        let accepted_by = known_attachment_acceptors(
+                            &req.model_capability.attachment_acceptance,
+                            source,
+                        );
+                        return Err(unsupported_attachment_capability(
+                            "Google Gemini",
+                            source,
+                            &accepted_by,
+                        ));
+                    }
+                    if matches!(source, AttachmentSource::Stored { .. })
+                        && req.attachment_bytes(source).is_none()
+                    {
+                        let mime = source.media_type().expect("stored source MIME");
+                        return Err(LlmTransportError::new(format!(
                     "Google Gemini could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"
                 ))
                 .with_kind(ProviderFailureKind::Validation)
                 .with_code("stored_attachment_not_resolved"));
+                    }
+
+                    Ok(())
+                })();
+                validation.map_err(|mut error: LlmTransportError| {
+                    error.message = format!("message index {message_index}: {}", error.message);
+                    error
+                })?;
             }
         }
         Ok(())
@@ -223,6 +238,16 @@ impl GoogleOAuthProvider {
                     "role": role,
                     "parts": parts,
                 }));
+            }
+        }
+        for content in &mut out {
+            if content["role"] == "user" {
+                // Keep parallel function responses together before the tagged
+                // feedback in their coalesced user turn.
+                content["parts"]
+                    .as_array_mut()
+                    .expect("content parts")
+                    .sort_by_key(|part| part.get("functionResponse").is_none());
             }
         }
         out

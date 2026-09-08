@@ -166,3 +166,46 @@ fn runtime_feedback_native_does_not_drop_whitespace_text_blocks() {
         "<runtime_feedback>a \nb</runtime_feedback>"
     );
 }
+
+#[test]
+fn runtime_feedback_result_order_preserves_explicit_cache_marker() {
+    let mut req = request(vec![
+        LlmMessage::text(LlmRole::User, "U"),
+        LlmMessage::new(
+            LlmRole::Assistant,
+            vec![LlmContentBlock::ToolCall {
+                call_id: "call1".into(),
+                tool_name: "lookup".into(),
+                input_json: "{}".into(),
+                replay: None,
+            }],
+        ),
+        LlmMessage::new(
+            LlmRole::System,
+            vec![LlmContentBlock::Text {
+                text: "F".into(),
+                response_meta: None,
+                cache_breakpoint: true,
+            }],
+        ),
+        LlmMessage::new(
+            LlmRole::User,
+            vec![LlmContentBlock::ToolResult {
+                call_id: "call1".into(),
+                tool_name: Some("lookup".into()),
+                content: "RESULT".into(),
+            }],
+        ),
+    ]);
+    req.model_capability.native_mid_conversation_system = true;
+    let provider = AnthropicProvider::new("key").with_options(ProviderOptions {
+        cache_retention: CacheRetention::Short,
+        ..Default::default()
+    });
+    let body = provider.build_request_body(&req).unwrap();
+    let parts = body["messages"][2]["content"].as_array().unwrap();
+    assert_eq!(parts[0]["type"], "tool_result");
+    assert!(parts[0].get("cache_control").is_none());
+    assert_eq!(parts[1]["text"], "<runtime_feedback>F</runtime_feedback>");
+    assert_eq!(parts[1]["cache_control"], json!({"type":"ephemeral"}));
+}

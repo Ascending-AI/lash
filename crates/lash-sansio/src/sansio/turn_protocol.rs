@@ -496,8 +496,8 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
         }
 
         Arc::new(LlmRequest {
-            instructions: (!ctx.config.system_prompt.is_empty())
-                .then(|| Arc::clone(&ctx.config.system_prompt)),
+            instructions: (!ctx.config.system_prompt.trim().is_empty())
+                .then(|| Arc::from(ctx.config.system_prompt.trim())),
             model: ctx.config.model.clone(),
             messages,
             resolved_stored: Default::default(),

@@ -28,36 +28,59 @@ impl OpenAiCompatibleProvider {
     }
 
     fn validate_chat_attachments(req: &LlmRequest) -> Result<(), LlmTransportError> {
-        for source in &req.attachments() {
-            let supported = req
-                .model_capability
-                .attachment_acceptance
-                .accepts("OpenAI Chat Completions", source);
-            if !supported {
-                let accepted_by =
-                    known_attachment_acceptors(&req.model_capability.attachment_acceptance, source);
-                return Err(unsupported_attachment_capability(
-                    "OpenAI Chat Completions",
-                    source,
-                    &accepted_by,
-                ));
-            }
-            // Chat's image_url wire part has no provider-file handle representation.
-            if matches!(source, AttachmentSource::ProviderFile { .. }) {
-                return Err(LlmTransportError::new(
-                    "Chat attachment wire parts cannot encode a provider-file handle",
-                )
-                .with_kind(ProviderFailureKind::Validation)
-                .with_code("attachment_source_not_encodable"));
-            }
-            if matches!(source, AttachmentSource::Stored { .. })
-                && req.attachment_bytes(source).is_none()
-            {
-                return Err(LlmTransportError::new(
+        for (message_index, message) in req.messages.iter().enumerate() {
+            for source in message.blocks.iter().filter_map(|block| match block {
+                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
+                _ => None,
+            }) {
+                let validation = (|| {
+                    let supported = req
+                        .model_capability
+                        .attachment_acceptance
+                        .accepts("OpenAI Chat Completions", source);
+                    if !supported {
+                        let accepted_by = known_attachment_acceptors(
+                            &req.model_capability.attachment_acceptance,
+                            source,
+                        );
+                        return Err(unsupported_attachment_capability(
+                            "OpenAI Chat Completions",
+                            source,
+                            &accepted_by,
+                        ));
+                    }
+                    // Chat's image_url wire part has no provider-file handle representation.
+                    if matches!(source, AttachmentSource::ProviderFile { .. }) {
+                        return Err(LlmTransportError::new(
+                            "Chat attachment wire parts cannot encode a provider-file handle",
+                        )
+                        .with_kind(ProviderFailureKind::Validation)
+                        .with_code("attachment_source_not_encodable"));
+                    }
+                    if matches!(source, AttachmentSource::Stored { .. })
+                        && req.attachment_bytes(source).is_none()
+                    {
+                        return Err(LlmTransportError::new(
                     "OpenAI Chat Completions could not materialize a stored attachment because session-guard resolution did not provide its bytes",
                 )
                 .with_kind(ProviderFailureKind::Validation)
                 .with_code("stored_attachment_not_resolved"));
+                    }
+
+                    if !source.media_type().is_some_and(|mime| mime.is_image()) {
+                        return Err(LlmTransportError::new(
+                            "Chat attachment parts require an image media type",
+                        )
+                        .with_kind(ProviderFailureKind::Validation)
+                        .with_code("attachment_source_not_encodable"));
+                    }
+
+                    Ok(())
+                })();
+                validation.map_err(|mut error: LlmTransportError| {
+                    error.message = format!("message index {message_index}: {}", error.message);
+                    error
+                })?;
             }
         }
         Ok(())
@@ -85,7 +108,11 @@ impl OpenAiCompatibleProvider {
         if let Some(instructions) = &req.instructions {
             messages.push(json!({"role": req.model_capability.instruction_role.as_str(), "content": [{"type": "text", "text": instructions}]}));
         }
+        let mut feedback_start = None;
         for msg in &req.messages {
+            shared::feedback_boundary(msg, messages.len(), &mut feedback_start);
+            let fallback = shared::attachment_feedback(msg);
+            let msg = fallback.as_ref().unwrap_or(msg);
             let role = if matches!(msg.role, LlmRole::System) {
                 req.model_capability.instruction_role.as_str()
             } else {
@@ -153,7 +180,7 @@ impl OpenAiCompatibleProvider {
                         {
                             tool_message["name"] = json!(name);
                         }
-                        messages.push(tool_message);
+                        shared::push_tool_output(&mut messages, tool_message, &mut feedback_start);
                     }
                     LlmContentBlock::Reasoning { .. } | LlmContentBlock::Attachment { .. } => {}
                     LlmContentBlock::Text { .. } | LlmContentBlock::ToolCall { .. } => {}

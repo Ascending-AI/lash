@@ -92,3 +92,53 @@ fn runtime_feedback_chat_cache_distinguishes_instructions_and_explicit_fences() 
             .is_none()
     );
 }
+
+#[test]
+fn runtime_feedback_codex_always_emits_instructions_string() {
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "U")]);
+    for instructions in [None, Some(Arc::from("")), Some(Arc::from(" I "))] {
+        req.instructions = instructions;
+        let body = crate::testing::serialize_codex_request(&req, CacheRetention::None).unwrap();
+        assert_eq!(
+            body.get("instructions"),
+            Some(&json!(req.instructions.as_deref().unwrap_or("")))
+        );
+    }
+}
+
+#[test]
+fn runtime_feedback_unencodable_chat_attachment_names_message_index() {
+    let source = AttachmentSource::provider_file(
+        lash_core::ProviderFileScope::new("openai", "credential"),
+        "file-feedback",
+        None,
+    );
+    let mut req = request(vec![
+        LlmMessage::text(LlmRole::User, "U"),
+        LlmMessage::new(
+            LlmRole::System,
+            vec![LlmContentBlock::Attachment {
+                source: Box::new(source),
+            }],
+        ),
+    ]);
+    Arc::make_mut(&mut req.model_capability.attachment_acceptance)
+        .acceptors
+        .push(lash_core::provider::AttachmentAcceptor {
+            provider: "OpenAI Chat Completions".into(),
+            rules: vec![
+                lash_core::provider::AttachmentAcceptanceRule::ProviderFile {
+                    provider: "openai".into(),
+                },
+            ],
+        });
+    let error = openrouter_provider()
+        .build_chat_request_body(&req, false)
+        .unwrap_err();
+    assert_eq!(error.kind, ProviderFailureKind::Validation);
+    assert_eq!(
+        error.code.as_deref(),
+        Some("attachment_source_not_encodable")
+    );
+    assert!(error.message.contains("message index 1"));
+}

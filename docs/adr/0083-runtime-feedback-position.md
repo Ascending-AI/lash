@@ -17,7 +17,7 @@ conversation is runtime feedback. Direct requests expose the same field and
 refuse a leading System message with `DirectLlmError::LeadingSystemMessage`,
 whose diagnostic names `instructions`; they never infer the caller's intent.
 
-Runtime feedback is emitted at its conversation position on every provider. It uses the provider's native instruction form when that form is legal at that position and the `<runtime_feedback>` tagged user form otherwise. It is never moved earlier or later, and never folded into the initial instructions.
+Runtime feedback is emitted at its conversation position on every provider. It uses the provider's native instruction form when that form is legal at that position and the `<runtime_feedback>` tagged user form otherwise. It is never moved across conversation turns or folded into the initial instructions.
 
 | Provider | Initial instructions | Runtime feedback |
 | --- | --- | --- |
@@ -26,13 +26,31 @@ Runtime feedback is emitted at its conversation position on every provider. It u
 | Anthropic | Top-level `system` | Native System at a legal slot when enabled; tagged user block otherwise |
 | Gemini and Code Assist | `systemInstruction` in the Gemini request | Tagged user part at position |
 
-`None` omits the initial-instruction element. Text is preserved byte for byte.
+`None` omits the initial-instruction element except on Codex, which retains its
+existing always-present `instructions: ""` string. Projectors trim configured
+prompts and map whitespace-only prompts to `None`; explicitly supplied request
+instructions and feedback text are preserved byte for byte.
 The fallback wraps the complete feedback text in one
 `<runtime_feedback>…</runtime_feedback>` pair. It carries user-level authority,
 not native instruction authority. Adjacent user blocks coalesce in Anthropic
 and Google, retaining each tagged block and its order. Consecutive native
 Anthropic System messages coalesce into one section. Empty feedback and feedback
 with attachments use tagged fallback; attachments remain separate user blocks.
+On Responses, Codex, and Chat, only an attachment-bearing feedback message
+downgrades to a user item/message containing the complete tagged text and its
+attachments. Other feedback retains the host instruction role. If an attachment
+cannot be projected legally, the provider returns a typed validation error naming
+the original message index; it must never silently discard the attachment.
+
+The single intra-message placement rule is: tool results precede feedback in the
+same user turn. Feedback injected between an assistant tool call and its result,
+or between consecutive result messages, remains before the next assistant turn.
+Anthropic coalesces that turn as `[tool_result…, tagged feedback…]`; this slot
+uses fallback even with native System enabled. Gemini and Code Assist likewise
+keep function-response parts first in the coalesced user content. Responses,
+Codex, and Chat emit the turn's tool-output items/messages first, followed by its
+feedback items/messages. Result order and feedback order are each preserved;
+this does not move feedback to a different conversation turn.
 
 The host supplies `ModelCapability.instruction_role` (`System` by default,
 `Developer` when specified) and `native_mid_conversation_system` (false by
