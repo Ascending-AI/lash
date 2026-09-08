@@ -372,6 +372,17 @@ impl crate::store::ConformanceSessionStoreFactory for super::InMemorySessionStor
     }
 }
 
+impl InMemorySessionStore {
+    pub fn bind_session_for_conformance(&self, session_id: &str) {
+        *self.bound_session_id.lock_recover() = Some(session_id.to_string());
+        *self.session_meta.lock_recover() = Some(crate::SessionMeta {
+            pending_observer_intents: Vec::new(),
+            session_id: session_id.to_string(),
+            relation: crate::SessionRelation::Root,
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::store::StoreMaintenance;
@@ -410,16 +421,5 @@ mod tests {
         let rows = store.raw_queued_work_for_testing();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].0.session_id, "deleted-session");
-    }
-}
-
-impl InMemorySessionStore {
-    pub fn bind_session_for_conformance(&self, session_id: &str) {
-        *self.bound_session_id.lock_recover() = Some(session_id.to_string());
-        *self.session_meta.lock_recover() = Some(crate::SessionMeta {
-            pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
-            relation: crate::SessionRelation::Root,
-        });
     }
 }
