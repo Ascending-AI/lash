@@ -23,6 +23,7 @@ mod maintenance;
 mod preflight;
 pub mod queued_work;
 mod realization;
+mod retention;
 mod runtime_commit;
 mod runtime_commit_plan;
 mod semantic_boundary;
@@ -68,6 +69,7 @@ pub use queued_work::{
     TurnWorkClaimSelection,
 };
 pub use realization::commit_runtime_state_verified;
+pub use retention::{RetentionBound, RetentionReport};
 pub use runtime_commit::{
     AppendRequestIdentity, RuntimeCommit, RuntimeCommitReceipt, RuntimeTurnCommitStamp,
     RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SemanticBoundaryOperation,

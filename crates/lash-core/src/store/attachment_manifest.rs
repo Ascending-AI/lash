@@ -237,19 +237,16 @@ pub trait AttachmentManifest: Send + Sync {
     /// out-of-band entry point for hosts that want to commit an id
     /// outside the normal turn-commit flow.
     ///
-    /// Commit is an *update in place* of an existing intent row, never an
-    /// insert: it stamps `committed_at_epoch_ms` on rows that already exist for
-    /// `(session_id, attachment_id)` and no-ops on ids with no row. This is
-    /// deliberate and sound in both edge cases:
+    /// Adoption acquires this session's own committed root, inserting a row
+    /// when the bytes were put only by another session. Existing intent metadata
+    /// and the first commit timestamp are preserved. A foreign owner's deletion
+    /// cannot release the receiver's root.
     ///
-    /// * An id with no row in *this* session (e.g. an attachment carried in from
-    ///   conversation history or a parent session) is already rooted by the
-    ///   session that recorded its intent — this session needs no row of its own.
-    /// * An id whose intent was *reconciled away* by GC (after its durable owner
-    ///   was proven dead and the retention window elapsed) also no-ops:
-    ///   because commit never re-inserts, it cannot resurrect a committed ref to
-    ///   bytes GC may already have collected. The read side surfaces the missing
-    ///   bytes as `NotFound` rather than through a dangling root.
+    /// Acquisition shares the attachment GC fence: it revokes an unarmed
+    /// condemnation and refuses an already armed physical delete. Normal runtime
+    /// adoption and graph publication succeed or roll back in one transaction.
+    /// This records reachability of supplied stored references; it does not put
+    /// bytes or validate their existence in the host's separate blob store.
     fn commit_refs(
         &self,
         session_id: &str,
@@ -320,27 +317,14 @@ pub trait AttachmentManifest: Send + Sync {
 
     /// Remove one session's manifest row. Called by the session facade when a
     /// turn releases an attachment, and by `delete_session` when a whole
-    /// session's refs are dropped. The bytes themselves die later via GC once
-    /// no session references them.
+    /// session's refs are dropped. FIG-653: committed rows needed by retained
+    /// graph history cannot be forgotten; GC removes them after the final
+    /// retained prefix disappears. Bytes die only after all roots disappear.
     fn forget(
         &self,
         session_id: &str,
         attachment_id: &crate::AttachmentId,
     ) -> Result<(), StoreError>;
-
-    /// Whether this manifest holds a live ref — an intent *or* a commit — for
-    /// `(session_id, attachment_id)`.
-    ///
-    /// The session-boundary guard: the
-    /// [`SessionAttachmentStore`](crate::SessionAttachmentStore) facade calls
-    /// it before every backend `get`, so a turn in session A can never resolve
-    /// session B's content-addressed blob by guessing its hash. Backends with
-    /// no attachment story answer `true` (they impose no guard).
-    fn holds_ref(
-        &self,
-        session_id: &str,
-        attachment_id: &crate::AttachmentId,
-    ) -> Result<bool, StoreError>;
 
     /// Every live attachment ref (intent or committed) this manifest instance
     /// can see, deduplicated. Both durable backends hold one manifest for every
@@ -399,14 +383,6 @@ macro_rules! impl_noop_attachment_manifest {
                 _attachment_id: &$crate::AttachmentId,
             ) -> ::std::result::Result<(), $crate::StoreError> {
                 Ok(())
-            }
-
-            fn holds_ref(
-                &self,
-                _session_id: &str,
-                _attachment_id: &$crate::AttachmentId,
-            ) -> ::std::result::Result<bool, $crate::StoreError> {
-                Ok(true)
             }
 
             fn list_all_refs(

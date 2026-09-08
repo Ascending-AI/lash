@@ -1,5 +1,23 @@
 use super::*;
 
+/// Agreement alone misses a missing-root defect shared by every backend.
+/// Apply the same independent byte-survival and rollback oracle to all three.
+pub(super) async fn cross_owner_attachment_adoption(
+    sqlite_root: &Path,
+    postgres: &PostgresStorage,
+) {
+    let factories: [Arc<dyn SessionStoreFactory>; 3] = [
+        Arc::new(InMemorySessionStoreFactory::new()),
+        Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+            sqlite_root.join("cross-owner"),
+        )),
+        Arc::new(postgres.session_store_factory()),
+    ];
+    for factory in factories {
+        lash_conformance::cross_owner_attachment_adoption_conformance(factory).await;
+    }
+}
+
 pub(super) fn fence_precedence_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::ForkFencePrecedence,
@@ -60,6 +78,36 @@ pub(super) fn rewind_case() -> GeneratedCase {
 }
 
 impl BackendRunner {
+    pub(super) async fn reclaim_terminal_evidence(
+        &self,
+    ) -> Result<Option<ComparableRuntimeCommitResult>, StoreError> {
+        let bound = lash_core::RetentionBound {
+            committed_before_epoch_ms: u64::MAX,
+        };
+        let report = self
+            .factory()
+            .reclaim_retained_evidence(bound)
+            .await
+            .map_err(|failure| StoreError::Backend(failure.to_string()))?;
+        assert_eq!(report.removed_receipt_count, 1);
+        assert_eq!(report.removed_usage_delta_count, 1);
+        assert_eq!(report.removed_attachment_root_count, 0);
+        assert_eq!(
+            self.factory()
+                .reclaim_retained_evidence(bound)
+                .await
+                .unwrap(),
+            lash_core::RetentionReport::default()
+        );
+        assert!(
+            self.factory()
+                .live_attachment_refs(0)
+                .await?
+                .contains(&differential_attachment_id())
+        );
+        Ok(None)
+    }
+
     pub(super) async fn apply_fork_operation(
         &mut self,
         operation: &StoreOperation,
@@ -111,6 +159,11 @@ impl BackendRunner {
                 Ok(None)
             }
             StoreOperation::Rewind => {
+                let attachment_rooted = self
+                    .factory()
+                    .live_attachment_refs(0)
+                    .await?
+                    .contains(&differential_attachment_id());
                 let node_id = self
                     .current_leaf_node_id
                     .clone()
@@ -139,6 +192,15 @@ impl BackendRunner {
                     .delete_session(&self.session_id)
                     .await
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
+                if attachment_rooted {
+                    assert!(
+                        self.factory()
+                            .live_attachment_refs(0)
+                            .await?
+                            .contains(&differential_attachment_id()),
+                        "FIG-2501: surviving fork retains the deleted parent's attachment root"
+                    );
+                }
                 let rewound = self
                     .factory()
                     .fork_at(&ForkSessionRequest {
@@ -161,6 +223,22 @@ impl BackendRunner {
                 Ok(None)
             }
             _ => unreachable!("fork helper received non-fork operation"),
+        }
+    }
+}
+
+/// PG reuses its catalog across cases and runs; remove earlier terminal evidence
+/// before this case commits so the literal count oracle covers this case alone.
+pub(super) async fn prepare_retention_case(case: CaseName, runners: &[BackendRunner]) {
+    if case == CaseName::AttachmentAdoption {
+        for runner in runners {
+            runner
+                .factory()
+                .reclaim_retained_evidence(lash_core::RetentionBound {
+                    committed_before_epoch_ms: u64::MAX,
+                })
+                .await
+                .expect("clear prior terminal evidence before the retention fixture");
         }
     }
 }

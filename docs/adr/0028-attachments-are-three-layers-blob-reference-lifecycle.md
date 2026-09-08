@@ -42,19 +42,11 @@ they run; owner identity is written in the same manifest mutation as the
 intent. There is no process-local pending-id correctness state. At final commit,
 the store stamps every row owned by the committing turn inside the graph and
 checkpoint transaction. The explicit tool-output/message attachment-id union
-remains as adoption for cross-turn references. The critical
-invariant is the **session-boundary guard** that replaces physical isolation:
-`get(id)` first asks the manifest whether this session holds a ref (intent or
-commit) for `(session_id, id)`, via a new `AttachmentManifest::holds_ref`, and
-returns `NotFound` for an unknown ref *before* it ever touches the backend. A
-turn in session A therefore cannot resolve session B's blob by guessing a
-content hash — prompt-injected tool calls and buggy plugins are semi-trusted, so
-the guard, not a physical copy, is what keeps them apart. `delete(id)` now drops
-only this session's manifest ref and leaves the backend bytes in place (a
-semantic change); the bytes die later via GC once no session references them.
-Ephemeral runtimes with no durable reference store wrap their backend in a
-`SessionAttachmentStore` carrying a `NoopAttachmentManifest` (which imposes no
-guard and records nothing), so every consumer sees exactly one facade type.
+remains as adoption for cross-turn references. FIG-2501 supersedes the original
+session-boundary read guard: reads resolve content addresses directly, and
+hosts own authorization. `delete(id)` forgets this session's manifest row only
+when retained history no longer needs it; physical deletion remains GC's job.
+Ephemeral facades record no durable roots.
 
 **Layer 3 — lifecycle is host policy, with lash levers and a bundled default.**
 The per-session `reclaim_orphaned_attachments` sweep is deleted. In its place is
@@ -190,38 +182,36 @@ blob is unreferenced *everywhere* before deleting it, so two sessions can share
 one physical blob and neither loses its content when the other is swept or
 deleted. The physical per-session namespace bought isolation by never sharing at
 all — paying a full byte copy per session and taxing every backend with session
-awareness — to solve a problem the manifest already models precisely. Reads are
-now gated by the reference layer, storage is dumb and deduplicated, and lifecycle
+awareness — to solve a problem the manifest already models precisely. Reads resolve content addresses, storage is deduplicated, and lifecycle
 is the host's to schedule.
 
-## Shared-history ruling (implementation pending)
+## Shared-history implementation (FIG-2501 / FIG-653)
 
-ADR 0047 supersedes two parts of the Layer 2 account above.
-The ruling deletes `AttachmentManifest::holds_ref` and the per-session read
-guard. Reference tracking establishes liveness, not authorization: Lash has no
-principal with which to decide whether a caller may read a content-addressed
-blob. After that deletion, a Host Application that exposes attachment reads to
-untrusted callers must enforce its own scope. Without that host check, the
-factory-wide blob store is an existence oracle for a caller that can obtain or
-compute a content hash.
+Attachment manifest ownership establishes liveness, not authorization. The
+attachment read guard and its membership capability are removed. History point
+reads still enforce graph membership, and process waits enforce observer
+subscription relationships. Hosts own authorization at their edge.
 
-The deletion and its replacement are not shipped. `holds_ref` currently gates
-attachment reads, and the attachment-edge relations below do not exist. The
-FIG-653 L7 retention work owns both changes.
+A boundary commit adopting a stored content address also acquires a committed
+manifest root for the receiving session, even if that session never put the
+bytes. Root acquisition and graph publication share one transaction; failure
+leaves no new root. Adoption uses the existing digest fence, revoking an unarmed
+condemnation and refusing a physical delete already in flight. The receiver's
+root then follows the same owner-level retention rule as any other attachment.
+This closes cross-session adoption without changing tables or versions.
 
-The ruling makes attachment liveness an explicit stored edge. History-node
-attachments, checkpoint attachments, process/artifact roots, and host roots
-will be named relations in the durable core. A commit will insert its attachment
-edges and retire the corresponding write-ahead intents in the same transaction;
-reclaiming a node will remove its edges in that transaction. A branch will share
-the historical prefix and therefore its attachment edges without copying
-manifest rows.
+The schema-free mechanism retains a deleted owner's committed manifest rows
+while any of that owner's graph nodes remain retained by a head, child, or pin.
+The final prefix retirement makes those roots reclaimable on the next sweep.
+Uncommitted rows are removed at owner deletion. Explicit forget also respects
+the graph-retention precondition. The in-memory factory shares the same manifest
+across its stores, so pins retain roots even without an active store handle.
 
-Once implemented, this replaces the inferred predicate over commit receipts
-described above. Receipt retention will no longer silently change the GC oracle:
-edges will be truth, and attachment/blob counts only a cache over those edges.
-Layer 1 remains a dumb content-addressed blob store, while Layer 3 remains
-host-scheduled lifecycle policy with explicit bounds.
+This conservatively retains suffix attachments too, until the last owner prefix
+is gone. Exact node-to-attachment edges would provide finer reclamation, but
+are not required for safety and would consume a store-schema change. Live-turn
+intent reconciliation still uses receipt supersession; terminal receipt
+reclamation is coupled to the permanent deleted-session proof in FIG-2502.
 
 ## Cross-version consequences
 

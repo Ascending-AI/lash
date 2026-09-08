@@ -1,3 +1,15 @@
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_cross_owner_attachment_adoption_conformance() {
+    let Some((_database_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(&storage).await;
+    lash_conformance::cross_owner_attachment_adoption_conformance(Arc::new(
+        storage.session_store_factory(),
+    ))
+    .await;
+}
+
 use std::future::Future;
 #[path = "conformance/claim_atomicity.rs"]
 mod claim_atomicity;
@@ -2386,4 +2398,12 @@ async fn postgres_attachment_owner_degraded_proof_conformance() {
     reset(&storage).await;
     lash_conformance::attachment_owner_degraded_proof(Arc::new(storage.session_store_factory()))
         .await;
+}
+
+#[tokio::test]
+async fn postgres_terminal_evidence_retention_conformance_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        return;
+    };
+    lash_conformance::retention_conformance(Arc::new(storage.session_store_factory())).await;
 }

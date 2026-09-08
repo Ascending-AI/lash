@@ -65,17 +65,6 @@ impl AttachmentManifest for RecordingManifest {
         Ok(())
     }
 
-    fn holds_ref(
-        &self,
-        session_id: &str,
-        attachment_id: &AttachmentId,
-    ) -> Result<bool, crate::StoreError> {
-        Ok(self
-            .entries
-            .lock_recover()
-            .contains_key(&(session_id.to_string(), attachment_id.clone())))
-    }
-
     fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
         Ok(self
             .entries
@@ -631,7 +620,7 @@ async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
 }
 
 #[tokio::test]
-async fn facade_get_is_gated_by_manifest_ownership() {
+async fn facade_get_resolves_content_addresses_across_sessions() {
     let backend: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
     let manifest: Arc<dyn AttachmentManifest> = Arc::new(RecordingManifest::default());
     let session_a = SessionAttachmentStore::new(backend.clone(), manifest.clone(), "session-a");
@@ -643,9 +632,18 @@ async fn facade_get_is_gated_by_manifest_ownership() {
         session_a.get(&reference.id).await.expect("a reads").bytes,
         vec![7, 7, 7]
     );
-    // Session B shares the backend blob but never referenced it: NotFound.
+    // FIG-653: manifest ownership is liveness, not read authorization.
+    assert_eq!(
+        session_b
+            .get(&reference.id)
+            .await
+            .expect("shared read")
+            .bytes,
+        vec![7, 7, 7]
+    );
+    let missing = AttachmentId::parse("absent").unwrap();
     assert!(matches!(
-        session_b.get(&reference.id).await,
+        session_b.get(&missing).await,
         Err(AttachmentStoreError::NotFound(_))
     ));
 }
@@ -659,12 +657,15 @@ async fn facade_delete_drops_ref_but_keeps_backend_bytes() {
     let reference = session.put(vec![9, 9], meta()).await.expect("put");
     session.delete(&reference.id).await.expect("delete ref");
 
-    // Facade no longer resolves it (ref dropped)...
-    assert!(matches!(
-        session.get(&reference.id).await,
-        Err(AttachmentStoreError::NotFound(_))
-    ));
-    // ...but the backend still physically holds the bytes (GC's job).
+    // Forget changes liveness; reads continue until GC removes the bytes.
+    assert_eq!(
+        session
+            .get(&reference.id)
+            .await
+            .expect("bytes remain")
+            .bytes,
+        vec![9, 9]
+    );
     assert_eq!(
         backend
             .get(&reference.id)
@@ -1130,7 +1131,6 @@ struct FencedFixture {
     store: Arc<dyn crate::RuntimePersistence>,
     backend: Arc<InMemoryAttachmentStore>,
     session: Arc<SessionAttachmentStore>,
-    session_id: String,
     /// Every fence outcome the facade observed, in order.
     fence_attempts:
         Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<AttachmentWriteFence>>>,
@@ -1162,7 +1162,6 @@ async fn fenced_fixture(session_id: &str) -> FencedFixture {
         store,
         backend,
         session,
-        session_id: session_id.to_string(),
         fence_attempts: Arc::new(tokio::sync::Mutex::new(fence_attempts)),
     }
 }
@@ -1259,14 +1258,6 @@ impl AttachmentManifest for SignalingManifest {
         self.inner.forget(session_id, attachment_id)
     }
 
-    fn holds_ref(
-        &self,
-        session_id: &str,
-        attachment_id: &AttachmentId,
-    ) -> Result<bool, crate::StoreError> {
-        self.inner.holds_ref(session_id, attachment_id)
-    }
-
     fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
         self.inner.list_all_refs()
     }
@@ -1323,7 +1314,8 @@ async fn same_content_put_inside_the_delete_window_survives() {
         bytes
     );
     assert!(
-        crate::AttachmentManifest::holds_ref(&*fixture.store, &fixture.session_id, &id)
+        crate::AttachmentManifest::list_all_refs(&*fixture.store)
+            .map(|refs| refs.contains(&id))
             .expect("manifest probe"),
         "the surviving bytes are rooted by the writer's intent"
     );
@@ -1568,7 +1560,7 @@ async fn ephemeral_facade_passes_reads_through_without_a_guard() {
 }
 
 #[test]
-fn persistence_manifest_adapter_forwards_holds_ref() {
+fn persistence_manifest_adapter_forwards_root_tracking() {
     let runtime: Arc<dyn crate::RuntimePersistence> = Arc::new(crate::InMemorySessionStore::new());
     let adapter = PersistenceManifestAdapter(runtime);
     let attachment_id = AttachmentId::parse("adapter-forwarding").expect("valid attachment id");
@@ -1583,13 +1575,9 @@ fn persistence_manifest_adapter_forwards_holds_ref() {
     adapter.record_intent(intent).expect("record intent");
     assert!(
         adapter
-            .holds_ref("adapter-session", &attachment_id)
+            .list_all_refs()
+            .map(|refs| refs.contains(&attachment_id))
             .expect("holds ref")
-    );
-    assert!(
-        !adapter
-            .holds_ref("other-session", &attachment_id)
-            .expect("no ref for other session")
     );
     assert_eq!(
         adapter.list_all_refs().expect("list all refs"),

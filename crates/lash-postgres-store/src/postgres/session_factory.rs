@@ -98,6 +98,13 @@ impl PostgresSessionStoreFactory {
 
 #[async_trait::async_trait]
 impl SessionStoreFactory for PostgresSessionStoreFactory {
+    async fn reclaim_retained_evidence(
+        &self,
+        bound: lash_core::store::RetentionBound,
+    ) -> lash_core::MaintenanceResult<lash_core::store::RetentionReport> {
+        crate::evidence_retention::reclaim(self, bound).await
+    }
+
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
@@ -608,6 +615,10 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         // supersedes a turn owner, a missing process row proves a process owner
         // was pruned, and only unscoped host puts use age alone.
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        sqlx::query(crate::attachments::RECLAIM_DELETED_ATTACHMENT_ROOTS)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         let delete_sql = crate::attachments::forget_aged_uncommitted_attachment_intents_sql(
             self.process_registry_shared,
         );
@@ -859,7 +870,6 @@ pub(crate) async fn delete_session_tx(
     .await
     .map_err(store_sqlx_error)?;
     for sql in [
-        "DELETE FROM lash_attachment_manifest WHERE session_id = $1",
         "DELETE FROM lash_queued_work_items WHERE batch_id IN (SELECT batch_id FROM lash_queued_work_batches WHERE session_id = $1)",
         "DELETE FROM lash_queued_work_batches WHERE session_id = $1",
         "DELETE FROM lash_wake_redelivery_fences WHERE session_id = $1",
@@ -867,8 +877,6 @@ pub(crate) async fn delete_session_tx(
         "DELETE FROM lash_pending_turn_inputs WHERE session_id = $1",
         "DELETE FROM lash_turn_cancel_requests WHERE session_id = $1",
         "DELETE FROM lash_session_execution_leases WHERE session_id = $1",
-        "DELETE FROM lash_usage_deltas WHERE session_id = $1",
-        "DELETE FROM lash_runtime_turn_commits WHERE session_id = $1",
         "DELETE FROM lash_fork_lineage WHERE session_id = $1",
         "DELETE FROM lash_session_meta WHERE session_id = $1",
     ] {
@@ -878,6 +886,10 @@ pub(crate) async fn delete_session_tx(
             .await
             .map_err(store_sqlx_error)?;
     }
+    sqlx::query(crate::attachments::RECLAIM_DELETED_ATTACHMENT_ROOTS)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     // Trigger manifests are the one artifact-ref namespace with an exact
     // session owner. Module, raw-artifact, and process-environment refs are
     // factory-wide services with no safe session attribution.
@@ -1056,11 +1068,6 @@ pub(crate) async fn delete_process_sessions_tx(
                     OR session_id IN (SELECT session_id FROM lash_deleted_sessions))
              RETURNING node_id
          ),
-         deleted_attachment_manifest AS (
-             DELETE FROM lash_attachment_manifest
-             WHERE session_id = ANY($1)
-             RETURNING attachment_id
-         ),
          deleted_queued_work_items AS (
              DELETE FROM lash_queued_work_items AS item
              WHERE EXISTS (
@@ -1101,16 +1108,6 @@ pub(crate) async fn delete_process_sessions_tx(
              WHERE session_id = ANY($1)
              RETURNING session_id
          ),
-         deleted_usage_deltas AS (
-             DELETE FROM lash_usage_deltas
-             WHERE session_id = ANY($1)
-             RETURNING session_id
-         ),
-         deleted_runtime_turn_commits AS (
-             DELETE FROM lash_runtime_turn_commits
-             WHERE session_id = ANY($1)
-             RETURNING session_id
-         ),
          deleted_fork_lineage AS (
              DELETE FROM lash_fork_lineage
              WHERE session_id = ANY($1)
@@ -1128,14 +1125,11 @@ pub(crate) async fn delete_process_sessions_tx(
              RETURNING artifact_ref
          )
          SELECT (SELECT count(*) FROM deleted_graph_nodes)
-              + (SELECT count(*) FROM deleted_attachment_manifest)
               + (SELECT count(*) FROM deleted_queued_work_batches)
               + (SELECT count(*) FROM deleted_wake_redelivery_fences)
               + (SELECT count(*) FROM deleted_wake_allocation_floors)
               + (SELECT count(*) FROM deleted_pending_turn_inputs)
               + (SELECT count(*) FROM deleted_session_execution_leases)
-              + (SELECT count(*) FROM deleted_usage_deltas)
-              + (SELECT count(*) FROM deleted_runtime_turn_commits)
               + (SELECT count(*) FROM deleted_fork_lineage)
               + (SELECT count(*) FROM deleted_session_meta)
               + (SELECT count(*) FROM deleted_trigger_manifests)",
@@ -1147,6 +1141,10 @@ pub(crate) async fn delete_process_sessions_tx(
         .await
         .map_err(store_sqlx_error)?;
 
+        sqlx::query(crate::attachments::RECLAIM_DELETED_ATTACHMENT_ROOTS)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
         crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(
             tx,
             candidates,

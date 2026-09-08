@@ -442,6 +442,7 @@ impl SessionCommitStore for Store {
         Store::load_session_head_meta(self).await
     }
 
+    /// FIG-653: session-relative history reads enforce graph membership, not authorization.
     async fn load_node(
         &self,
         node_id: &str,
@@ -1198,20 +1199,9 @@ impl SessionCommitStore for Store {
                             turn_cancel_input_outcome.affected_inputs.push(affected);
                         }
                     }
-                    if !commit.committed_attachment_ids.is_empty() {
-                        let now = now as i64;
-                        let mut stmt = tx
-                            .prepare(
-                                "UPDATE attachment_manifest
-                                 SET committed_at_ms = COALESCE(committed_at_ms, ?1)
-                                 WHERE attachment_id = ?2 AND session_id = ?3",
-                            )
-                            .map_err(sqlite_error)?;
-                        for id in &commit.committed_attachment_ids {
-                            stmt.execute(params![now, id.as_str(), commit.session_id])
-                                .map_err(sqlite_error)?;
-                        }
-                    }
+                    crate::attachments::commit_attachment_refs_conn(
+                        tx, &commit.session_id, &commit.committed_attachment_ids, now as i64,
+                    )?;
                     if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
                         tx.execute(
                             "UPDATE attachment_manifest
@@ -3117,7 +3107,7 @@ fn abandon_turn_input_claims_statement(
 impl StoreMaintenance for Store {
     async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {
         // `deleted_sessions` is deliberately exempt: it is permanent identity
-        // evidence and must survive every retention-pruning pass.
+        // evidence and must survive every retention-pruning pass (FIG-754 / FIG-748).
         let session_id = self.session_id.get().cloned().ok_or_else(|| {
             lash_core::MaintenanceFailure::failed_before_any_work(StoreError::SessionNotBound)
         })?;

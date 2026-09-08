@@ -222,11 +222,12 @@ impl InMemorySessionStore {
 
     /// Return every attachment-manifest row owned by this bound session.
     pub fn raw_attachment_manifest_for_testing(&self) -> Vec<crate::AttachmentManifestEntry> {
-        let session_id = self
-            .session_meta
-            .lock_recover()
-            .as_ref()
-            .map(|meta| meta.session_id.clone());
+        let session_id = self.bound_session_id.lock_recover().clone().or_else(|| {
+            self.session_meta
+                .lock_recover()
+                .as_ref()
+                .map(|meta| meta.session_id.clone())
+        });
         let mut rows = self
             .attachment_manifest
             .lock_recover()

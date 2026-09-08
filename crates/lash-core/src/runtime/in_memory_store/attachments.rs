@@ -9,21 +9,43 @@ use super::InMemorySessionStore;
 use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
+    /// The caller holds the factory write transaction. Check the whole batch
+    /// before mutating it, so an armed delete leaves no partially adopted roots.
     pub(super) fn commit_attachment_refs_in_memory(
         &self,
         session_id: &str,
         attachment_ids: &[crate::AttachmentId],
         committed_at_epoch_ms: u64,
-    ) {
-        let mut manifest = self.attachment_manifest.lock_recover();
-        for attachment_id in attachment_ids {
-            if let Some(entry) = manifest.get_mut(&(session_id.to_string(), attachment_id.clone()))
-            {
-                entry
-                    .committed_at_epoch_ms
-                    .get_or_insert(committed_at_epoch_ms);
+    ) -> Result<(), crate::StoreError> {
+        let mut condemnations = self.attachment_condemnations.lock_recover();
+        for id in attachment_ids {
+            if matches!(
+                condemnations.get(id),
+                Some(super::AttachmentCondemnationPhase::Deleting)
+            ) {
+                return Err(crate::StoreError::Backend(format!(
+                    "cannot adopt attachment `{id}` while physical deletion is in flight"
+                )));
             }
         }
+        let mut manifest = self.attachment_manifest.lock_recover();
+        for id in attachment_ids {
+            condemnations.remove(id);
+            manifest
+                .entry((session_id.to_string(), id.clone()))
+                .or_insert_with(|| crate::AttachmentManifestEntry {
+                    attachment_id: id.clone(),
+                    session_id: session_id.to_string(),
+                    canonical_uri: format!("lash-attachment://blake3/{id}"),
+                    intent_at_epoch_ms: committed_at_epoch_ms,
+                    committed_at_epoch_ms: None,
+                    owner_kind: None,
+                    owner_id: None,
+                })
+                .committed_at_epoch_ms
+                .get_or_insert(committed_at_epoch_ms);
+        }
+        Ok(())
     }
 
     pub(super) fn commit_turn_attachment_intents(
@@ -135,8 +157,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         let committed_at_epoch_ms = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(session_id)?;
-        self.commit_attachment_refs_in_memory(session_id, attachment_ids, committed_at_epoch_ms);
-        Ok(())
+        self.commit_attachment_refs_in_memory(session_id, attachment_ids, committed_at_epoch_ms)
     }
 
     fn list_uncommitted(
@@ -167,6 +188,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<(), crate::store::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
+        let deleted = self.deleted_session_ids.lock_recover().clone();
         let committed_turns = self
             .runtime_turn_commits
             .lock_recover()
@@ -179,18 +201,19 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         // boundary. Process owners are conservatively live in the in-memory store;
         // durable factories evaluate process-row existence in their database.
         self.attachment_manifest.lock_recover().retain(|_, entry| {
-            let owner_is_dead = match (entry.owner_kind, entry.owner_id.as_deref()) {
-                (None, None) => true,
-                (Some(crate::AttachmentOwnerKind::Turn), Some(owner_id)) => committed_turns
-                    .iter()
-                    .any(|(session_id, turn_id, committed_at_ms)| {
-                        session_id == &entry.session_id
-                            && turn_id != owner_id
-                            && *committed_at_ms > entry.intent_at_epoch_ms
-                    }),
-                (Some(crate::AttachmentOwnerKind::Process), Some(_)) => false,
-                _ => false,
-            };
+            let owner_is_dead = deleted.contains(&entry.session_id)
+                || match (entry.owner_kind, entry.owner_id.as_deref()) {
+                    (None, None) => true,
+                    (Some(crate::AttachmentOwnerKind::Turn), Some(owner_id)) => committed_turns
+                        .iter()
+                        .any(|(session_id, turn_id, committed_at_ms)| {
+                            session_id == &entry.session_id
+                                && turn_id != owner_id
+                                && *committed_at_ms > entry.intent_at_epoch_ms
+                        }),
+                    (Some(crate::AttachmentOwnerKind::Process), Some(_)) => false,
+                    _ => false,
+                };
             !(entry.committed_at_epoch_ms.is_none()
                 && entry.intent_at_epoch_ms <= intent_grace_cutoff_epoch_ms
                 && owner_is_dead)
@@ -203,21 +226,20 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         session_id: &str,
         attachment_id: &crate::AttachmentId,
     ) -> Result<(), crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        let owners = self.global_node_owners.lock_recover();
+        let tombstoned = self.tombstoned_node_ids.lock_recover();
+        let retained = owners
+            .iter()
+            .any(|(node, owner)| owner == session_id && !tombstoned.contains(node));
         self.attachment_manifest
             .lock_recover()
-            .remove(&(session_id.to_string(), attachment_id.clone()));
+            .retain(|(owner, id), entry| {
+                owner != session_id
+                    || id != attachment_id
+                    || (retained && entry.committed_at_epoch_ms.is_some())
+            });
         Ok(())
-    }
-
-    fn holds_ref(
-        &self,
-        session_id: &str,
-        attachment_id: &crate::AttachmentId,
-    ) -> Result<bool, crate::store::StoreError> {
-        Ok(self
-            .attachment_manifest
-            .lock_recover()
-            .contains_key(&(session_id.to_string(), attachment_id.clone())))
     }
 
     fn has_live_ref_for_id(
@@ -225,6 +247,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         attachment_id: &crate::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, crate::store::StoreError> {
+        let deleted = self.deleted_session_ids.lock_recover().clone();
         let committed_turns = self
             .runtime_turn_commits
             .lock_recover()
@@ -243,6 +266,9 @@ impl crate::AttachmentManifest for InMemorySessionStore {
                     || entry.intent_at_epoch_ms > intent_grace_cutoff_epoch_ms
                 {
                     return true;
+                }
+                if deleted.contains(&entry.session_id) {
+                    return false;
                 }
                 match (entry.owner_kind, entry.owner_id.as_deref()) {
                     (None, None) => false,
@@ -320,19 +346,18 @@ mod attachment_reconciliation_tests {
 
         assert!(
             store
-                .holds_ref(
-                    "s",
-                    &crate::AttachmentId::parse("kept").expect("valid attachment id")
-                )
+                .list_all_refs()
+                .map(|refs| refs
+                    .contains(&crate::AttachmentId::parse("kept").expect("valid attachment id")))
                 .unwrap(),
             "a refreshed intent (timestamp past the cutoff) must survive reconciliation"
         );
         assert!(
             !store
-                .holds_ref(
-                    "s",
+                .list_all_refs()
+                .map(|refs| refs.contains(
                     &crate::AttachmentId::parse("collected").expect("valid attachment id")
-                )
+                ))
                 .unwrap(),
             "a stale aged intent must be reconciled away"
         );
@@ -363,9 +388,17 @@ mod attachment_reconciliation_tests {
 
         store.forget_aged_uncommitted_intents(cutoff).unwrap();
         assert!(
-            store.holds_ref("s", &committed).unwrap(),
+            store
+                .list_all_refs()
+                .map(|refs| refs.contains(&committed))
+                .unwrap(),
             "a committed ref survives reconciliation regardless of its intent age"
         );
-        assert!(!store.holds_ref("s", &orphan).unwrap());
+        assert!(
+            !store
+                .list_all_refs()
+                .map(|refs| refs.contains(&orphan))
+                .unwrap()
+        );
     }
 }

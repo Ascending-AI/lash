@@ -162,9 +162,6 @@ impl InMemorySessionStore {
         *self.session_meta.lock_recover() = None;
         *self.session_state_version.lock_recover() = None;
         *self.checkpoint.lock_recover() = None;
-        self.attachment_manifest.lock_recover().clear();
-        self.usage_deltas.lock_recover().clear();
-        self.runtime_turn_commits.lock_recover().clear();
         self.queued_work.lock_recover().clear();
         self.pending_turn_inputs.lock_recover().clear();
         self.session_execution_leases.lock_recover().clear();

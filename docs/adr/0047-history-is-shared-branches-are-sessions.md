@@ -95,10 +95,9 @@ exclusivity. Processes remain independent durable objects and stay outside
 stored history-node reachability.
 
 Effect-journal identity and lifecycle retirement are implemented as recorded by
-ADR 0025. The attachment/blob part remains pending: explicit attachment-edge
-relations, bounded reclaim surfaces, and the `holds_ref` deletion belong to the
-FIG-653 L7 retention work. Current attachment liveness still uses manifest rows
-and commit-receipt predicates.
+ADR 0025. FIG-2501 removes the attachment membership read probe and protects
+manifest roots with graph retention (see below). FIG-2502 supplies terminal-gated `RetentionBound` receipt reclamation; live
+turn intents still use unprunable live-session receipts for supersession.
 
 ## Store leaf validation versus caller branch liveness
 
@@ -165,9 +164,9 @@ id directly. The shared-history and branch-as-session rulings are unchanged.
   compare-and-swaps. A plugin needing exclusivity against concurrent appends
   does not get it from `requires_ancestor_node_id`.
 - Reclamation remains host-scheduled. Effect-journal retirement is shipped and
-  lifecycle-gated. The remaining L7 ruling gives `vacuum`, receipt pruning, and
-  attachment reclamation explicit bounds and replaces inferred attachment
-  liveness with stored edges; FIG-653 owns that implementation.
+  lifecycle-gated. FIG-2502 adds the explicit terminal-session receipt/usage
+  horizon with atomic dependent-root reconciliation (ADR 0023). Existing vacuum
+  and attachment-GC policies retain their separate lifecycle contracts.
 - Lash owns the effect-journal contract while the configured substrate owns the
   journal. The session commit and effect journal remain separate transactions
   joined by stable operation identity.
@@ -184,3 +183,22 @@ id directly. The shared-history and branch-as-session rulings are unchanged.
   amendment. Process event folding and weak observation are orthogonal to
   immutable session history, and processes remain outside stored history
   reachability.
+
+## Attachment prefix retention (FIG-2501 / FIG-653)
+
+Attachment reads resolve content addresses directly; hosts own authorization.
+History point reads retain fork-lineage graph membership, and process waits
+retain observer subscription semantics. Neither relationship gate is authorization.
+
+Committing a stored attachment reference acquires a manifest root for the
+committing session, including references first put by another session. The
+boundary transaction owns this acquisition and its attachment GC fence, so
+successful adoption cannot be separated from publication of its receiver root.
+
+Committed attachment manifest rows survive owner deletion while any of that
+owner's graph nodes remain retained. The graph's existing head/child/pin
+retirement protocol supplies the prune precondition. A deleted owner's
+uncommitted intents are removed, and GC reconciles committed roots after the
+last retained node disappears, including after unpin. No schema bump is needed.
+This deliberately retains all of the owner's committed attachments while any
+prefix survives: the manifest has no exact node-to-attachment edge.

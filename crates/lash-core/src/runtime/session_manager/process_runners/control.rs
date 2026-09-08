@@ -991,6 +991,7 @@ impl ProcessCapability {
             .collect()
     }
 
+    /// FIG-653: this gate enforces observer subscription relationships, not authorization.
     async fn validate_process_handles_observed_inner(
         &self,
         current: &CurrentSessionCapability,

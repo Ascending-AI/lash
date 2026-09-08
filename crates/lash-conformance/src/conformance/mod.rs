@@ -23,6 +23,9 @@
 
 pub use lash_core::testing::coordinate_tool_provider_with_services;
 
+mod attachment_adoption;
+pub use attachment_adoption::cross_owner_attachment_adoption_conformance;
+
 mod artifact_store;
 mod attachment_owner;
 mod attachment_store;
@@ -48,6 +51,7 @@ mod process_prune_reclaim;
 mod process_references;
 mod process_registry;
 mod process_trigger_retention;
+mod retention;
 mod runtime_persistence;
 mod runtime_persistence_state_machine;
 mod session_delete_blob_reclaim;
@@ -87,6 +91,7 @@ pub use process_continuation_store::*;
 pub use process_prune_reclaim::*;
 pub use process_registry::*;
 pub use process_trigger_retention::*;
+pub use retention::*;
 pub use runtime_persistence::*;
 pub use runtime_persistence_state_machine::*;
 pub use session_delete_blob_reclaim::*;

@@ -542,6 +542,7 @@ impl SessionCommitStore for PostgresSessionStore {
         Ok(meta)
     }
 
+    /// FIG-653: fork-lineage visibility is graph membership, not authorization.
     async fn load_node(&self, node_id: &str) -> Result<Option<SessionNodeRecord>, StoreError> {
         let session_id = &self.session_id;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -2992,7 +2993,7 @@ impl TurnInputStore for PostgresSessionStore {
 impl StoreMaintenance for PostgresSessionStore {
     async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {
         // `lash_deleted_sessions` is deliberately exempt: it is permanent
-        // identity evidence and must survive every retention-pruning pass.
+        // identity evidence and must survive every retention-pruning pass (FIG-754 / FIG-748).
         let removed_node_count =
             sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1 AND tombstoned = TRUE")
                 .bind(&self.session_id)

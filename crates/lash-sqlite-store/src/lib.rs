@@ -99,6 +99,7 @@ mod await_event;
 mod blobs;
 mod codec;
 mod conn;
+mod retention;
 pub(crate) use codec::*;
 
 fn commit_count_entropy_seed() -> u64 {
@@ -788,6 +789,13 @@ impl SqliteSessionStoreFactory {
 
 #[async_trait::async_trait]
 impl SessionStoreFactory for SqliteSessionStoreFactory {
+    async fn reclaim_retained_evidence(
+        &self,
+        bound: lash_core::store::RetentionBound,
+    ) -> lash_core::MaintenanceResult<lash_core::store::RetentionReport> {
+        crate::retention::reclaim(self, bound).await
+    }
+
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
@@ -1135,7 +1143,7 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
         id: &lash_core::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, lash_core::StoreError> {
-        let store = self.open_catalog_for_attachment_gc("root re-check").await?;
+        let store = self.open_catalog_for_maintenance("root re-check").await?;
         lash_core::AttachmentManifest::has_live_ref_for_id(&store, id, intent_grace_cutoff_epoch_ms)
     }
 
@@ -1148,7 +1156,7 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
         id: &lash_core::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<lash_core::AttachmentCondemnation, lash_core::StoreError> {
-        let store = self.open_catalog_for_attachment_gc("condemnation").await?;
+        let store = self.open_catalog_for_maintenance("condemnation").await?;
         store
             .condemn_attachment(id, intent_grace_cutoff_epoch_ms)
             .await
@@ -1158,7 +1166,7 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
         &self,
         id: &lash_core::AttachmentId,
     ) -> Result<lash_core::AttachmentDeleteArming, lash_core::StoreError> {
-        let store = self.open_catalog_for_attachment_gc("delete arming").await?;
+        let store = self.open_catalog_for_maintenance("delete arming").await?;
         store.arm_attachment_delete(id).await
     }
 
@@ -1167,41 +1175,9 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
         id: &lash_core::AttachmentId,
     ) -> Result<(), lash_core::StoreError> {
         let store = self
-            .open_catalog_for_attachment_gc("condemnation release")
+            .open_catalog_for_maintenance("condemnation release")
             .await?;
         store.release_attachment_condemnation(id).await
-    }
-}
-
-impl SqliteSessionStoreFactory {
-    /// Open the factory-wide catalog that owns both halves of the attachment GC
-    /// fence — the manifest rows and the condemnation state.
-    async fn open_catalog_for_attachment_gc(
-        &self,
-        operation: &str,
-    ) -> Result<Store, lash_core::StoreError> {
-        let path = self.catalog_path();
-        if !path.exists() {
-            return Err(lash_core::StoreError::Backend(format!(
-                "attachment GC {operation} aborted: durable-core catalog {} does not exist",
-                path.display()
-            )));
-        }
-        Store::open_with_options_clock_and_process_registry(
-            &path,
-            self.options,
-            Arc::clone(&self.clock),
-            self.process_registry_path.as_deref(),
-            #[cfg(feature = "testing")]
-            self.fault_injector.clone(),
-        )
-        .await
-        .map_err(|err| {
-            lash_core::StoreError::Backend(format!(
-                "attachment GC {operation} aborted: durable-core catalog {} could not be opened: {err}",
-                path.display()
-            ))
-        })
     }
 }
 
@@ -1405,10 +1381,7 @@ async fn delete_session_from_catalog(
             for table in [
                 "pending_turn_inputs",
                 "turn_cancel_requests",
-                "attachment_manifest",
-                "runtime_turn_commits",
                 "session_execution_leases",
-                "usage_deltas",
                 "session_meta",
             ] {
                 tx.execute(
@@ -1417,6 +1390,8 @@ async fn delete_session_from_catalog(
                 )
                 .map_err(sqlite_error)?;
             }
+            tx.execute(attachments::RECLAIM_DELETED_ATTACHMENT_ROOTS, [])
+                .map_err(sqlite_error)?;
             // Trigger manifests are the one artifact-ref namespace with an exact
             // session owner. Module, raw-artifact, and process-environment refs are
             // content-addressed factory services with no safe session attribution;

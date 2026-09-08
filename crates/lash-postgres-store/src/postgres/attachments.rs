@@ -1,3 +1,15 @@
+/// FIG-653: graph retention is a prune precondition for committed attachment roots.
+/// Owner-level retention deliberately includes suffix attachments: the manifest
+/// has no node edge. Forks and pins keep these rows until their final prefix dies.
+pub(crate) const RECLAIM_DELETED_ATTACHMENT_ROOTS: &str =
+    "DELETE FROM lash_attachment_manifest AS manifest
+ WHERE EXISTS (SELECT 1 FROM lash_deleted_sessions AS deleted
+               WHERE deleted.session_id = manifest.session_id)
+   AND (manifest.committed_at_ms IS NULL OR NOT EXISTS (
+       SELECT 1 FROM lash_graph_nodes AS node
+       WHERE node.session_id = manifest.session_id AND node.tombstoned = FALSE
+   ))";
+
 use crate::*;
 
 fn process_owner_death_sql(process_registry_shared: bool) -> String {
@@ -27,6 +39,8 @@ pub(crate) fn live_attachment_ref_sql(process_registry_shared: bool) -> String {
                 AND manifest.intent_at_ms <= $2
                 AND (
                     manifest.owner_kind IS NULL
+                    OR EXISTS (SELECT 1 FROM lash_deleted_sessions AS deleted
+                               WHERE deleted.session_id = manifest.session_id)
                     OR (
                         manifest.owner_kind = '{}'
                         AND EXISTS (
@@ -54,6 +68,8 @@ pub(crate) fn forget_aged_uncommitted_attachment_intents_sql(
            AND manifest.intent_at_ms <= $1
            AND (
                 manifest.owner_kind IS NULL
+                    OR EXISTS (SELECT 1 FROM lash_deleted_sessions AS deleted
+                               WHERE deleted.session_id = manifest.session_id)
                 OR (
                     manifest.owner_kind = '{}'
                     AND EXISTS (
@@ -315,7 +331,12 @@ impl AttachmentManifest for PostgresSessionStore {
         block_on_detached(async move {
             sqlx::query(
                 "DELETE FROM lash_attachment_manifest
-                 WHERE session_id = $1 AND attachment_id = $2",
+                 WHERE session_id = $1 AND attachment_id = $2 AND (
+                             committed_at_ms IS NULL OR NOT EXISTS (
+                                 SELECT 1 FROM lash_graph_nodes AS node
+                                 WHERE node.session_id = lash_attachment_manifest.session_id
+                                   AND node.tombstoned = FALSE
+                             ))",
             )
             .bind(session_id)
             .bind(attachment_id)
@@ -323,29 +344,6 @@ impl AttachmentManifest for PostgresSessionStore {
             .await
             .map(|_| ())
             .map_err(store_sqlx_error)
-        })
-    }
-
-    fn holds_ref(
-        &self,
-        session_id: &str,
-        attachment_id: &AttachmentId,
-    ) -> Result<bool, StoreError> {
-        let pool = self.pool.clone();
-        let session_id = session_id.to_string();
-        let attachment_id = attachment_id.to_string();
-        block_on_detached(async move {
-            let row = sqlx::query(
-                "SELECT 1 FROM lash_attachment_manifest
-                 WHERE session_id = $1 AND attachment_id = $2
-                 LIMIT 1",
-            )
-            .bind(session_id)
-            .bind(attachment_id)
-            .fetch_optional(&pool)
-            .await
-            .map_err(store_sqlx_error)?;
-            Ok(row.is_some())
         })
     }
 

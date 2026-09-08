@@ -128,6 +128,7 @@ enum StoreOperation {
         adopt_attachment: bool,
     },
     RecordAttachmentIntent,
+    ReclaimRetainedEvidence,
     PinLeaf,
     ForkAtLeaf,
     ForkAtExistingTarget,
@@ -186,6 +187,7 @@ impl StoreOperation {
         match self {
             Self::Commit { label, .. } => label,
             Self::RecordAttachmentIntent => "record_attachment_intent",
+            Self::ReclaimRetainedEvidence => "reclaim_terminal_evidence_with_retained_fork",
             Self::PinLeaf => "pin_leaf",
             Self::ForkAtLeaf => "fork_at_leaf",
             Self::ForkAtExistingTarget => "fork_existing_target_precedes_point_fences",
@@ -553,14 +555,21 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 StoreOperation::Commit {
                     label: "adopt_attachment_in_runtime_commit",
                     expected_head_revision: 0,
-                    graph: append(Vec::new(), None),
+                    graph: append(
+                        vec![NodeSpec::new("active-frame", None, "attachment-prefix")],
+                        Some("active-frame"),
+                    ),
                     turn_commit: Some(TurnCommitSpec {
                         turn_id: "attachment-adoption",
                     }),
                     checkpoint: CheckpointSpec::Empty,
-                    usage: false,
+                    usage: true,
                     adopt_attachment: true,
                 },
+                StoreOperation::PinLeaf,
+                StoreOperation::Rewind,
+                StoreOperation::ReclaimRetainedEvidence,
+                StoreOperation::UnpinLeaf,
             ],
         },
         GeneratedCase {
@@ -1848,6 +1857,7 @@ impl BackendRunner {
                 );
                 Ok(None)
             }
+            StoreOperation::ReclaimRetainedEvidence => self.reclaim_terminal_evidence().await,
             StoreOperation::DeleteSession => {
                 let core = self.build_lifecycle_core();
                 let scope = core
@@ -2459,6 +2469,7 @@ async fn cross_backend_store_differential_agrees() {
             &run_nonce,
         )
         .await;
+        fork_cases::prepare_retention_case(case.name, &runners).await;
         for (step_index, operation) in case.operations.iter().enumerate() {
             let mut observations = Vec::with_capacity(runners.len());
             for runner in &mut runners {
@@ -2489,6 +2500,7 @@ async fn cross_backend_store_differential_agrees() {
         divergences.is_empty(),
         "cross-backend durable state diverged:{divergences}"
     );
+    fork_cases::cross_owner_attachment_adoption(sqlite_root.path(), &postgres).await;
     assert_storage_failure_mappings_agree(sqlite_root.path(), &postgres).await;
     eprintln!(
         "PASSED cross-backend store differential; \

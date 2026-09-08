@@ -1388,6 +1388,26 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
         session_id: &str,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport>;
 
+    /// Reclaim factory-wide evidence before an explicit host horizon (FIG-653).
+    ///
+    /// Receipts require a durably deleted owning session. Usage deltas require
+    /// that same terminal marker and absence of their receipt after the sweep;
+    /// live-session ledgers and receipts are never eligible. Receipt deletion
+    /// and dependent attachment/usage reconciliation share one transaction fence.
+    /// A retry in a deleted scope returns `StoreError::SessionDeleted`, before
+    /// and after receipt pruning. The permanent identity tombstone is exempt.
+    /// No daemon, clock read or live policy lookup runs this operation.
+    async fn reclaim_retained_evidence(
+        &self,
+        _bound: crate::store::RetentionBound,
+    ) -> crate::store::MaintenanceResult<crate::store::RetentionReport> {
+        Err(crate::store::MaintenanceFailure::failed_before_any_work(
+            crate::StoreError::UnsupportedStoreOperation {
+                operation: "reclaim_retained_evidence",
+            },
+        ))
+    }
+
     /// Retain the continuation checkpoint for `node_id`.
     ///
     /// A new pin can be created only while some live head is exactly at the

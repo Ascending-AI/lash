@@ -9,6 +9,7 @@ use lash_sansio::sync::MutexExt;
 pub struct InMemorySessionStoreFactory {
     pub(super) clock: Arc<dyn crate::Clock>,
     pub(super) stores: Arc<Mutex<HashMap<String, Arc<InMemorySessionStore>>>>,
+    pub(super) retired_stores: Arc<Mutex<HashMap<String, Arc<InMemorySessionStore>>>>,
     pub(super) write_transaction: Arc<Mutex<()>>,
     pub(super) global_session_graph: Arc<Mutex<crate::SessionGraph>>,
     pub(super) global_node_owners: Arc<Mutex<HashMap<String, String>>>,
@@ -26,6 +27,7 @@ pub struct InMemorySessionStoreFactory {
     /// the factory, so every store it creates shares this map and the writer's
     /// intent insert meets the sweeper's condemn CAS in one place.
     pub(super) attachment_condemnations: super::SharedAttachmentCondemnations,
+    pub(super) attachment_manifest: super::SharedAttachmentManifest,
     #[cfg(any(test, feature = "testing"))]
     fail_next_session_blob_delete: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -41,6 +43,7 @@ impl InMemorySessionStoreFactory {
         Self {
             clock,
             stores: Arc::new(Mutex::new(HashMap::new())),
+            retired_stores: Arc::new(Mutex::new(HashMap::new())),
             write_transaction: Arc::new(Mutex::new(())),
             global_session_graph: Arc::new(Mutex::new(crate::SessionGraph::default())),
             global_node_owners: Arc::new(Mutex::new(HashMap::new())),
@@ -53,6 +56,7 @@ impl InMemorySessionStoreFactory {
             deleted_session_ids: Arc::new(Mutex::new(HashSet::new())),
             session_catalog: Arc::new(Mutex::new(HashMap::new())),
             attachment_condemnations: Arc::new(Mutex::new(HashMap::new())),
+            attachment_manifest: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(any(test, feature = "testing"))]
             fail_next_session_blob_delete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
@@ -137,6 +141,7 @@ impl InMemorySessionStoreFactory {
                     Arc::clone(&self.deleted_session_ids),
                     Arc::clone(&self.session_catalog),
                     Arc::clone(&self.attachment_condemnations),
+                    Arc::clone(&self.attachment_manifest),
                 ));
                 *store.bound_session_id.lock_recover() = Some(request.session_id.clone());
                 *store.session_meta.lock_recover() = Some(crate::SessionMeta {
@@ -177,6 +182,13 @@ impl InMemorySessionStoreFactory {
 
 #[async_trait::async_trait]
 impl SessionStoreFactory for InMemorySessionStoreFactory {
+    async fn reclaim_retained_evidence(
+        &self,
+        bound: crate::store::RetentionBound,
+    ) -> crate::store::MaintenanceResult<crate::store::RetentionReport> {
+        Ok(self.reclaim_retained_evidence_in_memory(bound))
+    }
+
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
@@ -347,7 +359,11 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 .retain(|blob_ref, _| {
                     !candidates.contains(blob_ref) || surviving_refs.contains(blob_ref)
                 });
+            self.reclaim_deleted_attachment_roots();
             self.stores.lock_recover().remove(session_id);
+            self.retired_stores
+                .lock_recover()
+                .insert(session_id.to_string(), store);
             self.fork_plans.lock_recover().remove(session_id);
             return Ok(report);
         }
@@ -620,6 +636,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             Arc::clone(&self.deleted_session_ids),
             Arc::clone(&self.session_catalog),
             Arc::clone(&self.attachment_condemnations),
+            Arc::clone(&self.attachment_manifest),
         ));
         *store.bound_session_id.lock_recover() = Some(request.session_id.clone());
         *store.session_graph.lock_recover() = resident_graph.clone();
@@ -700,17 +717,22 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
                 .cloned()
                 .collect::<Vec<_>>()
         };
-        let mut refs = std::collections::BTreeSet::new();
         for store in stores {
             // Apply age and durable owner-death in one conditional pass (no
-            // list-then-forget race against a concurrent intent refresh), then
-            // union the surviving roots.
+            // list-then-forget race against a concurrent intent refresh).
             crate::AttachmentManifest::forget_aged_uncommitted_intents(
                 &*store,
                 intent_grace_cutoff_epoch_ms,
             )?;
-            refs.extend(crate::AttachmentManifest::list_all_refs(&*store)?);
         }
+        let _transaction = self.write_transaction.lock_recover();
+        self.reclaim_deleted_attachment_roots();
+        let refs = self
+            .attachment_manifest
+            .lock_recover()
+            .keys()
+            .map(|(_, id)| id.clone())
+            .collect();
         Ok(refs)
     }
 
@@ -723,6 +745,7 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         id: &crate::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<crate::AttachmentCondemnation, crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
         let stores = {
             self.stores
                 .lock_recover()
@@ -734,7 +757,14 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         // same lock `begin_attachment_write` takes: the root predicate and the
         // condemnation insert are therefore one conditional mutation against
         // every concurrent writer.
-        let _transaction = self.write_transaction.lock_recover();
+        if self
+            .attachment_manifest
+            .lock_recover()
+            .values()
+            .any(|entry| &entry.attachment_id == id && entry.committed_at_epoch_ms.is_some())
+        {
+            return Ok(crate::AttachmentCondemnation::RootPresent);
+        }
         for store in stores {
             if crate::AttachmentManifest::has_live_ref_for_id(
                 &*store,
@@ -787,6 +817,7 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         id: &crate::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
         let stores = {
             self.stores
                 .lock_recover()
@@ -794,6 +825,14 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
                 .cloned()
                 .collect::<Vec<_>>()
         };
+        if self
+            .attachment_manifest
+            .lock_recover()
+            .values()
+            .any(|entry| &entry.attachment_id == id && entry.committed_at_epoch_ms.is_some())
+        {
+            return Ok(true);
+        }
         for store in stores {
             if crate::AttachmentManifest::has_live_ref_for_id(
                 &*store,
@@ -921,5 +960,25 @@ pub(crate) mod lineage_conformance_support {
             factory: Arc::new(factory.clone()),
             injector: Arc::new(InMemoryLineageInjector { factory }),
         }
+    }
+}
+
+impl InMemorySessionStoreFactory {
+    /// FIG-653: caller holds the write transaction. Graph retention, including
+    /// pins without an active store, is a prune precondition for committed roots.
+    pub(super) fn reclaim_deleted_attachment_roots(&self) {
+        let deleted = self.deleted_session_ids.lock_recover();
+        let owners = self.global_node_owners.lock_recover();
+        let tombstoned = self.tombstoned_node_ids.lock_recover();
+        let retained: HashSet<_> = owners
+            .iter()
+            .filter(|(node, _)| !tombstoned.contains(*node))
+            .map(|(_, owner)| owner.as_str())
+            .collect();
+        self.attachment_manifest.lock_recover().retain(|_, entry| {
+            !deleted.contains(&entry.session_id)
+                || (entry.committed_at_epoch_ms.is_some()
+                    && retained.contains(entry.session_id.as_str()))
+        });
     }
 }

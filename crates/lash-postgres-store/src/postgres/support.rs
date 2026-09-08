@@ -834,15 +834,39 @@ pub(crate) async fn commit_attachment_refs_tx(
     if attachment_ids.is_empty() {
         return Ok(());
     }
-    for id in attachment_ids {
+    // Every digest meets the same fence as put/condemn/arm. Consistent order
+    // keeps multi-attachment commits from taking these locks in reverse order.
+    let ids = attachment_ids
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    for id in ids {
+        crate::attachments::lock_attachment_fence_tx(tx, id.as_str()).await?;
+        let deleting: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM lash_attachment_condemnations
+             WHERE attachment_id = $1 AND phase = 'deleting')",
+        )
+        .bind(id.as_str())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if deleting {
+            return Err(StoreError::Backend(format!(
+                "cannot adopt attachment `{id}` while physical deletion is in flight"
+            )));
+        }
+        sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1 AND phase = 'condemned'")
+            .bind(id.as_str()).execute(&mut **tx).await.map_err(store_sqlx_error)?;
         sqlx::query(
-            "UPDATE lash_attachment_manifest
-             SET committed_at_ms = COALESCE(committed_at_ms, $1)
-             WHERE attachment_id = $2 AND session_id = $3",
+            "INSERT INTO lash_attachment_manifest
+             (attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms)
+             VALUES ($2, $3, $4, $1, $1)
+             ON CONFLICT (session_id, attachment_id) DO UPDATE
+             SET committed_at_ms = COALESCE(lash_attachment_manifest.committed_at_ms, EXCLUDED.committed_at_ms)",
         )
         .bind(now_epoch_ms as i64)
         .bind(id.as_str())
         .bind(session_id)
+        .bind(format!("lash-attachment://blake3/{id}"))
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
