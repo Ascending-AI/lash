@@ -1,3 +1,4 @@
+pub mod scripted_provider;
 use anyhow::{Context, Result, anyhow, bail};
 use lash::durability::EffectHost;
 use lash::persistence::{

@@ -67,13 +67,13 @@ impl CommitBudget {
     }
 }
 
-pub(crate) struct RuntimeCommitBudgetMeasurement {
+pub struct RuntimeCommitBudgetMeasurement {
     pub(crate) graph_rows: usize,
     pub(crate) adopted_intent_rows: usize,
     pub(crate) total_rows: usize,
     pub(crate) session_config_bytes: usize,
     pub(crate) graph_delta_bytes: usize,
-    pub(crate) checkpoint_bytes: usize,
+    pub checkpoint_bytes: usize,
     pub(crate) attachment_manifest_bytes: usize,
     pub(crate) queue_batch_bytes: usize,
     pub(crate) agent_frame_bytes: usize,
@@ -217,7 +217,7 @@ impl RuntimeCommit {
         Ok(())
     }
 
-    pub(crate) fn measure_budget(&self) -> Result<RuntimeCommitBudgetMeasurement, StoreError> {
+    pub fn measure_budget(&self) -> Result<RuntimeCommitBudgetMeasurement, StoreError> {
         let measure_json = |result: Result<Vec<u8>, serde_json::Error>| {
             result.map(|bytes| bytes.len()).map_err(|err| {
                 StoreError::Backend(format!(

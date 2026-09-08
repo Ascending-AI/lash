@@ -378,23 +378,24 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
     // turn never reaches a terminal state.
     let dialect = lash_restate_postgres_workers_e2e::runbook_rlm_dialect()?;
     let scripted = lash_restate_postgres_workers_e2e::scripted_finish_cell(dialect, "\"ok\"");
-    let provider = lash_core::testing::TestProvider::builder()
-        .kind("version-bump-recreation")
-        .complete(move |_request| {
-            let text = scripted.clone();
-            async move {
-                Ok(lash::provider::LlmResponse {
-                    parts: vec![lash_core::LlmOutputPart::Text {
-                        text: text.to_string(),
-                        response_meta: None,
-                    }],
-                    response_metadata: Default::default(),
-                    ..lash::provider::LlmResponse::default()
-                })
-            }
-        })
-        .build()
-        .into_handle();
+    let provider =
+        lash_restate_postgres_workers_e2e::scripted_provider::ScriptedProvider::builder()
+            .kind("version-bump-recreation")
+            .complete(move |_request| {
+                let text = scripted.clone();
+                async move {
+                    Ok(lash::provider::LlmResponse {
+                        parts: vec![lash_core::LlmOutputPart::Text {
+                            text: text.to_string(),
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..lash::provider::LlmResponse::default()
+                    })
+                }
+            })
+            .build()
+            .into_handle();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))

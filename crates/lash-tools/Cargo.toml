@@ -39,5 +39,6 @@ tokio = { workspace = true, features = ["process", "io-util", "sync", "time", "r
 tokio-util = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
+lash-conformance.workspace = true
 lash-core = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }

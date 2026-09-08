@@ -400,7 +400,7 @@ fn session_id(phase: &str, backend: &Backend, run_id: &str) -> String {
 }
 
 fn scripted_provider() -> lash::provider::ProviderHandle {
-    lash_core::testing::TestProvider::builder()
+    lash_restate_postgres_workers_e2e::scripted_provider::ScriptedProvider::builder()
         .kind("session-lease-triage")
         .complete(|_request| async { Ok(scripted_response()) })
         .build()
@@ -433,7 +433,7 @@ impl StallingProvider {
         let handle = {
             let entered = Arc::clone(&entered);
             let release = Arc::clone(&release);
-            lash_core::testing::TestProvider::builder()
+            lash_restate_postgres_workers_e2e::scripted_provider::ScriptedProvider::builder()
                 // Same provider kind as the scripted variant: a session records the
                 // provider id it was created under, so a later core that registers
                 // a different kind cannot drive it.
@@ -752,7 +752,8 @@ async fn commit_cas_livelock(
         let before = capture
             .named("session_execution_lease.commit_cas_rejected")
             .len();
-        let state = lash::persistence::load_persisted_session_state(store.as_ref())
+        let state = store
+            .load_session()
             .await
             .map_err(anyhow::Error::msg)?
             .context("the materialized CAS-livelock session has a head")?;
@@ -813,11 +814,31 @@ async fn commit_cas_livelock(
                 "commit",
             )
         };
-        let loser = RuntimeCommit::persisted_state_for_test(&state, &[])
-            .with_operation(operation("loser"))
-            .map_err(anyhow::Error::msg)?
-            .0
-            .borrowing_session_execution_lease(holder.fence());
+        let loser = RuntimeCommit {
+            commit_budget: lash_core::store::CommitBudget::bounded(1024 * 1024, 512),
+            session_id: state.session_id,
+            expected_head_revision: state.head_revision,
+            session_execution_lease_fence: Some(holder.fence()),
+            release_session_execution_lease: None,
+            config: state.config,
+            current_frame_node_id: state.current_frame_node_id,
+            graph: lash_core::store::GraphAppend {
+                nodes: Vec::new(),
+                leaf_node_id: state.graph.leaf_node_id.clone(),
+            },
+            checkpoint: state
+                .checkpoint
+                .context("the materialized session has a checkpoint")?,
+            usage_deltas: Vec::new(),
+            failure_evidence: Vec::new(),
+            turn_commit: lash_core::RuntimeTurnCommitStamp::new(operation("loser")),
+            completed_queue_claims: Vec::new(),
+            completed_turn_input_claims: Vec::new(),
+            enqueued_queue_batches: Vec::new(),
+            interrupted_turn_input_turn_id: None,
+            adopted_intent_rows: 0,
+            committed_attachment_ids: Vec::new(),
+        };
 
         let loser = store.commit_runtime_state(loser).await;
         if let Err(StoreError::HeadRevisionConflict { expected, actual }) = &loser {

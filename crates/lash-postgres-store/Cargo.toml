@@ -1,4 +1,5 @@
 [package]
+autobins = false
 name = "lash-internal-postgres-store"
 autotests = false
 version.workspace = true
@@ -44,6 +45,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+lash-conformance.workspace = true
 fastrand = { workspace = true }
 lash = { package = "lash-runtime", path = "../lash", features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
@@ -61,11 +63,6 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tracing-subscriber = { workspace = true }
 
-[[bin]]
-name = "postgres-await-event-helper"
-path = "src/bin/postgres-await-event-helper.rs"
-required-features = ["testing"]
-test = false
 
 [[test]]
 name = "integration"
@@ -95,3 +92,9 @@ path = "tests/schema_drift.rs"
 [[test]]
 name = "schema_constraints"
 path = "tests/schema_constraints.rs"
+
+# Recovery subprocesses use certification fixtures only as dev dependencies.
+[[example]]
+name = "postgres-await-event-helper"
+path = "src/bin/postgres-await-event-helper.rs"
+required-features = ["testing"]

@@ -181,3 +181,15 @@ filter = '''
 '''
 priority = 98
 slow-timeout = { period = "600s", terminate-after = 1 }
+
+# Cold-process recovery helpers are Cargo examples so their conformance
+# dependency stays dev-only. Preserve both executables in relocated archives.
+[[profile.default.archive.include]]
+path = "debug/examples/sqlite-await-event-helper"
+relative-to = "target"
+on-missing = "error"
+
+[[profile.default.archive.include]]
+path = "debug/examples/postgres-await-event-helper"
+relative-to = "target"
+on-missing = "error"

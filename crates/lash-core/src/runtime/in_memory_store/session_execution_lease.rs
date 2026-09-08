@@ -214,7 +214,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         fence: &crate::SessionExecutionLeaseAuthority,
         lease_ttl_ms: u64,
     ) -> Result<crate::SessionExecutionLease, crate::store::StoreError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         {
             self.session_execution_lease_renewal_count
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -263,7 +263,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 session_id: fence.session_id.clone(),
             });
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         if self
             .force_next_session_execution_lease_renewal_zero_match
             .swap(false, std::sync::atomic::Ordering::SeqCst)
@@ -308,7 +308,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 }
             }
         };
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         if let Some(injected) = self
             .next_session_execution_lease_renewal_response
             .lock_recover()
@@ -323,7 +323,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         &self,
         completion: &crate::SessionExecutionLeaseAuthority,
     ) -> Result<(), crate::store::StoreError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         {
             let gate = self
                 .session_execution_lease_release_gate
@@ -335,7 +335,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         }
         {
             let _transaction = self.write_transaction.lock_recover();
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             self.session_execution_lease_release_attempt_count
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if !self.release_session_execution_lease_in_memory(completion, true) {
@@ -353,7 +353,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         &self,
         session_id: &str,
     ) -> Result<crate::SessionExecutionLeaseObservation, crate::store::StoreError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.refuse_injected_counter_defect("session_lease_fencing_token")?;
         let observed_at_epoch_ms = self.clock.timestamp_ms();
         let leases = self.session_execution_leases.lock_recover();

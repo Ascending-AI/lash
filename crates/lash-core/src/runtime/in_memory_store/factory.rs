@@ -60,14 +60,14 @@ impl InMemorySessionStoreFactory {
 
     /// Fail the next session-owner blob delete before any state is committed.
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn fail_next_session_blob_delete_for_testing(&self) {
+    pub fn fail_next_session_blob_delete_for_testing(&self) {
         self.fail_next_session_blob_delete
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Observe the factory-global component map without invoking maintenance.
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn checkpoint_blob_exists_for_testing(&self, blob_ref: &crate::BlobRef) -> bool {
+    pub fn checkpoint_blob_exists_for_testing(&self, blob_ref: &crate::BlobRef) -> bool {
         self.checkpoint_component_blobs
             .lock_recover()
             .contains_key(blob_ref)
@@ -799,10 +799,10 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
     }
 }
 
-#[cfg(test)]
-mod lineage_conformance_tests {
+#[cfg(any(test, feature = "testing"))]
+pub(crate) mod lineage_conformance_support {
     use super::*;
-    use crate::testing::conformance::{
+    use crate::testing::lineage::{
         GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
     };
 
@@ -907,26 +907,11 @@ mod lineage_conformance_tests {
         }
     }
 
-    fn handles() -> LineageConformanceHandles {
+    pub fn handles() -> LineageConformanceHandles {
         let factory = InMemorySessionStoreFactory::new();
         LineageConformanceHandles {
             factory: Arc::new(factory.clone()),
             injector: Arc::new(InMemoryLineageInjector { factory }),
         }
-    }
-
-    #[tokio::test]
-    async fn in_memory_fork_lineage_conformance() {
-        crate::testing::conformance::fork_lineage_conformance(handles()).await;
-    }
-
-    #[tokio::test]
-    async fn in_memory_fork_lineage_no_carrier_law() {
-        crate::testing::conformance::fork_lineage_no_carrier_law(handles()).await;
-    }
-
-    #[tokio::test]
-    async fn in_memory_fork_plan_matches_edge_walk_law() {
-        crate::testing::conformance::fork_plan_matches_edge_walk_law(handles()).await;
     }
 }

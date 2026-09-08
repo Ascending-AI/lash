@@ -5,7 +5,7 @@ struct PostgresWakeDeliveryOrderingGroupFaultInjector {
 }
 
 #[async_trait::async_trait]
-impl lash_core::testing::conformance::WakeDeliveryOrderingGroupFaultInjector
+impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector
     for PostgresWakeDeliveryOrderingGroupFaultInjector
 {
     async fn discard_without_reason(&self, delivery_id: &str) {
@@ -53,12 +53,12 @@ async fn postgres_wake_delivery_crash_matrix_when_configured() {
     let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
-    Box::pin(lash_core::testing::conformance::wake_delivery_crash_matrix(
+    Box::pin(lash_conformance::wake_delivery_crash_matrix(
         factory,
         registry,
         clock,
         process_work,
-        lash_core::testing::conformance::ProcessTerminalWaitWitness::Direct,
+        lash_conformance::ProcessTerminalWaitWitness::Direct,
     ))
     .await;
 }
@@ -77,13 +77,13 @@ async fn postgres_wake_delivery_ordering_group_conformance_when_configured() {
     let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
-    lash_core::testing::conformance::wake_delivery_ordering_group_conformance(
+    lash_conformance::wake_delivery_ordering_group_conformance(
         registry as Arc<dyn ProcessRegistry>,
         Arc::new(PostgresWakeDeliveryOrderingGroupFaultInjector {
             pool: storage.pool().clone(),
         }),
         process_work,
-        lash_core::testing::conformance::ProcessTerminalWaitWitness::Direct,
+        lash_conformance::ProcessTerminalWaitWitness::Direct,
     )
     .await;
 }

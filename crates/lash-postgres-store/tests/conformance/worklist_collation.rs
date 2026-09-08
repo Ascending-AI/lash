@@ -119,5 +119,5 @@ async fn postgres_process_registry_pagination_satisfies_conformance_when_configu
     };
     reset(&storage).await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-    lash_core::testing::conformance::process_registry_pagination(registry).await;
+    lash_conformance::process_registry_pagination(registry).await;
 }

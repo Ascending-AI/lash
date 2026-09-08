@@ -476,37 +476,6 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
 // ack suppression, terminal/await, observer edges, session deletion) live in the
 // backend-agnostic conformance suite so the in-memory and Sqlite registries are
 // held to one spec. See `crate::testing::conformance`.
-#[tokio::test]
-async fn test_local_process_registry_satisfies_conformance() {
-    crate::testing::conformance::process_registry(|| {
-        Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn crate::ConformanceProcessRegistry>
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn test_local_process_registry_pagination_satisfies_conformance() {
-    crate::testing::conformance::process_registry_pagination(Arc::new(
-        TestLocalProcessRegistry::default(),
-    ))
-    .await;
-}
-
-#[tokio::test]
-async fn test_local_change_feed_refuses_cursor_below_tombstone_compaction_horizon() {
-    crate::testing::conformance::process_change_cursor_below_tombstone_compaction_horizon_is_refused(
-        Arc::new(TestLocalProcessRegistry::default()),
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn test_local_process_prune_scopes_to_the_retention_filter() {
-    crate::testing::conformance::process_prune_scoped_by_originator(Arc::new(
-        TestLocalProcessRegistry::default(),
-    ))
-    .await;
-}
 
 fn wake_registration(id: &str, target_session_id: &str) -> ProcessRegistration {
     registration(id)
@@ -801,21 +770,6 @@ async fn lifecycle_append_serializes_target_cleanup_and_cannot_recreate_sender_f
         None,
         "a lifecycle append must not recreate sender state after target cleanup"
     );
-}
-
-#[tokio::test]
-async fn in_memory_leased_completion_replay_repairs_projection() {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
-    let registry_for_corruption = Arc::clone(&registry);
-    crate::testing::conformance::leased_completion_replay_repairs_projection(
-        registry as Arc<dyn ProcessRegistry>,
-        move |stale| async move {
-            registry_for_corruption
-                .replace_process_projection_for_testing(stale)
-                .await;
-        },
-    )
-    .await;
 }
 
 #[tokio::test]

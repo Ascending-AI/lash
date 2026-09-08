@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use lash_core::RuntimePersistence;
-use lash_core::testing::conformance::{
+use lash_conformance::{
     SessionExecutionLeaseRenewalZeroRowHandles, SessionExecutionLeaseRenewalZeroRowInjector,
 };
+use lash_core::RuntimePersistence;
 use lash_postgres_store::PostgresStorage;
 
 use crate::support::{SharedDatabaseLock, database_url};
@@ -64,7 +64,7 @@ async fn postgres_zero_row_session_execution_lease_renewal_is_refused_when_confi
             .await
             .expect("connect Postgres zero-row renewal store"),
     );
-    lash_core::testing::conformance::session_execution_lease_zero_row_renewal_is_refused(
+    lash_conformance::session_execution_lease_zero_row_renewal_is_refused(
         SessionExecutionLeaseRenewalZeroRowHandles {
             store: Arc::new(storage.session_store("zero-row-session-lease-renewal"))
                 as Arc<dyn RuntimePersistence>,

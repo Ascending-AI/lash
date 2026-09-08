@@ -12,12 +12,11 @@ async fn sqlite_session_read_view_satisfies_conformance() {
         SqliteSessionStoreFactory::new(dir.path())
             .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
     );
-    lash_core::testing::conformance::session_store_factory_mid_stream_failure_evidence(
-        factory.clone(),
-        || clock.advance(1),
-    )
+    lash_conformance::session_store_factory_mid_stream_failure_evidence(factory.clone(), || {
+        clock.advance(1)
+    })
     .await;
-    lash_core::testing::conformance::session_store_factory_read_session(factory).await;
+    lash_conformance::session_store_factory_read_session(factory).await;
 }
 
 fn catalog_state(root: &Path) -> std::collections::BTreeMap<String, (u64, std::time::SystemTime)> {

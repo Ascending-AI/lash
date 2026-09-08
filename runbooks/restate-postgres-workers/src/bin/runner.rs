@@ -491,16 +491,6 @@ async fn run_workflow_segment_one(
     mock_provider_base_url: &str,
     trace_dir: Option<PathBuf>,
 ) -> Result<SegmentOneOutput> {
-    let conformance_ingress = ingress_url.to_string();
-    lash_core::testing::conformance::effect_host_await_events_cold_instance(|| {
-        Arc::new(RestateEffectHost::new(conformance_ingress.clone()))
-            as Arc<dyn lash_core::EffectHost>
-    })
-    .await;
-    println!(
-        "Restate cold-instance AwaitEvent conformance passed: layer_a_vectors={}",
-        lash_core::testing::conformance::COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT
-    );
     run_cold_process_await_event_vectors(admin_url, ingress_url).await?;
 
     let main_request = TurnRequest {

@@ -100,7 +100,7 @@ async fn run_turn_action(
     marker: Option<std::path::PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let storage = PostgresStorage::connect(database_url).await?;
-    let scope = lash_core::testing::conformance::cold_process_turn_scope(nonce);
+    let scope = lash_conformance::cold_process_turn_scope(nonce);
     let session_id = scope
         .session_id()
         .expect("cold-process turn scope carries a session id")

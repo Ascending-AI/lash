@@ -103,7 +103,7 @@ async fn run_turn_action(
     let store = Arc::new(lash_sqlite_store::Store::open(database).await?)
         as Arc<dyn lash_core::RuntimePersistence>;
     let effect_database = database.with_extension("effects.db");
-    let scope = lash_core::testing::conformance::cold_process_turn_scope(nonce);
+    let scope = lash_conformance::cold_process_turn_scope(nonce);
     let controller = Arc::new(
         SqliteRuntimeEffectController::open_with_options(
             &effect_database,

@@ -72,7 +72,7 @@ mod conformance_mapping_tests {
     async fn invalid_active_path_is_typed_corruption() {
         let factory = super::super::InMemorySessionStoreFactory::new();
         factory
-            .create_store(&crate::testing::conformance::session_store_request(
+            .create_store(&crate::testing::store_fixtures::session_store_request(
                 "reader",
                 "mapping-test",
                 crate::SessionRelation::Root,

@@ -1175,8 +1175,6 @@ pub(crate) use runtime::{
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, QueuedWorkEnqueueOutcome,
 };
 pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
-#[cfg(any(test, feature = "testing"))]
-pub(crate) use runtime::{apply_process_event_projection, fold_process_record};
 pub(crate) use session_model::plugin_runtime_protocol_event;
 
 pub(crate) use session::RuntimeExecutionProcessEventContext;

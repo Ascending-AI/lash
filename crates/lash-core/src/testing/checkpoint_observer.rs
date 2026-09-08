@@ -303,7 +303,7 @@ impl ObservedSessionStoreFactory {
 /// Give conformance roles distinct outer handles over one in-memory substrate
 /// without adding `Clone` or shared-field semantics to the production store.
 #[cfg(any(test, feature = "testing"))]
-pub(crate) fn fresh_runtime_persistence_handle(
+pub fn fresh_runtime_persistence_handle(
     inner: Arc<dyn RuntimePersistence>,
 ) -> Arc<dyn RuntimePersistence> {
     Arc::new(ObservedSessionStore {

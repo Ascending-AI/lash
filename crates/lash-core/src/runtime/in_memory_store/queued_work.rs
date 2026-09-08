@@ -165,7 +165,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         ),
         crate::store::StoreError,
     > {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.checkpoint_probe_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if !self.checkpoint_work_pending_in_memory(
@@ -179,13 +179,13 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             return Ok((None, None));
         }
 
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.checkpoint_write_transaction_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.run_claim_after_lease_validation_hook();
         // Prepare both claim families against private state and publish them
         // together only after every selector, budget, and fencing check has
@@ -239,9 +239,9 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.run_claim_after_lease_validation_hook();
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         if self
             .fail_next_exact_queue_claim
             .swap(false, std::sync::atomic::Ordering::SeqCst)
@@ -463,7 +463,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             if entry.batch.session_id == claim.session_id
                 && entry.claim.owned_by(&claim.claim_id, &claim.lease_token)
             {
-                #[cfg(test)]
+                #[cfg(any(test, feature = "testing"))]
                 self.abandoned_queued_work_claim_count
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 entry.claim.restore(
@@ -517,7 +517,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         &self,
         session_id: &str,
     ) -> Result<Vec<crate::QueuedWorkBatch>, crate::store::StoreError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.refuse_injected_counter_defect("queued_work_claim_fencing_token")?;
         let mut batches = self
             .queued_work
@@ -527,7 +527,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             .map(|entry| entry.batch.clone())
             .collect::<Vec<_>>();
         batches.sort_by_key(|batch| batch.enqueue_seq);
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         if self
             .drop_next_list_queued_work_batch
             .swap(false, std::sync::atomic::Ordering::SeqCst)
@@ -589,10 +589,10 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         &self,
         session_id: &str,
     ) -> Result<Vec<crate::QueuedWorkBatch>, crate::store::StoreError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.list_pending_queued_work_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.refuse_injected_counter_defect("queued_work_claim_fencing_token")?;
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
@@ -607,7 +607,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             .map(|entry| entry.batch.clone())
             .collect::<Vec<_>>();
         batches.sort_by_key(|batch| batch.enqueue_seq);
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         if self
             .drop_next_list_pending_queued_work_batch
             .swap(false, std::sync::atomic::Ordering::SeqCst)

@@ -2096,6 +2096,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-internal-conformance"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "lash-internal-core",
+ "lash-internal-lashlang",
+ "lash-internal-sansio",
+ "proptest",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "lash-internal-core"
 version = "0.0.0-dev"
 dependencies = [
@@ -2105,6 +2127,7 @@ dependencies = [
  "futures-util",
  "hmac",
  "insta",
+ "lash-internal-conformance",
  "lash-internal-http-transport",
  "lash-internal-sansio",
  "lash-internal-trace",
@@ -2268,6 +2291,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "fastrand",
+ "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
@@ -2438,6 +2462,7 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-http-transport",
  "lash-internal-lashlang",
@@ -2481,6 +2506,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "futures-util",
+ "lash-internal-conformance",
  "lash-internal-core",
  "object_store",
  "tokio",
@@ -2507,6 +2533,7 @@ dependencies = [
  "async-trait",
  "flate2",
  "futures-executor",
+ "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
@@ -2576,6 +2603,7 @@ name = "lash-internal-tools"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
+ "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-lashlang-runtime",
  "lash-internal-sansio",
@@ -2699,6 +2727,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "insta",
+ "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
@@ -2743,6 +2772,7 @@ dependencies = [
  "chrono",
  "fastrand",
  "insta",
+ "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-lashlang-runtime",
  "lash-internal-llm-transport",

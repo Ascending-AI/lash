@@ -27,19 +27,7 @@ pub use lash_core::testing::behavior_transcript;
 pub use lash_core::testing::checkpoint_observer;
 
 pub mod conformance {
-    //! Backend-agnostic conformance suites: validate a custom backend
-    //! implementation against a contract by running the same suite the in-tree
-    //! backends run.
-    //!
-    //! Re-exports all lash-core trait suites, including process registry,
-    //! runtime persistence, store-recovery, trace-derived real-turn crash,
-    //! effect-host, trigger, attachment, artifact, and state-machine
-    //! conformance, and, with `rlm`, adds
-    //! `runtime_rebuild_and_worker_recovery` — a runtime-level suite
-    //! that proves cold session rebuild and durable worker recovery use the
-    //! same reconstructed runtime surface.
-
-    pub use lash_core::testing::conformance::*;
+    //! Runtime rebuild certification. Store laws live in `lash-internal-conformance`.
 
     #[cfg(feature = "rlm")]
     mod rlm {

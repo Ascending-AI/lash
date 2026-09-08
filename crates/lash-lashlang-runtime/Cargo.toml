@@ -17,11 +17,6 @@ categories = ["asynchronous", "api-bindings"]
 name = "lash_lashlang_runtime"
 
 [features]
-# Expose `lash_lashlang_runtime::testing::conformance`, the shared conformance
-# suite for durable stores that fuse `lashlang::LashlangArtifactStore` and
-# `lash_core::ProcessExecutionEnvStore`. This crate is the only layer that
-# depends on both trait crates, so the cross-namespace isolation case (which
-# needs both traits over one store) lives here rather than in either owner.
 testing = ["lash-core/testing", "lashlang/testing"]
 
 [lints]

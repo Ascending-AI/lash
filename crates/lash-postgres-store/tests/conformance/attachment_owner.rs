@@ -39,8 +39,8 @@ async fn postgres_attachment_owner_cold_replay_conformance_when_configured() {
         Arc::new(move |duration_ms| clock.advance(duration_ms)) as Arc<dyn Fn(u64) + Send + Sync>
     };
 
-    lash_core::testing::conformance::attachment_owner_cold_replay(
-        lash_core::testing::conformance::AttachmentOwnerColdReplayBackend {
+    lash_conformance::attachment_owner_cold_replay(
+        lash_conformance::AttachmentOwnerColdReplayBackend {
             session_store_factory: factory,
             process_registry: registry,
             attachment_store: Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),

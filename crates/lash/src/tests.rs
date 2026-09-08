@@ -2418,11 +2418,8 @@ mod turn_streaming;
 #[tokio::test]
 async fn snapshot_store_reports_the_holder_a_claim_displaces() {
     let store = SnapshotStore::default();
-    lash_core::testing::conformance::session_execution_lease_displacement(
-        &store,
-        "snapshot-lease-displacement",
-    )
-    .await;
+    lash_conformance::session_execution_lease_displacement(&store, "snapshot-lease-displacement")
+        .await;
 }
 
 #[tokio::test]

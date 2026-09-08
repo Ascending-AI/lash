@@ -72,9 +72,9 @@ async fn postgres_queued_work_redrive_selects_claim_identity_across_ready_gap_wh
             .await
             .expect("reset ready-gap law rows");
     }
-    lash_core::testing::conformance::queued_work_redrive_selects_claim_identity_across_ready_gap(
+    lash_conformance::queued_work_redrive_selects_claim_identity_across_ready_gap(
         Arc::new(storage.session_store(session_id)),
-        &lash_core::testing::conformance::RuntimePersistenceLeaseTiming::Realtime,
+        &lash_conformance::RuntimePersistenceLeaseTiming::Realtime,
     )
     .await;
 }

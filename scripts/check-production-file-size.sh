@@ -13,7 +13,7 @@ fi
 is_test_rust_file() {
   local file="$1"
   case "$file" in
-    */tests/*|*/test/*|*/testing/*|*/src/tests.rs|*/src/test.rs|*/src/*/tests.rs|*/src/*/test.rs|*/src/*_tests.rs|*/language/support.rs)
+    */lash-conformance/src/*|*/tests/*|*/test/*|*/testing/*|*/src/tests.rs|*/src/test.rs|*/src/*/tests.rs|*/src/*/test.rs|*/src/*_tests.rs|*/language/support.rs)
       return 0
       ;;
     *)
@@ -59,7 +59,7 @@ declare -A allowlist=(
   ["crates/lash-restate/src/tests.rs"]="Restate backend test suite"
   ["crates/lashlang/tests/language.rs"]="Lashlang language conformance test suite"
   ["crates/lash-core/src/runtime/tests/turns.rs"]="core turn-loop test suite"
-  ["crates/lash-core/src/testing/conformance/runtime_persistence.rs"]="RuntimePersistence conformance suite"
+  ["crates/lash-conformance/src/conformance/runtime_persistence.rs"]="RuntimePersistence conformance suite"
   ["crates/lash/src/tests/turn_streaming.rs"]="facade turn-streaming test suite"
 )
 

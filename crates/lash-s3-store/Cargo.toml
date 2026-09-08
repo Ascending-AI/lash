@@ -31,5 +31,6 @@ tracing = { workspace = true }
 url = "2"
 
 [dev-dependencies]
+lash-conformance.workspace = true
 lash-core = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["macros", "rt"] }

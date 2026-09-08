@@ -257,7 +257,7 @@ pub(crate) fn shared_drain_mode_policy(mode: DrainMode) -> Arc<dyn QueuedDrainPo
 /// Hosts reach this through
 /// [`QueuedWorkBatchingConfig::drain_policy`](crate::QueuedWorkBatchingConfig::drain_policy)
 /// rather than directly, so it stays crate-internal.
-pub(crate) fn default_queued_drain_policy() -> Arc<dyn QueuedDrainPolicy> {
+pub fn default_queued_drain_policy() -> Arc<dyn QueuedDrainPolicy> {
     shared_drain_mode_policy(DrainMode::default())
 }
 

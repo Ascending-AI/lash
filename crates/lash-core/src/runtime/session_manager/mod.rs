@@ -20,7 +20,7 @@ pub(in crate::runtime::session_manager) use usage::{
     ChannelEventSink, LiveChildUsageForwarder, subtract_usage,
 };
 #[cfg(any(test, feature = "testing"))]
-pub(crate) use usage::{
+pub use usage::{
     PendingTokenLedgerEntry, StagedTokenLedger, record_token_usage_shared,
     stage_token_ledger_shared,
 };
@@ -444,7 +444,7 @@ impl RuntimeSessionServices {
 }
 
 #[cfg(any(test, feature = "testing"))]
-pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
+pub async fn append_receipt_mixed_usage_envelope_conformance(
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let policy = crate::SessionPolicy {
@@ -753,7 +753,7 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
 }
 
 #[cfg(any(test, feature = "testing"))]
-pub(crate) async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
+pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
     store: Arc<dyn crate::RuntimePersistence>,
     arm_and_wait: A,
 ) where

@@ -49,11 +49,11 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = "0.8"
 chrono = { workspace = true }
-lash-core = { workspace = true, features = ["testing"] }
+lash-core = { workspace = true }
 lash = { workspace = true, features = ["rlm"] }
 lash-llm-tools = { workspace = true }
 lash-postgres-store = { workspace = true }
-lash-protocol-rlm = { workspace = true, features = ["testing"] }
+lash-protocol-rlm = { workspace = true }
 lash-provider-openai = { workspace = true }
 lash-restate = { workspace = true }
 lash-sqlite-store = { workspace = true }

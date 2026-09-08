@@ -60,7 +60,7 @@ impl SessionRevision {
 pub struct SessionCursor(String);
 
 impl SessionCursor {
-    pub(crate) fn new(
+    pub fn new(
         replay_incarnation_id: impl AsRef<str>,
         session_id: impl AsRef<str>,
         revision: SessionRevision,
@@ -99,7 +99,7 @@ impl SessionCursor {
         &self.0
     }
 
-    pub(crate) fn parse_for_session(
+    pub fn parse_for_session(
         &self,
         expected_session_id: &str,
     ) -> Result<ParsedSessionCursor<'_>, SessionCursorError> {
@@ -173,7 +173,7 @@ impl fmt::Display for SessionCursor {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ParsedSessionCursor<'a> {
+pub struct ParsedSessionCursor<'a> {
     pub replay_incarnation_id: &'a str,
     pub session_id: &'a str,
     pub revision: SessionRevision,

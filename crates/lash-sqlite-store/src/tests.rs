@@ -294,7 +294,7 @@ async fn durable_state(store: &Store, session_id: &str) -> lash_core::RuntimeSes
 #[tokio::test]
 async fn checkpoint_probe_skips_writes_for_deferred_head() {
     let store = Arc::new(Store::memory().await.expect("open counter store"));
-    lash_core::testing::conformance::checkpoint_claim_probe_transaction_counts(
+    lash_conformance::checkpoint_claim_probe_transaction_counts(
         Arc::clone(&store) as Arc<dyn RuntimePersistence>,
         "sqlite-checkpoint-counter",
         || store.checkpoint_claim_counts(),

@@ -460,9 +460,9 @@ pub(crate) struct ActiveReadPrefix<'a> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct SessionReadModel {
+pub struct SessionReadModel {
     pub(crate) active_events: Arc<Vec<SessionHistoryRecord>>,
-    pub(crate) messages: Arc<Vec<Message>>,
+    pub messages: Arc<Vec<Message>>,
     pub(crate) prompt_render_cache: Arc<BaseRenderCache>,
 }
 
@@ -901,14 +901,14 @@ impl SessionGraph {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn from_unchecked_nodes_for_testing(
+    pub fn from_unchecked_nodes_for_testing(
         nodes: Vec<SessionNodeRecord>,
         leaf_node_id: Option<String>,
     ) -> Self {
         Self::from_validated_nodes(nodes, leaf_node_id)
     }
 
-    pub(crate) fn validate_resident_integrity(&self) -> Result<(), crate::StoreError> {
+    pub fn validate_resident_integrity(&self) -> Result<(), crate::StoreError> {
         if !self.nodes.is_empty() && self.leaf_node_id.is_none() {
             return Err(crate::StoreError::InvalidGraphLeaf { leaf_node_id: None });
         }
@@ -1108,7 +1108,7 @@ impl SessionGraph {
             .collect())
     }
 
-    pub(crate) fn read_model(&self) -> SessionReadModel {
+    pub fn read_model(&self) -> SessionReadModel {
         let cache = self.cache();
         SessionReadModel {
             active_events: Arc::clone(&cache.active_events),
@@ -1146,7 +1146,7 @@ impl SessionGraph {
         self.append_node_drafts_at_inner(None, drafts, crate::SystemClock.timestamp_rfc3339())
     }
 
-    pub(crate) fn append_frame_open_with_id_at(
+    pub fn append_frame_open_with_id_at(
         &mut self,
         frame_node_id: String,
         frame_key: crate::FrameKey,

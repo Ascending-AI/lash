@@ -15,7 +15,7 @@ use super::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TurnCancelPeekIdentity {
+pub enum TurnCancelPeekIdentity {
     StartGate,
     PostAbortGate,
     // Shipped protocols issue at most one LLM call per protocol iteration, so
@@ -536,7 +536,7 @@ async fn terminal_key(
 
 /// Per-execution bridge between the durable gate and the turn's internal
 /// cancellation token.
-pub(crate) struct ActiveTurnControl {
+pub struct ActiveTurnControl {
     address: TurnAddress,
     cancel_key: AwaitEventKey,
     terminal_key: AwaitEventKey,
@@ -545,7 +545,7 @@ pub(crate) struct ActiveTurnControl {
 }
 
 impl ActiveTurnControl {
-    pub(crate) async fn new(
+    pub async fn new(
         resolver: &dyn AwaitEventResolver,
         address: TurnAddress,
     ) -> Result<Self, RuntimeError> {
@@ -559,12 +559,12 @@ impl ActiveTurnControl {
         })
     }
 
-    pub(crate) fn with_local_cancel_origin(mut self, origin: TurnCancelOriginHint) -> Self {
+    pub fn with_local_cancel_origin(mut self, origin: TurnCancelOriginHint) -> Self {
         self.local_cancel_origin = origin;
         self
     }
 
-    pub(crate) async fn await_cancel(
+    pub async fn await_cancel(
         &self,
         resolver: &dyn AwaitEventResolver,
         stop_wait: CancellationToken,
@@ -581,7 +581,7 @@ impl ActiveTurnControl {
         }
     }
 
-    pub(crate) async fn observe_pending_cancel(
+    pub async fn observe_pending_cancel(
         &self,
         controller: &dyn RuntimeEffectController,
         identity: TurnCancelPeekIdentity,
@@ -635,7 +635,7 @@ impl ActiveTurnControl {
     /// is what keeps a single cancellation to a single request id: the
     /// evidence a host saw on the streamed `TurnOutcome` is the evidence the
     /// committed report carries.
-    pub(crate) async fn settle_before_commit(
+    pub async fn settle_before_commit(
         &self,
         resolver: &dyn AwaitEventResolver,
         locally_cancelled: bool,
@@ -685,7 +685,7 @@ impl ActiveTurnControl {
         }
     }
 
-    pub(crate) async fn publish_terminal(
+    pub async fn publish_terminal(
         &self,
         resolver: &dyn AwaitEventResolver,
         terminal: &TurnTerminal,
@@ -705,7 +705,7 @@ impl ActiveTurnControl {
         }
     }
 
-    pub(crate) fn evidence(&self) -> Option<TurnCancellationEvidence> {
+    pub fn evidence(&self) -> Option<TurnCancellationEvidence> {
         self.evidence.lock_recover().clone()
     }
 
@@ -713,7 +713,7 @@ impl ActiveTurnControl {
     /// the durable gate has settled: the observed request when one arrived,
     /// otherwise lash's own internal evidence. The settled evidence from
     /// [`Self::settle_before_commit`] is what the committed turn carries.
-    pub(crate) fn evidence_or_internal(&self) -> TurnCancellationEvidence {
+    pub fn evidence_or_internal(&self) -> TurnCancellationEvidence {
         self.evidence().unwrap_or_else(|| self.internal_evidence())
     }
 

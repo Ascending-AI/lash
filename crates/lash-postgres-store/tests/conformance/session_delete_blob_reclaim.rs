@@ -5,7 +5,7 @@ struct PostgresSessionDeleteBlobProbe {
 }
 
 #[async_trait::async_trait]
-impl lash_core::testing::conformance::SessionDeleteBlobProbe for PostgresSessionDeleteBlobProbe {
+impl lash_conformance::SessionDeleteBlobProbe for PostgresSessionDeleteBlobProbe {
     async fn blob_exists(&self, blob_ref: &lash_core::BlobRef) -> bool {
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM lash_blobs WHERE hash = $1)")
             .bind(blob_ref.as_str())
@@ -89,14 +89,14 @@ async fn postgres_session_delete_blob_reclaim_conformance_when_configured() {
     };
     let storage = Arc::new(storage);
     let make_storage = Arc::clone(&storage);
-    lash_core::testing::conformance::session_delete_blob_reclaim_conformance("postgres", || {
+    lash_conformance::session_delete_blob_reclaim_conformance("postgres", || {
         let storage = Arc::clone(&make_storage);
         sync_await(async move {
             reset(&storage).await;
-            lash_core::testing::conformance::SessionDeleteBlobHandles {
+            lash_conformance::SessionDeleteBlobHandles {
                 factory: Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>,
                 probe: Arc::new(PostgresSessionDeleteBlobProbe { storage })
-                    as Arc<dyn lash_core::testing::conformance::SessionDeleteBlobProbe>,
+                    as Arc<dyn lash_conformance::SessionDeleteBlobProbe>,
             }
         })
     })

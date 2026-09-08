@@ -47,7 +47,7 @@ impl InMemorySessionStore {
         &self,
         binding: &crate::SessionBinding,
     ) -> Result<crate::SessionAdmission, crate::StoreError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.session_admission_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         binding.validate()?;

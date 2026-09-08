@@ -6,7 +6,7 @@ struct SqliteSessionDeleteBlobProbe {
 }
 
 #[async_trait::async_trait]
-impl lash_core::testing::conformance::SessionDeleteBlobProbe for SqliteSessionDeleteBlobProbe {
+impl lash_conformance::SessionDeleteBlobProbe for SqliteSessionDeleteBlobProbe {
     async fn blob_exists(&self, blob_ref: &lash_core::BlobRef) -> bool {
         let conn = rusqlite::Connection::open(&self.path).expect("open SQLite blob probe");
         conn.query_row(
@@ -71,12 +71,12 @@ impl lash_core::testing::conformance::SessionDeleteBlobProbe for SqliteSessionDe
 
 #[tokio::test]
 async fn sqlite_session_delete_blob_reclaim_conformance() {
-    lash_core::testing::conformance::session_delete_blob_reclaim_conformance("sqlite", || {
+    lash_conformance::session_delete_blob_reclaim_conformance("sqlite", || {
         let dir = Arc::new(tempfile::tempdir().expect("tempdir"));
         let path = dir.path().join("durable-core.db");
         let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()));
         let probe = Arc::new(SqliteSessionDeleteBlobProbe { _dir: dir, path });
-        lash_core::testing::conformance::SessionDeleteBlobHandles {
+        lash_conformance::SessionDeleteBlobHandles {
             factory: factory as Arc<dyn SessionStoreFactory>,
             probe,
         }
