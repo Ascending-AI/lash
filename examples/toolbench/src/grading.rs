@@ -17,6 +17,7 @@ pub(crate) struct RunEvidence {
     pub(crate) completion_error: Option<String>,
     pub(crate) finish_value: Option<Value>,
     pub(crate) iterations: usize,
+    pub(crate) code_blocks: Vec<String>,
     pub(crate) tool_call_count: usize,
     pub(crate) failed_execution_errors: Vec<String>,
 }
@@ -72,6 +73,10 @@ pub(crate) fn grade(task: &Task, final_world: &World, evidence: &RunEvidence) ->
             "tool-call count mismatch: expected {}, got {}",
             task.tool_calls, evidence.tool_call_count
         ));
+    }
+
+    if evidence.code_blocks.len() > 2 {
+        failures.push("task requires at most two code executions".to_string());
     }
 
     Grade {
@@ -213,6 +218,18 @@ mod tests {
                 .failure_reason
                 .unwrap()
                 .contains("identical execution error repeated")
+        );
+    }
+    #[test]
+    fn excessive_code_executions_are_rejected() {
+        let task = fixture();
+        let mut evidence = passing_evidence();
+        evidence.code_blocks = vec!["one".into(), "two".into(), "three".into()];
+        let result = grade(&task, &task.expected_world, &evidence);
+        assert!(!result.passed);
+        assert_eq!(
+            result.failure_reason.as_deref(),
+            Some("task requires at most two code executions")
         );
     }
 }

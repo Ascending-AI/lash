@@ -24,6 +24,8 @@ pub(crate) async fn run_task(
     channel: lash::rlm::RlmChannel,
 ) -> (World, RunEvidence) {
     let started = std::time::Instant::now();
+    // Every run owns its world, telemetry, provider and in-memory stores. No
+    // process environment mutations, listeners or filesystem stores are used.
     let telemetry = Arc::new(crate::telemetry::Telemetry::default());
     let world = SharedWorld::new(task.seed.clone());
     let result = tokio::time::timeout(
@@ -79,6 +81,14 @@ pub(crate) async fn run_task(
                         .then(|| format!("turn outcome: {:?}", output.result.outcome)),
                     finish_value: output.final_value().cloned(),
                     iterations,
+                    code_blocks: output
+                        .activities
+                        .iter()
+                        .filter_map(|activity| match &activity.event {
+                            TurnEvent::CodeBlockStarted { code, .. } => Some(code.clone()),
+                            _ => None,
+                        })
+                        .collect(),
                     tool_call_count: output.result.tool_calls.len(),
                     failed_execution_errors,
                 },
@@ -173,13 +183,7 @@ async fn run_turn(
     let session_id = format!("toolbench-{run}-{}-{}", dialect.language_id(), task.id);
     let session = core
         .session(session_id)
-        .plugin_option(
-            lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-            lash::rlm::RlmCreateExtras {
-                dialect: Some(dialect),
-                ..lash::rlm::RlmCreateExtras::default()
-            },
-        )
+        .plugin_option(lash::rlm::RLM_PROTOCOL_PLUGIN_ID, session_options(dialect))
         .context("encode dialect session option")?
         .open()
         .await
@@ -223,6 +227,11 @@ async fn run_turn(
     ))
 }
 
+/// Native capability probes are sampled model behaviour, so one stochastic
+/// miss must not exclude a whole cohort; the route is excluded only when
+/// every probe attempt fails.
+const PREFLIGHT_ATTEMPTS: usize = 3;
+
 pub(crate) async fn preflight(
     task: &Task,
     dialect: lash::rlm::RlmDialect,
@@ -232,20 +241,52 @@ pub(crate) async fn preflight(
     let mut probe = task.clone();
     probe.id = "__native_probe";
     probe.prompt = "Call execute_code exactly once with code that finishes with the number 1. Do not call any host operations.";
-    let (_, evidence) = run_task(
-        &probe,
-        dialect,
-        model,
-        api_key,
-        0,
-        lash::rlm::RlmChannel::NativeTool,
-    )
-    .await;
-    if evidence.completed && evidence.finish_value == Some(serde_json::json!(1)) {
-        Ok(())
-    } else {
-        Err(evidence
-            .completion_error
-            .unwrap_or_else(|| "native one-call probe did not finish with 1".to_string()))
+    let mut failures = Vec::with_capacity(PREFLIGHT_ATTEMPTS);
+    for attempt in 0..PREFLIGHT_ATTEMPTS {
+        let (_, evidence) = run_task(
+            &probe,
+            dialect,
+            model,
+            api_key,
+            attempt,
+            lash::rlm::RlmChannel::NativeTool,
+        )
+        .await;
+        if evidence.completed && evidence.finish_value == Some(serde_json::json!(1)) {
+            return Ok(());
+        }
+        failures.push(evidence.completion_error.unwrap_or_else(|| {
+            format!(
+                "native one-call probe finished with {:?} instead of 1",
+                evidence.finish_value
+            )
+        }));
+    }
+    Err(format!(
+        "{PREFLIGHT_ATTEMPTS} probe attempts failed: {}",
+        failures.join(" | ")
+    ))
+}
+
+fn session_options(dialect: lash::rlm::RlmDialect) -> lash::rlm::RlmCreateExtras {
+    lash::rlm::RlmCreateExtras {
+        dialect: Some(dialect),
+        final_answer_format: Some(lash::rlm::RlmFinalAnswerFormat::RawFinalValue),
+        ..lash::rlm::RlmCreateExtras::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn benchmark_sessions_use_raw_finish_values_for_every_dialect() {
+        for dialect in lash::rlm::RlmDialect::ALL {
+            let options = super::session_options(dialect);
+            assert_eq!(options.dialect, Some(dialect));
+            assert_eq!(
+                options.final_answer_format,
+                Some(lash::rlm::RlmFinalAnswerFormat::RawFinalValue)
+            );
+        }
     }
 }
