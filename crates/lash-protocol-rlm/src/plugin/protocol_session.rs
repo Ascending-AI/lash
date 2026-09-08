@@ -16,7 +16,7 @@ use super::runtime_state::RlmRuntimeState;
 use super::{RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig};
 use crate::rlm_support::effective_budget_tokens;
 
-pub(super) struct RlmProtocolSession {
+pub(crate) struct RlmProtocolSession {
     config: RlmProtocolPluginConfig,
     runtime_state: Arc<RlmRuntimeState>,
     warned_at_threshold: Mutex<bool>,
@@ -27,7 +27,7 @@ impl RlmProtocolSession {
         self.runtime_state.dialect_prompt_vocabulary()
     }
 
-    pub(super) fn new(
+    pub(crate) fn new(
         config: RlmProtocolPluginConfig,
         runtime_state: Arc<RlmRuntimeState>,
     ) -> Self {
@@ -38,7 +38,7 @@ impl RlmProtocolSession {
         }
     }
 
-    pub(super) async fn projected_binding_prompt_contributions(
+    pub(crate) async fn projected_binding_prompt_contributions(
         &self,
     ) -> Vec<lash_core::PromptContribution> {
         self.runtime_state
@@ -46,7 +46,7 @@ impl RlmProtocolSession {
             .await
     }
 
-    pub(super) fn soft_warn_directives(
+    pub(crate) fn soft_warn_directives(
         &self,
         ctx: CheckpointHookContext,
     ) -> Result<Vec<TurnPluginDirective>, PluginError> {
@@ -133,6 +133,7 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
             materialization.plugin_options,
             materialization.is_root_session,
         )?;
+        let options = super::channel::record_channel(options, self.config.channel);
         ctx.set_protocol_turn_options_all_frames(options);
         Ok(())
     }
@@ -148,7 +149,7 @@ pub fn rlm_session_config(
     if options.is_empty() {
         return Ok(RlmSessionConfig::default());
     }
-    let extras = options
+    let extras = super::channel::without_channel(options)
         .decode::<RlmCreateExtras>()
         .map_err(|err| RlmSessionConfigDecodeError(err.to_string()))?;
     Ok(RlmSessionConfig::from(&extras))
@@ -370,7 +371,7 @@ pub fn rlm_plugin_session_dialect(
 
 /// The one language this session is allowed to use, for the plugin build that
 /// has to pick a dialect implementation before the session materializes.
-pub(super) fn resolve_new_rlm_session_dialect(
+pub(crate) fn resolve_new_rlm_session_dialect(
     existing: &ProtocolTurnOptions,
     plugin_options: &PluginOptions,
 ) -> Result<lash_rlm_types::RlmDialect, SessionError> {
@@ -379,7 +380,7 @@ pub(super) fn resolve_new_rlm_session_dialect(
         .unwrap_or_default())
 }
 
-pub(super) fn resolve_recorded_rlm_session_dialect(
+pub(crate) fn resolve_recorded_rlm_session_dialect(
     recorded: &ProtocolTurnOptions,
 ) -> Result<lash_rlm_types::RlmDialect, lash_core::PluginError> {
     rlm_session_config(recorded)

@@ -6,6 +6,9 @@ use super::{
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RlmProtocolPluginConfig {
+    /// Session-pinned transport used for model-authored programs.
+    #[serde(default)]
+    pub channel: super::RlmChannel,
     pub instruction_limit: InstructionBound,
     pub wall_clock: WallClockBound,
     pub memory_limit: MemoryBound,
@@ -87,6 +90,7 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound, MemoryBoun
     /// Finish the config. Available only once all three bounds are chosen.
     pub fn build(self) -> RlmProtocolPluginConfig {
         RlmProtocolPluginConfig {
+            channel: super::RlmChannel::Cell,
             instruction_limit: self.instruction_limit,
             wall_clock: self.wall_clock,
             memory_limit: self.memory_limit,
@@ -100,6 +104,12 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound, MemoryBoun
 }
 
 impl RlmProtocolPluginConfig {
+    /// Select the transport before session materialization.
+    pub fn with_channel(mut self, channel: super::RlmChannel) -> Self {
+        self.channel = channel;
+        self
+    }
+
     /// Start configuring an RLM protocol plugin. Every execution bound is
     /// named and separately typed; there is no positional constructor to get
     /// them in the wrong order.

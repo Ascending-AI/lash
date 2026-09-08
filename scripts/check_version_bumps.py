@@ -66,6 +66,15 @@ DEFAULT_CONFIG = Path(__file__).with_name("versioned-surfaces.toml")
 # Entries stay after the surface lands; they are dead-but-honest history, and
 # re-adding a removed entry over a live constant is not a registration.
 REGISTRATION_BASELINES = {
+    # FIG-2164: native channel surfaces are new relative to main. Parked
+    # state honestly advanced from lane v1 to v2 when unused prose was removed;
+    # transport v1 stamps the previously unversioned lane envelope.
+    "crates/lash-protocol-rlm/src/native/state.rs:NATIVE_DRIVER_STATE_VERSION": (
+        "sha256:6ecfecc263e22e361f115d31643a605c8c935521fbe23f0bd47cc398acf50860"
+    ),
+    "crates/lash-protocol-rlm/src/native/transport.rs:NATIVE_TRANSPORT_VERSION": (
+        "sha256:0d697b5a1acbc0565660971dd40cc17ec0eb14e8190c07381f4dd8353674ad8e"
+    ),
     # FIG-1529: enrolment of the durable graph-node body, whose already-current
     # shape gained its schema_version stamp in the same change.
     "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (

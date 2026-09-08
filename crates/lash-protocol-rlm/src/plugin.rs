@@ -1,15 +1,15 @@
 pub const RLM_PROTOCOL_PLUGIN_ID: &str = "rlm_protocol";
 
-mod budget_warning;
+pub(crate) mod budget_warning;
 mod config;
 mod config_types;
 mod factory;
 mod prose_projector;
 mod protocol_driver;
-mod protocol_session;
+pub(crate) mod protocol_session;
 mod registration;
-mod runtime_state;
-mod tool_args;
+pub(crate) mod runtime_state;
+pub(crate) mod tool_args;
 
 pub use config::{RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, UnsetBound};
 pub use config_types::{
@@ -26,3 +26,6 @@ pub use protocol_session::{
     apply_rlm_session_config_post_open, rlm_plugin_session_dialect, rlm_session_config,
     rlm_session_config_options, rlm_session_dialect,
 };
+
+mod channel;
+pub use channel::RlmChannel;

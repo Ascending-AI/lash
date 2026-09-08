@@ -865,3 +865,23 @@ symbols = [
 # LASHLANG_VM_ABI_VERSION, and SOURCE_CACHE_VERSION identify hashes/caches rather
 # than serialized shapes. TOOL_INTENT_PROTOCOL_V1 is a permanently named v1
 # discriminator, not a mutable current-version constant.
+
+[[surface]]
+constant = "NATIVE_DRIVER_STATE_VERSION"
+constant_path = "crates/lash-protocol-rlm/src/native/state.rs"
+description = "native RLM parked driver state"
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-protocol-rlm/src/native/state.rs"]
+must_cover = ["RlmDriverState", "Envelope"]
+
+[[surface]]
+constant = "NATIVE_TRANSPORT_VERSION"
+constant_path = "crates/lash-protocol-rlm/src/native/transport.rs"
+description = "native RLM durable provider call and repair envelopes"
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-protocol-rlm/src/native/transport.rs"]
+must_cover = ["Envelope", "Transport"]

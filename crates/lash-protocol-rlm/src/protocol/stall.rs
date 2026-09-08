@@ -39,6 +39,14 @@ pub(super) const NO_PROGRESS_BUDGET_PHASE: &str = "no_progress_budget";
 /// would be one short on exactly one of them.
 ///
 pub(super) fn stalled_attempts(ctx: &DriverContextView<'_>, actions: &[DriverAction]) -> usize {
+    stalled_attempts_in_phase(ctx, actions, LLM_EXTRACTION_PHASE)
+}
+
+pub(crate) fn stalled_attempts_in_phase(
+    ctx: &DriverContextView<'_>,
+    actions: &[DriverAction],
+    extraction_phase: &str,
+) -> usize {
     let turn_id = ctx.turn_id();
     let trajectory_prefix = trajectory_entry_turn_prefix(turn_id);
     let mut attempts = 0;
@@ -48,7 +56,7 @@ pub(super) fn stalled_attempts(ctx: &DriverContextView<'_>, actions: &[DriverAct
         };
         match crate::projection::decode_rlm_protocol_event(event) {
             Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                if diagnostic.phase == LLM_EXTRACTION_PHASE =>
+                if diagnostic.phase == extraction_phase =>
             {
                 if diagnostic.payload.get("turn_id").and_then(Value::as_str) != Some(turn_id) {
                     break;
@@ -70,13 +78,18 @@ pub(super) fn stalled_attempts(ctx: &DriverContextView<'_>, actions: &[DriverAct
             _ => {}
         }
     }
-    count_pending_attempts(actions, &trajectory_prefix, &mut attempts);
+    count_pending_attempts(actions, &trajectory_prefix, &mut attempts, extraction_phase);
     attempts
 }
 
 /// Apply the not-yet-committed action batch to `attempts`, forwards, since the
 /// batch is this turn's and is ordered.
-fn count_pending_attempts(actions: &[DriverAction], trajectory_prefix: &str, attempts: &mut usize) {
+fn count_pending_attempts(
+    actions: &[DriverAction],
+    trajectory_prefix: &str,
+    attempts: &mut usize,
+    extraction_phase: &str,
+) {
     for action in actions {
         let DriverAction::AppendEvents(records) = action else {
             continue;
@@ -92,7 +105,7 @@ fn count_pending_attempts(actions: &[DriverAction], trajectory_prefix: &str, att
                     *attempts = 0;
                 }
                 Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                    if diagnostic.phase == LLM_EXTRACTION_PHASE =>
+                    if diagnostic.phase == extraction_phase =>
                 {
                     *attempts += 1;
                 }
@@ -119,7 +132,7 @@ fn trajectory_entry_turn_prefix(turn_id: &str) -> String {
 /// not the reasoning summary that varies between two identical answers. Hashed
 /// rather than stored, because the diagnostic is durable session history and a
 /// reply is not small. Derived from the reply alone, so it is replay-stable.
-pub(super) fn reply_fingerprint(assistant_text: &str) -> String {
+pub(crate) fn reply_fingerprint(assistant_text: &str) -> String {
     let digest = lash_sansio::core_support::blake3_domain_hash(
         "lash-rlm-stall-reply/v2",
         assistant_text.as_bytes(),

@@ -11,6 +11,8 @@ pub(crate) const IDENTICAL_ERROR_LIMIT: usize = 2;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RunEvidence {
+    pub(crate) attempts: Vec<serde_json::Value>,
+    pub(crate) wall_ms: u128,
     pub(crate) completed: bool,
     pub(crate) completion_error: Option<String>,
     pub(crate) finish_value: Option<Value>,

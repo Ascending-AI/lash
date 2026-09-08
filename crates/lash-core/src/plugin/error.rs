@@ -34,6 +34,16 @@ pub enum PluginError {
     /// protocol-owned field is absent from its durable record.
     #[error("recorded session config for plugin `{plugin_id}` is missing required field `{field}`")]
     MissingRecordedSessionConfig { plugin_id: String, field: String },
+    /// A host attempted to substitute a durably pinned protocol selection.
+    #[error(
+        "recorded session config for plugin `{plugin_id}` pins `{field}` to {recorded}, refusing {requested}"
+    )]
+    RecordedSessionConfigConflict {
+        plugin_id: String,
+        field: String,
+        recorded: String,
+        requested: String,
+    },
     #[error(transparent)]
     Runtime(crate::RuntimeError),
     /// A turn-scoped plugin write presented a lapsed or superseded borrowed
@@ -196,6 +206,7 @@ impl PluginError {
             Self::BeforeToolCallReplacementConflict { .. }
             | Self::AfterToolCallReplacementConflict { .. }
             | Self::MissingRecordedSessionConfig { .. }
+            | Self::RecordedSessionConfigConflict { .. }
             | Self::AppendOperationIdentityConflict { .. }
             | Self::AppendReceiptRequestedNodeCountCorrupt { .. }
             | Self::StoredDataCorrupt { .. }
