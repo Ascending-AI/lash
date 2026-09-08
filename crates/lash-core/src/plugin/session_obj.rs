@@ -656,6 +656,16 @@ impl PluginSession {
         }
     }
 
+    pub(crate) fn require_runtime_owner(&self) -> Result<(), PluginError> {
+        if self.host.export_plugin_namespaces {
+            Ok(())
+        } else {
+            Err(PluginError::Session(
+                "plugin-facing session handles cannot construct a host runtime".into(),
+            ))
+        }
+    }
+
     pub(crate) fn capture_state(&self) -> PluginState {
         self.state.lock_recover().data.clone()
     }

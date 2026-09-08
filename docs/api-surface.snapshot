@@ -3786,6 +3786,10 @@ lash::plugins::ProtocolSessionPlugin::configure_runtime_on_materialize
 lash::plugins::ProtocolSessionPlugin::initialize_session
 lash::plugins::ProtocolSessionPlugin::restore_session
 lash::plugins::ProtocolSessionPlugin::validate_turn_extension
+lash::plugins::ProtocolSessionRestoreView
+lash::plugins::ProtocolSessionRestoreView::active_events
+lash::plugins::ProtocolSessionRestoreView::current_frame_node_id
+lash::plugins::ProtocolSessionRestoreView::execution_state
 lash::plugins::ProtocolTurnExtension
 lash::plugins::ProtocolTurnExtension::as_any
 lash::plugins::ProtocolTurnExtension::prompt_contributions

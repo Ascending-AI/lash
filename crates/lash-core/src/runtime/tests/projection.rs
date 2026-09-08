@@ -91,7 +91,7 @@ impl crate::plugin::ProtocolSessionPlugin for AppendRollbackProtocolSession {
     async fn restore_session(
         &self,
         _ctx: crate::plugin::ProtocolSessionContext<'_>,
-        _state: &crate::RuntimeSessionState,
+        _state: crate::plugin::ProtocolSessionRestoreView,
     ) -> Result<(), crate::SessionError> {
         self.protocol_dirty.store(false, Ordering::SeqCst);
         self.restore_called.store(true, Ordering::SeqCst);

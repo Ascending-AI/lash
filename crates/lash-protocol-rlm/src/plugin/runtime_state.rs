@@ -172,7 +172,7 @@ impl RlmRuntimeState {
 
     pub(crate) async fn restore_runtime_session_state(
         &self,
-        state: &lash_core::runtime::RuntimeSessionState,
+        state: lash_core::plugin::ProtocolSessionRestoreView,
     ) -> Result<(), SessionError> {
         let mut active_agent_frame_id = self.active_agent_frame_id.lock().await;
         let mut execution_guard = self.execution.lock().await;
@@ -187,18 +187,14 @@ impl RlmRuntimeState {
             *active_agent_frame_id = current_frame_node_id;
         }
         let protected_names = self.protected_projected_binding_names().await;
-        if let Some(snapshot) =
-            state
-                .execution_state_hydration()
-                .map_err(|error| SessionError::Store {
-                    context: "failed to hydrate RLM execution-state components".to_string(),
-                    source: error,
-                })?
-        {
+        if let Some(snapshot) = state.execution_state.map_err(|error| SessionError::Store {
+            context: "failed to hydrate RLM execution-state components".to_string(),
+            source: error,
+        })? {
             execution.restore_execution_state(&snapshot)?;
             execution.prune_protected_globals(&protected_names)?;
         }
-        for event in state.read_view().active_events() {
+        for event in &state.active_events {
             if let SessionHistoryRecord::Protocol(event) = event
                 && let Some(event) = decode_rlm_protocol_event(event)
             {

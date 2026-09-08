@@ -998,9 +998,21 @@ impl RuntimeSessionState {
         self.checkpoint_components.execution_state_hydration()
     }
 
-    /// Updates plugin snapshots state for protocol and process-engine implementors while
-    /// materializing or restoring protocol session state.
+    /// Refreshes exported plugin state while respecting the session handle's
+    /// namespace permissions. Plugin-facing handles expose no namespaces.
     pub fn refresh_plugin_states(&mut self, plugins: &crate::PluginSession) {
+        self.refresh_plugin_states_with(plugins, crate::PluginSession::export_state);
+    }
+
+    pub(crate) fn capture_plugin_states(&mut self, plugins: &crate::PluginSession) {
+        self.refresh_plugin_states_with(plugins, crate::PluginSession::capture_state);
+    }
+
+    fn refresh_plugin_states_with(
+        &mut self,
+        plugins: &crate::PluginSession,
+        capture: fn(&crate::PluginSession) -> crate::PluginState,
+    ) {
         let tool_registry = plugins.tool_registry();
         let generation = tool_registry.generation();
         if self.tool_state_ref().is_none() || self.tool_state_generation() != Some(generation) {
@@ -1013,7 +1025,7 @@ impl RuntimeSessionState {
         if !generations.is_empty()
             && (self.plugin_state_ref().is_none() || captured != Some(&generations))
         {
-            self.set_plugin_state(Some(plugins.capture_state()));
+            self.set_plugin_state(Some(capture(plugins)));
         }
     }
 }
@@ -1297,11 +1309,6 @@ pub(crate) fn adopt_durable_head(
     state.current_frame_node_id = head.current_frame_node_id.clone();
     state.checkpoint_ref = head.checkpoint_ref.clone();
     state.token_ledger = head.token_ledger.clone();
-    state.checkpoint_components = if head.checkpoint_ref.is_some() {
-        RuntimeCheckpointComponents::unproven()
-    } else {
-        RuntimeCheckpointComponents::complete_empty()
-    };
     state.head_revision = head.head_revision;
     state.persisted_node_ids = head
         .graph

@@ -62,7 +62,7 @@ pub use protocol::{
     EXECUTION_STATE_LEAF_MIN_BODY_BYTES, ExecutionStateComponentSnapshot, ExecutionStateSnapshot,
     HydratedExecutionState, PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
     ProtocolLlmCallAction, ProtocolRuntimeContext, ProtocolSessionContext,
-    ProtocolSessionMaterialization, ProtocolSessionPlugin,
+    ProtocolSessionMaterialization, ProtocolSessionPlugin, ProtocolSessionRestoreView,
 };
 pub use registrar::{
     ContextRegistrations, ExecutionRegistrations, OutputRegistrations,

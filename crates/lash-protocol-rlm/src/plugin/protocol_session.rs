@@ -94,7 +94,7 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
     async fn restore_session(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-        state: &lash_core::runtime::RuntimeSessionState,
+        state: lash_core::plugin::ProtocolSessionRestoreView,
     ) -> Result<(), SessionError> {
         self.runtime_state
             .restore_runtime_session_state(state)

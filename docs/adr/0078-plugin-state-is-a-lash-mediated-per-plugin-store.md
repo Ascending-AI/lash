@@ -241,12 +241,14 @@ every plugin a forgeable route into every other plugin's namespace; and it would
 spread one concept across fifteen structs to deliver a value the closure already
 has.
 
-**Ordering.** The store is hydrated from the checkpoint *before* `session_ready`
-runs. The full sequence is: factory `build` → `register` → session construction
-→ **store hydration** → `session_ready`. So `session_ready` is the first point
-at which a plugin observes durable state, and it is also the point at which the
-old `restore` callback used to run — which is why deleting `restore` costs
-nothing (invariant 6): restore *is* reading the store on rebuild.
+**Ordering.** The store is hydrated from the checkpoint *before* `register`
+runs. The full sequence is: factory `build` → **store hydration** → `register`
+→ session construction → `session_ready`. Registration reads and validates
+writes against durable state; `session_ready` observes that state with the
+accepted registration edits applied exactly once. Deleting the old `restore`
+callback costs nothing (invariant 6): restore *is* reading the store on rebuild.
+Protocol restore receives only the current frame identity, hydrated protocol
+execution state, and active history; it has no decoded plugin namespaces.
 
 Writes are accepted from any of these points, including `register` and
 `session_ready`, and from plugin operations and tasks running off the turn loop.

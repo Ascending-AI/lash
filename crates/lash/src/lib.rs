@@ -387,8 +387,8 @@ pub mod plugins {
         PluginAbort, PluginNamespaceState, PluginState, PrepareTurnRequest,
         ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
         ProtocolRuntimeContext, ProtocolSessionContext, ProtocolSessionMaterialization,
-        ProtocolSessionPlugin, RecordedSessionConfig, SessionAuthorityContext,
-        SessionCreationConfig, TurnFinalization, TurnPreparation,
+        ProtocolSessionPlugin, ProtocolSessionRestoreView, RecordedSessionConfig,
+        SessionAuthorityContext, SessionCreationConfig, TurnFinalization, TurnPreparation,
     };
     /// Host-mediated JSON state, accepted in memory and persisted at boundary commits.
     pub use lash_core::plugin::{

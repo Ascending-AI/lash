@@ -265,7 +265,22 @@ impl PluginFactory for PlanPluginFactory {
 
 // A state-only host never runs turns, but still declares its protocol capability.
 struct StateOnlyProtocol;
-impl lash::plugins::ProtocolSessionPlugin for StateOnlyProtocol {}
+#[async_trait::async_trait]
+impl lash::plugins::ProtocolSessionPlugin for StateOnlyProtocol {
+    async fn restore_session(
+        &self,
+        _ctx: lash::plugins::ProtocolSessionContext<'_>,
+        state: lash::plugins::ProtocolSessionRestoreView,
+    ) -> Result<(), lash::SessionError> {
+        let _ = state
+            .execution_state
+            .map_err(|source| lash::SessionError::Store {
+                context: "restore protocol execution state".into(),
+                source,
+            })?;
+        Ok(())
+    }
+}
 impl lash::plugins::ProtocolDriverPlugin for StateOnlyProtocol {
     fn build_preamble(
         &self,
@@ -449,6 +464,24 @@ async fn plugin_operations_round_trip() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn documented_protocol_restore_view() {
+        let state = lash::plugins::ProtocolSessionRestoreView {
+            current_frame_node_id: Some(lash::plugins::FrameNodeId::new("frame")),
+            execution_state: Ok(Some(lash::plugins::HydratedExecutionState {
+                root: b"protocol-state".to_vec(),
+                components: Default::default(),
+            })),
+            active_events: Vec::new(),
+        };
+        assert_eq!(state.current_frame_node_id.unwrap().as_str(), "frame");
+        assert_eq!(
+            state.execution_state.unwrap().unwrap().root,
+            b"protocol-state"
+        );
+        assert!(state.active_events.is_empty());
+    }
 
     #[tokio::test]
     async fn documented_plugin_operations_round_trip() {

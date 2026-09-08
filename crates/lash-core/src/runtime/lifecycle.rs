@@ -176,6 +176,10 @@ impl LashRuntime {
         runtime_lease_owner: crate::LeaseOwnerIdentity,
         runtime_lease_executor_id: String,
     ) -> Result<Self, SessionError> {
+        services
+            .plugins
+            .require_runtime_owner()
+            .map_err(SessionError::Plugin)?;
         // Defaulted state (e.g. `RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))` used
         // by fresh-session constructors) carries an empty policy.
         // Fill it in from the caller's policy so tests and hosts that
@@ -270,7 +274,7 @@ impl LashRuntime {
         protocol_session
             .restore_session(
                 crate::plugin::ProtocolSessionContext::new(&mut session, &session_id),
-                &state,
+                crate::plugin::ProtocolSessionRestoreView::new(&state),
             )
             .await?;
         state.discard_runtime_snapshots();

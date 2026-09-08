@@ -142,7 +142,7 @@ impl crate::plugin::ProtocolSessionPlugin for FailNextProtocolRestore {
     async fn restore_session(
         &self,
         _ctx: crate::plugin::ProtocolSessionContext<'_>,
-        _state: &crate::RuntimeSessionState,
+        _state: crate::plugin::ProtocolSessionRestoreView,
     ) -> Result<(), crate::SessionError> {
         self.restore_count.fetch_add(1, Ordering::SeqCst);
         if self.fail_next.swap(false, Ordering::SeqCst) {
@@ -306,10 +306,10 @@ impl crate::plugin::ProtocolSessionPlugin for ResetExecutorOnSwitchProtocol {
     async fn restore_session(
         &self,
         ctx: crate::plugin::ProtocolSessionContext<'_>,
-        state: &crate::RuntimeSessionState,
+        state: crate::plugin::ProtocolSessionRestoreView,
     ) -> Result<(), crate::SessionError> {
         let snapshot = state
-            .execution_state_hydration()
+            .execution_state
             .map_err(|source| crate::SessionError::Store {
                 context: "hydrate test execution state".to_string(),
                 source,
@@ -347,12 +347,12 @@ impl crate::plugin::ProtocolSessionPlugin for SwitchBeforeLlmProtocol {
     async fn restore_session(
         &self,
         ctx: crate::plugin::ProtocolSessionContext<'_>,
-        state: &crate::RuntimeSessionState,
+        state: crate::plugin::ProtocolSessionRestoreView,
     ) -> Result<(), crate::SessionError> {
         if let (Some(executor), Some(snapshot)) = (
             self.executor.as_ref(),
             state
-                .execution_state_hydration()
+                .execution_state
                 .map_err(|source| crate::SessionError::Store {
                     context: "hydrate test execution state".to_string(),
                     source,
@@ -389,11 +389,11 @@ impl crate::plugin::ProtocolSessionPlugin for RestoreExecutorFromRuntimeState {
     async fn restore_session(
         &self,
         ctx: crate::plugin::ProtocolSessionContext<'_>,
-        state: &crate::RuntimeSessionState,
+        state: crate::plugin::ProtocolSessionRestoreView,
     ) -> Result<(), crate::SessionError> {
         if let Some(snapshot) =
             state
-                .execution_state_hydration()
+                .execution_state
                 .map_err(|source| crate::SessionError::Store {
                     context: "hydrate test execution state".to_string(),
                     source,

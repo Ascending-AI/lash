@@ -20,7 +20,7 @@ impl LashRuntime {
         if let Some(session) = self.session.as_ref() {
             let snapshot = session.plugins().tool_registry().export_state();
             self.state.set_tool_state_snapshot(Some(snapshot));
-            self.state.refresh_plugin_states(session.plugins());
+            self.state.capture_plugin_states(session.plugins());
         } else {
             self.state.set_tool_state_snapshot(None);
             self.state.set_plugin_state(None);
@@ -168,7 +168,7 @@ impl LashRuntime {
         if let Some(session) = self.session.as_ref() {
             let snapshot = session.plugins().tool_registry().export_state();
             state.set_tool_state_snapshot(Some(snapshot));
-            state.refresh_plugin_states(session.plugins());
+            state.capture_plugin_states(session.plugins());
         }
         Ok(state)
     }
@@ -1032,7 +1032,7 @@ impl LashRuntime {
             })?;
         let commit_state = next_config_state.as_mut().unwrap_or(&mut self.state);
         if let Some(session) = self.session.as_ref() {
-            commit_state.refresh_plugin_states(session.plugins());
+            commit_state.capture_plugin_states(session.plugins());
         }
         let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(

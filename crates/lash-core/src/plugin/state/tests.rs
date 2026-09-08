@@ -462,7 +462,17 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
                 Box::pin(async move {
                     assert_eq!(state.keys(), vec![state.plugin_id().to_string()]);
                     for (id, host) in hosts.lock_recover().iter() {
-                        assert!(host.session(id).unwrap().export_state().plugins.is_empty());
+                        let session = host.session(id).unwrap();
+                        assert!(session.export_state().plugins.is_empty());
+                        let mut exported =
+                            crate::RuntimeSessionState::new(crate::testing::mock_session_policy());
+                        exported.refresh_plugin_states(&session);
+                        assert!(
+                            exported
+                                .plugin_state()
+                                .is_none_or(|state| state.plugins.is_empty()),
+                            "public refresh must respect restricted namespace exports"
+                        );
                     }
                     let snapshot = serde_json::to_string(&ctx.state.to_snapshot()).unwrap();
                     assert!(!snapshot.contains("neighbor-secret-key"));
@@ -491,11 +501,35 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             Ok(())
         }
     }
+    struct ProtocolObserver(Arc<std::sync::atomic::AtomicUsize>);
+    #[async_trait::async_trait]
+    impl crate::plugin::ProtocolSessionPlugin for ProtocolObserver {
+        async fn restore_session(
+            &self,
+            _ctx: crate::plugin::ProtocolSessionContext<'_>,
+            state: crate::plugin::ProtocolSessionRestoreView,
+        ) -> Result<(), crate::SessionError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let visible = format!("{state:?}");
+            assert!(
+                !visible.contains("neighbor-secret-key"),
+                "protocol restore must not expose a decoded neighbor namespace: {visible}"
+            );
+            Ok(())
+        }
+    }
     struct Sessions;
     #[async_trait::async_trait]
     impl crate::plugin::SessionStateService for Sessions {}
     let hosts = Arc::new(Mutex::new(Vec::new()));
-    let host = crate::PluginHost::new(vec![
+    let restores = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut factories = vec![
+        crate::testing::test_standard_protocol_factory_with_runtime_state(
+            Arc::new(ProtocolObserver(restores.clone())),
+            None,
+        ),
+    ];
+    factories.extend(vec![
         Arc::new(Fixture {
             id: "observer",
             hosts: hosts.clone(),
@@ -503,8 +537,9 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         Arc::new(Fixture {
             id: "neighbor-secret-key",
             hosts: hosts.clone(),
-        }),
+        }) as Arc<dyn crate::plugin::PluginFactory>,
     ]);
+    let host = crate::PluginHost::new(factories);
     let parent = host.build_session("private-parent").unwrap();
     assert!(
         parent.export_state().plugins["neighbor-secret-key"]
@@ -534,13 +569,45 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     );
     let mut runtime_state =
         crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
-    runtime_state.refresh_plugin_states(&child);
+    runtime_state.capture_plugin_states(&child);
     assert!(
         runtime_state.plugin_state().unwrap().plugins["neighbor-secret-key"]
             .values
             .contains_key("neighbor-secret-key"),
         "restricted exports must not strip runtime checkpoint or fork state"
     );
+    runtime_state.session_id = "private-child".into();
+    let restricted_runtime = crate::LashRuntime::from_embedded_state(
+        crate::testing::mock_session_policy(),
+        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        )),
+        crate::RuntimeServices::new(child.clone()),
+        runtime_state.clone(),
+        crate::testing::runtime_lease_owner(),
+    )
+    .await;
+    assert!(matches!(
+        restricted_runtime,
+        Err(crate::SessionError::Plugin(crate::PluginError::Session(message)))
+            if message == "plugin-facing session handles cannot construct a host runtime"
+    ));
+    assert_eq!(restores.load(std::sync::atomic::Ordering::SeqCst), 0);
+    let runtime = crate::LashRuntime::from_embedded_state(
+        crate::testing::mock_session_policy(),
+        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        )),
+        crate::RuntimeServices::new(host.session("private-child").unwrap()),
+        runtime_state.clone(),
+        crate::testing::runtime_lease_owner(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(restores.load(std::sync::atomic::Ordering::SeqCst), 1);
+    drop(runtime);
     parent
         .before_turn(crate::plugin::TurnHookContext {
             session_id: "private-parent".into(),
