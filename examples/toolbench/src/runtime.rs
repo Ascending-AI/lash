@@ -189,7 +189,7 @@ async fn run_turn(
         .await
         .context("open toolbench session")?;
     let result = session
-        .turn(TurnInput::text(task.prompt))
+        .turn(TurnInput::text(task.prompt.clone()))
         .require_finish()
         .context("require RLM finish value")?
         .stream_to(telemetry.as_ref())
@@ -240,7 +240,7 @@ pub(crate) async fn preflight(
 ) -> Result<(), String> {
     let mut probe = task.clone();
     probe.id = "__native_probe";
-    probe.prompt = "Call execute_code exactly once with code that finishes with the number 1. Do not call any host operations.";
+    probe.prompt = "Call execute_code exactly once with code that finishes with the number 1. Do not call any host operations.".into();
     let mut failures = Vec::with_capacity(PREFLIGHT_ATTEMPTS);
     for attempt in 0..PREFLIGHT_ATTEMPTS {
         let (_, evidence) = run_task(

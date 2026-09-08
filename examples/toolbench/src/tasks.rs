@@ -8,6 +8,7 @@ use crate::world::{MailMessage, World};
 pub(crate) enum FinishMatcher {
     Exact(Value),
     Normalized(String),
+    NumericString(f64),
 }
 
 impl FinishMatcher {
@@ -17,6 +18,9 @@ impl FinishMatcher {
             (Self::Normalized(expected), Some(Value::String(actual))) => {
                 normalize(expected) == normalize(actual)
             }
+            (Self::NumericString(expected), Some(Value::String(actual))) => actual
+                .parse::<f64>()
+                .is_ok_and(|number| number == *expected),
             _ => false,
         }
     }
@@ -25,6 +29,7 @@ impl FinishMatcher {
         match self {
             Self::Exact(value) => format!("finish exactly {value}"),
             Self::Normalized(value) => format!("normalized finish equals {value:?}"),
+            Self::NumericString(value) => format!("numeric string equal to {value}"),
         }
     }
 }
@@ -40,7 +45,7 @@ fn normalize(value: &str) -> String {
 #[derive(Clone, Debug)]
 pub(crate) struct Task {
     pub(crate) id: &'static str,
-    pub(crate) prompt: &'static str,
+    pub(crate) prompt: String,
     pub(crate) seed: World,
     pub(crate) expected_world: World,
     pub(crate) finish: FinishMatcher,
@@ -61,31 +66,31 @@ pub(crate) fn task_pack() -> Vec<Task> {
     vec![
         read_task(
             "weather-temperature",
-            "Call weather.lookup for Berlin, then finish with the plain string 12 (the temperature in Celsius), not a number. Do not call any other tool.",
-            FinishMatcher::Exact(json!("12")),
+            "Call weather.lookup for Berlin and finish with only its temperature_c value converted to a decimal string, not a number.",
+            FinishMatcher::NumericString(12.0),
             1,
         ),
         read_task(
             "weather-condition",
-            "Call weather.lookup for Berlin, then finish with its condition as a plain string. Do not call any other tool.",
+            "Call weather.lookup for Berlin, then finish with only its condition as a plain string.",
             FinishMatcher::Normalized("rain".to_string()),
             1,
         ),
         read_task(
             "weather-compare",
-            "Use code to call weather.lookup for Berlin and Lisbon, then finish with the warmer city's name as a string.",
+            "Call weather.lookup once for Berlin and once for Lisbon, then finish with only the warmer city's name as a string, preserving its spelling.",
             FinishMatcher::Exact(json!("Lisbon")),
             2,
         ),
         read_task(
             "string-owner",
-            "Call notes.render for N-7 and extract the owner from the returned text. Finish with only the owner as a string.",
+            "Call notes.render for N-7 and extract the value after owner= up to the next comma, excluding the comma. Finish with only that value as a string, nothing else, preserving its spelling.",
             FinishMatcher::Exact(json!("Imani")),
             1,
         ),
         read_task(
             "string-token",
-            "Use code to call notes.render for N-7 and extract the token without its closing parenthesis. Finish with the exact token string ALPHA-17.",
+            "Call notes.render for N-7 and extract the value after token= up to the closing parenthesis, excluding the parenthesis. Finish with only that value as a string, nothing else, preserving its spelling.",
             FinishMatcher::Exact(json!("ALPHA-17")),
             1,
         ),
@@ -115,26 +120,26 @@ pub(crate) fn task_pack() -> Vec<Task> {
         ),
         read_task(
             "mail-count",
-            "Use code to call mail.list and count the messages. Finish with the count as a string.",
-            FinishMatcher::Exact(json!("2")),
+            "Use code to call mail.list and count the messages. Finish with only the count converted to a decimal string, not a number.",
+            FinishMatcher::NumericString(2.0),
             1,
         ),
         read_task(
             "mail-sender",
-            "Call mail.list and find the message whose subject is Build. Finish with its sender as a string.",
+            "Call mail.list and find the message whose subject is Build. Finish with only its sender field as a string, preserving its spelling.",
             FinishMatcher::Exact(json!("Ada")),
             1,
         ),
         write_task(
             "mail-send",
-            "Send one message to ops@example.test with subject Deploy and body Ship build 104. Finish with the returned message id as a string.",
+            "Call mail.send once with recipient \"ops@example.test\", subject \"Deploy\", and body \"Ship build 104\" (exactly the text inside the quotes). Finish with only the returned id field as a string.",
             FinishMatcher::Exact(json!("m3")),
             1,
             append_deploy_mail,
         ),
         write_task(
             "mail-send-read",
-            "Send one message to ops@example.test with subject Deploy and body Ship build 104, then call mail.list to verify it is present. Finish with the new message id as a string.",
+            "Call mail.send once with recipient \"ops@example.test\", subject \"Deploy\", and body \"Ship build 104\" (exactly the text inside the quotes), then call mail.list once to verify it is present. Finish with only the new message's id field as a string.",
             FinishMatcher::Exact(json!("m3")),
             2,
             append_deploy_mail,
@@ -167,7 +172,7 @@ pub(crate) fn task_pack() -> Vec<Task> {
         ),
         read_task(
             "string-to-kv-chain",
-            "Use one short program to read N-9 with notes.render, extract the key after key=, and retrieve it with kv.get. Finish with the retrieved value as a string.",
+            "Call notes.render for N-9, extract the key after key= through the end of the text, and retrieve that key with kv.get. Finish with only the retrieved value field as a string, preserving its spelling.",
             FinishMatcher::Exact(json!("L7")),
             2,
         ),
@@ -195,7 +200,10 @@ fn write_task(
     mutate_expected(&mut expected_world);
     Task {
         id,
-        prompt,
+        prompt: format!(
+            "{prompt} Use at most two code executions and exactly {tool_calls} host tool call(s) total; allow at most {} failed executions and never repeat an identical execution error; leave all other world state unchanged.",
+            crate::grading::MAX_FAILED_EXECUTIONS,
+        ),
         seed,
         expected_world,
         finish,
@@ -211,4 +219,117 @@ fn append_deploy_mail(world: &mut World) {
         subject: "Deploy".to_string(),
         body: "Ship build 104".to_string(),
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_task_discloses_the_grading_budget() {
+        let tasks = task_pack();
+        assert_eq!(tasks.len(), 16);
+        for task in tasks {
+            assert!(
+                task.prompt.contains("at most two code executions"),
+                "{}",
+                task.id
+            );
+            assert!(
+                task.prompt.contains(&format!(
+                    "exactly {} host tool call(s) total",
+                    task.tool_calls
+                )),
+                "{}",
+                task.id
+            );
+            assert!(
+                task.prompt.contains("at most 2 failed executions"),
+                "{}",
+                task.id
+            );
+            assert!(
+                task.prompt
+                    .contains("never repeat an identical execution error"),
+                "{}",
+                task.id
+            );
+            assert!((1..=3).contains(&task.tool_calls));
+        }
+    }
+
+    #[test]
+    fn lookup_prompts_do_not_supply_the_answer() {
+        for task in task_pack() {
+            if matches!(
+                task.id,
+                "weather-temperature" | "string-owner" | "string-token"
+            ) {
+                let answer = match &task.finish {
+                    FinishMatcher::Exact(Value::String(answer)) => answer.clone(),
+                    FinishMatcher::NumericString(answer) => answer.to_string(),
+                    _ => panic!("lookup must finish with a string"),
+                };
+                assert!(
+                    !task.prompt.contains(&answer),
+                    "{} leaks its answer",
+                    task.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn extraction_matchers_reject_records_and_delimiters() {
+        for (id, accepted, rejected) in [
+            ("string-owner", "Imani", "Imani,"),
+            ("string-token", "ALPHA-17", "ALPHA-17)"),
+            ("string-to-kv-chain", "L7", "launch_code"),
+        ] {
+            let task = task_pack().into_iter().find(|task| task.id == id).unwrap();
+            assert!(task.finish.matches(Some(&json!(accepted))));
+            assert!(!task.finish.matches(Some(&json!(rejected))));
+            assert!(!task.finish.matches(Some(&json!({"value": accepted}))));
+        }
+    }
+
+    #[test]
+    fn decimal_string_requests_keep_their_type_contract() {
+        for (id, value) in [("weather-temperature", 12), ("mail-count", 2)] {
+            let task = task_pack().into_iter().find(|task| task.id == id).unwrap();
+            assert!(task.prompt.contains("decimal string, not a number"));
+            assert!(task.finish.matches(Some(&json!(value.to_string()))));
+            assert!(task.finish.matches(Some(&json!(format!("{value}.0")))));
+            assert!(!task.finish.matches(Some(&json!(value))));
+            assert!(!task.finish.matches(Some(&json!((value + 1).to_string()))));
+            assert!(!task.finish.matches(Some(&json!("NaN"))));
+            assert!(
+                !task
+                    .finish
+                    .matches(Some(&json!(format!("{value} degrees"))))
+            );
+        }
+    }
+
+    #[test]
+    fn mail_prompts_quote_the_exact_body_without_sentence_punctuation() {
+        for task in task_pack()
+            .into_iter()
+            .filter(|task| matches!(task.id, "mail-send" | "mail-send-read"))
+        {
+            assert!(task.prompt.contains("body \"Ship build 104\""));
+            let mut evidence = crate::grading::RunEvidence {
+                completed: true,
+                finish_value: Some(json!("m3")),
+                tool_call_count: task.tool_calls,
+                ..Default::default()
+            };
+            assert!(crate::grading::grade(&task, &task.expected_world, &evidence).passed);
+            let mut wrong = task.expected_world.clone();
+            wrong.mail.last_mut().unwrap().body.push('.');
+            assert!(!crate::grading::grade(&task, &wrong, &evidence).passed);
+            evidence.finish_value = Some(json!(task.expected_world.mail.last().unwrap()));
+            assert!(!crate::grading::grade(&task, &task.expected_world, &evidence).passed);
+        }
+    }
 }
