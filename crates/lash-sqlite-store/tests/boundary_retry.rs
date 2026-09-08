@@ -170,7 +170,7 @@ async fn record_config_retry_after_head_advance() {
 
 #[tokio::test]
 async fn create_session_retry_after_head_advance() {
-    plain_boundary_retry_after_head_advance("root", "create-session").await;
+    semantic_boundary_retry_after_head_advance("root", "create-session").await;
 }
 
 #[tokio::test]

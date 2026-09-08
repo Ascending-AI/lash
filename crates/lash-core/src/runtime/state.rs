@@ -1300,7 +1300,7 @@ pub fn append_session_nodes_to_state_with_clock(
 /// | preview (initial park) | Local hash input, never submitted | No store operation to replay | No speculative receipt |
 /// | initial-park | Persist dirty state on consuming park | Exact commit replays; changed content gets a different operation | Keep content-addressed identity; no rebuilt-request promise |
 /// | record-config | Persist materialized protocol configuration | Semantic-boundary receipt replays same-request rebuilds; a differing canonical encoding is refused (FIG-2480) | Adopted: `SemanticBoundary` identity with a typed operation tag |
-/// | create-session | Create a new child; registered IDs are rejected | Exact commit replays; rebuilt commit conflicts | Needs semantic receipt plus host result recovery; shape guard stops adoption |
+/// | create-session | Create a new child; registered IDs are rejected | Semantic-boundary receipt replays same-request rebuilds; a differing canonical encoding is refused (FIG-2480) | Adopted: `SemanticBoundary` identity with a typed operation tag |
 /// | usage-ledger | Flush staged child usage after its turn | Exact commit replays; rebuilt commit conflicts | Needs semantic receipt for unconfirmed usage; shape guard stops adoption |
 ///
 /// Plain-commit writes still require the original canonical commit for replay,
