@@ -133,6 +133,7 @@ fn host_model_capability_validates_reasoning_effort_selections() {
     assert!(required.message.contains("requires an explicit effort"));
 
     let malformed_capability = lash::provider::ModelCapability {
+        attachment_acceptance: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["low".to_string(), "high".to_string()],
             default_effort: None,

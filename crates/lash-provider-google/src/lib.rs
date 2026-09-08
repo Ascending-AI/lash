@@ -19,7 +19,6 @@ pub mod testing;
 mod upload;
 
 pub use config::{GoogleOAuthClient, GoogleOAuthProvider};
-pub use lash_core::llm::transport::{GOOGLE_FILE_MIMES, GOOGLE_IMAGE_MIMES, GOOGLE_MEDIA_FAMILIES};
 
 #[cfg(test)]
 mod tests {
@@ -82,12 +81,13 @@ mod tests {
 
     fn request_with_capability(
         model_variant: Option<&str>,
-        model_capability: ModelCapability,
+        mut model_capability: ModelCapability,
     ) -> LlmRequest {
+        model_capability.attachment_acceptance =
+            crate::attachment_test_capability().attachment_acceptance;
         LlmRequest {
             model: "gemini-3.1-pro-preview".to_string(),
             messages: vec![LlmMessage::text(LlmRole::User, "hello")],
-            attachments: Vec::new(),
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::<LlmToolSpec>::new()),
             tool_choice: LlmToolChoice::Auto,
@@ -719,6 +719,7 @@ mod tests {
 
     fn effort_capability(efforts: &[&str]) -> ModelCapability {
         ModelCapability {
+            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: efforts.iter().copied().map(str::to_string).collect(),
@@ -736,6 +737,7 @@ mod tests {
 
     fn budget_capability(entries: &[(&str, u32)]) -> ModelCapability {
         ModelCapability {
+            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: entries
@@ -808,7 +810,12 @@ mod tests {
             bytes.clone(),
         );
         let mut req = request(None);
-        req.attachments = vec![attachment.clone()];
+        req.messages.push(LlmMessage::new(
+            LlmRole::User,
+            vec![LlmContentBlock::Attachment {
+                source: Box::new(attachment.clone()),
+            }],
+        ));
 
         GoogleOAuthProvider::validate_attachments(&req).expect("audio is supported");
         let part = GoogleOAuthProvider::inline_attachment_part(&req, &attachment);
@@ -832,7 +839,12 @@ mod tests {
                 media_type,
             );
             let mut req = request(None);
-            req.attachments = vec![attachment.clone()];
+            req.messages.push(LlmMessage::new(
+                LlmRole::User,
+                vec![LlmContentBlock::Attachment {
+                    source: Box::new(attachment.clone()),
+                }],
+            ));
 
             GoogleOAuthProvider::validate_attachments(&req).expect("provider file is supported");
             assert_eq!(
@@ -845,10 +857,15 @@ mod tests {
     #[test]
     fn google_accepts_webp_attachment_through_validation() {
         let mut req = request(None);
-        req.attachments = vec![AttachmentSource::inline(
-            lash_core::MediaType::parse("image/webp").unwrap(),
-            vec![0],
-        )];
+        req.messages.push(LlmMessage::new(
+            LlmRole::User,
+            vec![LlmContentBlock::Attachment {
+                source: Box::new(AttachmentSource::inline(
+                    lash_core::MediaType::parse("image/webp").unwrap(),
+                    vec![0],
+                )),
+            }],
+        ));
 
         GoogleOAuthProvider::validate_attachments(&req).expect("webp is supported");
     }
@@ -1512,3 +1529,8 @@ mod tests {
     mod conformance;
     mod protocol53;
 }
+
+#[cfg(test)]
+mod attachment_capability_fixture;
+#[cfg(test)]
+pub(crate) use attachment_capability_fixture::attachment_test_capability;

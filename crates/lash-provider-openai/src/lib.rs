@@ -25,7 +25,11 @@ pub use config::{
     OpenAiWireConfig, ProviderRoutingPrefs,
 };
 pub use driver::CompletionEndpoint;
-pub use lash_core::llm::transport::{OPENAI_FILE_MIMES, OPENAI_IMAGE_MIMES};
 pub use reasoning::{
     ReasoningEncodeError, ReasoningWireEncoder, ReasoningWireFormat, ReasoningWireIntent,
 };
+
+#[cfg(test)]
+mod attachment_capability_fixture;
+#[cfg(test)]
+pub(crate) use attachment_capability_fixture::attachment_test_capability;

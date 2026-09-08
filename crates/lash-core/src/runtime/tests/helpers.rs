@@ -548,6 +548,7 @@ impl crate::ToolProvider for EmptyTools {
 }
 
 pub(crate) struct TestRuntime {
+    attachment_acceptance: Arc<crate::provider::AttachmentCapabilitySnapshot>,
     plugins: Vec<Arc<dyn crate::PluginFactory>>,
     tools: Arc<dyn crate::ToolProvider>,
     transport: TestProvider,
@@ -560,6 +561,7 @@ pub(crate) struct TestRuntime {
 impl TestRuntime {
     pub(crate) fn new(transport: TestProvider) -> Self {
         Self {
+            attachment_acceptance: Default::default(),
             plugins: crate::testing::test_standard_protocol_factories(),
             tools: Arc::new(EmptyTools),
             transport,
@@ -568,6 +570,14 @@ impl TestRuntime {
             process_registry: Some(Arc::new(crate::TestLocalProcessRegistry::default())),
             session_id: None,
         }
+    }
+
+    pub(crate) fn attachment_acceptance(
+        mut self,
+        snapshot: Arc<crate::provider::AttachmentCapabilitySnapshot>,
+    ) -> Self {
+        self.attachment_acceptance = snapshot;
+        self
     }
 
     pub(crate) fn plugins(mut self, plugins: Vec<Arc<dyn crate::PluginFactory>>) -> Self {
@@ -623,9 +633,12 @@ impl TestRuntime {
             initial_state.session_id = session_id.clone();
             initial_state.policy.session_id = Some(session_id);
         }
+        let mut policy = standard_test_policy();
+        policy.model.capability.attachment_acceptance = self.attachment_acceptance.clone();
+        initial_state.policy.model.capability.attachment_acceptance = self.attachment_acceptance;
         let runtime = match (self.store, self.process_registry) {
             (Some(store), None) => LashRuntime::from_persistent_embedded_state(
-                standard_test_policy(),
+                policy,
                 self.host,
                 crate::PersistentRuntimeServices::new(plugin_session, store),
                 initial_state.clone(),
@@ -634,7 +647,7 @@ impl TestRuntime {
             .await
             .expect("runtime"),
             (None, None) => LashRuntime::from_embedded_state(
-                standard_test_policy(),
+                policy,
                 self.host,
                 crate::RuntimeServices::new(plugin_session),
                 initial_state.clone(),
@@ -649,7 +662,7 @@ impl TestRuntime {
                     Arc::new(crate::NoQueuedWork::new()),
                 );
                 LashRuntime::from_persistent_background_state(
-                    standard_test_policy(),
+                    policy,
                     host,
                     crate::PersistentRuntimeServices::new(plugin_session, store),
                     initial_state.clone(),
@@ -665,7 +678,7 @@ impl TestRuntime {
                     Arc::new(crate::NoQueuedWork::new()),
                 );
                 LashRuntime::from_background_state(
-                    standard_test_policy(),
+                    policy,
                     host,
                     crate::RuntimeServices::new(plugin_session),
                     initial_state,

@@ -418,6 +418,15 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
+    pub(super) fn attachment_acceptance(&self) -> &crate::provider::AttachmentCapabilitySnapshot {
+        &self
+            .execution_env_spec
+            .policy
+            .model
+            .capability
+            .attachment_acceptance
+    }
+
     pub(crate) fn with_execution_env_spec(
         mut self,
         execution_env_spec: crate::ProcessExecutionEnvSpec,

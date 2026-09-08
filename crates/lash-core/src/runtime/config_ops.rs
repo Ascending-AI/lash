@@ -95,7 +95,7 @@ impl ApplyConfigPatch {
             policy.provider_id = provider_id.clone();
         }
         if let Some(model) = self.model.as_ref() {
-            policy.model = model.clone();
+            policy.replace_model_retaining_attachment_acceptance(model.clone());
         }
         if let Some(prompt) = self.prompt.as_ref() {
             policy.prompt = prompt.clone();
@@ -151,7 +151,7 @@ impl LashRuntime {
             candidate.provider_id = provider.kind().to_string();
         }
         if let Some(model) = patch.model {
-            candidate.model = model;
+            candidate.replace_model_retaining_attachment_acceptance(model);
         }
         if let Some(prompt) = patch.prompt {
             candidate.prompt = prompt;

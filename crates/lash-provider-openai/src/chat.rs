@@ -28,18 +28,27 @@ impl OpenAiCompatibleProvider {
     }
 
     fn validate_chat_attachments(req: &LlmRequest) -> Result<(), LlmTransportError> {
-        for source in &req.attachments {
-            let supported = source
-                .media_type()
-                .is_some_and(|mime| OPENAI_IMAGE_MIMES.contains(&mime.as_str()))
-                && !matches!(source, AttachmentSource::ProviderFile { .. });
+        for source in &req.attachments() {
+            let supported = req
+                .model_capability
+                .attachment_acceptance
+                .accepts("OpenAI Chat Completions", source);
             if !supported {
-                let accepted_by = known_attachment_acceptors(source);
+                let accepted_by =
+                    known_attachment_acceptors(&req.model_capability.attachment_acceptance, source);
                 return Err(unsupported_attachment_capability(
                     "OpenAI Chat Completions",
                     source,
                     &accepted_by,
                 ));
+            }
+            // Chat's image_url wire part has no provider-file handle representation.
+            if matches!(source, AttachmentSource::ProviderFile { .. }) {
+                return Err(LlmTransportError::new(
+                    "Chat attachment wire parts cannot encode a provider-file handle",
+                )
+                .with_kind(ProviderFailureKind::Validation)
+                .with_code("attachment_source_not_encodable"));
             }
             if matches!(source, AttachmentSource::Stored { .. })
                 && req.attachment_bytes(source).is_none()
@@ -99,12 +108,8 @@ impl OpenAiCompatibleProvider {
                         }
                         text_parts.push(part);
                     }
-                    LlmContentBlock::Attachment { attachment_idx }
-                        if matches!(msg.role, LlmRole::User) =>
-                    {
-                        if let Some(att) = req.attachments.get(*attachment_idx) {
-                            text_parts.push(Self::chat_attachment_part(req, att));
-                        }
+                    LlmContentBlock::Attachment { source } if matches!(msg.role, LlmRole::User) => {
+                        text_parts.push(Self::chat_attachment_part(req, source));
                     }
                     LlmContentBlock::ToolCall {
                         call_id,

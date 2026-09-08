@@ -688,10 +688,10 @@ pub use lash_sansio::{
     ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord, FrameKey, FrameKeyError,
     LashSchema, LlmCallError, MediaType, Message, MessageOrigin, MessageRole, Observation,
     OmittedToolCalls, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
-    PromptBuiltin, PromptContribution, PromptContributionGate, PromptLayer, PromptSlot,
-    PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection, PruneState,
-    SchemaContract, SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode,
-    TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolActivation,
+    PromptBuiltin, PromptContribution, PromptContributionBody, PromptContributionGate, PromptLayer,
+    PromptSlot, PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
+    PruneState, SchemaContract, SchemaProjectionOverride, SchemaProjectionPolicy,
+    SessionAppendNode, TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolActivation,
     ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
     ToolCancellation, ToolCatalog, ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition,
     ToolFailure, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentExecutionOutcome,
@@ -1076,7 +1076,8 @@ pub(crate) use plugin::{
 };
 
 pub use provider::{
-    CacheControlDialect, GoogleDialect, ModelCapability, ReasoningCapability,
+    AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+    AttachmentMimeSource, CacheControlDialect, GoogleDialect, ModelCapability, ReasoningCapability,
     ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
     StreamTermination,
 };
@@ -1159,20 +1160,20 @@ pub use runtime::{
     WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerProcessWork,
     WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
 };
+pub(crate) use runtime::{
+    ProcessEngineRunGuard, ProcessEngineRuntimeContext, QueuedWorkEnqueueOutcome,
+};
 #[allow(unused_imports)]
 pub(crate) use runtime::{
-    LlmAttachmentSpec, ProcessEventSemantics, QueuedCheckpointTurnInput, QueuedCheckpointWork,
-    QueuedTurnWork, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-    QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkCompletion, QueuedWorkCompletionData,
-    QueuedWorkItem, QueuedWorkPayload, RuntimeSubject, TurnWorkPayload, load_process_execution_env,
+    ProcessEventSemantics, QueuedCheckpointTurnInput, QueuedCheckpointWork, QueuedTurnWork,
+    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
+    QueuedWorkClaimData, QueuedWorkCompletion, QueuedWorkCompletionData, QueuedWorkItem,
+    QueuedWorkPayload, RuntimeSubject, TurnWorkPayload, load_process_execution_env,
     materialize_process_event_semantics, persist_process_execution_env,
     prepare_process_event_append, prepare_process_registration, prepare_process_start,
     prepare_process_transition, process_event_invocation, process_registration_fingerprint,
     process_wake_batch_draft, process_wake_input_from_event_payload, process_wake_turn_cause,
     process_wake_turn_text, require_event_replay,
-};
-pub(crate) use runtime::{
-    ProcessEngineRunGuard, ProcessEngineRuntimeContext, QueuedWorkEnqueueOutcome,
 };
 pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
 pub(crate) use session_model::plugin_runtime_protocol_event;

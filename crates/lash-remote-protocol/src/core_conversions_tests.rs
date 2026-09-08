@@ -233,10 +233,21 @@ fn provider_file_media_type_round_trips_between_core_and_remote() {
 fn llm_request_and_response_round_trip_owned_dtos() {
     let request = core_llm::LlmRequest {
         model: "gpt-test".to_string(),
-        messages: vec![core_llm::LlmMessage::text(core_llm::LlmRole::User, "hello")],
-        attachments: vec![core_llm::AttachmentSource::inline(
-            lash_core::MediaType::parse("image/png").unwrap(),
-            vec![1, 2, 3],
+        messages: vec![core_llm::LlmMessage::new(
+            core_llm::LlmRole::User,
+            vec![
+                core_llm::LlmContentBlock::Text {
+                    text: "hello".into(),
+                    response_meta: None,
+                    cache_breakpoint: false,
+                },
+                core_llm::LlmContentBlock::Attachment {
+                    source: Box::new(core_llm::AttachmentSource::inline(
+                        lash_core::MediaType::parse("image/png").unwrap(),
+                        vec![1, 2, 3],
+                    )),
+                },
+            ],
         )],
         resolved_stored: Default::default(),
         tools: Arc::new(vec![core_llm::LlmToolSpec {
@@ -258,6 +269,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
         tool_choice: core_llm::LlmToolChoice::Auto,
         model_variant: core_llm::ReasoningSelection::Effort("fast".to_string()),
         model_capability: core_llm::ModelCapability {
+            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(core_llm::ReasoningCapability {
                 efforts: vec!["fast".to_string(), "slow".to_string()],
@@ -353,7 +365,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     assert_eq!(core.agent_frame_id(), "session-1:frame:test");
     assert_eq!(core.request_id(), "session-1:request:test");
     assert!(matches!(
-        &core.attachments[0],
+        &core.attachments()[0],
         core_llm::AttachmentSource::Inline { bytes, .. } if bytes == &[1, 2, 3]
     ));
     assert_eq!(

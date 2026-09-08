@@ -128,7 +128,12 @@ pub use usage_activity::*;
 // failure kinds, FIG-2406 derived status, and FIG-1942 Google dialect capability.
 // All members are present: publish only this complete window-53 shape.
 // Exact-match negotiation refuses version-52 peers; no tolerant decoding.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 53;
+// Window 54 CLOSED: FIG-1944 inline attachment sources; FIG-2000 slot-less
+// contribution bodies; FIG-2357 retained host attachment capability snapshots.
+// All members are present; publish only this complete, pinned window-54 shape.
+// Known peer: lash-cli must adopt window 54; its repository is unchanged here.
+// Exact-match negotiation refuses version-53 peers before payload decoding.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 54;
 
 /// One versioned remote-protocol message.
 ///
@@ -215,3 +220,9 @@ mod tests;
 
 #[cfg(test)]
 mod versioned_decode_tests;
+
+#[cfg(test)]
+mod prompt_body_tests;
+
+#[cfg(test)]
+mod attachment_capability_tests;

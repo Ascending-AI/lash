@@ -160,17 +160,15 @@ impl From<RemotePromptSlotLayer> for lash_core::PromptSlotLayer {
     }
 }
 
-impl From<lash_core::PromptContribution> for RemotePromptContribution {
-    fn from(value: lash_core::PromptContribution) -> Self {
-        let lash_core::PromptContribution {
-            slot,
+impl From<lash_core::PromptContributionBody> for RemotePromptContribution {
+    fn from(value: lash_core::PromptContributionBody) -> Self {
+        let lash_core::PromptContributionBody {
             title,
             priority,
             gate,
             content,
         } = value;
         Self {
-            slot: slot.into(),
             title: title.map(|title| title.to_string()),
             priority,
             gate: gate.into(),
@@ -179,17 +177,15 @@ impl From<lash_core::PromptContribution> for RemotePromptContribution {
     }
 }
 
-impl From<RemotePromptContribution> for lash_core::PromptContribution {
+impl From<RemotePromptContribution> for lash_core::PromptContributionBody {
     fn from(value: RemotePromptContribution) -> Self {
         let RemotePromptContribution {
-            slot,
             title,
             priority,
             gate,
             content,
         } = value;
         Self {
-            slot: slot.into(),
             title: title.map(Arc::from),
             priority,
             gate: gate.into(),

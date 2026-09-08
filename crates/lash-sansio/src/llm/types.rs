@@ -5,9 +5,11 @@ use std::sync::Arc;
 use crate::{AttachmentRef, MediaType, SchemaContract};
 
 pub use crate::llm::capability::{
-    CacheControlDialect, GoogleDialect, ModelCapability, ModelEffortValidationCategory,
-    ModelEffortValidationError, ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding,
-    ReasoningSelection, SamplingCapability, StreamTermination,
+    AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+    AttachmentMimeSource, CacheControlDialect, GoogleDialect, ModelCapability,
+    ModelEffortValidationCategory, ModelEffortValidationError, ReasoningCapability,
+    ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
+    StreamTermination,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -378,9 +380,8 @@ pub enum LlmContentBlock {
         response_meta: Option<ResponseTextMeta>,
         cache_breakpoint: bool,
     },
-    /// Index into the enclosing `LlmRequest.attachments` vector. Provider
-    /// adapters dispatch on the attachment's MIME family and source.
-    Attachment { attachment_idx: usize },
+    /// The source travels with the block through projection and transport.
+    Attachment { source: Box<AttachmentSource> },
     /// Assistant tool call with optional opaque provider replay state.
     ToolCall {
         call_id: String,
@@ -917,7 +918,6 @@ impl GenerationReceipt {
 pub struct LlmRequest {
     pub model: String,
     pub messages: Vec<LlmMessage>,
-    pub attachments: Vec<AttachmentSource>,
     /// Request-local bytes resolved through the session guard for `Stored`
     /// sources. This materialization cache is never serialized and does not
     /// blur source ownership: adapters still inspect the original source and
@@ -940,6 +940,18 @@ pub struct LlmRequest {
 }
 
 impl LlmRequest {
+    /// Attachment sources in message order, derived from their owning blocks.
+    pub fn attachments(&self) -> Vec<&AttachmentSource> {
+        self.messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Remove opaque replay state that was not minted by the exact LLM
     /// Provider route serving this request.
     ///

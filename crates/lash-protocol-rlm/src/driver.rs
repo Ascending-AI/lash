@@ -3,7 +3,7 @@ pub(crate) mod history;
 
 use std::sync::{Arc, RwLock};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 use lash_core::llm::types::LlmContentBlock;
 use lash_core::llm::types::{LlmMessage, LlmRequestScope, LlmRole, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
@@ -321,7 +321,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
                 Arc::clone(&ctx.config.system_prompt),
             ));
         }
-        let mut attachments = Vec::new();
+
         messages.extend(build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
                 dialect: self.dialect.as_ref(),
@@ -336,7 +336,6 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
                 budget_suffix: budget_suffix.as_deref(),
                 bound_variables: &bound_variables_prompt,
             },
-            &mut attachments,
         ));
 
         let mut generation = ctx.config.generation.clone();
@@ -349,7 +348,6 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         Arc::new(LlmRequest {
             model: ctx.config.model.clone(),
             messages,
-            attachments,
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::new()),
             tool_choice: LlmToolChoice::None,
@@ -481,23 +479,19 @@ impl RlmContextProjector {
     /// flattened to their text for substring assertions on the rendered format.
     #[cfg(test)]
     fn format_history(&self, events: &[lash_core::SessionHistoryRecord]) -> String {
-        let mut attachments = Vec::new();
-        let messages = render_history_messages(
-            &RlmHistoryRenderInput {
-                dialect: self.dialect.as_ref(),
-                events,
-                turn_messages: &lash_core::facade_support::MessageSequence::default(),
-                turn_causes: &[],
-                max_output_chars: self.max_output_chars,
-                protocol_iteration: 0,
-                finalization: "",
-                required_output: None,
-                final_answer_format: None,
-                budget_suffix: None,
-                bound_variables: "",
-            },
-            &mut attachments,
-        );
+        let messages = render_history_messages(&RlmHistoryRenderInput {
+            dialect: self.dialect.as_ref(),
+            events,
+            turn_messages: &lash_core::facade_support::MessageSequence::default(),
+            turn_causes: &[],
+            max_output_chars: self.max_output_chars,
+            protocol_iteration: 0,
+            finalization: "",
+            required_output: None,
+            final_answer_format: None,
+            budget_suffix: None,
+            bound_variables: "",
+        });
         messages
             .iter()
             .flat_map(|message| message.blocks.iter())
@@ -520,29 +514,31 @@ pub(crate) fn render_conformance_history_message(
     let events = [lash_core::SessionHistoryRecord::Conversation(
         lash_core::session_model::ConversationRecord::from_message(message),
     )];
-    let mut attachments = Vec::new();
-    let rendered = render_history_messages(
-        &RlmHistoryRenderInput {
-            dialect: &dialect,
-            events: &events,
-            turn_messages: &lash_core::facade_support::MessageSequence::default(),
-            turn_causes: &[],
-            max_output_chars: 10_000,
-            protocol_iteration: 0,
-            finalization: "",
-            required_output: None,
-            final_answer_format: None,
-            budget_suffix: None,
-            bound_variables: "",
-        },
-        &mut attachments,
-    );
+
+    let rendered = render_history_messages(&RlmHistoryRenderInput {
+        dialect: &dialect,
+        events: &events,
+        turn_messages: &lash_core::facade_support::MessageSequence::default(),
+        turn_causes: &[],
+        max_output_chars: 10_000,
+        protocol_iteration: 0,
+        finalization: "",
+        required_output: None,
+        final_answer_format: None,
+        budget_suffix: None,
+        bound_variables: "",
+    });
+    let attachment_count = rendered
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .filter(|block| matches!(block, LlmContentBlock::Attachment { .. }))
+        .count();
     match rendered.as_slice() {
-        [message] if attachments.is_empty() => Ok(message.clone()),
+        [message] if attachment_count == 0 => Ok(message.clone()),
         _ => Err(format!(
             "RLM conformance history rendered {} messages and {} attachments; expected exactly one message and no attachments",
             rendered.len(),
-            attachments.len()
+            attachment_count
         )),
     }
 }
@@ -827,23 +823,20 @@ mod tests {
             assistant_prose_event("a1", "Found it. Running it now."),
             step_event(0, "loc = run()", "ok"),
         ];
-        let mut attachments = Vec::new();
-        let messages = build_rlm_history_messages_from_turn(
-            RlmHistoryRenderInput {
-                dialect: projector.dialect.as_ref(),
-                events: &events,
-                turn_messages: &lash_core::facade_support::MessageSequence::default(),
-                turn_causes: &[],
-                max_output_chars: 1000,
-                protocol_iteration: 1,
-                finalization: rlm_finalization_prompt(&RlmTermination::default()),
-                required_output: None,
-                final_answer_format: None,
-                budget_suffix: None,
-                bound_variables: "",
-            },
-            &mut attachments,
-        );
+
+        let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            dialect: projector.dialect.as_ref(),
+            events: &events,
+            turn_messages: &lash_core::facade_support::MessageSequence::default(),
+            turn_causes: &[],
+            max_output_chars: 1000,
+            protocol_iteration: 1,
+            finalization: rlm_finalization_prompt(&RlmTermination::default()),
+            required_output: None,
+            final_answer_format: None,
+            budget_suffix: None,
+            bound_variables: "",
+        });
 
         let assistant_texts = messages
             .iter()
@@ -894,24 +887,20 @@ mod tests {
             user_event("u2", "continue"),
             step_event(0, "print \"next turn\"", "next turn"),
         ];
-        let mut attachments = Vec::new();
 
-        let messages = render_history_messages(
-            &RlmHistoryRenderInput {
-                dialect: projector.dialect.as_ref(),
-                events: &events,
-                turn_messages: &lash_core::facade_support::MessageSequence::default(),
-                turn_causes: &[],
-                max_output_chars: 1000,
-                protocol_iteration: 0,
-                finalization: "",
-                required_output: None,
-                final_answer_format: None,
-                budget_suffix: None,
-                bound_variables: "",
-            },
-            &mut attachments,
-        );
+        let messages = render_history_messages(&RlmHistoryRenderInput {
+            dialect: projector.dialect.as_ref(),
+            events: &events,
+            turn_messages: &lash_core::facade_support::MessageSequence::default(),
+            turn_causes: &[],
+            max_output_chars: 1000,
+            protocol_iteration: 0,
+            finalization: "",
+            required_output: None,
+            final_answer_format: None,
+            budget_suffix: None,
+            bound_variables: "",
+        });
         let rendered = messages
             .iter()
             .map(message_text)
@@ -927,7 +916,12 @@ mod tests {
         assert!(!rendered.contains("Final output:"));
         assert!(rendered.contains("history[4].output[0] (9 chars):\nnext turn"));
         assert!(!rendered.contains("history[6].output[0]"));
-        assert!(attachments.is_empty());
+        assert!(
+            messages
+                .iter()
+                .flat_map(|message| message.blocks.iter())
+                .all(|block| !matches!(block, LlmContentBlock::Attachment { .. }))
+        );
     }
 
     #[test]
@@ -983,23 +977,20 @@ mod tests {
             user_event("u1", "Tell me naturally."),
             assistant_prose_event("a1", "A natural prose answer.\n\nSecond paragraph."),
         ];
-        let mut attachments = Vec::new();
-        let messages = render_history_messages(
-            &RlmHistoryRenderInput {
-                dialect: projector.dialect.as_ref(),
-                events: &events,
-                turn_messages: &lash_core::facade_support::MessageSequence::default(),
-                turn_causes: &[],
-                max_output_chars: 1000,
-                protocol_iteration: 0,
-                finalization: "",
-                required_output: None,
-                final_answer_format: None,
-                budget_suffix: None,
-                bound_variables: "",
-            },
-            &mut attachments,
-        );
+
+        let messages = render_history_messages(&RlmHistoryRenderInput {
+            dialect: projector.dialect.as_ref(),
+            events: &events,
+            turn_messages: &lash_core::facade_support::MessageSequence::default(),
+            turn_causes: &[],
+            max_output_chars: 1000,
+            protocol_iteration: 0,
+            finalization: "",
+            required_output: None,
+            final_answer_format: None,
+            budget_suffix: None,
+            bound_variables: "",
+        });
 
         assert_eq!(messages.len(), 2);
         assert_eq!(message_text(&messages[0]), "Tell me naturally.");
@@ -1023,23 +1014,20 @@ mod tests {
             ),
             assistant_prose_event("a1", "done"),
         ];
-        let mut attachments = Vec::new();
-        let messages = build_rlm_history_messages_from_turn(
-            RlmHistoryRenderInput {
-                dialect: projector.dialect.as_ref(),
-                events: &events,
-                turn_messages: &lash_core::facade_support::MessageSequence::default(),
-                turn_causes: &[],
-                max_output_chars: 1000,
-                protocol_iteration: 0,
-                finalization: "finish",
-                required_output: None,
-                final_answer_format: None,
-                budget_suffix: None,
-                bound_variables: "",
-            },
-            &mut attachments,
-        );
+
+        let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            dialect: projector.dialect.as_ref(),
+            events: &events,
+            turn_messages: &lash_core::facade_support::MessageSequence::default(),
+            turn_causes: &[],
+            max_output_chars: 1000,
+            protocol_iteration: 0,
+            finalization: "finish",
+            required_output: None,
+            final_answer_format: None,
+            budget_suffix: None,
+            bound_variables: "",
+        });
 
         assert!(matches!(
             messages[1].blocks.first(),
@@ -1185,24 +1173,20 @@ mod tests {
             }),
         });
         let events = [event];
-        let mut attachments = Vec::new();
 
-        let messages = build_rlm_history_messages_from_turn(
-            RlmHistoryRenderInput {
-                dialect: projector.dialect.as_ref(),
-                events: &events,
-                turn_messages: &lash_core::facade_support::MessageSequence::default(),
-                turn_causes: &[],
-                max_output_chars: 1000,
-                protocol_iteration: 1,
-                finalization: rlm_finalization_prompt(&RlmTermination::default()),
-                required_output: None,
-                final_answer_format: None,
-                budget_suffix: None,
-                bound_variables: "",
-            },
-            &mut attachments,
-        );
+        let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            dialect: projector.dialect.as_ref(),
+            events: &events,
+            turn_messages: &lash_core::facade_support::MessageSequence::default(),
+            turn_causes: &[],
+            max_output_chars: 1000,
+            protocol_iteration: 1,
+            finalization: rlm_finalization_prompt(&RlmTermination::default()),
+            required_output: None,
+            final_answer_format: None,
+            budget_suffix: None,
+            bound_variables: "",
+        });
         let history = projector.format_history(&events);
 
         assert!(history.contains("Background process wake"));
@@ -1229,24 +1213,20 @@ mod tests {
         };
         let event_message = cause.to_event_message();
         let messages = lash_core::facade_support::MessageSequence::from(vec![event_message]);
-        let mut attachments = Vec::new();
 
-        let rendered = build_rlm_history_messages_from_turn(
-            RlmHistoryRenderInput {
-                dialect: projector.dialect.as_ref(),
-                events: &[],
-                turn_messages: &messages,
-                turn_causes: std::slice::from_ref(&cause),
-                max_output_chars: 1000,
-                protocol_iteration: 0,
-                finalization: rlm_finalization_prompt(&RlmTermination::default()),
-                required_output: None,
-                final_answer_format: None,
-                budget_suffix: None,
-                bound_variables: "",
-            },
-            &mut attachments,
-        );
+        let rendered = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            dialect: projector.dialect.as_ref(),
+            events: &[],
+            turn_messages: &messages,
+            turn_causes: std::slice::from_ref(&cause),
+            max_output_chars: 1000,
+            protocol_iteration: 0,
+            finalization: rlm_finalization_prompt(&RlmTermination::default()),
+            required_output: None,
+            final_answer_format: None,
+            budget_suffix: None,
+            bound_variables: "",
+        });
 
         let combined = rendered
             .iter()
@@ -1295,25 +1275,29 @@ mod tests {
             }),
         ));
         let events = [event];
-        let mut attachments = Vec::new();
 
-        let messages = build_rlm_history_messages_from_turn(
-            RlmHistoryRenderInput {
-                dialect: projector.dialect.as_ref(),
-                events: &events,
-                turn_messages: &lash_core::facade_support::MessageSequence::default(),
-                turn_causes: &[],
-                max_output_chars: 1000,
-                protocol_iteration: 1,
-                finalization: rlm_finalization_prompt(&RlmTermination::default()),
-                required_output: None,
-                final_answer_format: None,
-                budget_suffix: None,
-                bound_variables: "",
-            },
-            &mut attachments,
-        );
+        let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            dialect: projector.dialect.as_ref(),
+            events: &events,
+            turn_messages: &lash_core::facade_support::MessageSequence::default(),
+            turn_causes: &[],
+            max_output_chars: 1000,
+            protocol_iteration: 1,
+            finalization: rlm_finalization_prompt(&RlmTermination::default()),
+            required_output: None,
+            final_answer_format: None,
+            budget_suffix: None,
+            bound_variables: "",
+        });
 
+        let attachments = messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         assert_eq!(attachments.len(), 1);
         assert!(matches!(
             &attachments[0],
@@ -1327,7 +1311,7 @@ mod tests {
                 && message
                     .blocks
                     .iter()
-                    .any(|block| matches!(block, LlmContentBlock::Attachment { attachment_idx: 0 }))
+                    .any(|block| matches!(block, LlmContentBlock::Attachment { .. }))
         }));
     }
 
@@ -1335,24 +1319,20 @@ mod tests {
     fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() {
         let projector = projector(1000);
         let events = [user_event("u1", "first"), step_event(0, "print 1", "1")];
-        let mut attachments = Vec::new();
 
-        let messages = build_rlm_history_messages_from_turn(
-            RlmHistoryRenderInput {
-                dialect: projector.dialect.as_ref(),
-                events: &events,
-                turn_messages: &lash_core::facade_support::MessageSequence::default(),
-                turn_causes: &[],
-                max_output_chars: 1000,
-                protocol_iteration: 2,
-                finalization: rlm_finalization_prompt(&RlmTermination::default()),
-                required_output: None,
-                final_answer_format: None,
-                budget_suffix: None,
-                bound_variables: "",
-            },
-            &mut attachments,
-        );
+        let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            dialect: projector.dialect.as_ref(),
+            events: &events,
+            turn_messages: &lash_core::facade_support::MessageSequence::default(),
+            turn_causes: &[],
+            max_output_chars: 1000,
+            protocol_iteration: 2,
+            finalization: rlm_finalization_prompt(&RlmTermination::default()),
+            required_output: None,
+            final_answer_format: None,
+            budget_suffix: None,
+            bound_variables: "",
+        });
 
         // user turn, assistant cell, user observation, volatile current-iteration tail.
         assert_eq!(messages.len(), 4);
@@ -1458,7 +1438,7 @@ mod tests {
     fn rlm_prompt_renders_required_output_block_when_schema_present() {
         let projector = projector(1000);
         let events = [user_event("u1", "first")];
-        let mut attachments = Vec::new();
+
         let schema = serde_json::json!({
             "type": "object",
             "properties": {
@@ -1469,22 +1449,19 @@ mod tests {
         });
 
         let schema_contract = render_value_schema_contract(&schema);
-        let messages = build_rlm_history_messages_from_turn(
-            RlmHistoryRenderInput {
-                dialect: projector.dialect.as_ref(),
-                events: &events,
-                turn_messages: &lash_core::facade_support::MessageSequence::default(),
-                turn_causes: &[],
-                max_output_chars: 1000,
-                protocol_iteration: 1,
-                finalization: "Call finish",
-                required_output: Some(&schema_contract),
-                final_answer_format: None,
-                budget_suffix: None,
-                bound_variables: "",
-            },
-            &mut attachments,
-        );
+        let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            dialect: projector.dialect.as_ref(),
+            events: &events,
+            turn_messages: &lash_core::facade_support::MessageSequence::default(),
+            turn_causes: &[],
+            max_output_chars: 1000,
+            protocol_iteration: 1,
+            finalization: "Call finish",
+            required_output: Some(&schema_contract),
+            final_answer_format: None,
+            budget_suffix: None,
+            bound_variables: "",
+        });
 
         let tail = messages
             .last()

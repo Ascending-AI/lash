@@ -23,7 +23,9 @@ impl GoogleOAuthProvider {
             AttachmentSource::ProviderFile { id, .. } => {
                 json!({"fileData": {"fileUri": id}})
             }
-            AttachmentSource::ExternalUrl { .. } => unreachable!("validated as unsupported"),
+            AttachmentSource::ExternalUrl { media_type, url } => {
+                json!({"fileData": {"mimeType": media_type, "fileUri": url}})
+            }
             AttachmentSource::Inline { .. } | AttachmentSource::Stored { .. } => {
                 let media_type = source.media_type().expect("MIME-bearing source");
                 let bytes = req
@@ -41,21 +43,14 @@ impl GoogleOAuthProvider {
     }
 
     pub(crate) fn validate_attachments(req: &LlmRequest) -> Result<(), LlmTransportError> {
-        for source in &req.attachments {
-            let supported = match source {
-                AttachmentSource::ExternalUrl { .. } => false,
-                AttachmentSource::ProviderFile { provider_scope, .. } => matches!(
-                    provider_scope.provider.to_ascii_lowercase().as_str(),
-                    "google" | "google_oauth" | "gemini"
-                ),
-                source => source.media_type().is_some_and(|mime| {
-                    GOOGLE_IMAGE_MIMES.contains(&mime.as_str())
-                        || GOOGLE_MEDIA_FAMILIES.contains(&mime.family())
-                        || GOOGLE_FILE_MIMES.contains(&mime.as_str())
-                }),
-            };
+        for source in &req.attachments() {
+            let supported = req
+                .model_capability
+                .attachment_acceptance
+                .accepts("Google Gemini", source);
             if !supported {
-                let accepted_by = known_attachment_acceptors(source);
+                let accepted_by =
+                    known_attachment_acceptors(&req.model_capability.attachment_acceptance, source);
                 return Err(unsupported_attachment_capability(
                     "Google Gemini",
                     source,
@@ -76,13 +71,6 @@ impl GoogleOAuthProvider {
         Ok(())
     }
 
-    fn attachment_part_for_index(attachment_parts: &[Value], idx: usize) -> Value {
-        attachment_parts
-            .get(idx)
-            .cloned()
-            .unwrap_or_else(|| json!({ "text": "[Attachment]" }))
-    }
-
     fn valid_text_signature(meta: &ResponseTextMeta) -> Option<String> {
         let signature = meta.provider_payload.as_deref()?.trim();
         if signature.is_empty() {
@@ -98,7 +86,7 @@ impl GoogleOAuthProvider {
     pub(crate) fn build_contents_with_attachment_parts(
         &self,
         req: &LlmRequest,
-        attachment_parts: &[Value],
+        attachment_parts: &[(AttachmentSource, Value)],
     ) -> Vec<Value> {
         let serving_route = self.route_identity_for_model(&req.model);
         let safe_request = req.replay_safe_for(&serving_route);
@@ -140,12 +128,15 @@ impl GoogleOAuthProvider {
                         }
                         parts.push(part);
                     }
-                    LlmContentBlock::Attachment { attachment_idx } => {
+                    LlmContentBlock::Attachment { source } => {
                         if matches!(msg.role, LlmRole::User) {
-                            parts.push(Self::attachment_part_for_index(
-                                attachment_parts,
-                                *attachment_idx,
-                            ));
+                            parts.push(
+                                attachment_parts
+                                    .iter()
+                                    .find(|(candidate, _)| candidate == source.as_ref())
+                                    .map(|(_, part)| part.clone())
+                                    .unwrap_or_else(|| Self::inline_attachment_part(req, source)),
+                            );
                         }
                     }
                     LlmContentBlock::ToolCall {

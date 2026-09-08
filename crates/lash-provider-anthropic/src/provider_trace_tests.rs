@@ -8,7 +8,7 @@ use lash_core::llm::types::{
     LlmMessage, LlmProviderTraceEvent, LlmProviderTraceSender, LlmRequest, LlmRequestScope,
     LlmRole, LlmToolChoice,
 };
-use lash_core::provider::{ModelCapability, Provider};
+use lash_core::provider::Provider;
 use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
 
 const SECRET_SENTINEL: &str = "sk-super-secret-do-not-log";
@@ -62,12 +62,11 @@ fn request() -> LlmRequest {
             LlmRole::User,
             format!("large prompt: {}", "x".repeat(3_000)),
         )],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
-        model_capability: ModelCapability::default(),
+        model_capability: crate::attachment_test_capability(),
         generation: Default::default(),
         scope: LlmRequestScope::new("session", "frame", "request"),
         output_spec: None,

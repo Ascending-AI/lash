@@ -138,12 +138,12 @@ fn direct_mock_call() -> super::helpers::MockCall {
 }
 
 async fn fixtures() -> Fixtures {
-    let runtime = super::helpers::runtime_with_plugins_and_tools_and_host(
+    let runtime = Box::pin(super::helpers::runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(crate::testing::EmptyToolProvider),
         super::helpers::mock_provider(vec![direct_mock_call(), direct_mock_call()]),
         crate::runtime::EmbeddedRuntimeHost::new(super::helpers::test_runtime_host_config()),
-    )
+    ))
     .await;
     let host = Arc::new(
         crate::testing::MockSessionManager::default().with_tool_registry(
@@ -1267,7 +1267,6 @@ fn direct_llm_request(request_id: &str) -> crate::LlmRequest {
                 cache_breakpoint: false,
             }],
         )],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: crate::llm::types::LlmToolChoice::None,

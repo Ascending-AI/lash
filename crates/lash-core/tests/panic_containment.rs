@@ -403,7 +403,6 @@ fn request() -> LlmRequest {
     LlmRequest {
         model: "panic-test-model".to_string(),
         messages: Vec::new(),
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: Default::default(),

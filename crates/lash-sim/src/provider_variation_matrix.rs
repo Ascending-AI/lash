@@ -916,13 +916,13 @@ fn matrix_request(
 ) -> LlmRequest {
     let model = dialect_model(dialect);
     let model_capability = lash_core::ModelCapability {
+        attachment_acceptance: Default::default(),
         stream_termination: Some(StreamTermination::RequireTerminalEvidence),
         ..Default::default()
     };
     LlmRequest {
         model: model.to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,

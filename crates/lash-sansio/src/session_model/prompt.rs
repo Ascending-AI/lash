@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::PromptContext;
-use crate::plugin::PromptContribution;
+use crate::plugin::{PromptContribution, PromptContributionBody};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -151,7 +151,7 @@ impl PromptLayer {
             .entry(contribution.slot)
             .or_default()
             .contributions
-            .push(contribution);
+            .push(contribution.into());
     }
 
     pub fn with_contribution(mut self, contribution: PromptContribution) -> Self {
@@ -168,7 +168,7 @@ impl PromptLayer {
             slot,
             PromptSlotLayer {
                 reset: true,
-                contributions: normalize_slot_contributions(slot, contributions),
+                contributions: contributions.into_iter().map(Into::into).collect(),
             },
         );
     }
@@ -203,7 +203,7 @@ pub struct PromptSlotLayer {
     #[serde(default)]
     pub reset: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub contributions: Vec<PromptContribution>,
+    pub contributions: Vec<PromptContributionBody>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -226,29 +226,19 @@ pub fn resolve_prompt_layers<'a>(
                 contributions
                     .retain(|contribution: &PromptContribution| contribution.slot != *slot);
             }
-            contributions.extend(normalize_slot_contributions(
-                *slot,
-                slot_layer.contributions.iter().cloned(),
-            ));
+            contributions.extend(
+                slot_layer
+                    .contributions
+                    .iter()
+                    .cloned()
+                    .map(|body| body.in_slot(*slot)),
+            );
         }
     }
     ResolvedPromptLayer {
         template,
         contributions,
     }
-}
-
-fn normalize_slot_contributions(
-    slot: PromptSlot,
-    contributions: impl IntoIterator<Item = PromptContribution>,
-) -> Vec<PromptContribution> {
-    contributions
-        .into_iter()
-        .map(|mut contribution| {
-            contribution.slot = slot;
-            contribution
-        })
-        .collect()
 }
 
 pub fn default_prompt_template() -> PromptTemplate {
@@ -508,5 +498,28 @@ mod tests {
         )]);
         let text = template.render(&prompt());
         assert!(text.is_empty());
+    }
+    #[test]
+    fn contribution_body_preserves_authoring_slot_through_map_key() {
+        let authored = PromptContribution::new(
+            PromptSlot::Environment,
+            "Environment",
+            "pinned host context",
+        );
+        let layer = PromptLayer::new().with_contribution(authored.clone());
+        let body = &layer.slots[&PromptSlot::Environment].contributions[0];
+        let wire = serde_json::to_value(body).unwrap();
+        assert!(wire.get("slot").is_none());
+        assert_eq!(
+            resolve_prompt_layers([&layer]).contributions,
+            vec![authored]
+        );
+        let mut legacy = wire;
+        legacy["slot"] = serde_json::json!("guidance");
+        let error = serde_json::from_value::<PromptContributionBody>(legacy).unwrap_err();
+        assert!(
+            error.to_string().contains("unknown field `slot`"),
+            "{error}"
+        );
     }
 }

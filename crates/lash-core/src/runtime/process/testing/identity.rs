@@ -21,6 +21,7 @@ fn process_execution_env_identity_golden_corpus() {
             .build()
             .expect("valid rich model limits")
             .with_capability(crate::ModelCapability {
+                attachment_acceptance: Default::default(),
                 google_dialect: Default::default(),
                 reasoning: Some(crate::ReasoningCapability {
                     efforts: vec!["low".to_string(), "high".to_string()],

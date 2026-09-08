@@ -129,6 +129,7 @@ mod asserted_examples {
         assert!(reasoning.mandatory);
 
         let capability = ModelCapability {
+            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(reasoning),
             cache_control: Some(CacheControlDialect::Anthropic),

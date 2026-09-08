@@ -165,6 +165,7 @@ impl LlmHttpTransport for RecordingHttpTransport {
 
 fn reasoning_capability() -> ModelCapability {
     ModelCapability {
+        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
@@ -182,6 +183,7 @@ fn reasoning_capability() -> ModelCapability {
 
 fn budget_reasoning_capability() -> ModelCapability {
     ModelCapability {
+        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
@@ -200,6 +202,7 @@ fn budget_reasoning_capability() -> ModelCapability {
 
 fn toggle_false_reasoning_capability() -> ModelCapability {
     ModelCapability {
+        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string()],
@@ -217,12 +220,11 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
         model: "openai/gpt-5.4".to_string(),
         messages,
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
-        model_capability: ModelCapability::default(),
+        model_capability: crate::attachment_test_capability(),
         scope: LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",
@@ -540,7 +542,11 @@ async fn response_metadata_captures_buffered_responses_endpoint_observations() {
 fn chat_image_attachment_serializes_as_data_url() {
     let provider = openrouter_provider();
     let png_bytes = vec![0x89, 0x50, 0x4E, 0x47];
-    let mut req = request(vec![LlmMessage::new(
+    let attachment = AttachmentSource::inline(
+        lash_core::MediaType::parse("image/png").unwrap(),
+        png_bytes.clone(),
+    );
+    let req = request(vec![LlmMessage::new(
         LlmRole::User,
         vec![
             LlmContentBlock::Text {
@@ -548,13 +554,11 @@ fn chat_image_attachment_serializes_as_data_url() {
                 response_meta: None,
                 cache_breakpoint: false,
             },
-            LlmContentBlock::Attachment { attachment_idx: 0 },
+            LlmContentBlock::Attachment {
+                source: Box::new(attachment),
+            },
         ],
     )]);
-    req.attachments = vec![AttachmentSource::inline(
-        lash_core::MediaType::parse("image/png").unwrap(),
-        png_bytes.clone(),
-    )];
     let body = provider.build_chat_request_body(&req, false).unwrap();
     let messages = body["messages"].as_array().expect("messages");
     let user_msg = messages.last().expect("user message");
@@ -573,14 +577,16 @@ fn chat_image_attachment_serializes_as_data_url() {
 #[test]
 fn chat_unsupported_image_mime_is_rejected_at_request_boundary() {
     let provider = openrouter_provider();
-    let mut req = request(vec![LlmMessage::new(
-        LlmRole::User,
-        vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
-    )]);
-    req.attachments = vec![AttachmentSource::inline(
+    let attachment = AttachmentSource::inline(
         lash_core::MediaType::parse("image/bmp").unwrap(),
         vec![0x42, 0x4D],
-    )];
+    );
+    let req = request(vec![LlmMessage::new(
+        LlmRole::User,
+        vec![LlmContentBlock::Attachment {
+            source: Box::new(attachment),
+        }],
+    )]);
 
     let err = provider
         .build_chat_request_body(&req, false)
@@ -600,7 +606,11 @@ fn chat_unsupported_image_mime_is_rejected_at_request_boundary() {
 fn responses_image_attachment_serializes_as_input_image_data_url() {
     let provider = OpenAiProvider::new("key");
     let png_bytes = vec![0x89, 0x50, 0x4E, 0x47];
-    let mut req = request(vec![LlmMessage::new(
+    let attachment = AttachmentSource::inline(
+        lash_core::MediaType::parse("image/png").unwrap(),
+        png_bytes.clone(),
+    );
+    let req = request(vec![LlmMessage::new(
         LlmRole::User,
         vec![
             LlmContentBlock::Text {
@@ -608,13 +618,11 @@ fn responses_image_attachment_serializes_as_input_image_data_url() {
                 response_meta: None,
                 cache_breakpoint: false,
             },
-            LlmContentBlock::Attachment { attachment_idx: 0 },
+            LlmContentBlock::Attachment {
+                source: Box::new(attachment),
+            },
         ],
     )]);
-    req.attachments = vec![AttachmentSource::inline(
-        lash_core::MediaType::parse("image/png").unwrap(),
-        png_bytes.clone(),
-    )];
     let body = provider.build_responses_request_body(&req, false).unwrap();
     let input = body["input"].as_array().expect("input array");
     let user_msg = input.last().expect("user message");
@@ -633,14 +641,16 @@ fn responses_image_attachment_serializes_as_input_image_data_url() {
 #[test]
 fn responses_unsupported_image_mime_is_rejected_at_request_boundary() {
     let provider = OpenAiProvider::new("key");
-    let mut req = request(vec![LlmMessage::new(
-        LlmRole::User,
-        vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
-    )]);
-    req.attachments = vec![AttachmentSource::inline(
+    let attachment = AttachmentSource::inline(
         lash_core::MediaType::parse("image/bmp").unwrap(),
         vec![0x42, 0x4D],
-    )];
+    );
+    let req = request(vec![LlmMessage::new(
+        LlmRole::User,
+        vec![LlmContentBlock::Attachment {
+            source: Box::new(attachment),
+        }],
+    )]);
 
     let err = provider
         .build_responses_request_body(&req, false)

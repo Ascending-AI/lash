@@ -94,8 +94,6 @@ pub struct RemoteLlmRequest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub messages: Vec<RemoteLlmMessage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attachments: Vec<RemoteAttachmentSource>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<RemoteLlmToolSpec>,
     #[serde(default)]
     pub tool_choice: RemoteLlmToolChoice,
@@ -108,6 +106,18 @@ pub struct RemoteLlmRequest {
 }
 
 impl RemoteLlmRequest {
+    /// Attachment sources in message order, derived from their owning blocks.
+    pub fn attachments(&self) -> Vec<&RemoteAttachmentSource> {
+        self.messages
+            .iter()
+            .flat_map(|message| message.content.iter())
+            .filter_map(|block| match block {
+                RemoteLlmContentBlock::Attachment { source } => Some(source.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Encodes one request inside the shared remote-protocol envelope.
     pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         crate::Envelope::new(self).encode_json()
@@ -140,7 +150,7 @@ impl RemoteLlmRequest {
         for (index, message) in self.messages.iter().enumerate() {
             message.validate(index)?;
         }
-        for (index, attachment) in self.attachments.iter().enumerate() {
+        for (index, attachment) in self.attachments().iter().enumerate() {
             attachment.validate(index)?;
         }
         for tool in &self.tools {
@@ -449,6 +459,11 @@ pub struct RemoteModelIntent {
 /// encode effort exactly like a local runtime.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteModelCapability {
+    #[serde(
+        default,
+        skip_serializing_if = "RemoteAttachmentCapabilitySnapshot::is_empty"
+    )]
+    pub attachment_acceptance: RemoteAttachmentCapabilitySnapshot,
     #[serde(default, skip_serializing_if = "RemoteGoogleDialect::is_legacy")]
     pub google_dialect: RemoteGoogleDialect,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -464,7 +479,8 @@ pub struct RemoteModelCapability {
 
 impl RemoteModelCapability {
     pub fn is_empty(&self) -> bool {
-        self.google_dialect.is_legacy()
+        self.attachment_acceptance.is_empty()
+            && self.google_dialect.is_legacy()
             && self.reasoning.is_none()
             && self.cache_control.is_none()
             && self.stream_termination.is_none()
@@ -715,7 +731,7 @@ pub enum RemoteLlmContentBlock {
         cache_breakpoint: bool,
     },
     Attachment {
-        attachment_index: usize,
+        source: Box<RemoteAttachmentSource>,
     },
     ToolCall {
         call_id: String,
@@ -1129,4 +1145,49 @@ pub struct RemoteDiagnostic {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
+}
+
+/// An immutable host catalogue revision retained in a session's model policy.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteAttachmentCapabilitySnapshot {
+    pub revision: String,
+    pub acceptors: Vec<RemoteAttachmentAcceptor>,
+}
+
+/// Acceptance rules supplied by the host for a transport dialect.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteAttachmentAcceptor {
+    pub provider: String,
+    pub rules: Vec<RemoteAttachmentAcceptanceRule>,
+}
+
+/// MIME-bearing sources and scoped provider handles have distinct admission facts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemoteAttachmentAcceptanceRule {
+    Mime {
+        source: RemoteAttachmentMimeSource,
+        media_types: Vec<String>,
+        media_families: Vec<String>,
+    },
+    ProviderFile {
+        provider: String,
+    },
+}
+
+/// The source modes which carry a required MIME type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteAttachmentMimeSource {
+    Inline,
+    Stored,
+    ExternalUrl,
+}
+
+impl RemoteAttachmentCapabilitySnapshot {
+    pub fn is_empty(&self) -> bool {
+        self.revision.is_empty() && self.acceptors.is_empty()
+    }
 }

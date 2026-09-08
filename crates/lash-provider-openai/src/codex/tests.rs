@@ -48,6 +48,7 @@ fn response_from_state(state: CodexStreamState) -> LlmResponse {
 
 fn reasoning_capability() -> ModelCapability {
     ModelCapability {
+        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["medium".to_string(), "high".to_string()],
@@ -67,12 +68,11 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
         model: "gpt-5.4".to_string(),
         messages,
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
-        model_capability: ModelCapability::default(),
+        model_capability: crate::attachment_test_capability(),
         scope: LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",

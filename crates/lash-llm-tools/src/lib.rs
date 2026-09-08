@@ -142,7 +142,6 @@ impl LlmToolsProvider {
                             parts: vec![DirectPart::Text(prompt)],
                         },
                     ],
-                    attachments: Vec::new(),
                     output,
                     stream_events: None,
                     generation,

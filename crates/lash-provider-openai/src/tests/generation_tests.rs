@@ -149,6 +149,7 @@ fn sampling_controls_do_not_disturb_the_rest_of_the_chat_body() {
     }]);
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
     req.model_capability = ModelCapability {
+        attachment_acceptance: Default::default(),
         reasoning: Some(ReasoningCapability {
             efforts: vec!["high".to_string()],
             default_effort: None,

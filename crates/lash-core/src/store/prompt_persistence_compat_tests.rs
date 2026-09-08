@@ -208,3 +208,61 @@ fn committed_generation_cold_loads_into_the_runtime_policy() {
 
     assert_eq!(restored.policy.generation, expected_generation);
 }
+
+#[test]
+fn persisted_head_and_frame_open_reject_legacy_slot_fields() {
+    let prompt = committed_prompt_layer();
+    let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+    policy.prompt = prompt;
+    let head = SessionHeadPayload {
+        schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
+        session_id: "slot-body-session".into(),
+        config: crate::PersistedSessionConfig::from(&policy),
+        current_frame_node_id: None,
+    };
+    let mut head_json = serde_json::to_value(&head).unwrap();
+    assert!(
+        head_json["config"]["prompt"]["slots"]["guidance"]["contributions"][0]
+            .get("slot")
+            .is_none()
+    );
+    head_json["config"]["prompt"]["slots"]["guidance"]["contributions"][0]["slot"] =
+        serde_json::json!("environment");
+    let error = decode_versioned_json_record::<SessionHeadPayload>(
+        &head_json.to_string(),
+        "SessionHeadMeta",
+        SESSION_HEAD_META_SCHEMA_VERSION,
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("unknown field `slot`"),
+        "{error}"
+    );
+
+    let node = crate::SessionNodeRecord {
+        node_id: "slot-body-frame".into(),
+        parent_node_id: None,
+        timestamp: "2026-09-07T00:00:00Z".into(),
+        payload: crate::SessionNodePayload::FrameOpen {
+            frame_key: crate::FrameKey::from_caller_material("slot-body-frame").unwrap(),
+            reason: crate::AgentFrameReason::initial(),
+            assignment: crate::AgentFrameAssignment::from_policy(policy),
+            protocol_turn_options: crate::ProtocolTurnOptions::default(),
+        },
+    };
+    let current = node.encode_storage_body().unwrap();
+    let restored =
+        crate::SessionNodeRecord::decode_storage_body(node.node_id.clone(), None, &current)
+            .unwrap();
+    assert_eq!(restored.encode_storage_body().unwrap(), current);
+    let mut legacy: serde_json::Value = serde_json::from_str(&current).unwrap();
+    legacy["assignment"]["policy"]["prompt"]["slots"]["guidance"]["contributions"][0]["slot"] =
+        serde_json::json!("environment");
+    let error =
+        crate::SessionNodeRecord::decode_storage_body(node.node_id, None, &legacy.to_string())
+            .unwrap_err();
+    assert!(
+        error.to_string().contains("unknown field `slot`"),
+        "{error}"
+    );
+}

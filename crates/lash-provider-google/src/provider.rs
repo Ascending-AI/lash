@@ -536,9 +536,14 @@ impl Provider for GoogleOAuthProvider {
         let project_id = self.project_id.clone();
 
         let inline_attachment_parts = req
-            .attachments
+            .attachments()
             .iter()
-            .map(|source| Self::inline_attachment_part(&req, source))
+            .map(|source| {
+                (
+                    (*source).clone(),
+                    Self::inline_attachment_part(&req, source),
+                )
+            })
             .collect::<Vec<_>>();
         let inline_contents =
             self.build_contents_with_attachment_parts(&req, &inline_attachment_parts);

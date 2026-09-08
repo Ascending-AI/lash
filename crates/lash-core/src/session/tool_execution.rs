@@ -585,7 +585,11 @@ impl RuntimeExecutionContext<'_> {
                 err.to_string(),
             ),
         };
-        surface_attachment_materialization_notices(&output, &mut model_return);
+        surface_attachment_materialization_notices(
+            self.attachment_acceptance(),
+            &output,
+            &mut model_return,
+        );
         for intent_outcome in &outcome.intent_outcomes {
             model_return.parts.push(crate::ModelToolReturnPart::text(
                 intent_outcome.model_addendum(),
@@ -863,9 +867,16 @@ impl RuntimeExecutionContext<'_> {
         _index: usize,
         trace_hook: crate::ToolChildExecutionTraceHook,
     ) -> ToolInvocationReply {
-        let executed = self
-            .execute_tool_call_by_id(call_id, tool_id, args, _index, None, None, Some(trace_hook))
-            .await;
+        let executed = Box::pin(self.execute_tool_call_by_id(
+            call_id,
+            tool_id,
+            args,
+            _index,
+            None,
+            None,
+            Some(trace_hook),
+        ))
+        .await;
         let reply = ToolInvocationReply::from_output(executed.completed.output);
         reply.with_record(executed.record)
     }
@@ -1109,14 +1120,13 @@ impl RuntimeExecutionContext<'_> {
 }
 
 fn surface_attachment_materialization_notices(
+    snapshot: &crate::provider::AttachmentCapabilitySnapshot,
     output: &ToolCallOutput,
     model_return: &mut ModelToolReturn,
 ) {
-    for notice in output
-        .attachments()
-        .iter()
-        .filter_map(crate::attachments::attachment_materialization_notice)
-    {
+    for notice in output.attachments().iter().filter_map(|source| {
+        crate::attachments::attachment_materialization_notice(snapshot, source)
+    }) {
         model_return
             .parts
             .push(crate::ModelToolReturnPart::text(notice.model_placeholder()));
@@ -1146,7 +1156,11 @@ mod attachment_materialization_tests {
             &output,
         );
 
-        surface_attachment_materialization_notices(&output, &mut model_return);
+        surface_attachment_materialization_notices(
+            &crate::attachments::attachment_test_capability().attachment_acceptance,
+            &output,
+            &mut model_return,
+        );
 
         assert!(output.is_success(), "admission must not fail the tool");
         assert_eq!(model_return.attachment_notices.len(), 1);

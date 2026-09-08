@@ -37,10 +37,6 @@ fn remote_llm_request_json_round_trips() {
                 cache_breakpoint: false,
             }],
         }],
-        attachments: vec![RemoteAttachmentSource::Inline {
-            media_type: "image/png".to_string(),
-            data_base64: "AQID".to_string(),
-        }],
         tools: Vec::new(),
         tool_choice: RemoteLlmToolChoice::Auto,
         output_spec: Some(RemoteLlmOutputSpec::JsonObject),
@@ -120,7 +116,6 @@ fn current_llm_envelope_rejects_userinfo_in_replay_route_without_echoing_it() {
                 cache_breakpoint: false,
             }],
         }],
-        attachments: Vec::new(),
         tools: Vec::new(),
         tool_choice: RemoteLlmToolChoice::Auto,
         output_spec: None,
@@ -161,10 +156,14 @@ fn remote_attachment_media_types_are_validated_syntactically() {
         request_id: "request-invalid-mime".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-invalid-mime"),
         model_intent: RemoteModelIntent::new("gpt-test"),
-        messages: Vec::new(),
-        attachments: vec![RemoteAttachmentSource::ExternalUrl {
-            media_type: "not a mime".to_string(),
-            url: "https://example.test/file".to_string(),
+        messages: vec![RemoteLlmMessage {
+            role: RemoteLlmRole::User,
+            content: vec![RemoteLlmContentBlock::Attachment {
+                source: Box::new(RemoteAttachmentSource::ExternalUrl {
+                    media_type: "invalid-mime".to_string(),
+                    url: "https://example.test/file".to_string(),
+                }),
+            }],
         }],
         tools: Vec::new(),
         tool_choice: RemoteLlmToolChoice::Auto,
@@ -182,9 +181,11 @@ fn remote_attachment_media_types_are_validated_syntactically() {
             .contains("syntactically valid type/subtype")
     );
 
-    request.attachments = vec![RemoteAttachmentSource::ExternalUrl {
-        media_type: "audio/mpeg".to_string(),
-        url: "https://example.test/file".to_string(),
+    request.messages[0].content = vec![RemoteLlmContentBlock::Attachment {
+        source: Box::new(RemoteAttachmentSource::ExternalUrl {
+            media_type: "audio/mpeg".to_string(),
+            url: "https://example.test/file".to_string(),
+        }),
     }];
     request
         .validate()
@@ -1369,7 +1370,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 53,
+            "protocol_version": 54,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1384,7 +1385,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 53,
+            actual: 54,
             expected: 41,
         }
     ));
@@ -1430,7 +1431,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 51,
-            expected: 53,
+            expected: 54,
         }
     ));
 
@@ -1447,7 +1448,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 53, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 54, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         id: "process:1".to_string(),
         input: RemoteProcessInput::External {
@@ -1780,7 +1781,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 53,
+            expected: 54,
         })
     ));
 }
@@ -1820,7 +1821,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 53,
+                expected: 54,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1856,7 +1857,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 53,
+                expected: 54,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1912,7 +1913,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 53,
+                expected: 54,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -1944,7 +1945,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 53,
+                expected: 54,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
@@ -2436,14 +2437,31 @@ fn remote_process_event() -> RemoteProcessEvent {
 }
 
 #[test]
-fn protocol_52_is_refused_before_window_53_payload_decode() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 53, "window 53 adjacency pin");
-    let old = br#"{"protocol_version":52,"outcome":{"type":"unknown_to_53"}}"#;
+fn protocol_53_is_refused_before_window_54_payload_decode() {
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 54, "window 54 adjacency pin");
+    let old = br#"{"protocol_version":53,"outcome":{"type":"unknown_to_54"}}"#;
     assert!(matches!(
         RemoteTurnReport::decode_json(old),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 52,
-            expected: 53
+            actual: 53,
+            expected: 54
         })
     ));
+}
+
+#[test]
+fn attachment_block_wire_literals_and_owned_source_are_pinned() {
+    let block = RemoteLlmContentBlock::Attachment {
+        source: Box::new(RemoteAttachmentSource::ExternalUrl {
+            media_type: "image/png".to_string(),
+            url: "https://example.test/image.png".to_string(),
+        }),
+    };
+    assert_eq!(
+        serde_json::to_value(&block).unwrap(),
+        serde_json::json!({
+            "type": "attachment",
+            "source": { "source": "external_url", "media_type": "image/png", "url": "https://example.test/image.png" }
+        })
+    );
 }

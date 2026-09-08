@@ -101,9 +101,8 @@ struct PendingProse {
 
 pub(super) fn build_rlm_history_messages_from_turn(
     input: RlmHistoryRenderInput<'_>,
-    attachments: &mut Vec<AttachmentSource>,
 ) -> Vec<LlmMessage> {
-    let mut messages = render_history_messages(&input, attachments);
+    let mut messages = render_history_messages(&input);
     let saw_history = !messages.is_empty();
     let history_len = rlm_history_projection(
         &lash_core::facade_support::ChronologicalProjection::from_turn_view(
@@ -141,10 +140,7 @@ pub(super) fn build_rlm_history_messages_from_turn(
 
 /// The history portion only (no current-iteration tail): each prior step as an
 /// assistant cell message + a user observation message, with prose folded in.
-pub(super) fn render_history_messages(
-    input: &RlmHistoryRenderInput<'_>,
-    attachments: &mut Vec<AttachmentSource>,
-) -> Vec<LlmMessage> {
+pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<LlmMessage> {
     let mut messages = Vec::new();
     let chronological = lash_core::facade_support::ChronologicalProjection::from_turn_view(
         input.events,
@@ -176,7 +172,7 @@ pub(super) fn render_history_messages(
                 // Assistant prose: buffer to fold into the next lashlang step.
                 flush_pending_prose(&mut messages, &mut pending);
                 let mut image_blocks = Vec::new();
-                append_borrowed_entry_image_blocks(entry, attachments, &mut image_blocks);
+                append_borrowed_entry_image_blocks(entry, &mut image_blocks);
                 pending = Some(PendingProse {
                     text: message_history_text_parts(message.parts),
                     reasoning_blocks: message_history_reasoning_blocks(message.parts),
@@ -226,7 +222,7 @@ pub(super) fn render_history_messages(
                     &step,
                 );
                 let mut obs_blocks = vec![text_block(obs_text, false)];
-                append_borrowed_entry_image_blocks(entry, attachments, &mut obs_blocks);
+                append_borrowed_entry_image_blocks(entry, &mut obs_blocks);
                 messages.push(LlmMessage::new(LlmRole::User, obs_blocks));
             }
             BorrowedChronologicalPayload::Message(message) => {
@@ -242,7 +238,7 @@ pub(super) fn render_history_messages(
                     input.max_output_chars,
                 );
                 let mut blocks = vec![text_block(text, false)];
-                append_borrowed_entry_image_blocks(entry, attachments, &mut blocks);
+                append_borrowed_entry_image_blocks(entry, &mut blocks);
                 let role = match message.role {
                     lash_core::MessageRole::User | lash_core::MessageRole::Event => LlmRole::User,
                     lash_core::MessageRole::System => LlmRole::System,
@@ -471,7 +467,6 @@ fn mark_last_history_text_cache_breakpoint(messages: &mut [LlmMessage]) {
 
 fn append_borrowed_entry_image_blocks(
     entry: BorrowedChronologicalEntry<'_>,
-    attachments: &mut Vec<AttachmentSource>,
     blocks: &mut Vec<LlmContentBlock>,
 ) {
     match entry.payload {
@@ -480,9 +475,9 @@ fn append_borrowed_entry_image_blocks(
                 let Some(attachment) = part.attachment.as_ref() else {
                     continue;
                 };
-                let attachment_idx = attachments.len();
-                attachments.push(attachment.source.clone());
-                blocks.push(LlmContentBlock::Attachment { attachment_idx });
+                blocks.push(LlmContentBlock::Attachment {
+                    source: Box::new(attachment.source.clone()),
+                });
             }
         }
         BorrowedChronologicalPayload::ProtocolEvent(event) => {
@@ -490,9 +485,10 @@ fn append_borrowed_entry_image_blocks(
                 decode_rlm_protocol_event(event)
             {
                 for image in &entry.images {
-                    let attachment_idx = attachments.len();
-                    attachments.push(AttachmentSource::stored(image.clone()));
-                    blocks.push(LlmContentBlock::Attachment { attachment_idx });
+                    let source = AttachmentSource::stored(image.clone());
+                    blocks.push(LlmContentBlock::Attachment {
+                        source: Box::new(source),
+                    });
                 }
             }
         }

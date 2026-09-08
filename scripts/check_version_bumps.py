@@ -175,14 +175,11 @@ IDENTIFIER_RENAME_BASELINES = {
 # must not merge independently and publish the reserved version without the
 # pinned upper-branch shape.
 STACKED_VERSION_BASELINES = {
-    # Protocol window 53 (the closed protocol-52 window's FIG-1972 pin was
-    # retired by this entry). FIG-1989's opening layer (#1008) performed the
-    # window's single 52 -> 53 bump under the release freeze; the remaining
-    # seven layers (FIG-1989 cancel evidence, FIG-1991, FIG-1993, FIG-1996,
-    # FIG-2081 x2, FIG-2406, FIG-1942) land together as one train carrying the
-    # complete version-53 wire shape pinned here.
+    # Protocol window 54 retires the window-53 pin. Layer 1 reserves 54;
+    # FIG-1944 inline sources, FIG-2000 slot-free bodies, and FIG-2357 retained
+    # host capability snapshots form one atomic train with this final shape.
     "crates/lash-remote-protocol/src/lib.rs:REMOTE_PROTOCOL_VERSION": (
-        "sha256:4496c6208642e716abd426fb4cdc96040eb3498a7b4f5049ad4780e8f1fe598a"
+        "sha256:d236866bcbb30109b344def73cefbd18912955ad79e8426b8a1a070343c431d2"
     ),
 }
 

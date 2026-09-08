@@ -16,6 +16,7 @@ use lash_core::llm::types as core_llm;
 
 use super::*;
 
+mod attachment_capability;
 mod llm;
 mod observations;
 mod processes;

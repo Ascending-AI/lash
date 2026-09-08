@@ -529,8 +529,10 @@ pub mod remote {
     /// output specs, and provider metadata.
     pub mod llm {
         pub use lash_remote_protocol::llm::{
-            RemoteAttachmentRef, RemoteAttachmentSource, RemoteAttachmentTypeMetadata,
-            RemoteAttemptOutcome, RemoteAttemptRecord, RemoteDiagnostic, RemoteExecutionEvidence,
+            RemoteAttachmentAcceptanceRule, RemoteAttachmentAcceptor,
+            RemoteAttachmentCapabilitySnapshot, RemoteAttachmentMimeSource, RemoteAttachmentRef,
+            RemoteAttachmentSource, RemoteAttachmentTypeMetadata, RemoteAttemptOutcome,
+            RemoteAttemptRecord, RemoteDiagnostic, RemoteExecutionEvidence,
             RemoteExecutionEvidenceCollectionInterruption, RemoteGenerationOptionOutcome,
             RemoteGenerationOptions, RemoteGenerationReceipt, RemoteGoogleDialect,
             RemoteLlmCallRecord, RemoteLlmContentBlock, RemoteLlmMessage, RemoteLlmOutputPart,
@@ -770,14 +772,14 @@ pub mod runtime {
         CheckpointClaimSet, CompletionKeyPreparation, DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY,
         DirectCompletionClient, EffectGroupHandle, EffectGroupMembership, EmbeddedRuntimeHost,
         EventSink, ExecutionScope, GroupExecutors, GroupSettlement, GroupWakePolicy, LashRuntime,
-        LlmAttachmentSpec, LlmRequestSpec, LoserPolicy, NativeQueuedWork,
-        NativeRuntimeEffectController, NativeSubstrateConfig, NativeSubstrateConfigError,
-        NoQueuedWork, NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
-        QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder,
-        QueuedLaneProbe, QueuedWorkExecutionConcurrencyError, QueuedWorkRunError,
-        QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest,
-        QueuedWorkSlowWake, QueuedWorkSubstrate, QueuedWorkWakeContended, QueuedWorkWakeFailure,
-        QueuedWorkWakeOutcome, RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
+        LlmRequestSpec, LoserPolicy, NativeQueuedWork, NativeRuntimeEffectController,
+        NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork, NoopEventSink,
+        NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome, QueuedLaneAcquisition,
+        QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
+        QueuedWorkExecutionConcurrencyError, QueuedWorkRunError, QueuedWorkRunErrorClass,
+        QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest, QueuedWorkSlowWake,
+        QueuedWorkSubstrate, QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
+        RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
         RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
         RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectKind,
         RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
@@ -806,9 +808,9 @@ pub mod runtime {
 /// Prompt templates, layers, and contributions.
 pub mod prompt {
     pub use lash_core::{
-        PromptBuiltin, PromptContribution, PromptContributionGate, PromptLayer, PromptSlot,
-        PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
-        facade_support::default_prompt_template,
+        PromptBuiltin, PromptContribution, PromptContributionBody, PromptContributionGate,
+        PromptLayer, PromptSlot, PromptSlotLayer, PromptTemplate, PromptTemplateEntry,
+        PromptTemplateSection, facade_support::default_prompt_template,
     };
 }
 
@@ -863,6 +865,14 @@ pub mod provider {
         ProviderRateLimitPolicy, ProviderRateLimiter, ProviderReliability, ProviderRetryPolicy,
         RequestTimeout,
     };
+    pub use lash_core::{
+        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+        AttachmentMimeSource, CacheControlDialect, GoogleDialect, ModelCapability,
+        ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,
+        SamplingCapability, StreamTermination, facade_support::GenerationRetryGuarantee,
+        facade_support::LlmTimeouts, facade_support::Provider, facade_support::ProviderComponents,
+        facade_support::ProviderHandle, facade_support::ProviderOptions,
+    };
     /// Request/response/error vocabulary of [`Provider::complete`],
     /// re-exported so hosts can implement provider decorators (admission
     /// gates, metrics taps) against the facade alone.
@@ -871,12 +881,5 @@ pub mod provider {
         ExecutionEvidenceMergeError, LlmRequest, LlmRequestScope, LlmResponse, LlmStreamEvidence,
         NormalizedError, ProtocolPosition, ProviderEndpointError,
         facade_support::LlmTransportError,
-    };
-    pub use lash_core::{
-        CacheControlDialect, GoogleDialect, ModelCapability, ReasoningCapability,
-        ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
-        StreamTermination, facade_support::GenerationRetryGuarantee, facade_support::LlmTimeouts,
-        facade_support::Provider, facade_support::ProviderComponents,
-        facade_support::ProviderHandle, facade_support::ProviderOptions,
     };
 }

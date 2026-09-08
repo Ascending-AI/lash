@@ -28,7 +28,7 @@ impl RuntimeTurnDriver<'_> {
         // guard reads — untouched. Since FIG-1313 removed the projected-request
         // token comparison, resolving would buy nothing but store reads and a
         // new failure mode on the selected-drain path.
-        if request.attachments.iter().any(|source| {
+        if request.attachments().iter().any(|source| {
             matches!(
                 source,
                 crate::AttachmentSource::ExternalUrl { .. }

@@ -305,9 +305,9 @@ fn render_structured_prompt_preserves_tool_protocol_and_user_images() {
     ));
     assert!(matches!(
         rendered.messages[1].blocks[1],
-        LlmContentBlock::Attachment { attachment_idx: 0 }
+        LlmContentBlock::Attachment { .. }
     ));
-    assert_eq!(rendered.attachments.len(), 1);
+    assert_eq!(rendered.attachments().len(), 1);
     assert!(matches!(
         rendered.messages[2].blocks[0],
         LlmContentBlock::ToolCall { .. }
@@ -382,7 +382,7 @@ fn render_transcript_prompt_collects_attachments() {
     let rendered = render_transcript_prompt(&msgs);
     let text = block_text(&rendered.messages[0], 0);
     assert!(text.contains("[Attachment]"));
-    assert_eq!(rendered.attachments.len(), 1);
+    assert_eq!(rendered.attachments().len(), 1);
 }
 
 #[test]

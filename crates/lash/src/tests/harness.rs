@@ -29,6 +29,7 @@ fn capability_for_variant(variant: Option<&str>) -> lash_core::ModelCapability {
         return lash_core::ModelCapability::default();
     };
     lash_core::ModelCapability {
+        attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(lash_core::ReasoningCapability {
             efforts: vec![variant.to_string()],

@@ -14,7 +14,6 @@ mod support;
 pub mod testing;
 
 pub use config::{AnthropicProvider, DEFAULT_BASE_URL};
-pub use lash_core::llm::transport::{ANTHROPIC_FILE_MIMES, ANTHROPIC_IMAGE_MIMES};
 
 #[cfg(test)]
 mod tests {
@@ -85,6 +84,7 @@ mod tests {
     // any variant absent from the map (e.g. "none").
     fn effort_capability(efforts: &[&str]) -> ModelCapability {
         ModelCapability {
+            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: efforts.iter().map(|e| e.to_string()).collect(),
@@ -107,6 +107,7 @@ mod tests {
             ("high".to_string(), 12_288u32),
         ]);
         ModelCapability {
+            attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
                 efforts: ["low", "medium", "high"]
@@ -133,12 +134,11 @@ mod tests {
         LlmRequest {
             model: "claude-sonnet-4-6".to_string(),
             messages,
-            attachments: Vec::new(),
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::<LlmToolSpec>::new()),
             tool_choice: LlmToolChoice::Auto,
             model_variant: Default::default(),
-            model_capability: ModelCapability::default(),
+            model_capability: crate::attachment_test_capability(),
             scope: lash_core::LlmRequestScope::new(
                 "session-1",
                 "session-1:frame:test",
@@ -609,7 +609,11 @@ mod tests {
         use base64::Engine;
         let provider = AnthropicProvider::new("key");
         let png_bytes = vec![0x89, 0x50, 0x4E, 0x47];
-        let mut req = request(vec![LlmMessage::new(
+        let attachment = AttachmentSource::inline(
+            lash_core::MediaType::parse("image/png").unwrap(),
+            png_bytes.clone(),
+        );
+        let req = request(vec![LlmMessage::new(
             LlmRole::User,
             vec![
                 LlmContentBlock::Text {
@@ -617,13 +621,11 @@ mod tests {
                     response_meta: None,
                     cache_breakpoint: false,
                 },
-                LlmContentBlock::Attachment { attachment_idx: 0 },
+                LlmContentBlock::Attachment {
+                    source: Box::new(attachment),
+                },
             ],
         )]);
-        req.attachments = vec![AttachmentSource::inline(
-            lash_core::MediaType::parse("image/png").unwrap(),
-            png_bytes.clone(),
-        )];
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -643,14 +645,16 @@ mod tests {
     #[test]
     fn external_pdf_serializes_as_document_url_block() {
         let provider = AnthropicProvider::new("key");
-        let mut req = request(vec![LlmMessage::new(
-            LlmRole::User,
-            vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
-        )]);
-        req.attachments = vec![AttachmentSource::external_url(
+        let attachment = AttachmentSource::external_url(
             lash_core::MediaType::parse("application/pdf").unwrap(),
             "https://example.test/report.pdf",
-        )];
+        );
+        let req = request(vec![LlmMessage::new(
+            LlmRole::User,
+            vec![LlmContentBlock::Attachment {
+                source: Box::new(attachment),
+            }],
+        )]);
 
         let body = provider.build_request_body(&req).expect("body");
         let block = &body["messages"][0]["content"][0];
@@ -667,15 +671,17 @@ mod tests {
             ("image/png", "image", "file-image"),
             ("application/pdf", "document", "file-document"),
         ] {
-            let mut req = request(vec![LlmMessage::new(
-                LlmRole::User,
-                vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
-            )]);
-            req.attachments = vec![AttachmentSource::provider_file(
+            let attachment = AttachmentSource::provider_file(
                 lash_core::ProviderFileScope::new("anthropic", "credential"),
                 file_id,
                 Some(lash_core::MediaType::parse(mime).unwrap()),
-            )];
+            );
+            let req = request(vec![LlmMessage::new(
+                LlmRole::User,
+                vec![LlmContentBlock::Attachment {
+                    source: Box::new(attachment),
+                }],
+            )]);
 
             let body = provider.build_request_body(&req).expect("body");
             let block = &body["messages"][0]["content"][0];
@@ -687,15 +693,17 @@ mod tests {
     #[test]
     fn provider_file_without_media_type_is_rejected_before_transport() {
         let provider = AnthropicProvider::new("key");
-        let mut req = request(vec![LlmMessage::new(
-            LlmRole::User,
-            vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
-        )]);
-        req.attachments = vec![AttachmentSource::provider_file(
+        let attachment = AttachmentSource::provider_file(
             lash_core::ProviderFileScope::new("anthropic", "credential"),
             "file-without-mime",
             None,
-        )];
+        );
+        let req = request(vec![LlmMessage::new(
+            LlmRole::User,
+            vec![LlmContentBlock::Attachment {
+                source: Box::new(attachment),
+            }],
+        )]);
 
         let err = provider
             .build_request_body(&req)
@@ -1594,3 +1602,8 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod attachment_capability_fixture;
+#[cfg(test)]
+pub(crate) use attachment_capability_fixture::attachment_test_capability;

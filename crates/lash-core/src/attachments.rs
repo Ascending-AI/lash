@@ -1411,7 +1411,12 @@ pub async fn resolve_llm_request_attachments(
     mut request: crate::llm::types::LlmRequest,
     store: &SessionAttachmentStore,
 ) -> Result<crate::llm::types::LlmRequest, AttachmentStoreError> {
-    for attachment in &request.attachments {
+    for attachment in request
+        .attachments()
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>()
+    {
         let crate::AttachmentSource::Stored { attachment_ref } = attachment else {
             continue;
         };
@@ -1427,9 +1432,10 @@ pub async fn resolve_llm_request_attachments(
 }
 
 pub(crate) fn attachment_materialization_notice(
+    snapshot: &crate::provider::AttachmentCapabilitySnapshot,
     source: &crate::AttachmentSource,
 ) -> Option<crate::AttachmentMaterializationNotice> {
-    crate::llm::transport::known_attachment_acceptors(source)
+    crate::llm::transport::known_attachment_acceptors(snapshot, source)
         .is_empty()
         .then(|| crate::AttachmentMaterializationNotice::no_provider_accepts(source))
 }
@@ -1444,35 +1450,21 @@ pub(crate) fn degrade_unmaterializable_request_attachments(
     request: &mut Arc<crate::llm::types::LlmRequest>,
 ) -> Vec<crate::AttachmentMaterializationNotice> {
     let notices = request
-        .attachments
-        .iter()
-        .map(attachment_materialization_notice)
+        .attachments()
+        .into_iter()
+        .filter_map(|source| {
+            attachment_materialization_notice(
+                &request.model_capability.attachment_acceptance,
+                source,
+            )
+        })
         .collect::<Vec<_>>();
-    if notices.iter().all(Option::is_none) {
-        return Vec::new();
+    if notices.is_empty() {
+        return notices;
     }
-
     let request = Arc::make_mut(request);
-    let mut remapped_indices = Vec::with_capacity(request.attachments.len());
-    let mut retained = Vec::with_capacity(request.attachments.len());
-    for (source, notice) in request.attachments.drain(..).zip(&notices) {
-        if notice.is_some() {
-            remapped_indices.push(None);
-        } else {
-            remapped_indices.push(Some(retained.len()));
-            retained.push(source);
-        }
-    }
-    request.attachments = retained;
-
+    let snapshot = &request.model_capability.attachment_acceptance;
     for message in &mut request.messages {
-        if !message
-            .blocks
-            .iter()
-            .any(|block| matches!(block, crate::llm::types::LlmContentBlock::Attachment { .. }))
-        {
-            continue;
-        }
         let existing_placeholders = message
             .blocks
             .iter()
@@ -1484,40 +1476,41 @@ pub(crate) fn degrade_unmaterializable_request_attachments(
                 _ => None,
             })
             .collect::<HashSet<_>>();
+        if !message.blocks.iter().any(|block| {
+            matches!(block,
+            crate::llm::types::LlmContentBlock::Attachment { source }
+            if attachment_materialization_notice(snapshot, source).is_some())
+        }) {
+            continue;
+        }
         Arc::make_mut(&mut message.blocks).retain_mut(|block| {
-            let crate::llm::types::LlmContentBlock::Attachment { attachment_idx } = block else {
+            let crate::llm::types::LlmContentBlock::Attachment { source } = block else {
                 return true;
             };
-            match notices.get(*attachment_idx) {
-                Some(Some(notice)) => {
-                    let placeholder = notice.model_placeholder();
-                    if existing_placeholders.contains(&placeholder) {
-                        return false;
-                    }
-                    *block = crate::llm::types::LlmContentBlock::Text {
-                        text: placeholder.into(),
-                        response_meta: None,
-                        cache_breakpoint: false,
-                    };
-                }
-                Some(None) => {
-                    *attachment_idx = remapped_indices[*attachment_idx]
-                        .expect("retained attachment has a remapped index");
-                }
-                None => {}
+            let Some(notice) = attachment_materialization_notice(snapshot, source) else {
+                return true;
+            };
+            let placeholder = notice.model_placeholder();
+            if existing_placeholders.contains(&placeholder) {
+                return false;
             }
+            *block = crate::llm::types::LlmContentBlock::Text {
+                text: placeholder.into(),
+                response_meta: None,
+                cache_breakpoint: false,
+            };
             true
         });
     }
-
-    request.resolved_stored.retain(|attachment_id, _| {
-        request.attachments.iter().any(|source| {
-            source
-                .stored_ref()
-                .is_some_and(|attachment_ref| &attachment_ref.id == attachment_id)
-        })
-    });
-    notices.into_iter().flatten().collect()
+    let retained = request
+        .attachments()
+        .into_iter()
+        .filter_map(|source| source.stored_ref().map(|r| r.id.clone()))
+        .collect::<HashSet<_>>();
+    request
+        .resolved_stored
+        .retain(|id, _| retained.contains(id));
+    notices
 }
 
 #[cfg(test)]
@@ -1527,3 +1520,9 @@ mod fail_closed_tests;
 #[cfg(test)]
 #[path = "attachments/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "attachments/test_capability.rs"]
+mod test_capability;
+#[cfg(test)]
+pub(crate) use test_capability::attachment_test_capability;

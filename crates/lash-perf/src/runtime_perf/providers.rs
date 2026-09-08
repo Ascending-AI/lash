@@ -2274,7 +2274,6 @@ fn empty_request() -> LlmRequest {
     LlmRequest {
         model: "mock-model".to_string(),
         messages: Vec::new(),
-        attachments: Vec::new(),
         resolved_stored: Default::default(),
         tools: std::sync::Arc::new(Vec::new()),
         tool_choice: Default::default(),

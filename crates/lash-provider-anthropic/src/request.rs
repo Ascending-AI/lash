@@ -20,8 +20,7 @@ impl AnthropicProvider {
         }
     }
 
-    fn attachment_block_value(req: &LlmRequest, attachment_idx: usize) -> Option<Value> {
-        let source = req.attachments.get(attachment_idx)?;
+    fn attachment_block_value(req: &LlmRequest, source: &AttachmentSource) -> Option<Value> {
         let media_type = source.media_type()?;
         let block_type = if media_type.is_image() {
             "image"
@@ -64,10 +63,7 @@ impl AnthropicProvider {
                 }
                 Some(Self::text_block_value(text))
             }
-            LlmContentBlock::Attachment { attachment_idx } => Some(
-                Self::attachment_block_value(req, *attachment_idx)
-                    .unwrap_or_else(|| Self::text_block_value("[Attachment]")),
-            ),
+            LlmContentBlock::Attachment { source } => Self::attachment_block_value(req, source),
             LlmContentBlock::ToolCall {
                 call_id,
                 tool_name,
@@ -335,7 +331,7 @@ impl AnthropicProvider {
         let serving_route = self.route_identity(&req.model);
         let safe_request = req.replay_safe_for(&serving_route);
         let req = safe_request.as_ref();
-        for source in &req.attachments {
+        for source in &req.attachments() {
             if matches!(
                 source,
                 AttachmentSource::ProviderFile {
@@ -350,17 +346,13 @@ impl AnthropicProvider {
                 .with_kind(ProviderFailureKind::Validation)
                 .with_code("provider_file_media_type_required"));
             }
-            let supported = match source {
-                AttachmentSource::ProviderFile { provider_scope, .. } => {
-                    provider_scope.provider.eq_ignore_ascii_case("anthropic")
-                }
-                source => source.media_type().is_some_and(|mime| {
-                    ANTHROPIC_IMAGE_MIMES.contains(&mime.as_str())
-                        || ANTHROPIC_FILE_MIMES.contains(&mime.as_str())
-                }),
-            };
+            let supported = req
+                .model_capability
+                .attachment_acceptance
+                .accepts("Anthropic Messages", source);
             if !supported {
-                let accepted_by = known_attachment_acceptors(source);
+                let accepted_by =
+                    known_attachment_acceptors(&req.model_capability.attachment_acceptance, source);
                 return Err(unsupported_attachment_capability(
                     "Anthropic Messages",
                     source,

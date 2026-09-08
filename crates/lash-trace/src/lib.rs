@@ -89,7 +89,8 @@ pub use lashlang_graph::{
 /// Version 16 removes the two unemitted lifecycle and standalone usage events;
 /// turn starts and completed LLM calls retain lifecycle and per-call usage evidence.
 /// Version 17 adds compile/link outcomes for every RLM program step.
-pub const TRACE_SCHEMA_VERSION: u32 = 17;
+/// Version 18 carries attachment sources through request blocks.
+pub const TRACE_SCHEMA_VERSION: u32 = 18;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -788,13 +789,25 @@ pub struct TraceLlmRequest {
     pub model_variant: Option<String>,
     pub messages: Vec<TraceLlmMessage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attachments: Vec<TraceAttachment>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<TraceToolSpec>,
     pub tool_choice: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_spec: Option<Value>,
     pub stream: bool,
+}
+
+impl TraceLlmRequest {
+    /// Sources in message order, derived from their owning blocks.
+    pub fn attachments(&self) -> Vec<&TraceAttachment> {
+        self.messages
+            .iter()
+            .flat_map(|message| &message.blocks)
+            .filter_map(|block| match block {
+                TraceContentBlock::Attachment { source } => Some(source.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -812,7 +825,7 @@ pub enum TraceContentBlock {
         cache_breakpoint: bool,
     },
     Attachment {
-        attachment_idx: usize,
+        source: Box<TraceAttachment>,
     },
     ToolCall {
         call_id: Option<String>,

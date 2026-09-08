@@ -1078,15 +1078,6 @@ const _: () = assert!(std::mem::size_of::<RuntimeEffectOutcome>() <= 128);
 // Request specs (serializable forms of LLM/Direct requests)
 // =============================================================================
 
-/// Serializable attachment data for runtime effect envelopes.
-///
-/// Inline sources are normalized to `Stored` before this durable shape is
-/// created. Borrowed sources round-trip without entering Lash storage.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LlmAttachmentSpec {
-    pub source: AttachmentSource,
-}
-
 /// Serializable LLM request data. Live stream and provider-trace callbacks are
 /// attached by the local executor, and attachment bytes are resolved locally
 /// from refs rather than persisted in the effect envelope.
@@ -1094,7 +1085,6 @@ pub struct LlmAttachmentSpec {
 pub struct LlmRequestSpec {
     pub model: String,
     pub messages: Vec<LlmMessage>,
-    pub attachments: Vec<LlmAttachmentSpec>,
     pub tools: Arc<Vec<LlmToolSpec>>,
     pub tool_choice: LlmToolChoice,
     pub model_variant: crate::ReasoningSelection,
@@ -1107,15 +1097,40 @@ pub struct LlmRequestSpec {
 }
 
 impl LlmRequestSpec {
+    /// Sources are retained by their message blocks.
+    pub fn attachments(&self) -> Vec<&AttachmentSource> {
+        self.messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                crate::llm::types::LlmContentBlock::Attachment { source } => Some(source.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub(crate) async fn from_request(
         request: &CoreLlmRequest,
         attachment_store: &crate::SessionAttachmentStore,
     ) -> Result<Self, RuntimeEffectControllerError> {
+        let mut messages = request.messages.clone();
+        for message in &mut messages {
+            if !message
+                .blocks
+                .iter()
+                .any(|block| matches!(block, crate::llm::types::LlmContentBlock::Attachment { .. }))
+            {
+                continue;
+            }
+            for block in Arc::make_mut(&mut message.blocks) {
+                if let crate::llm::types::LlmContentBlock::Attachment { source } = block {
+                    **source = durable_attachment_source(source, attachment_store).await?;
+                }
+            }
+        }
         Ok(Self {
             model: request.model.clone(),
-            messages: request.messages.clone(),
-            attachments: attachment_specs_from_attachments(&request.attachments, attachment_store)
-                .await?,
+            messages,
             tools: Arc::clone(&request.tools),
             tool_choice: request.tool_choice.clone(),
             model_variant: request.model_variant.clone(),
@@ -1134,11 +1149,6 @@ impl LlmRequestSpec {
         CoreLlmRequest {
             model: self.model,
             messages: self.messages,
-            attachments: self
-                .attachments
-                .into_iter()
-                .map(|spec| spec.source)
-                .collect(),
             resolved_stored: Default::default(),
             tools: self.tools,
             tool_choice: self.tool_choice,
@@ -1153,21 +1163,10 @@ impl LlmRequestSpec {
     }
 }
 
-async fn attachment_specs_from_attachments(
-    attachments: &[AttachmentSource],
-    attachment_store: &crate::SessionAttachmentStore,
-) -> Result<Vec<LlmAttachmentSpec>, RuntimeEffectControllerError> {
-    let mut specs = Vec::with_capacity(attachments.len());
-    for attachment in attachments {
-        specs.push(attachment_spec_from_attachment(attachment, attachment_store).await?);
-    }
-    Ok(specs)
-}
-
-async fn attachment_spec_from_attachment(
+async fn durable_attachment_source(
     attachment: &AttachmentSource,
     attachment_store: &crate::SessionAttachmentStore,
-) -> Result<LlmAttachmentSpec, RuntimeEffectControllerError> {
+) -> Result<AttachmentSource, RuntimeEffectControllerError> {
     let source = match attachment {
         AttachmentSource::Inline { media_type, bytes } => {
             let attachment_ref = attachment_store
@@ -1188,7 +1187,7 @@ async fn attachment_spec_from_attachment(
         }
         durable => durable.clone(),
     };
-    Ok(LlmAttachmentSpec { source })
+    Ok(source)
 }
 
 impl RuntimeEffectOutcome {
