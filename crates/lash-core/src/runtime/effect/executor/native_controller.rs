@@ -305,7 +305,7 @@ impl NativeRuntimeEffectController {
             .await
     }
 
-    pub(crate) async fn request_process_cancel(
+    pub async fn request_process_cancel(
         registry: Arc<dyn crate::ProcessRegistry>,
         process_id: &str,
         reason: Option<String>,
@@ -338,11 +338,11 @@ impl NativeRuntimeEffectController {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 impl NativeRuntimeEffectController {
     /// The settlement record of one group, for the conformance tests that read
     /// what a durable tier would read out of its journal.
-    pub(crate) fn recorded_group_settlements(&self, group_key: &str) -> Vec<RecordedSettlement> {
+    pub fn recorded_group_settlements(&self, group_key: &str) -> Vec<RecordedSettlement> {
         self.groups.recorded(group_key)
     }
 }
@@ -359,7 +359,7 @@ impl std::fmt::Debug for NativeRuntimeEffectController {
 
 /// One settlement as a test reads it: the child's position, the sequence it was
 /// allocated, and whether its outcome was a success.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 type RecordedSettlement = (usize, u64, bool);
 
 /// Every group this controller has open, keyed exactly as ADR 0065 keys them.
@@ -379,7 +379,7 @@ pub(crate) struct NativeEffectGroups {
     /// tests can observe a completed group's settlement order. Test-only, in the
     /// style of `AwaitEventRegistry`'s cache counter: production keeps nothing
     /// once a group is reaped.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     retired: Mutex<HashMap<String, Vec<RecordedSettlement>>>,
 }
 
@@ -801,7 +801,7 @@ impl NativeEffectGroups {
             .is_some_and(|current| Arc::ptr_eq(current, state))
         {
             open.remove(group_key);
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             self.retired.lock_recover().insert(
                 group_key.to_string(),
                 Self::snapshot(&state.state.lock_recover()),
@@ -817,7 +817,7 @@ impl NativeEffectGroups {
     /// settlement stays observable to a test: reaping is a retention decision,
     /// and a test that had to race it would be asserting on the reaper rather
     /// than on the contract.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn recorded(&self, group_key: &str) -> Vec<RecordedSettlement> {
         let Some(state) = self.get(group_key) else {
             return self
@@ -831,7 +831,7 @@ impl NativeEffectGroups {
         Self::snapshot(&inner)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     fn snapshot(inner: &NativeEffectGroupState) -> Vec<RecordedSettlement> {
         inner
             .order

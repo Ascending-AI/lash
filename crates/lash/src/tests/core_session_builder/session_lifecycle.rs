@@ -1849,7 +1849,7 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
 #[tokio::test]
 async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Result<()> {
     let factory = Arc::new(DeletingStoreFactory::default());
-    let effect_host = Arc::new(lash_core::testing::conformance::RecordingEffectHost::default());
+    let effect_host = Arc::new(lash_conformance::RecordingEffectHost::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())

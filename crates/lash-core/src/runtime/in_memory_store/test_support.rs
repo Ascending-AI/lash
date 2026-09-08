@@ -6,7 +6,7 @@ use super::InMemorySessionStore;
 /// Test seam that suspends `release_session_execution_lease` at its backend
 /// await so a caller can drop the release future at exactly that point.
 #[derive(Debug)]
-pub(crate) struct SessionExecutionLeaseReleaseGate {
+pub struct SessionExecutionLeaseReleaseGate {
     entered: tokio::sync::Notify,
     admitted: tokio::sync::Semaphore,
 }
@@ -22,12 +22,12 @@ impl Default for SessionExecutionLeaseReleaseGate {
 
 impl SessionExecutionLeaseReleaseGate {
     /// Wait until a release attempt has reached the gate.
-    pub(crate) async fn wait_entered(&self) {
+    pub async fn wait_entered(&self) {
         self.entered.notified().await;
     }
 
     /// Let exactly one release attempt through.
-    pub(crate) fn admit_one(&self) {
+    pub fn admit_one(&self) {
         self.admitted.add_permits(1);
     }
 
@@ -61,12 +61,7 @@ impl InMemorySessionStore {
         Ok(())
     }
 
-    pub(crate) fn inject_raw_counter_for_testing(
-        &self,
-        field: &'static str,
-        record_id: &str,
-        value: i64,
-    ) {
+    pub fn inject_raw_counter_for_testing(&self, field: &'static str, record_id: &str, value: i64) {
         if value < 0 {
             self.raw_counter_defects
                 .lock_recover()
@@ -101,11 +96,7 @@ impl InMemorySessionStore {
         }
     }
 
-    pub(crate) fn raw_counter_snapshot_for_testing(
-        &self,
-        field: &'static str,
-        record_id: &str,
-    ) -> String {
+    pub fn raw_counter_snapshot_for_testing(&self, field: &'static str, record_id: &str) -> String {
         if let Some(value) = self.raw_counter_defects.lock_recover().get(field) {
             return format!("defect:{field}:{value}");
         }
@@ -158,35 +149,35 @@ impl InMemorySessionStore {
         }
     }
 
-    pub(crate) fn set_claim_after_lease_validation_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+    pub fn set_claim_after_lease_validation_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
         *self.claim_after_lease_validation_hook.lock_recover() = Some(hook);
     }
 
-    pub(crate) fn fail_next_exact_queue_claim(&self) {
+    pub fn fail_next_exact_queue_claim(&self) {
         self.fail_next_exact_queue_claim
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    pub(crate) fn drop_next_list_queued_work_batch(&self) {
+    pub fn drop_next_list_queued_work_batch(&self) {
         self.drop_next_list_queued_work_batch
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    pub(crate) fn drop_next_list_pending_queued_work_batch(&self) {
+    pub fn drop_next_list_pending_queued_work_batch(&self) {
         self.drop_next_list_pending_queued_work_batch
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    pub(crate) fn list_pending_queued_work_count(&self) -> usize {
+    pub fn list_pending_queued_work_count(&self) -> usize {
         self.list_pending_queued_work_count
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    pub(crate) fn fail_next_runtime_commit(&self, error: crate::StoreError) {
+    pub fn fail_next_runtime_commit(&self, error: crate::StoreError) {
         *self.fail_next_runtime_commit.lock_recover() = Some(error);
     }
 
-    pub(crate) fn fail_next_runtime_commit_after_first_mutation(&self, error: crate::StoreError) {
+    pub fn fail_next_runtime_commit_after_first_mutation(&self, error: crate::StoreError) {
         *self
             .fail_next_runtime_commit_after_first_mutation
             .lock_recover() = Some(error);
@@ -207,30 +198,30 @@ impl InMemorySessionStore {
         Ok(())
     }
 
-    pub(crate) async fn save_session_head_meta(&self, meta: crate::SessionHeadMeta) {
+    pub async fn save_session_head_meta(&self, meta: crate::SessionHeadMeta) {
         *self.session_head_meta.lock_recover() = Some(meta);
     }
 
-    pub(crate) fn load_session_count(&self) -> usize {
+    pub fn load_session_count(&self) -> usize {
         self.load_session_count
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    pub(crate) fn load_session_head_meta_count(&self) -> usize {
+    pub fn load_session_head_meta_count(&self) -> usize {
         self.load_session_head_meta_count
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    pub(crate) fn fail_next_load_session_head_meta(&self) {
+    pub fn fail_next_load_session_head_meta(&self) {
         self.fail_next_load_session_head_meta
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    pub(crate) fn fail_load_session_on_call(&self, call: usize) {
+    pub fn fail_load_session_on_call(&self, call: usize) {
         *self.fail_load_session_on_call.lock_recover() = Some(call);
     }
 
-    pub(crate) fn checkpoint_claim_counts(&self) -> (usize, usize) {
+    pub fn checkpoint_claim_counts(&self) -> (usize, usize) {
         (
             self.checkpoint_probe_count
                 .load(std::sync::atomic::Ordering::Relaxed),
@@ -240,7 +231,7 @@ impl InMemorySessionStore {
     }
 
     /// Inject a transient renewal rejection (the lease stays durably ours).
-    pub(crate) fn fail_next_session_execution_lease_renewal(&self) {
+    pub fn fail_next_session_execution_lease_renewal(&self) {
         self.fail_next_session_execution_lease_renewal_with(crate::StoreError::Backend(
             "injected session execution lease renewal rejection".to_string(),
         ));
@@ -248,7 +239,7 @@ impl InMemorySessionStore {
 
     /// Inject a specific renewal rejection. Transient errors and a definitive
     /// `SessionExecutionLeaseExpired` mean different things to a lease guard.
-    pub(crate) fn fail_next_session_execution_lease_renewal_with(&self, error: crate::StoreError) {
+    pub fn fail_next_session_execution_lease_renewal_with(&self, error: crate::StoreError) {
         *self
             .fail_next_session_execution_lease_renewal
             .lock_recover() = Some(error);
@@ -256,14 +247,14 @@ impl InMemorySessionStore {
 
     /// Make the next already-validated conditional renewal mutation match no
     /// lease, mirroring a zero-row compare-and-set result in a SQL backend.
-    pub(crate) fn force_next_session_execution_lease_renewal_zero_match(&self) {
+    pub fn force_next_session_execution_lease_renewal_zero_match(&self) {
         self.force_next_session_execution_lease_renewal_zero_match
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Replace the next successful backend renewal response without changing
     /// the durable row, emulating a corrupt or mis-targeted backend result.
-    pub(crate) fn respond_to_next_session_execution_lease_renewal_with(
+    pub fn respond_to_next_session_execution_lease_renewal_with(
         &self,
         response: crate::SessionExecutionLease,
     ) {
@@ -274,25 +265,23 @@ impl InMemorySessionStore {
 
     /// Suspend every subsequent `release_session_execution_lease` at its
     /// backend await until the returned gate admits it.
-    pub(crate) fn gate_session_execution_lease_release(
-        &self,
-    ) -> Arc<SessionExecutionLeaseReleaseGate> {
+    pub fn gate_session_execution_lease_release(&self) -> Arc<SessionExecutionLeaseReleaseGate> {
         let gate = Arc::new(SessionExecutionLeaseReleaseGate::default());
         *self.session_execution_lease_release_gate.lock_recover() = Some(Arc::clone(&gate));
         gate
     }
 
-    pub(crate) fn session_execution_lease_release_attempt_count(&self) -> usize {
+    pub fn session_execution_lease_release_attempt_count(&self) -> usize {
         self.session_execution_lease_release_attempt_count
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    pub(crate) fn session_execution_lease_renewal_count(&self) -> usize {
+    pub fn session_execution_lease_renewal_count(&self) -> usize {
         self.session_execution_lease_renewal_count
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    pub(crate) fn abandoned_claim_counts(&self) -> (usize, usize) {
+    pub fn abandoned_claim_counts(&self) -> (usize, usize) {
         (
             self.abandoned_queued_work_claim_count
                 .load(std::sync::atomic::Ordering::SeqCst),
@@ -301,12 +290,12 @@ impl InMemorySessionStore {
         )
     }
 
-    pub(crate) fn commit_write_transaction_count(&self) -> usize {
+    pub fn commit_write_transaction_count(&self) -> usize {
         self.commit_write_transaction_count
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    pub(crate) fn force_active_leaf_for_testing(&self, leaf_node_id: String) {
+    pub fn force_active_leaf_for_testing(&self, leaf_node_id: String) {
         let _transaction = self.write_transaction.lock_recover();
         let mut meta = self.session_head_meta.lock_recover();
         let meta = meta.as_mut().expect("branch switch requires session head");
@@ -317,7 +306,7 @@ impl InMemorySessionStore {
             .set_leaf_node_id(Some(leaf_node_id));
     }
 
-    pub(crate) fn tombstone_node_for_testing(&self, node_id: String) {
+    pub fn tombstone_node_for_testing(&self, node_id: String) {
         let _transaction = self.write_transaction.lock_recover();
         self.tombstoned_node_ids.lock_recover().insert(node_id);
     }

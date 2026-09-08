@@ -32,6 +32,7 @@ tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
+lash-conformance.workspace = true
 bytes = { workspace = true }
 chrono = { workspace = true }
 http = "1"

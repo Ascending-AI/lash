@@ -65,7 +65,7 @@ fn host(path: &std::path::Path, executors: Option<Arc<dyn GroupExecutors>>) -> S
 async fn sqlite_effect_host_satisfies_the_effect_group_contract() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("effect-groups.db");
-    lash_core::testing::conformance::effect_group_host_conformance(|executors| {
+    lash_conformance::effect_group_host_conformance(|executors| {
         Arc::new(host(&path, executors)) as Arc<dyn EffectHost>
     })
     .await;
@@ -80,9 +80,9 @@ async fn sqlite_effect_host_satisfies_the_effect_group_contract() {
 async fn sqlite_journals_a_cancelled_child_as_its_terminal() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("cancelled-child-terminal.db");
-    lash_core::testing::conformance::effect_group_cancelled_child_terminal_is_durable(
-        |executors| Arc::new(host(&path, executors)) as Arc<dyn EffectHost>,
-    )
+    lash_conformance::effect_group_cancelled_child_terminal_is_durable(|executors| {
+        Arc::new(host(&path, executors)) as Arc<dyn EffectHost>
+    })
     .await;
 }
 

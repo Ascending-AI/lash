@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use lash::process::ConformanceProcessRegistry;
 use lash::testing::TestLocalProcessRegistry;
-use lash::testing::conformance::process_registry;
+use lash_conformance::process_registry;
 
 #[tokio::test]
 async fn base_process_registry_conformance_runs_with_testing_alone() {

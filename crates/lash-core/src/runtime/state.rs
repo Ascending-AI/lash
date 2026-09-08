@@ -225,7 +225,7 @@ impl RuntimeCheckpointComponents {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn complete_refs_for_testing(
+    pub fn complete_refs_for_testing(
         refs: impl IntoIterator<Item = (String, crate::store::BlobRef)>,
     ) -> Self {
         let entries = refs
@@ -899,7 +899,7 @@ impl RuntimeSessionState {
             .discard_known_bodies(committed_components_match);
     }
 
-    pub(crate) fn pending_graph_commit(&self) -> crate::GraphAppend {
+    pub fn pending_graph_commit(&self) -> crate::GraphAppend {
         let nodes = self
             .session_graph
             .nodes
@@ -920,7 +920,7 @@ impl RuntimeSessionState {
         }
     }
 
-    pub(crate) fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
+    pub fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
     where
         I: IntoIterator<Item = String>,
     {
@@ -1275,7 +1275,7 @@ pub(super) fn apply_session_head(
     apply_persisted_session_config(&mut state.policy, &head.config);
 }
 
-pub(crate) fn append_session_nodes_to_state_with_clock(
+pub fn append_session_nodes_to_state_with_clock(
     state: &mut RuntimeSessionState,
     nodes: &[crate::SessionAppendNode],
     draft_namespace: &str,
@@ -1311,7 +1311,7 @@ pub(crate) fn append_session_nodes_to_state_with_clock(
 ///
 /// Frame open and extension apply are no longer callers of this seam. Remaining
 /// references are test helpers and witnesses, not additional production operations.
-pub(crate) fn boundary_operation(
+pub fn boundary_operation(
     session_id: &str,
     boundary_id: &str,
     key: impl Into<String>,

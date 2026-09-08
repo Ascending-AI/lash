@@ -7,7 +7,7 @@ async fn postgres_append_receipt_refuses_negative_stored_identity_encoding_versi
     };
     reset(&storage).await;
     let pool = storage.pool().clone();
-    lash_core::testing::conformance::append_receipt_corrupt_identity_encoding_version_is_refused(
+    lash_conformance::append_receipt_corrupt_identity_encoding_version_is_refused(
         Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
         move || async move {
             sqlx::query(

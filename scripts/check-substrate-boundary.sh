@@ -35,8 +35,8 @@ containment_forbidden='(^|[^[:alnum:]_])(NativeQueuedWork|NoQueuedWork|NativePro
 fallback_forbidden='ProcessAwaiter::polling|Option[[:space:]]*<[[:space:]]*Arc[[:space:]]*<[[:space:]]*dyn[[:space:]]+(QueuedWorkSubstrate|ProcessWorkSubstrate)[[:space:]]*>[[:space:]]*>|Option[[:space:]]*<[[:space:]]*(ProcessWorkDriver|QueuedWorkDriver)[[:space:]]*>'
 capability_names='replay_ownership|journal_addressing|durable_workflow_controller|allows_process_lifetime_completion_keys'
 capability_forbidden="fn[[:space:]]+(${capability_names})([^[:alnum:]_]|$)|\.(${capability_names})[[:space:]]*\(|(^|[^[:alnum:]_])(${capability_names})[[:space:]]*:"
-test_path_regex='(^|/)(tests?|testing|[a-z_]*_tests)(/|\.rs$)'
-containment_test_path_regex='(^|/)(tests?|testing|[a-z_]*_tests)(/|\.rs$)|_tests\.rs$'
+test_path_regex='^crates/lash-conformance/|(^|/)(tests?|testing|[a-z_]*_tests)(/|\.rs$)'
+containment_test_path_regex='^crates/lash-conformance/|(^|/)(tests?|testing|[a-z_]*_tests)(/|\.rs$)|_tests\.rs$'
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf -- "$tmp_dir"' EXIT

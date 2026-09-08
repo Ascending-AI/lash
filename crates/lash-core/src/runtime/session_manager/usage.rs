@@ -3,9 +3,9 @@ use lash_sansio::sync::MutexExt;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(any(test, feature = "testing"), derive(serde::Serialize))]
-pub(crate) struct PendingTokenLedgerEntry {
-    pub(crate) entry: TokenLedgerEntry,
-    pub(crate) identity: Option<crate::store::RuntimeUsageDeltaIdentity>,
+pub struct PendingTokenLedgerEntry {
+    pub entry: TokenLedgerEntry,
+    pub identity: Option<crate::store::RuntimeUsageDeltaIdentity>,
 }
 
 impl PendingTokenLedgerEntry {
@@ -181,17 +181,17 @@ impl UsageCapability {
     }
 }
 
-pub(crate) struct StagedTokenLedger {
+pub struct StagedTokenLedger {
     ledger: Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     deltas: Vec<crate::store::RuntimeUsageDelta>,
 }
 
 impl StagedTokenLedger {
-    pub(crate) fn deltas(&self) -> &[crate::store::RuntimeUsageDelta] {
+    pub fn deltas(&self) -> &[crate::store::RuntimeUsageDelta] {
         &self.deltas
     }
 
-    pub(crate) fn confirm_identities(
+    pub fn confirm_identities(
         self,
         confirmed: &[crate::store::RuntimeUsageDeltaIdentity],
     ) -> Result<(), crate::StoreError> {
@@ -241,7 +241,7 @@ pub(super) fn plugin_error_from_usage_confirmation(error: crate::StoreError) -> 
     }
 }
 
-pub(crate) fn stage_token_ledger_shared(
+pub fn stage_token_ledger_shared(
     token_ledger: &Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     operation: &crate::OperationId,
 ) -> Result<StagedTokenLedger, crate::StoreError> {
@@ -296,7 +296,7 @@ pub(crate) fn stage_token_ledger_shared(
     })
 }
 
-pub(crate) fn record_token_usage_shared(
+pub fn record_token_usage_shared(
     token_ledger: &Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     source: &str,
     model: &str,

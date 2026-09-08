@@ -128,7 +128,6 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use crate::session_graph::SharedJsonValue;
     use crate::store::StoreMaintenance;
@@ -141,20 +140,6 @@ mod tests {
     /// as the durable ones. It used to return `GcReport::default()`
     /// unconditionally, which is the "nothing to do" arm spelled without ever
     /// looking.
-    #[tokio::test]
-    async fn in_memory_store_satisfies_the_maintenance_outcome_contract() {
-        crate::testing::conformance::store_maintenance_outcome_contract(
-            "in-memory",
-            || {
-                Arc::new(super::super::factory::InMemorySessionStoreFactory::new())
-                    as Arc<dyn crate::SessionStoreFactory>
-            },
-            // The in-memory sweep reads only process memory under the write
-            // transaction: it has no failure path to inject.
-            None,
-        )
-        .await;
-    }
 
     #[tokio::test]
     async fn vacuum_rebuild_failure_preserves_tombstone_set() {

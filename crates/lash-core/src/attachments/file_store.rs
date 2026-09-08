@@ -326,7 +326,6 @@ mod tests {
     use crate::{AttachmentTypeMetadata, MediaType};
     use lash_sansio::sync::MutexExt;
     use std::collections::BTreeSet;
-    use std::sync::{Arc, Mutex};
 
     fn meta() -> AttachmentCreateMeta {
         AttachmentCreateMeta::new(
@@ -556,27 +555,6 @@ mod tests {
     // Runs the backend-agnostic `AttachmentStore` conformance suite against
     // the file-backed implementation. The same suite runs against the
     // in-memory store, so both backends are held to one contract.
-    #[tokio::test]
-    async fn file_attachment_store_satisfies_conformance() {
-        use crate::testing::conformance::ReopenableAttachmentStore;
-
-        // Each `make()` call needs its own root that outlives the returned
-        // store. Keep the tempdirs alive for the duration of the suite.
-        let dirs: Arc<Mutex<Vec<tempfile::TempDir>>> = Arc::new(Mutex::new(Vec::new()));
-        crate::testing::conformance::attachment_store_reopenable(
-            || {
-                let dir = tempfile::tempdir().expect("tempdir");
-                let open =
-                    Arc::new(FileAttachmentStore::new(dir.path())) as Arc<dyn AttachmentStore>;
-                let reopen =
-                    Arc::new(FileAttachmentStore::new(dir.path())) as Arc<dyn AttachmentStore>;
-                dirs.lock_recover().push(dir);
-                ReopenableAttachmentStore { open, reopen }
-            },
-            AttachmentStorePersistence::Durable,
-        )
-        .await;
-    }
 
     /// The escape canary: a traversal id never reaches the store because it
     /// never becomes an `AttachmentId` in the first place. The canary file

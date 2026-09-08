@@ -18,7 +18,7 @@ struct PostgresProcessPruneBlobProbe {
 }
 
 #[async_trait::async_trait]
-impl lash_core::testing::conformance::SessionDeleteBlobProbe for PostgresProcessPruneBlobProbe {
+impl lash_conformance::SessionDeleteBlobProbe for PostgresProcessPruneBlobProbe {
     async fn blob_exists(&self, blob_ref: &lash_core::BlobRef) -> bool {
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM lash_blobs WHERE hash = $1)")
             .bind(blob_ref.as_str())
@@ -124,7 +124,7 @@ async fn postgres_process_prune_reclaims_tombstones_owned_by_deleted_sessions_wh
         return;
     };
     let (factory, registry) = backend(&storage).await;
-    lash_core::testing::conformance::process_prune_reclaims_tombstones_owned_by_deleted_sessions(
+    lash_conformance::process_prune_reclaims_tombstones_owned_by_deleted_sessions(
         factory, registry,
     )
     .await;
@@ -140,10 +140,7 @@ async fn postgres_process_prune_records_deletions_for_later_reclaim_when_configu
         return;
     };
     let (factory, registry) = backend(&storage).await;
-    lash_core::testing::conformance::process_prune_records_deletions_for_later_reclaim(
-        factory, registry,
-    )
-    .await;
+    lash_conformance::process_prune_records_deletions_for_later_reclaim(factory, registry).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -158,7 +155,7 @@ async fn postgres_process_prune_reclaims_checkpoint_blobs_and_propagates_failure
         as Arc<dyn SessionStoreFactory>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let probe = Arc::new(PostgresProcessPruneBlobProbe { storage });
-    lash_core::testing::conformance::process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
+    lash_conformance::process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
         "postgres", factory, registry, probe,
     )
     .await;
@@ -176,7 +173,7 @@ async fn postgres_process_prune_reclaims_content_aliased_checkpoint_roots_when_c
         as Arc<dyn SessionStoreFactory>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let probe = Arc::new(PostgresProcessPruneBlobProbe { storage });
-    lash_core::testing::conformance::process_prune_reclaims_content_aliased_checkpoint_roots(
+    lash_conformance::process_prune_reclaims_content_aliased_checkpoint_roots(
         "postgres", factory, registry, probe,
     )
     .await;

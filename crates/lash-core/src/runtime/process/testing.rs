@@ -43,16 +43,6 @@ use support::{ExecutionWritePause, process_lease_expired, validate_in_memory_exe
 use types::{ManagedLeaseMap, ManagedProcessRecord};
 pub use types::{RawProcessRegistryStateForTesting, TestLocalProcessRegistry};
 
-#[async_trait::async_trait]
-impl crate::testing::conformance::WakeDeliveryOrderingGroupFaultInjector
-    for TestLocalProcessRegistry
-{
-    async fn discard_without_reason(&self, delivery_id: &str) {
-        self.discard_wake_without_reason_for_testing(delivery_id)
-            .await;
-    }
-}
-
 impl TestLocalProcessRegistry {
     async fn append_managed_event(
         &self,

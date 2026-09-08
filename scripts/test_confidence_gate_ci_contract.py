@@ -1781,7 +1781,7 @@ derive_mutation_jobs() {{
             # conformance test that exercises
             # effect_host_await_event_session_cancel_resolves_outstanding_waits.
             'step "Native effect-host await-event session-cancel conformance"',
-            "run_cargo_tests -p lash-internal-core --locked native_effect_host_satisfies_conformance",
+            "run_cargo_tests -p lash-internal-conformance --locked native_effect_host_satisfies_conformance",
         ]
         for snippet in required_snippets:
             self.assertIn(snippet, gate)

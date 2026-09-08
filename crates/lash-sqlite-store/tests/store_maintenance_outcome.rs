@@ -15,9 +15,7 @@ struct SqliteCorruptRootedManifest {
 }
 
 #[async_trait::async_trait]
-impl lash_core::testing::conformance::StoreMaintenanceFaultInjector
-    for SqliteCorruptRootedManifest
-{
+impl lash_conformance::StoreMaintenanceFaultInjector for SqliteCorruptRootedManifest {
     async fn break_gc_scope(&self, _session_id: &str) {
         let catalog = self
             .catalog
@@ -45,7 +43,7 @@ async fn sqlite_store_satisfies_the_maintenance_outcome_contract() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
     let catalog = Arc::new(Mutex::new(None));
     let injector_catalog = Arc::clone(&catalog);
-    lash_core::testing::conformance::store_maintenance_outcome_contract(
+    lash_conformance::store_maintenance_outcome_contract(
         "sqlite",
         || {
             let dir = tempfile::tempdir().expect("tempdir");

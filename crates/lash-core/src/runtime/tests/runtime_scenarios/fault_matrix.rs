@@ -111,7 +111,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         kind: DurableFaultKind::LeaseLoss,
         contract: "After a successor generation re-claims queued work, the predecessor claim is rejected at commit without mutation.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-internal-core",
+            package: "lash-internal-conformance",
             test_target: None,
             filter: "queued_work_claims_supersede_across_session_lease_generations",
             required_env: None,
@@ -122,7 +122,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         kind: DurableFaultKind::LeaseLoss,
         contract: "A failed turn's DeferredNextTurn claim is reclaimed by idle retry under a new session-lease generation while its stale completion is rejected.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-internal-core",
+            package: "lash-internal-conformance",
             test_target: None,
             filter: "turn_input_claims_supersede_across_session_lease_generations",
             required_env: None,
@@ -133,7 +133,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         kind: DurableFaultKind::LeaseLoss,
         contract: "More than 32 same-generation claims cannot hide a later unclaimed queued-work, session-command, or turn-input row from bounded scans.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-internal-core",
+            package: "lash-internal-conformance",
             test_target: None,
             filter: "same_generation_claim_scans_reach_rows_beyond_the_scan_surplus",
             required_env: None,

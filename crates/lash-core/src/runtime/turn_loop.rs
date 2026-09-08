@@ -77,7 +77,7 @@ impl<T> QueuedTurnDrain<T> {
     /// Only the crate's own suites need this: host code reads the drain itself,
     /// so a scenario that only asks whether a turn ran lives behind `testing`.
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn ran(self) -> Option<T> {
+    pub fn ran(self) -> Option<T> {
         match self {
             Self::Ran(turn) => Some(turn),
             Self::Empty(_) => None,

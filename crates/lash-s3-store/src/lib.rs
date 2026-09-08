@@ -419,7 +419,7 @@ fn endpoint_uses_http(endpoint: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::testing::conformance::ReopenableAttachmentStore;
+    use lash_conformance::ReopenableAttachmentStore;
     use lash_core::{AttachmentTypeMetadata, MediaType};
 
     /// `content_path` derives the object key from the id, so it depends on
@@ -508,7 +508,7 @@ mod tests {
 
     #[tokio::test]
     async fn s3_attachment_store_satisfies_conformance_with_in_memory_object_store() {
-        lash_core::testing::conformance::attachment_store(
+        lash_conformance::attachment_store(
             || {
                 Arc::new(S3AttachmentStore::from_object_store(
                     Arc::new(object_store::memory::InMemory::new()),
@@ -526,7 +526,7 @@ mod tests {
             eprintln!("skipping MinIO conformance: LASH_MINIO_ENDPOINT is not set");
             return;
         };
-        lash_core::testing::conformance::attachment_store_reopenable(
+        lash_conformance::attachment_store_reopenable(
             || {
                 // The conformance contract requires each `make()` to yield a
                 // fresh, empty store. S3 has no per-instance isolation, so give
@@ -570,7 +570,7 @@ mod tests {
             config.prefix.as_deref().unwrap_or("tests"),
             unique_case_suffix()
         ));
-        lash_core::testing::conformance::attachment_ownership_isolation_with_store(
+        lash_conformance::attachment_ownership_isolation_with_store(
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::new(S3AttachmentStore::from_config(config).expect("store"))
                 as Arc<dyn AttachmentStore>,

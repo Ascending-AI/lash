@@ -13,7 +13,7 @@ use lash_sansio::sync::MutexExt;
 pub mod attempt_sentinel;
 pub mod behavior_transcript;
 pub mod checkpoint_observer;
-pub mod conformance;
+
 mod execution_context_builder;
 mod live_replay;
 pub mod sansio_transcript;
@@ -42,7 +42,7 @@ pub fn queued_lane_holder_for_testing(expires_at_epoch_ms: u64) -> crate::Queued
 }
 
 #[cfg(any(test, feature = "testing"))]
-pub(crate) fn process_work_wiring_for_registry(
+pub fn process_work_wiring_for_registry(
     registry: Arc<dyn crate::ProcessRegistry>,
 ) -> crate::ProcessWorkWiring {
     let watched = crate::facade_support::watch_process_registry(registry);
@@ -2392,3 +2392,9 @@ mod test_protocol_fakes {
         }
     }
 } // mod test_protocol_fakes
+
+pub mod conformance_support;
+pub mod graph_integrity;
+pub mod lineage;
+pub mod store_fixtures;
+pub use crate::runtime::in_memory_lineage_handles;

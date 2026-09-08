@@ -4,6 +4,7 @@ members = [
     "crates/lash-trace",
     "crates/lash-rlm-types",
     "crates/lash-core",
+    "crates/lash-conformance",
     "crates/lash-lashlang-runtime",
     "crates/lash-remote-protocol",
     "crates/lash-http-transport",
@@ -103,6 +104,7 @@ channel = "0.1.0-alpha"
 # Centralized external versions. Members opt in with
 # `dep = { workspace = true, features = [...] }`.
 [workspace.dependencies]
+lash-conformance = { package = "lash-internal-conformance", path = "crates/lash-conformance" }
 anyhow = "1"
 arc-swap = "1"
 async-trait = "0.1"

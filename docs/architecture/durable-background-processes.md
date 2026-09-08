@@ -702,7 +702,7 @@ terminal are carried as request config / tool-access, not lost.
 - `crates/lash-restate/src/tests.rs` —
   `sqlite_trigger_started_process_recovered_after_worker_registry_reopen` and
   `sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_cancel`.
-- `crates/lash-core/src/testing/conformance/` — process-lease single-owner /
+- `crates/lash-conformance/src/conformance/` — process-lease single-owner /
   fencing conformance suite (`process_registry.rs`), plus the ADR 0019 cases:
   sweep obeys disposition, Abandoned requires owner drain or a lapsed-lease
   reconciled request, a revenant's lease-fenced writes are rejected, and owner

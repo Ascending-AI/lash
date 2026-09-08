@@ -182,7 +182,7 @@ impl RuntimeCommit {
 
     #[doc(hidden)]
     #[track_caller]
-    pub(crate) fn persisted_state_with_graph_commit(
+    pub fn persisted_state_with_graph_commit(
         state: &crate::RuntimeSessionState,
         mut graph: GraphAppend,
         usage_deltas: &[crate::TokenLedgerEntry],
@@ -223,7 +223,7 @@ impl RuntimeCommit {
         )
     }
 
-    pub(crate) fn persisted_state_with_operation_and_staged_usage(
+    pub fn persisted_state_with_operation_and_staged_usage(
         state: &mut crate::RuntimeSessionState,
         usage_deltas: &[RuntimeUsageDelta],
         operation: OperationId,
@@ -236,7 +236,7 @@ impl RuntimeCommit {
         )
     }
 
-    pub(crate) fn persisted_state_with_graph_commit_and_operation(
+    pub fn persisted_state_with_graph_commit_and_operation(
         state: &crate::RuntimeSessionState,
         graph: GraphAppend,
         usage_deltas: &[crate::TokenLedgerEntry],
@@ -501,7 +501,7 @@ pub struct RuntimeUsageDelta {
 }
 
 impl RuntimeUsageDelta {
-    pub(crate) fn for_operation(
+    pub fn for_operation(
         operation: &OperationId,
         entries: &[crate::TokenLedgerEntry],
     ) -> Result<Vec<Self>, StoreError> {
@@ -625,7 +625,7 @@ impl RuntimeTurnCommitStamp {
         }
     }
 
-    pub(crate) fn append_session_nodes(
+    pub fn append_session_nodes(
         operation: OperationId,
         requested_ancestor_node_id: Option<&str>,
         nodes: &[crate::SessionAppendNode],

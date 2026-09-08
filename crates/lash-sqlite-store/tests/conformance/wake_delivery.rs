@@ -5,7 +5,7 @@ struct SqliteWakeDeliveryOrderingGroupFaultInjector {
 }
 
 #[async_trait::async_trait]
-impl lash_core::testing::conformance::WakeDeliveryOrderingGroupFaultInjector
+impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector
     for SqliteWakeDeliveryOrderingGroupFaultInjector
 {
     async fn discard_without_reason(&self, delivery_id: &str) {
@@ -51,12 +51,12 @@ async fn sqlite_wake_delivery_crash_matrix() {
     let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
-    Box::pin(lash_core::testing::conformance::wake_delivery_crash_matrix(
+    Box::pin(lash_conformance::wake_delivery_crash_matrix(
         factory,
         registry,
         clock,
         process_work,
-        lash_core::testing::conformance::ProcessTerminalWaitWitness::Direct,
+        lash_conformance::ProcessTerminalWaitWitness::Direct,
     ))
     .await;
 }
@@ -73,13 +73,13 @@ async fn sqlite_wake_delivery_ordering_group_conformance() {
     let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
-    lash_core::testing::conformance::wake_delivery_ordering_group_conformance(
+    lash_conformance::wake_delivery_ordering_group_conformance(
         registry as Arc<dyn ProcessRegistry>,
         Arc::new(SqliteWakeDeliveryOrderingGroupFaultInjector {
             path: process_registry_path,
         }),
         process_work,
-        lash_core::testing::conformance::ProcessTerminalWaitWitness::Direct,
+        lash_conformance::ProcessTerminalWaitWitness::Direct,
     )
     .await;
 }

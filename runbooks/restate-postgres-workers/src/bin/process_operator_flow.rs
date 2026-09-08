@@ -25,7 +25,7 @@ use lash_core::{
     AbandonWriter, AwaitEventKey, AwaitEventWaitIdentity, LeaseOwnerIdentity, ProcessAwaitOutput,
     ProcessInput, ProcessListFilter, ProcessProvenance, ProcessRecord, ProcessRegistration,
     ProcessRegistry, ProcessStarted, ProcessStatus, ProcessStatusFilter, RecoveryContract,
-    Resolution, ResolveOutcome, SessionScope, TestProcessRegistryWriteExt,
+    Resolution, ResolveOutcome, SessionScope,
 };
 use lash_postgres_store::PostgresStorage;
 use serde_json::{Value, json};
@@ -83,6 +83,36 @@ fn registration(id: &str, disposition: RecoveryContract) -> ProcessRegistration 
     )
 }
 
+async fn record_started(
+    registry: &Arc<dyn ProcessRegistry>,
+    id: &str,
+    started: ProcessStarted,
+) -> Result<()> {
+    let owner = LeaseOwnerIdentity::opaque(format!("test-fixture:{id}"), "lifecycle-write");
+    let lease = registry
+        .claim_process_lease(id, &owner, 60_000)
+        .await?
+        .acquired()
+        .with_context(|| format!("claim setup lease for `{id}`"))?;
+    let result = registry
+        .record_first_started_with_authority(
+            id,
+            started,
+            &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
+        )
+        .await;
+    let release = registry
+        .complete_process_lease(&lash_core::ProcessLeaseCompletion::from_lease(&lease))
+        .await;
+    match result? {
+        lash_core::ProcessStartOutcome::Started(_)
+        | lash_core::ProcessStartOutcome::AlreadyApplied(_) => {}
+        refused => bail!("record first start for `{id}` was refused: {refused:?}"),
+    }
+    release?;
+    Ok(())
+}
+
 async fn register_started(
     registry: &Arc<dyn ProcessRegistry>,
     id: &str,
@@ -93,18 +123,18 @@ async fn register_started(
         .register_process(registration(id, disposition))
         .await
         .with_context(|| format!("register `{id}`"))?;
-    registry
-        .record_first_started(
-            id,
-            ProcessStarted {
-                owner: started_owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: now_epoch_ms(),
-            },
-        )
-        .await
-        .with_context(|| format!("record first start for `{id}`"))?;
+    record_started(
+        registry,
+        id,
+        ProcessStarted {
+            owner: started_owner.clone(),
+            fencing_token: 0,
+            attempt: 1,
+            started_at_ms: now_epoch_ms(),
+        },
+    )
+    .await
+    .with_context(|| format!("record first start for `{id}`"))?;
     Ok(())
 }
 
@@ -221,7 +251,7 @@ impl StallingProvider {
             let entered = Arc::clone(&entered);
             let release = Arc::clone(&release);
             let calls = Arc::clone(&calls);
-            lash_core::testing::TestProvider::builder()
+            lash_restate_postgres_workers_e2e::scripted_provider::ScriptedProvider::builder()
                 .kind("process-operator-flow")
                 .complete(move |_request| {
                     let entered = Arc::clone(&entered);
@@ -437,17 +467,18 @@ async fn selected_drain_scope_isolation(storage: &PostgresStorage) -> Result<()>
     const SESSION_ID: &str = "process-operations-selected-drain";
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let observed_provider_calls = Arc::clone(&provider_calls);
-    let provider = lash_core::testing::TestProvider::builder()
-        .kind("process-operations-selected-drain")
-        .complete(move |_| {
-            let observed_provider_calls = Arc::clone(&observed_provider_calls);
-            async move {
-                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(scripted_response("selected A only"))
-            }
-        })
-        .build()
-        .into_handle();
+    let provider =
+        lash_restate_postgres_workers_e2e::scripted_provider::ScriptedProvider::builder()
+            .kind("process-operations-selected-drain")
+            .complete(move |_| {
+                let observed_provider_calls = Arc::clone(&observed_provider_calls);
+                async move {
+                    observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(scripted_response("selected A only"))
+                }
+            })
+            .build()
+            .into_handle();
     let attachments = tempfile::tempdir().context("selected-drain attachment directory")?;
     let core = core(storage, provider, &attachments)?;
     let session = core
@@ -843,17 +874,17 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
             &[OBSERVER_SESSION_ID.to_string()],
         )
         .await?;
-    registry
-        .record_first_started(
-            REQUEST_PROCESS_ID,
-            ProcessStarted {
-                owner: silent_owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: now_epoch_ms(),
-            },
-        )
-        .await?;
+    record_started(
+        &registry,
+        REQUEST_PROCESS_ID,
+        ProcessStarted {
+            owner: silent_owner.clone(),
+            fencing_token: 0,
+            attempt: 1,
+            started_at_ms: now_epoch_ms(),
+        },
+    )
+    .await?;
     let live_lease = registry
         .claim_process_lease(REQUEST_PROCESS_ID, &silent_owner, 1_000)
         .await?
@@ -861,11 +892,12 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
         .context("silent owner did not acquire its lease")?;
 
     let attachments = tempfile::tempdir().context("request-abandon attachment directory")?;
-    let provider = lash_core::testing::TestProvider::builder()
-        .kind("process-operator-flow")
-        .complete(|_request| async { Ok(scripted_response("unused")) })
-        .build()
-        .into_handle();
+    let provider =
+        lash_restate_postgres_workers_e2e::scripted_provider::ScriptedProvider::builder()
+            .kind("process-operator-flow")
+            .complete(|_request| async { Ok(scripted_response("unused")) })
+            .build()
+            .into_handle();
     let core = core(storage, provider, &attachments)?;
     let seeded = core
         .processes()

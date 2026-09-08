@@ -246,7 +246,7 @@ impl Default for FrameNodeId {
 
 impl FrameNodeId {
     /// Wraps an already-derived durable frame-node identity inside core.
-    pub(crate) fn new(value: impl Into<String>) -> Self {
+    pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
 
@@ -312,7 +312,7 @@ impl AgentFrameReason {
     pub(crate) const INITIAL: &'static str = "initial";
     pub(crate) const CONTINUE_AS: &'static str = "continue_as";
     pub(crate) const COMPACTION: &'static str = "compaction";
-    pub(crate) fn new(label: impl Into<String>) -> Self {
+    pub fn new(label: impl Into<String>) -> Self {
         Self(label.into())
     }
 

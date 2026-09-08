@@ -1034,7 +1034,7 @@ struct AttachmentOwner {
     recorded_intent_ids: Arc<Mutex<BTreeSet<AttachmentId>>>,
 }
 
-pub(crate) struct AttachmentOwnerBinding {
+pub struct AttachmentOwnerBinding {
     store: Arc<SessionAttachmentStore>,
     owner: AttachmentOwner,
     previous: Option<AttachmentOwner>,
@@ -1055,7 +1055,7 @@ impl SessionAttachmentStore {
         Self::new_with_clock(backend, manifest, session_id, Arc::new(crate::SystemClock))
     }
 
-    pub(crate) fn new_with_clock(
+    pub fn new_with_clock(
         backend: Arc<dyn AttachmentStore>,
         manifest: Arc<dyn AttachmentManifest>,
         session_id: impl Into<String>,
@@ -1131,7 +1131,7 @@ impl SessionAttachmentStore {
     }
 
     /// Bind puts for the lifetime of a durable turn execution.
-    pub(crate) fn bind_turn_scoped(
+    pub fn bind_turn_scoped(
         self: &Arc<Self>,
         turn_id: impl Into<String>,
     ) -> AttachmentOwnerBinding {
@@ -1139,7 +1139,7 @@ impl SessionAttachmentStore {
     }
 
     /// Bind puts for the lifetime of a recovered ToolCall or Engine process.
-    pub(crate) fn bind_process_scoped(
+    pub fn bind_process_scoped(
         self: &Arc<Self>,
         process_id: impl Into<String>,
     ) -> AttachmentOwnerBinding {
@@ -1347,7 +1347,7 @@ fn now_epoch_ms() -> u64 {
 /// `Arc<dyn RuntimePersistence>` as an `Arc<dyn AttachmentManifest>`.
 /// Rust's trait-object upcasting does not yet allow direct coercion
 /// between the two; this thin forwarder is the bridge.
-pub(crate) struct PersistenceManifestAdapter(pub Arc<dyn crate::RuntimePersistence>);
+pub struct PersistenceManifestAdapter(pub Arc<dyn crate::RuntimePersistence>);
 
 impl AttachmentManifest for PersistenceManifestAdapter {
     fn record_intent(&self, intent: AttachmentIntent) -> Result<(), crate::StoreError> {

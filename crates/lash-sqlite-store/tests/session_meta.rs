@@ -22,7 +22,7 @@ async fn sqlite_unbound_session_meta_refuses_ambiguous_resolution() {
         .await
         .expect("open unbound SQLite store");
 
-    lash_core::testing::conformance::unbound_session_meta_refuses_ambiguous_resolution(
+    lash_conformance::unbound_session_meta_refuses_ambiguous_resolution(
         "SQLite",
         unbound.load_session_meta(),
     )

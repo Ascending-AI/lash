@@ -4,12 +4,12 @@ use super::InMemorySessionStore;
 use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
-    #[cfg(test)]
-    pub(crate) fn inject_graph_corruption_for_testing(
+    #[cfg(any(test, feature = "testing"))]
+    pub fn inject_graph_corruption_for_testing(
         &self,
-        target: &crate::testing::conformance::GraphIntegrityTarget,
+        target: &crate::testing::graph_integrity::GraphIntegrityTarget,
     ) {
-        use crate::testing::conformance::{GraphIntegrityCorruption, GraphIntegrityRead};
+        use crate::testing::graph_integrity::{GraphIntegrityCorruption, GraphIntegrityRead};
 
         if target.corruption == GraphIntegrityCorruption::DanglingLeafId {
             self.session_head_meta
@@ -71,10 +71,8 @@ impl InMemorySessionStore {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn load_whole_graph_for_testing(
-        &self,
-    ) -> Result<crate::SessionGraph, crate::StoreError> {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn load_whole_graph_for_testing(&self) -> Result<crate::SessionGraph, crate::StoreError> {
         let leaf_node_id = self
             .session_head_meta
             .lock()
@@ -371,6 +369,17 @@ impl crate::store::ConformanceSessionStoreFactory for super::InMemorySessionStor
         Ok(self
             .open_existing_in_memory_store(request)
             .map(|store| store as std::sync::Arc<dyn crate::store::ConformancePersistence>))
+    }
+}
+
+impl InMemorySessionStore {
+    pub fn bind_session_for_conformance(&self, session_id: &str) {
+        *self.bound_session_id.lock_recover() = Some(session_id.to_string());
+        *self.session_meta.lock_recover() = Some(crate::SessionMeta {
+            pending_observer_intents: Vec::new(),
+            session_id: session_id.to_string(),
+            relation: crate::SessionRelation::Root,
+        });
     }
 }
 

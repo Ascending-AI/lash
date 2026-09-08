@@ -706,11 +706,11 @@ impl std::fmt::Debug for QueuedLaneHolder {
 }
 
 impl QueuedLaneHolder {
-    pub(crate) fn new(holder: crate::store::SessionExecutionLease) -> Self {
+    pub fn new(holder: crate::store::SessionExecutionLease) -> Self {
         Self(holder)
     }
 
-    pub(crate) fn lease(&self) -> &crate::store::SessionExecutionLease {
+    pub fn lease(&self) -> &crate::store::SessionExecutionLease {
         &self.0
     }
 

@@ -674,10 +674,10 @@ pub struct QueuedWorkClaimData {
     /// this successor claim is abandoned. This is claim-control metadata, not
     /// durable protocol payload, so it is deliberately omitted from serde.
     #[serde(skip)]
-    pub(crate) abandon_restore_claim_id: Option<String>,
+    pub abandon_restore_claim_id: Option<String>,
     /// Interrupted predecessor token paired with `abandon_restore_claim_id`.
     #[serde(skip)]
-    pub(crate) abandon_restore_claim_token: Option<Box<str>>,
+    pub abandon_restore_claim_token: Option<Box<str>>,
 }
 
 /// A shared work claim carrying queued-work batches.

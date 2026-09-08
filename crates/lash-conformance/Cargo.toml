@@ -1,0 +1,33 @@
+[package]
+name = "lash-internal-conformance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Backend certification laws for Lash stores"
+
+[lib]
+name = "lash_conformance"
+
+[lints]
+workspace = true
+
+[dependencies]
+lashlang = { workspace = true, features = ["testing"] }
+lash-core = { workspace = true, features = ["testing"] }
+lash-sansio = { workspace = true, features = ["schema-validation"] }
+async-trait.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+serde.workspace = true
+serde_json.workspace = true
+futures-util.workspace = true
+uuid.workspace = true
+proptest = "1"
+tokio-util.workspace = true
+sha2.workspace = true
+chrono.workspace = true
+rmp-serde.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -44,6 +44,7 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 
 [dev-dependencies]
+lash-conformance.workspace = true
 insta = "1"
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-provider-auth = { workspace = true }

@@ -114,8 +114,8 @@ impl InMemoryTriggerStore {
             .contains_key(operation_id)
     }
 
-    #[cfg(test)]
-    pub(crate) fn inject_revision_for_testing(&self, subscription_id: &str, value: i64) {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn inject_revision_for_testing(&self, subscription_id: &str, value: i64) {
         assert!(value >= 0, "in-memory trigger revisions cannot be negative");
         self.state
             .lock_recover()
@@ -125,8 +125,8 @@ impl InMemoryTriggerStore {
             .revision = value as u64;
     }
 
-    #[cfg(test)]
-    pub(crate) fn revision_snapshot_for_testing(&self, subscription_id: &str) -> String {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn revision_snapshot_for_testing(&self, subscription_id: &str) -> String {
         let state = self.state.lock_recover();
         let record = state
             .subscriptions

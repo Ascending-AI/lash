@@ -315,7 +315,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             if entry.input.session_id == claim.session_id
                 && entry.claim.owned_by(&claim.claim_id, &claim.lease_token)
             {
-                #[cfg(test)]
+                #[cfg(any(test, feature = "testing"))]
                 self.abandoned_turn_input_claim_count
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if matches!(entry.input.state, crate::TurnInputState::Accepted) {

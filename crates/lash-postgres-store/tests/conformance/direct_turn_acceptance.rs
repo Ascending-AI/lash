@@ -18,12 +18,10 @@ async fn postgres_direct_turn_accepts_before_driving_when_configured() {
         return;
     };
     reset(&storage).await;
-    Box::pin(
-        lash_core::testing::conformance::direct_turn_accepts_before_driving(
-            "postgres",
-            Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-        ),
-    )
+    Box::pin(lash_conformance::direct_turn_accepts_before_driving(
+        "postgres",
+        Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
+    ))
     .await;
 }
 
@@ -35,7 +33,7 @@ async fn postgres_orphaned_direct_turn_input_is_drivable_by_another_worker_when_
     };
     reset(&storage).await;
     Box::pin(
-        lash_core::testing::conformance::orphaned_direct_turn_input_is_drivable_by_another_worker(
+        lash_conformance::orphaned_direct_turn_input_is_drivable_by_another_worker(
             "postgres",
             Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
         ),
@@ -51,7 +49,7 @@ async fn postgres_direct_turn_acceptance_mints_no_idempotency_key_when_configure
     };
     reset(&storage).await;
     Box::pin(
-        lash_core::testing::conformance::direct_turn_acceptance_mints_no_idempotency_key(
+        lash_conformance::direct_turn_acceptance_mints_no_idempotency_key(
             "postgres",
             Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
         ),
@@ -67,7 +65,7 @@ async fn postgres_unclaimed_turn_input_settlement_is_a_conditional_write_when_co
     };
     reset(&storage).await;
     Box::pin(
-        lash_core::testing::conformance::unclaimed_turn_input_settlement_is_a_conditional_write(
+        lash_conformance::unclaimed_turn_input_settlement_is_a_conditional_write(
             "postgres",
             Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
         ),
@@ -86,7 +84,7 @@ async fn postgres_busy_execution_lane_refuses_direct_turn_before_acceptance_when
     };
     reset(&storage).await;
     Box::pin(
-        lash_core::testing::conformance::busy_execution_lane_refuses_direct_turn_before_acceptance(
+        lash_conformance::busy_execution_lane_refuses_direct_turn_before_acceptance(
             "postgres",
             Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
         ),

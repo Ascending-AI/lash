@@ -1,4 +1,5 @@
 [package]
+autobins = false
 name = "lash-internal-sqlite-store"
 autotests = false
 version.workspace = true
@@ -45,6 +46,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+lash-conformance.workspace = true
 lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = ".", features = ["testing"] }
@@ -53,11 +55,6 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tracing-subscriber = { workspace = true }
 
-[[bin]]
-name = "sqlite-await-event-helper"
-path = "src/bin/sqlite-await-event-helper.rs"
-required-features = ["testing"]
-test = false
 
 [[test]]
 name = "integration"
@@ -75,3 +72,9 @@ path = "tests/process_change_horizon.rs"
 [[test]]
 name = "durable_read_fixture"
 path = "tests/durable_read_fixture.rs"
+
+# Recovery subprocesses use certification fixtures only as dev dependencies.
+[[example]]
+name = "sqlite-await-event-helper"
+path = "src/bin/sqlite-await-event-helper.rs"
+required-features = ["testing"]

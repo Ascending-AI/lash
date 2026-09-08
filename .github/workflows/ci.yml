@@ -783,6 +783,10 @@ jobs:
 
       - name: Archive workspace tests
         run: |
+          # Recovery helpers use dev-only certification fixtures.
+          # shellcheck disable=SC2086
+          cargo build --workspace --locked ${LASH_CI_FEATURES} \
+            --example sqlite-await-event-helper --example postgres-await-event-helper
           # shellcheck disable=SC2086
           cargo nextest archive --workspace --locked ${LASH_CI_FEATURES} \
             --archive-file "${RUNNER_TEMP}/lash-nextest.tar.zst"

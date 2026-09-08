@@ -16,8 +16,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use lash_conformance::{DrainWorld, DrainWorldFactory, DrainWorldSpec};
 use lash_core::EffectHost;
-use lash_core::testing::conformance::{DrainWorld, DrainWorldFactory, DrainWorldSpec};
 use lash_sqlite_store::{SqliteEffectHost, SqliteEffectReplayOptions};
 
 /// A world over one database file.
@@ -58,5 +58,5 @@ async fn sqlite_effect_host_satisfies_the_loser_drain_contract() {
         let path = path.clone();
         Box::pin(async move { world(path, spec).await })
     });
-    lash_core::testing::conformance::store_effect_group_drain_conformance(make).await;
+    lash_conformance::store_effect_group_drain_conformance(make).await;
 }

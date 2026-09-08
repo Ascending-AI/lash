@@ -1241,7 +1241,7 @@ async fn write_stdin_projects_the_recorded_terminal_target_refusal() {
     )
     .expect("build production-shaped intent controller");
     let processes: Arc<dyn lash_core::ProcessService> = service;
-    let completed = lash_core::testing::conformance::coordinate_tool_provider_with_services(
+    let completed = lash_conformance::coordinate_tool_provider_with_services(
         scope,
         processes,
         "test-session",
@@ -1291,7 +1291,7 @@ async fn write_stdin_projects_the_recorded_absent_target_discriminator() {
     )
     .expect("build production-shaped intent controller");
     let processes: Arc<dyn lash_core::ProcessService> = service;
-    let completed = lash_core::testing::conformance::coordinate_tool_provider_with_services(
+    let completed = lash_conformance::coordinate_tool_provider_with_services(
         scope,
         processes,
         "test-session",
@@ -1360,7 +1360,7 @@ async fn write_stdin_projects_the_recorded_pruned_target_discriminator() {
     )
     .expect("build production-shaped intent controller");
     let processes: Arc<dyn lash_core::ProcessService> = service;
-    let completed = lash_core::testing::conformance::coordinate_tool_provider_with_services(
+    let completed = lash_conformance::coordinate_tool_provider_with_services(
         scope,
         processes,
         "test-session",
@@ -1409,7 +1409,7 @@ async fn write_stdin_projects_the_recorded_signal_sequence() {
     )
     .expect("build production-shaped intent controller");
     let processes: Arc<dyn lash_core::ProcessService> = service;
-    let completed = lash_core::testing::conformance::coordinate_tool_provider_with_services(
+    let completed = lash_conformance::coordinate_tool_provider_with_services(
         scope,
         processes,
         "test-session",

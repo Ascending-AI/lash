@@ -1508,7 +1508,7 @@ where
 }
 
 #[cfg(any(test, feature = "testing"))]
-pub(crate) async fn reconcile_pruned_trigger_deliveries_interleaved<F, Fut>(
+pub async fn reconcile_pruned_trigger_deliveries_interleaved<F, Fut>(
     registry: &dyn ProcessRegistry,
     trigger_store: &dyn crate::TriggerStore,
     session_store_factory: Option<&dyn crate::SessionStoreFactory>,

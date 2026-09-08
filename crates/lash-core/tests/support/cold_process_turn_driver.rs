@@ -9,9 +9,6 @@ pub async fn run_real_turn_action(
     nonce: &str,
     marker: Option<std::path::PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    lash_core::testing::conformance::cold_process_real_turn_driver(
-        store, controller, nonce, action, marker,
-    )
-    .await;
+    lash_conformance::cold_process_real_turn_driver(store, controller, nonce, action, marker).await;
     Ok(())
 }

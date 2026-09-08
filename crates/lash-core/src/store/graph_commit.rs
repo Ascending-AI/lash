@@ -1,7 +1,7 @@
 use super::{GraphAppend, OperationId, StoreError, derive_history_node_id};
 
 impl GraphAppend {
-    pub(crate) fn derive_node_ids(
+    pub fn derive_node_ids(
         &mut self,
         session_id: &str,
         operation: &OperationId,

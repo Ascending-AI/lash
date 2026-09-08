@@ -155,7 +155,7 @@ echo "scenario 3 evidence: model process tools were filtered while host list/sig
 
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
   cargo test --locked -p lash-internal-postgres-store --test conformance \
-  postgres_runtime_persistence_satisfies_conformance_when_configured \
+  queued_work_join_groups_by_delivery_policy_and_merge_key \
   -- --nocapture --test-threads=1 \
   2>&1 | tee "$artifact_dir/04-wake-turn-policy.log" | tee -a "$test_output"
 echo "scenario 4 evidence: EachWake produced separate claims and Coalesce produced one multi-batch claim on PostgreSQL" | tee -a "$test_output"

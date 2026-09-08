@@ -71,7 +71,7 @@ const MAX_SLICE_MS: u64 = 500;
 
 /// Why a durable queued drain stopped waiting for the session lane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum QueuedLaneGiveUp {
+pub enum QueuedLaneGiveUp {
     /// The holder renewed its lease under an unchanged identity triple.
     HolderIsAlive,
     /// The total in-process wait budget elapsed.
@@ -81,7 +81,7 @@ pub(crate) enum QueuedLaneGiveUp {
 }
 
 impl QueuedLaneGiveUp {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::HolderIsAlive => "holder_is_alive",
             Self::WaitBudgetExhausted => "wait_budget_exhausted",
@@ -92,7 +92,7 @@ impl QueuedLaneGiveUp {
 
 /// What the drain does with one observed busy holder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum QueuedLaneWaitStep {
+pub enum QueuedLaneWaitStep {
     /// Sleep this long, then re-claim.
     Wait { slice_ms: u64 },
     /// Stop waiting and report the typed retryable error.
@@ -101,7 +101,7 @@ pub(crate) enum QueuedLaneWaitStep {
 
 /// The per-drain wait state: one instance spans one drain's Busy rounds.
 #[derive(Debug, Default)]
-pub(crate) struct QueuedLaneWait {
+pub struct QueuedLaneWait {
     budget_ms: u64,
     slice_ms: u64,
     waited_ms: u64,
@@ -110,18 +110,18 @@ pub(crate) struct QueuedLaneWait {
 
 impl QueuedLaneWait {
     /// Total waiting this drain has already committed to, in milliseconds.
-    pub(crate) fn waited_ms(&self) -> u64 {
+    pub fn waited_ms(&self) -> u64 {
         self.waited_ms
     }
 
     /// Total budget fixed from the first observed holder's persisted term.
     #[cfg(test)]
-    pub(crate) fn budget_ms(&self) -> u64 {
+    pub fn budget_ms(&self) -> u64 {
         self.budget_ms
     }
 
     /// Decide what to do with `holder`, the busy holder this round observed.
-    pub(crate) fn observe(&mut self, holder: &QueuedLaneHolder) -> QueuedLaneWaitStep {
+    pub fn observe(&mut self, holder: &QueuedLaneHolder) -> QueuedLaneWaitStep {
         match self.previous.take() {
             None => {
                 self.budget_ms = holder

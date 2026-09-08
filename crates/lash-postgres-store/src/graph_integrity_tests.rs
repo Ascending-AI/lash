@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
-use lash_core::testing::conformance::{
+use lash_conformance::{
     GraphIntegrityCorruption, GraphIntegrityHandles, GraphIntegrityInjector, GraphIntegrityRead,
     GraphIntegrityTarget,
 };
@@ -176,7 +176,7 @@ async fn postgres_graph_integrity_conformance_when_configured() {
             .expect("connect Postgres graph-integrity storage"),
     );
     reset_graph_integrity_storage(&storage).await;
-    lash_core::testing::conformance::graph_integrity_conformance(|case| {
+    lash_conformance::graph_integrity_conformance(|case| {
         let storage = Arc::clone(&storage);
         async move {
             reset_graph_integrity_storage(&storage).await;

@@ -27,7 +27,7 @@ mod session_binding;
 mod session_execution_lease;
 use session_execution_lease::{InMemorySessionExecutionLease, Lease};
 mod state_version;
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) mod test_support;
 #[cfg(any(test, feature = "testing"))]
 mod testing_access;
@@ -201,54 +201,54 @@ pub struct InMemorySessionStore {
     /// same factory owns because the digest is factory-global: the writer's
     /// intent insert and the sweeper's condemn CAS must meet here.
     pub(crate) attachment_condemnations: SharedAttachmentCondemnations,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     claim_after_lease_validation_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     fail_next_exact_queue_claim: std::sync::atomic::AtomicBool,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     drop_next_list_queued_work_batch: std::sync::atomic::AtomicBool,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     drop_next_list_pending_queued_work_batch: std::sync::atomic::AtomicBool,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     list_pending_queued_work_count: std::sync::atomic::AtomicUsize,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     load_session_count: std::sync::atomic::AtomicUsize,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     load_session_head_meta_count: std::sync::atomic::AtomicUsize,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     fail_next_load_session_head_meta: std::sync::atomic::AtomicBool,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     fail_load_session_on_call: Mutex<Option<usize>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     checkpoint_probe_count: std::sync::atomic::AtomicUsize,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     checkpoint_write_transaction_count: std::sync::atomic::AtomicUsize,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     commit_write_transaction_count: std::sync::atomic::AtomicUsize,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     fail_next_runtime_commit: Mutex<Option<crate::StoreError>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     fail_next_runtime_commit_after_first_mutation: Mutex<Option<crate::StoreError>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     fail_next_session_execution_lease_renewal: Mutex<Option<crate::StoreError>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     force_next_session_execution_lease_renewal_zero_match: std::sync::atomic::AtomicBool,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     next_session_execution_lease_renewal_response: Mutex<Option<crate::SessionExecutionLease>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     session_execution_lease_renewal_count: std::sync::atomic::AtomicUsize,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     session_execution_lease_release_gate:
         Mutex<Option<Arc<test_support::SessionExecutionLeaseReleaseGate>>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     session_execution_lease_release_attempt_count: std::sync::atomic::AtomicUsize,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     raw_counter_defects: Mutex<HashMap<String, i64>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     abandoned_turn_input_claim_count: std::sync::atomic::AtomicUsize,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) session_admission_count: std::sync::atomic::AtomicUsize,
 }
 
@@ -342,54 +342,54 @@ impl InMemorySessionStore {
             turn_cancel_requests: Mutex::new(HashMap::new()),
             attachment_manifest: Mutex::new(HashMap::new()),
             attachment_condemnations,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             claim_after_lease_validation_hook: Mutex::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             fail_next_exact_queue_claim: std::sync::atomic::AtomicBool::new(false),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             drop_next_list_queued_work_batch: std::sync::atomic::AtomicBool::new(false),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             drop_next_list_pending_queued_work_batch: std::sync::atomic::AtomicBool::new(false),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             list_pending_queued_work_count: std::sync::atomic::AtomicUsize::new(0),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             load_session_count: std::sync::atomic::AtomicUsize::new(0),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             load_session_head_meta_count: std::sync::atomic::AtomicUsize::new(0),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             fail_next_load_session_head_meta: std::sync::atomic::AtomicBool::new(false),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             fail_load_session_on_call: Mutex::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             checkpoint_probe_count: std::sync::atomic::AtomicUsize::new(0),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             checkpoint_write_transaction_count: std::sync::atomic::AtomicUsize::new(0),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             commit_write_transaction_count: std::sync::atomic::AtomicUsize::new(0),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             fail_next_runtime_commit: Mutex::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             fail_next_runtime_commit_after_first_mutation: Mutex::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             fail_next_session_execution_lease_renewal: Mutex::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             force_next_session_execution_lease_renewal_zero_match:
                 std::sync::atomic::AtomicBool::new(false),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             next_session_execution_lease_renewal_response: Mutex::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             session_execution_lease_renewal_count: std::sync::atomic::AtomicUsize::new(0),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             session_execution_lease_release_gate: Mutex::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             session_execution_lease_release_attempt_count: std::sync::atomic::AtomicUsize::new(0),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             raw_counter_defects: Mutex::new(HashMap::new()),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize::new(0),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             abandoned_turn_input_claim_count: std::sync::atomic::AtomicUsize::new(0),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             session_admission_count: std::sync::atomic::AtomicUsize::new(0),
         }
     }
@@ -509,7 +509,7 @@ impl InMemorySessionStore {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.run_claim_after_lease_validation_hook();
         self.claim_ready_queued_work_after_lease_validation(
             session_id,
@@ -699,7 +699,7 @@ impl InMemorySessionStore {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.run_claim_after_lease_validation_hook();
         self.claim_pending_turn_inputs_after_lease_validation(
             session_id,
@@ -903,14 +903,14 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         &self,
     ) -> Result<Option<crate::store::PersistedSessionRead>, crate::store::StoreError> {
         self.guard_session_payload_in_memory()?;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.refuse_injected_counter_defect("session_head_revision")?;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         let load_call = self
             .load_session_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             + 1;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         if self
             .fail_load_session_on_call
             .lock_recover()
@@ -1005,12 +1005,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         &self,
     ) -> Result<Option<crate::SessionHeadMeta>, crate::StoreError> {
         self.read_session_state_version().await?;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.refuse_injected_counter_defect("session_head_revision")?;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.load_session_head_meta_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         if self
             .fail_next_load_session_head_meta
             .swap(false, std::sync::atomic::Ordering::SeqCst)
@@ -1045,7 +1045,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         let session_id = commit.session_id.clone();
         let transaction_now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.commit_write_transaction_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.ensure_session_not_deleted(&session_id)?;
@@ -1054,7 +1054,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             // that serialization is intentional for the development backend.
             self.verify_session_execution_lease(&session_id, fence, transaction_now)?;
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         if let Some(error) = self.fail_next_runtime_commit.lock_recover().take() {
             return Err(error);
         }
@@ -1064,7 +1064,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         self.ensure_session_metadata_for_commit(commit)?;
         let mut meta = self.session_head_meta.lock_recover();
         let actual = meta.as_ref().map_or(0, |meta| meta.head_revision);
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         self.fail_after_first_runtime_commit_mutation_if_requested(
             session_meta_before_commit.clone(),
         )?;
@@ -1561,3 +1561,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         Ok(self.session_meta.lock_recover().clone())
     }
 }
+
+#[cfg(any(test, feature = "testing"))]
+pub use factory::lineage_conformance_support::handles as in_memory_lineage_handles;

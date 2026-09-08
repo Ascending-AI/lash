@@ -9,9 +9,6 @@ pub use process_identity::deterministic_lashlang_process_id;
 mod typescript_runtime;
 pub use typescript_runtime::{is_typescript_runtime_receiver, journaled_typescript_runtime_value};
 
-#[cfg(feature = "testing")]
-pub mod testing;
-
 pub use lash_trace::{
     TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
     TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,

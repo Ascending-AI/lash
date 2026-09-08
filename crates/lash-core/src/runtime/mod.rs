@@ -41,11 +41,11 @@ pub use session_catalog::*;
 pub(crate) mod session_execution_lease;
 mod session_manager;
 #[cfg(any(test, feature = "testing"))]
-pub(crate) use session_manager::append_receipt_mixed_usage_envelope_conformance;
+pub use session_manager::append_receipt_mixed_usage_envelope_conformance;
 #[cfg(any(test, feature = "testing"))]
-pub(crate) use session_manager::append_usage_cancellation_exactly_once_conformance;
+pub use session_manager::append_usage_cancellation_exactly_once_conformance;
 #[cfg(any(test, feature = "testing"))]
-pub(crate) use session_manager::{
+pub use session_manager::{
     PendingTokenLedgerEntry, StagedTokenLedger, record_token_usage_shared,
     stage_token_ledger_shared,
 };
@@ -208,7 +208,7 @@ pub use observation::{
     SessionProcessEventKind, SessionQueueEventKind, SessionResume, SessionRevision,
 };
 #[cfg(any(test, feature = "testing"))]
-pub(crate) use process::reconcile_pruned_trigger_deliveries_interleaved;
+pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;
 pub use process::{
     AbandonEvidence, AbandonRequest, AbandonWriter, DEFAULT_WAKE_DELIVERY_EXPIRY_MS,
@@ -261,13 +261,12 @@ pub use process_worker::{
     ProcessDrainReport, ProcessExecutionConcurrencyError, ProcessRecoveryAttemptOutcome,
     ProcessRecoveryOperation, ProcessWorkerFault, WorkerProcessWork,
 };
+pub use queued_drain_policy::default_queued_drain_policy;
 pub use queued_drain_policy::{
     DrainMode, DrainModePolicy, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
     QueuedDrainSelection,
 };
-pub(crate) use queued_drain_policy::{
-    default_queued_drain_policy, exact_selection_drain_policy, shared_drain_mode_policy,
-};
+pub(crate) use queued_drain_policy::{exact_selection_drain_policy, shared_drain_mode_policy};
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use session_manager::DirectCompletionClient;
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
@@ -1476,3 +1475,6 @@ pub struct LashRuntime {
     /// reconstruct this session in another runtime.
     pub(in crate::runtime) materialized_protocol_config_dirty: bool,
 }
+
+#[cfg(any(test, feature = "testing"))]
+pub use in_memory_store::in_memory_lineage_handles;

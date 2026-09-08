@@ -282,7 +282,7 @@ async fn postgres_unbound_session_meta_refuses_ambiguous_resolution() {
         .unwrap_or_else(|error| panic!("seed `{session_id}` metadata: {error}"));
     }
 
-    lash_core::testing::conformance::unbound_session_meta_refuses_ambiguous_resolution(
+    lash_conformance::unbound_session_meta_refuses_ambiguous_resolution(
         "PostgreSQL",
         crate::session_meta::load_session_meta(storage.pool(), None),
     )
@@ -972,7 +972,7 @@ async fn checkpoint_probe_skips_writes_for_deferred_head_when_configured() {
         .expect("connect checkpoint counter storage");
     let session_id = format!("postgres-checkpoint-counter:{}", std::process::id());
     let store = Arc::new(storage.session_store(&session_id));
-    lash_core::testing::conformance::checkpoint_claim_probe_transaction_counts(
+    lash_conformance::checkpoint_claim_probe_transaction_counts(
         Arc::clone(&store) as Arc<dyn RuntimePersistence>,
         &session_id,
         || store.checkpoint_claim_counts(),

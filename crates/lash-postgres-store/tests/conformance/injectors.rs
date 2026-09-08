@@ -8,7 +8,7 @@ pub(crate) struct PostgresLegacyTriggerMutationReceiptInjector {
 }
 
 #[async_trait::async_trait]
-impl lash_core::testing::conformance::LegacyTriggerMutationReceiptInjector
+impl lash_conformance::LegacyTriggerMutationReceiptInjector
     for PostgresLegacyTriggerMutationReceiptInjector
 {
     async fn insert_legacy_receipt(

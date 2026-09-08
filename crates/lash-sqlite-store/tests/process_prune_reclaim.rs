@@ -15,7 +15,7 @@ struct SqliteProcessPruneBlobProbe {
 }
 
 #[async_trait::async_trait]
-impl lash_core::testing::conformance::SessionDeleteBlobProbe for SqliteProcessPruneBlobProbe {
+impl lash_conformance::SessionDeleteBlobProbe for SqliteProcessPruneBlobProbe {
     async fn blob_exists(&self, blob_ref: &lash_core::BlobRef) -> bool {
         rusqlite::Connection::open(&self.path)
             .expect("open SQLite process-prune blob probe")
@@ -51,7 +51,7 @@ impl lash_core::testing::conformance::SessionDeleteBlobProbe for SqliteProcessPr
 #[tokio::test]
 async fn sqlite_process_prune_reclaims_tombstones_owned_by_deleted_sessions() {
     let (_dir, factory, registry) = backend().await;
-    lash_core::testing::conformance::process_prune_reclaims_tombstones_owned_by_deleted_sessions(
+    lash_conformance::process_prune_reclaims_tombstones_owned_by_deleted_sessions(
         factory, registry,
     )
     .await;
@@ -60,10 +60,7 @@ async fn sqlite_process_prune_reclaims_tombstones_owned_by_deleted_sessions() {
 #[tokio::test]
 async fn sqlite_process_prune_records_deletions_for_later_reclaim() {
     let (_dir, factory, registry) = backend().await;
-    lash_core::testing::conformance::process_prune_records_deletions_for_later_reclaim(
-        factory, registry,
-    )
-    .await;
+    lash_conformance::process_prune_records_deletions_for_later_reclaim(factory, registry).await;
 }
 
 #[tokio::test]
@@ -72,7 +69,7 @@ async fn sqlite_process_prune_reclaims_checkpoint_blobs_and_propagates_failure()
     let probe = Arc::new(SqliteProcessPruneBlobProbe {
         path: dir.path().join("sessions/durable-core.db"),
     });
-    lash_core::testing::conformance::process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
+    lash_conformance::process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
         "sqlite", factory, registry, probe,
     )
     .await;
@@ -84,7 +81,7 @@ async fn sqlite_process_prune_reclaims_content_aliased_checkpoint_roots() {
     let probe = Arc::new(SqliteProcessPruneBlobProbe {
         path: dir.path().join("sessions/durable-core.db"),
     });
-    lash_core::testing::conformance::process_prune_reclaims_content_aliased_checkpoint_roots(
+    lash_conformance::process_prune_reclaims_content_aliased_checkpoint_roots(
         "sqlite", factory, registry, probe,
     )
     .await;

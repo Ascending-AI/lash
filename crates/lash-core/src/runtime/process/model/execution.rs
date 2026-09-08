@@ -301,7 +301,7 @@ impl ProcessCompletionOutcome {
         }
     }
 
-    pub(crate) fn stored(&self) -> &ProcessRecord {
+    pub fn stored(&self) -> &ProcessRecord {
         match self {
             Self::Committed(record)
             | Self::AlreadyApplied { stored: record }
