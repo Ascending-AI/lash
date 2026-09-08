@@ -574,6 +574,7 @@ fn provider(config: &Config, ledger: &SpendLedger) -> ProviderHandle {
     compat.request_fields = Some(false);
     compat.provider_routing = Some(ProviderRoutingPrefs {
         require_parameters: true,
+        ..ProviderRoutingPrefs::default()
     });
     let components = OpenAiCompatibleProvider::new(config.api_key.clone(), OPENROUTER_BASE_URL)
         .with_compat(compat)

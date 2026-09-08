@@ -46,6 +46,12 @@ pub struct ProviderRoutingPrefs {
     /// under a nominal `finish_reason: "stop"`, so the structured-output
     /// contract fails only at parse time.
     pub require_parameters: bool,
+    /// Route only to upstream providers with zero data retention.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub zdr: bool,
+    /// Restrict routing to the named upstream provider slugs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub only: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
