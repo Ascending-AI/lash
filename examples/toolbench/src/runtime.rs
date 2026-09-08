@@ -183,13 +183,7 @@ async fn run_turn(
     let session_id = format!("toolbench-{run}-{}-{}", dialect.language_id(), task.id);
     let session = core
         .session(session_id)
-        .plugin_option(
-            lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-            lash::rlm::RlmCreateExtras {
-                dialect: Some(dialect),
-                ..lash::rlm::RlmCreateExtras::default()
-            },
-        )
+        .plugin_option(lash::rlm::RLM_PROTOCOL_PLUGIN_ID, session_options(dialect))
         .context("encode dialect session option")?
         .open()
         .await
@@ -257,5 +251,28 @@ pub(crate) async fn preflight(
         Err(evidence
             .completion_error
             .unwrap_or_else(|| "native one-call probe did not finish with 1".to_string()))
+    }
+}
+
+fn session_options(dialect: lash::rlm::RlmDialect) -> lash::rlm::RlmCreateExtras {
+    lash::rlm::RlmCreateExtras {
+        dialect: Some(dialect),
+        final_answer_format: Some(lash::rlm::RlmFinalAnswerFormat::RawFinalValue),
+        ..lash::rlm::RlmCreateExtras::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn benchmark_sessions_use_raw_finish_values_for_every_dialect() {
+        for dialect in lash::rlm::RlmDialect::ALL {
+            let options = super::session_options(dialect);
+            assert_eq!(options.dialect, Some(dialect));
+            assert_eq!(
+                options.final_answer_format,
+                Some(lash::rlm::RlmFinalAnswerFormat::RawFinalValue)
+            );
+        }
     }
 }
