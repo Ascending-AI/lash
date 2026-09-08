@@ -24,6 +24,8 @@ pub(crate) async fn run_task(
     channel: lash::rlm::RlmChannel,
 ) -> (World, RunEvidence) {
     let started = std::time::Instant::now();
+    // Every run owns its world, telemetry, provider and in-memory stores. No
+    // process environment mutations, listeners or filesystem stores are used.
     let telemetry = Arc::new(crate::telemetry::Telemetry::default());
     let world = SharedWorld::new(task.seed.clone());
     let result = tokio::time::timeout(

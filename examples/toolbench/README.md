@@ -45,3 +45,12 @@ not a guarantee that later model runs will pass.
 The pack contains five admitted tasks: weather temperature, weather condition,
 KV read, mail count, and weather-to-KV. Three paired repetitions across both
 dialects produce 60 task rows per model.
+
+Use `--concurrency N` to bound simultaneous task runs (default 1, preserving
+serial execution). Start at 4–8 for OpenRouter: rate limits belong to the model
+route. A single serial native preflight runs before the fan-out; each task owns
+its world, telemetry and in-memory stores, and retains its 120-second timeout.
+Attempt and task rows stream to stdout and `--results-file` as runs complete;
+stdout ends with the aggregate JSON result. The stderr table is printed once,
+sorted by repetition, dialect, task and channel. For example, add
+`--concurrency 8` to the paired command above.

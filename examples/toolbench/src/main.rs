@@ -9,6 +9,8 @@ use clap::{Parser, ValueEnum};
 use serde::Serialize;
 use serde_json::Value;
 use std::io::Write as _;
+use std::sync::Arc;
+use tokio::sync::{Mutex, Semaphore};
 
 use crate::grading::grade;
 use crate::tasks::{Task, task_pack};
@@ -64,6 +66,9 @@ struct Args {
     paired: bool,
     #[arg(long, default_value_t = 1)]
     repetitions: usize,
+    /// Maximum simultaneous task runs; start at 4–8 for OpenRouter.
+    #[arg(long, default_value_t = 1)]
+    concurrency: usize,
     /// Per-provider-attempt machine-readable evidence, including retries.
     #[arg(long, default_value = "toolbench-results.jsonl")]
     results_file: std::path::PathBuf,
@@ -126,7 +131,7 @@ async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     let args = Args::parse();
     if args.runs == 0 || args.repetitions == 0 {
-        bail!("--runs must be at least 1");
+        bail!("--runs and --repetitions must be at least 1");
     }
     let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
     if api_key.trim().is_empty() {
@@ -134,27 +139,23 @@ async fn main() -> Result<()> {
     }
 
     let tasks = selected_tasks(args.task.as_deref())?;
-    let mut results = Vec::new();
-    let mut results_file =
-        std::fs::File::create(&args.results_file).context("create results JSONL")?;
-    let mut supported = Vec::new();
-    for &dialect in args.dialect.dialects() {
-        if (args.paired || args.channel == ChannelSelection::Native)
-            && let Err(reason) = runtime::preflight(&tasks[0], dialect, &args.model, &api_key).await
-        {
-            writeln!(
-                results_file,
-                "{}",
-                serde_json::json!({"kind":"excluded_route","route":"openrouter","model":args.model,"dialect":dialect.language_id(),"reason":reason})
-            )?;
-            eprintln!(
-                "excluded {} / {}: {reason}",
-                args.model,
-                dialect.language_id()
-            );
-            continue;
+    if args.concurrency == 0 {
+        bail!("--concurrency must be at least 1");
+    }
+    let writer =
+        Mutex::new(std::fs::File::create(&args.results_file).context("create results JSONL")?);
+    let supported = args.dialect.dialects();
+    // Capability is a route-level probe, performed once before any work starts.
+    if (args.paired || args.channel == ChannelSelection::Native)
+        && let Err(reason) =
+            runtime::preflight(&tasks[0], supported[0], &args.model, &api_key).await
+    {
+        let row = serde_json::json!({"kind":"excluded_route","route":"openrouter","model":args.model,"reason":reason});
+        write_row(&mut *writer.lock().await, &row)?;
+        if !args.allow_partial {
+            bail!("native route preflight failed: {reason}");
         }
-        supported.push(dialect);
+        return Ok(());
     }
     let runs = if args.paired {
         args.repetitions
@@ -162,67 +163,50 @@ async fn main() -> Result<()> {
         args.runs
     };
     let mut random = std::fs::File::open("/dev/urandom").context("open random order source")?;
-    for run in 1..=runs {
-        for &dialect in &supported {
-            for task in &tasks {
-                let mut channels = if args.paired {
-                    vec![ChannelSelection::Cell, ChannelSelection::Native]
-                } else {
-                    vec![args.channel]
-                };
-                let mut coin = [0u8];
-                std::io::Read::read_exact(&mut random, &mut coin)?;
-                if coin[0] & 1 == 1 {
-                    channels.reverse();
-                }
-                for channel in channels {
-                    eprintln!(
-                        "running {run}/{runs} {} {} {}",
-                        channel.name(),
-                        dialect.language_id(),
-                        task.id
-                    );
-                    let (final_world, evidence) = runtime::run_task(
-                        task,
-                        dialect,
-                        &args.model,
-                        &api_key,
-                        run,
-                        channel.channel(),
-                    )
-                    .await;
-                    let grade = grade(task, &final_world, &evidence);
-                    for attempt in &evidence.attempts {
-                        let mut row = attempt.clone();
-                        let fields = row.as_object_mut().expect("attempt is an object");
-                        fields.extend(serde_json::json!({"kind":"attempt", "task":task.id,"model":args.model,"route":"openrouter","dialect":dialect.language_id(),"channel":channel.name(),"repetition":run,"success":grade.passed,"grade":grade,"task_wall_ms":evidence.wall_ms}).as_object().expect("metadata object").clone());
-                        writeln!(results_file, "{row}")?;
-                    }
-                    writeln!(
-                        results_file,
-                        "{}",
-                        serde_json::json!({"kind":"task_result","task":task.id,"model":args.model,"route":"openrouter","dialect":dialect.language_id(),"channel":channel.name(),"repetition":run,"success":grade.passed,"grade":grade,"wall_ms":evidence.wall_ms})
-                    )?;
-                    results_file.flush()?;
-                    results.push(TaskResult {
-                        run,
-                        id: task.id.to_string(),
-                        dialect: dialect.language_id().to_string(),
-                        channel: channel.name().to_string(),
-                        wall_ms: evidence.wall_ms,
-                        passed: grade.passed,
-                        failure_reason: grade.failure_reason,
-                        iterations: evidence.iterations,
-                        tool_call_count: evidence.tool_call_count,
-                        failed_exec_iterations: evidence.failed_execution_errors.len(),
-                        finish_value: evidence.finish_value,
-                        seed: task.seed.clone(),
-                        checker: task.checker_description(),
-                    });
-                }
-            }
+    let work = build_work_list(&tasks, supported, runs, args.paired, args.channel, || {
+        let mut coin = [0u8];
+        std::io::Read::read_exact(&mut random, &mut coin)?;
+        Ok(coin[0] & 1 == 1)
+    })?;
+    let mut results = run_work_list(work, args.concurrency, |item| {
+        let tasks = &tasks;
+        let args = &args;
+        let api_key = &api_key;
+        let writer = &writer;
+        async move {
+        let task = &tasks[item.task_index];
+        let (final_world, evidence) = runtime::run_task(
+            task, item.dialect, &args.model, api_key, item.run, item.channel.channel(),
+        ).await;
+        let grade = grade(task, &final_world, &evidence);
+        let mut file = writer.lock().await;
+        for attempt in &evidence.attempts {
+            let mut row = attempt.clone();
+            let fields = row.as_object_mut().expect("attempt is an object");
+            fields.extend(serde_json::json!({"kind":"attempt", "task":task.id,"model":args.model,"route":"openrouter","dialect":item.dialect.language_id(),"channel":item.channel.name(),"repetition":item.run,"success":grade.passed,"grade":grade,"task_wall_ms":evidence.wall_ms}).as_object().expect("metadata object").clone());
+            write_row(&mut file, &row)?;
         }
-    }
+        write_row(&mut file, &serde_json::json!({"kind":"task_result","task":task.id,"model":args.model,"route":"openrouter","dialect":item.dialect.language_id(),"channel":item.channel.name(),"repetition":item.run,"success":grade.passed,"grade":grade,"wall_ms":evidence.wall_ms}))?;
+        file.flush()?;
+        Ok(TaskResult {
+            run: item.run,
+            id: task.id.to_string(),
+            dialect: item.dialect.language_id().to_string(),
+            channel: item.channel.name().to_string(),
+            wall_ms: evidence.wall_ms,
+            passed: grade.passed,
+            failure_reason: grade.failure_reason,
+            iterations: evidence.iterations,
+            tool_call_count: evidence.tool_call_count,
+            failed_exec_iterations: evidence.failed_execution_errors.len(),
+            finish_value: evidence.finish_value,
+            seed: task.seed.clone(),
+            checker: task.checker_description(),
+        })
+    }}).await?;
+    results.sort_by(|a, b| {
+        (a.run, &a.dialect, &a.id, &a.channel).cmp(&(b.run, &b.dialect, &b.id, &b.channel))
+    });
     print_table(&results);
     let summaries = summarize(&results);
     let all_passed = !results.is_empty() && results.iter().all(|result| result.passed);
@@ -241,6 +225,99 @@ async fn main() -> Result<()> {
         bail!("one or more toolbench tasks failed");
     }
     Ok(())
+}
+
+fn write_row(file: &mut std::fs::File, row: &Value) -> Result<()> {
+    writeln!(file, "{row}")?;
+    let mut stdout = std::io::stdout().lock();
+    writeln!(stdout, "{row}")?;
+    stdout.flush()?;
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WorkItem {
+    run: usize,
+    dialect: lash::rlm::RlmDialect,
+    task_index: usize,
+    channel: ChannelSelection,
+}
+
+fn build_work_list(
+    tasks: &[Task],
+    dialects: &[lash::rlm::RlmDialect],
+    runs: usize,
+    paired: bool,
+    channel: ChannelSelection,
+    mut reverse_pair: impl FnMut() -> Result<bool>,
+) -> Result<Vec<WorkItem>> {
+    let mut work = Vec::new();
+    for run in 1..=runs {
+        for &dialect in dialects {
+            for task_index in 0..tasks.len() {
+                let channels = if paired {
+                    if reverse_pair()? {
+                        vec![ChannelSelection::Native, ChannelSelection::Cell]
+                    } else {
+                        vec![ChannelSelection::Cell, ChannelSelection::Native]
+                    }
+                } else {
+                    vec![channel]
+                };
+                work.extend(channels.into_iter().map(|channel| WorkItem {
+                    run,
+                    dialect,
+                    task_index,
+                    channel,
+                }));
+            }
+        }
+    }
+    Ok(work)
+}
+
+// Scoped futures keep model credentials and the writer borrowed. The semaphore
+// bounds active runs; all futures are polled together without spawning threads.
+async fn run_work_list<T, F: std::future::Future<Output = Result<T>>>(
+    work: Vec<WorkItem>,
+    concurrency: usize,
+    run: impl Fn(WorkItem) -> F,
+) -> Result<Vec<T>> {
+    let semaphore = Arc::new(Semaphore::new(concurrency));
+    let mut pending = work
+        .into_iter()
+        .map(|item| {
+            let semaphore = Arc::clone(&semaphore);
+            let run = &run;
+            Box::pin(async move {
+                let _permit = semaphore.acquire().await.context("acquire task permit")?;
+                run(item).await
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut results = Vec::new();
+    std::future::poll_fn(|cx| {
+        let mut index = 0;
+        while index < pending.len() {
+            match pending[index].as_mut().poll(cx) {
+                std::task::Poll::Ready(result) => {
+                    drop(pending.remove(index));
+                    match result {
+                        Ok(result) => results.push(result),
+                        Err(error) => return std::task::Poll::Ready(Err(error)),
+                    }
+                }
+                std::task::Poll::Pending => index += 1,
+            }
+        }
+        if pending.is_empty() {
+            std::task::Poll::Ready(Ok(()))
+        } else {
+            std::task::Poll::Pending
+        }
+    })
+    .await?;
+    Ok(results)
 }
 
 fn selected_tasks(task_id: Option<&str>) -> Result<Vec<Task>> {
@@ -309,4 +386,110 @@ fn summarize(results: &[TaskResult]) -> Vec<Summary> {
         }
     }
     summaries
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn key(item: &WorkItem) -> (usize, &str, usize, &str) {
+        (
+            item.run,
+            item.dialect.language_id(),
+            item.task_index,
+            item.channel.name(),
+        )
+    }
+
+    #[test]
+    fn paired_repetitions_keep_both_channels_consecutive() {
+        let args = Args::parse_from(["toolbench", "--paired", "--repetitions", "2"]);
+        let tasks = task_pack();
+        let mut coins = 0;
+        let work = build_work_list(
+            &tasks,
+            args.dialect.dialects(),
+            args.repetitions,
+            args.paired,
+            args.channel,
+            || {
+                coins += 1;
+                Ok(coins % 2 == 0)
+            },
+        )
+        .unwrap();
+        assert_eq!(args.concurrency, 1);
+        assert_eq!(
+            work.len(),
+            tasks.len() * 2 * args.dialect.dialects().len() * 2
+        );
+        assert_eq!(coins, work.len() / 2);
+        for (index, pair) in work.chunks_exact(2).enumerate() {
+            assert_eq!(key(&pair[0]).0, key(&pair[1]).0);
+            assert_eq!(key(&pair[0]).1, key(&pair[1]).1);
+            assert_eq!(pair[0].task_index, pair[1].task_index);
+            assert_ne!(pair[0].channel, pair[1].channel);
+            assert_eq!(
+                pair[0].channel,
+                if index % 2 == 0 {
+                    ChannelSelection::Cell
+                } else {
+                    ChannelSelection::Native
+                }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_fake_runs_preserve_rows_and_bound_active_work() {
+        let args = Args::parse_from([
+            "toolbench",
+            "--paired",
+            "--repetitions",
+            "2",
+            "--concurrency",
+            "4",
+        ]);
+        let work = build_work_list(
+            &task_pack(),
+            args.dialect.dialects(),
+            args.repetitions,
+            args.paired,
+            args.channel,
+            || Ok(false),
+        )
+        .unwrap();
+        let mut expected = work.iter().map(key).collect::<Vec<_>>();
+        expected.sort();
+        let active = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let actual = run_work_list(work.clone(), args.concurrency, |item| {
+            let active = &active;
+            let peak = &peak;
+            async move {
+                let count = active.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(count, Ordering::SeqCst);
+                for _ in 0..=item.task_index % 3 {
+                    tokio::task::yield_now().await;
+                }
+                active.fetch_sub(1, Ordering::SeqCst);
+                Ok(item)
+            }
+        })
+        .await
+        .unwrap();
+        let mut actual_keys = actual.iter().map(key).collect::<Vec<_>>();
+        actual_keys.sort();
+        assert_eq!(actual_keys, expected);
+        assert_eq!(peak.load(Ordering::SeqCst), 4);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        let serial = run_work_list(work.clone(), 1, |item| async move { Ok(item) })
+            .await
+            .unwrap();
+        assert_eq!(
+            serial.iter().map(key).collect::<Vec<_>>(),
+            work.iter().map(key).collect::<Vec<_>>()
+        );
+    }
 }
