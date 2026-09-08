@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use lash_sansio::core_support::Blake3DomainHasher;
+use lash_sansio::sync::MutexExt;
 
 use super::*;
 
@@ -178,15 +178,9 @@ where
     Ok(out)
 }
 
-struct EmptySnapshotReader;
-
-impl SnapshotReader for EmptySnapshotReader {
-    fn read_blob(&self, _name: &str) -> Option<&[u8]> {
-        None
-    }
-}
-
+#[derive(Clone)]
 pub struct PluginSession {
+    pub(super) state: Arc<std::sync::Mutex<PluginStateRegistry>>,
     pub(super) host: PluginHost,
     pub(super) session_id: String,
     pub(super) plugins: Vec<Arc<dyn SessionPlugin>>,
@@ -653,52 +647,56 @@ impl PluginSession {
         policy
     }
 
-    pub fn snapshot(&self) -> Result<PluginSessionSnapshot, PluginError> {
-        let mut plugins = BTreeMap::new();
-        for plugin in &self.plugins {
-            let mut writer = InMemorySnapshotWriter::default();
-            let meta = plugin.snapshot(&mut writer)?;
-            plugins.insert(
-                plugin.id().to_string(),
-                PluginSnapshotEntry {
-                    meta,
-                    artifacts: writer.finish(),
-                },
-            );
+    /// Host handles capture every namespace. Plugin-facing handles export none.
+    pub fn export_state(&self) -> PluginState {
+        if self.host.export_plugin_namespaces {
+            self.capture_state()
+        } else {
+            PluginState::default()
         }
-        Ok(PluginSessionSnapshot { plugins })
     }
 
-    pub fn snapshot_revision_fingerprint(&self) -> u64 {
-        let mut hasher = Blake3DomainHasher::new("lash-plugin-snapshot-revision/v2");
-        for plugin in &self.plugins {
-            hasher.update(plugin.id().as_bytes());
-            hasher.update([0]);
-            hasher.update(plugin.version().as_bytes());
-            hasher.update([0]);
-            hasher.update(plugin.snapshot_revision().to_le_bytes());
-            hasher.update([0xff]);
+    pub(crate) fn require_runtime_owner(&self) -> Result<(), PluginError> {
+        if self.host.export_plugin_namespaces {
+            Ok(())
+        } else {
+            Err(PluginError::Session(
+                "plugin-facing session handles cannot construct a host runtime".into(),
+            ))
         }
-        let digest = hasher.finalize();
-        u64::from_le_bytes(digest[..8].try_into().expect("digest prefix"))
     }
 
-    pub fn restore(&self, snapshot: &PluginSessionSnapshot) -> Result<(), PluginError> {
+    pub(crate) fn capture_state(&self) -> PluginState {
+        self.state.lock_recover().data.clone()
+    }
+
+    pub(crate) fn state_generations(&self) -> BTreeMap<String, u64> {
+        self.state
+            .lock_recover()
+            .data
+            .plugins
+            .iter()
+            .map(|(id, ns)| (id.clone(), ns.generation))
+            .collect()
+    }
+
+    pub(crate) fn matches_state_ref(&self, reference: &crate::BlobRef) -> bool {
+        self.state.lock_recover().matches_ref(reference)
+    }
+
+    pub(crate) fn require_hydrated_state(&self, snapshot: &PluginState) -> Result<(), PluginError> {
+        if self.state.lock_recover().was_hydrated_from(snapshot) {
+            Ok(())
+        } else {
+            Err(PluginError::Session("persisted plugin state requires PluginHost::rematerialize_session before runtime construction".into()))
+        }
+    }
+
+    pub(crate) fn hydrate_state(&self, snapshot: &PluginState) -> Result<(), PluginError> {
+        let mut live = self.state.lock_recover();
+        live.hydrate_live(snapshot)?;
         for plugin in &self.plugins {
-            if let Some(entry) = snapshot.plugins.get(plugin.id()) {
-                let reader = InMemorySnapshotReader { entry };
-                plugin.restore(&entry.meta, &reader)?;
-            } else {
-                plugin.restore(
-                    &PluginSnapshotMeta {
-                        plugin_id: plugin.id().to_string(),
-                        plugin_version: plugin.version().to_string(),
-                        revision: plugin.snapshot_revision(),
-                        state: None,
-                    },
-                    &EmptySnapshotReader,
-                )?;
-            }
+            live.data.plugins.entry(plugin.id().into()).or_default();
         }
         Ok(())
     }
@@ -708,7 +706,7 @@ impl PluginSession {
         session_id: impl Into<String>,
         config: super::SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
-        let snapshot = self.snapshot()?;
+        let snapshot = self.capture_state();
         self.host.build_forked_session_with_parent_and_overlay(
             session_id,
             None,
@@ -725,7 +723,7 @@ impl PluginSession {
         parent_session_id: Option<String>,
         config: super::SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
-        let snapshot = self.snapshot()?;
+        let snapshot = self.capture_state();
         self.host.build_forked_session_with_parent_and_overlay(
             session_id,
             parent_session_id,
@@ -742,7 +740,7 @@ impl PluginSession {
         tool_catalog_overlay: ToolCatalogContribution,
         config: super::SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
-        let snapshot = self.snapshot()?;
+        let snapshot = self.capture_state();
         self.host.build_forked_session_with_parent_and_overlay(
             session_id,
             None,

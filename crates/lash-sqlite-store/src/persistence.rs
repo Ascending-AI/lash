@@ -99,8 +99,11 @@ fn read_session_state_version_conn(
             |row| row.get::<_, Option<i64>>(0),
         )
         .optional()
-        .map_err(sqlite_error)?
-        .flatten()
+        .map_err(sqlite_error)?;
+    let Some(marker) = marker else {
+        return Ok(lash_core::store::CURRENT_SESSION_STATE_VERSION);
+    };
+    let marker = marker
         .map(|version| {
             u32::try_from(version).map_err(|_| StoreError::StoredDataCorrupt {
                 record_kind: "SessionStateVersion",

@@ -259,6 +259,9 @@ fn commit_shape(group: &[&CheckpointWriteEvent]) -> String {
                 CheckpointComponentWriteKind::Stored { logical_bytes } => {
                     shape.push_str(&format!("=stored{}", logical_bytes.unwrap_or(0)));
                 }
+                CheckpointComponentWriteKind::PluginState { state } => {
+                    shape.push_str(&format!("=state{}", serde_json::to_string(state).unwrap()))
+                }
                 CheckpointComponentWriteKind::UnchangedRef => shape.push_str("=ref"),
             }
         }
@@ -287,6 +290,10 @@ fn commit_entry(write: &CheckpointWriteEvent) -> Entry {
             CheckpointComponentWriteKind::Stored { logical_bytes } => {
                 Component::stored(component.component.as_str(), *logical_bytes)
             }
+            CheckpointComponentWriteKind::PluginState { state } => Component::stored_json(
+                component.component.as_str(),
+                serde_json::to_value(state).expect("decoded plugin state"),
+            ),
             CheckpointComponentWriteKind::UnchangedRef => {
                 Component::unchanged_ref(component.component.as_str())
             }

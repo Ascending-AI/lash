@@ -7,7 +7,7 @@ pub(crate) mod process_key;
 pub use checkpoint::{
     CHECKPOINT_COMPONENT_ENCODING_VERSION, CheckpointComponentDescriptor,
     EXECUTION_STATE_CHECKPOINT_COMPONENT, HydratedCheckpointComponent, HydratedSessionCheckpoint,
-    PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT, SESSION_CHECKPOINT_SCHEMA_VERSION, SessionCheckpoint,
+    PLUGIN_STATE_CHECKPOINT_COMPONENT, SESSION_CHECKPOINT_SCHEMA_VERSION, SessionCheckpoint,
     TOOL_STATE_CHECKPOINT_COMPONENT, ensure_checkpoint_component_encoding_version,
     ensure_checkpoint_component_hash_agreement,
 };
@@ -414,10 +414,9 @@ pub(crate) fn encode_checkpoint_component<T: serde::Serialize>(
 fn build_checkpoint_from_persisted_state(
     state: &crate::RuntimeSessionState,
 ) -> Result<HydratedSessionCheckpoint, StoreError> {
-    state.checkpoint_components.build_checkpoint(
-        build_persisted_turn_state(state),
-        state.plugin_snapshot_revision,
-    )
+    state
+        .checkpoint_components
+        .build_checkpoint(build_persisted_turn_state(state))
 }
 
 impl RuntimeCommit {
@@ -887,7 +886,7 @@ impl Default for SessionHeadPayload {
 /// [`impl_noop_attachment_manifest!`](crate::impl_noop_attachment_manifest).
 ///
 /// Checkpoint components have one backend-independent durable shape. When a
-/// commit supplies a tool-state, plugin-snapshot, or execution-state body, the
+/// commit supplies a tool-state, plugin-state, or execution-state body, the
 /// backend must store it under a content ref and return that ref in
 /// [`RuntimeCommitReceipt::manifest`]. A later commit may carry the ref without
 /// the body to mean "unchanged"; the backend must resolve the existing body
@@ -895,7 +894,7 @@ impl Default for SessionHeadPayload {
 /// must fail instead of persisting a checkpoint that hydrates to `None`.
 #[async_trait::async_trait]
 pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
-    /// Read the marker without guarded payload decode; absence means oldest supported.
+    /// Read the marker without guarded payload decode. Legacy absent markers mean zero.
     async fn read_session_state_version(&self) -> Result<u32, StoreError> {
         Ok(OLDEST_SUPPORTED_SESSION_STATE_VERSION)
     }

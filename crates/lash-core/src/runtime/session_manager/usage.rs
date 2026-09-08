@@ -146,6 +146,7 @@ impl UsageCapability {
         if staged.deltas().is_empty() {
             return Ok(());
         }
+        state.capture_plugin_states(&current.plugins);
         let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
                 &mut state,

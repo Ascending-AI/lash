@@ -244,6 +244,10 @@ fn commit_entry(write: &CheckpointWriteEvent) -> Entry {
             CheckpointComponentWriteKind::Stored { logical_bytes } => {
                 Component::stored(component.component.as_str(), *logical_bytes)
             }
+            CheckpointComponentWriteKind::PluginState { state } => Component::stored_json(
+                component.component.as_str(),
+                serde_json::to_value(state).expect("decoded plugin state"),
+            ),
             CheckpointComponentWriteKind::UnchangedRef => {
                 Component::unchanged_ref(component.component.as_str())
             }
@@ -426,11 +430,11 @@ mod tests {
 
     use lash_core::store::RuntimeCommit;
     use lash_core::{
-        PluginSessionSnapshot, ProcessAwaitOutput, ProcessCompletionAuthority,
-        ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType,
-        ProcessValueSelector, ProcessWakeSpec, ProjectionWatermark, RecoveryContract,
-        RuntimeSessionState, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory as _,
-        ToolState, facade_support::InMemorySessionStoreFactory,
+        PluginState, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEventAppendRequest,
+        ProcessEventSemanticsSpec, ProcessEventType, ProcessValueSelector, ProcessWakeSpec,
+        ProjectionWatermark, RecoveryContract, RuntimeSessionState, SessionRelation,
+        SessionStoreCreateRequest, SessionStoreFactory as _, ToolState,
+        facade_support::InMemorySessionStoreFactory,
     };
 
     use super::*;
@@ -609,13 +613,12 @@ mod tests {
         let mut state = RuntimeSessionState {
             session_id: "mutation-session".to_string(),
             turn_index: 1,
-            plugin_snapshot_revision: Some(1),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
             ))
         };
         state.set_tool_state_snapshot(Some(tool_state(1)));
-        state.set_plugin_snapshot(Some(PluginSessionSnapshot::default()));
+        state.set_plugin_state(Some(PluginState::default()));
         state.set_execution_state_snapshot(Some(b"first execution state".to_vec()));
         let first = store
             .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
@@ -625,8 +628,7 @@ mod tests {
 
         state.turn_index = 2;
         state.set_tool_state_snapshot(Some(tool_state(2)));
-        state.set_plugin_snapshot(Some(PluginSessionSnapshot::default()));
-        state.plugin_snapshot_revision = Some(2);
+        state.set_plugin_state(Some(PluginState::default()));
         state.set_execution_state_snapshot(Some(b"changed execution state".to_vec()));
         let second = store
             .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))

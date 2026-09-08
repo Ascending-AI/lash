@@ -24,7 +24,7 @@ struct ToolCatalogCacheKey {
     include_base_tools: bool,
     context_overlay_revision: u64,
     tool_generation: u64,
-    plugin_revision: u64,
+    plugin_generations: std::collections::BTreeMap<String, u64>,
     authority_fingerprint: [u8; 32],
 }
 
@@ -284,7 +284,7 @@ impl Session {
             include_base_tools: self.include_base_tools,
             context_overlay_revision: self.context_overlay_revision,
             tool_generation,
-            plugin_revision: self.plugins().snapshot_revision_fingerprint(),
+            plugin_generations: self.plugins().state_generations(),
             authority_fingerprint: tool_catalog_authority_fingerprint(tool_access),
         }
     }

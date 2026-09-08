@@ -33,6 +33,5 @@ pub(super) fn resolve_components(
     Ok(crate::HydratedSessionCheckpoint {
         turn_state: checkpoint.turn_state.clone(),
         components,
-        plugin_snapshot_revision: checkpoint.plugin_snapshot_revision,
     })
 }

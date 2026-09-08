@@ -176,6 +176,10 @@ impl LashRuntime {
         runtime_lease_owner: crate::LeaseOwnerIdentity,
         runtime_lease_executor_id: String,
     ) -> Result<Self, SessionError> {
+        services
+            .plugins
+            .require_runtime_owner()
+            .map_err(SessionError::Plugin)?;
         // Defaulted state (e.g. `RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))` used
         // by fresh-session constructors) carries an empty policy.
         // Fill it in from the caller's policy so tests and hosts that
@@ -227,6 +231,18 @@ impl LashRuntime {
             .with_attachment_store(Arc::clone(&host.core.durability.attachment_store))
             .with_process_env_store(Arc::clone(&host.core.durability.process_env_store))
             .with_clock(Arc::clone(&host.core.clock));
+        if let Some(snapshot) = state.plugin_state() {
+            services
+                .plugins
+                .require_hydrated_state(snapshot)
+                .map_err(SessionError::Plugin)?;
+        } else if let Some(reference) = state.plugin_state_ref()
+            && !services.plugins.matches_state_ref(reference)
+        {
+            return Err(SessionError::Protocol(
+                "plugin-state reference must be hydrated before runtime construction".into(),
+            ));
+        }
         let mut session = Session::new(services.clone(), &state.session_id).await?;
         if let Some(tool_state) = state.tool_state_snapshot().cloned() {
             // Cold rebuild reconciles the persisted catalog over live tools,
@@ -253,18 +269,12 @@ impl LashRuntime {
             }
         }
         session.refresh_tool_catalog().await?;
-        if let Some(snapshot) = state.plugin_snapshot().cloned() {
-            session
-                .plugins()
-                .restore(&snapshot)
-                .map_err(|err| SessionError::Protocol(err.to_string()))?;
-        }
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = state.session_id.clone();
         protocol_session
             .restore_session(
                 crate::plugin::ProtocolSessionContext::new(&mut session, &session_id),
-                &state,
+                crate::plugin::ProtocolSessionRestoreView::new(&state),
             )
             .await?;
         state.discard_runtime_snapshots();
@@ -531,7 +541,7 @@ impl LashRuntime {
             subagent: state.authority.subagent.clone(),
             plugin_options,
         };
-        let plugin_session = match state.plugin_snapshot() {
+        let plugin_session = match state.plugin_state() {
             Some(snapshot) => plugin_host.rematerialize_session_with_parent(
                 state.session_id.as_str(),
                 parent_session_id.clone(),
@@ -578,6 +588,7 @@ impl LashRuntime {
         let Some(store) = self.services.store.clone() else {
             return Ok(());
         };
+        self.stamp_live_plugin_state();
         let operation = super::state::boundary_operation(
             &self.state.session_id,
             "protocol-materialization",
@@ -629,16 +640,18 @@ impl LashRuntime {
                 "park() requires a persistent runtime (store is not set)".to_string(),
             )
         })?;
+        self.stamp_live_plugin_state();
         let session_id = self.state.session_id.clone();
         let policy = self.state.effective_policy().clone();
         // Under the settled-state contract every durable mutation commits at
         // its own boundary (turn final commit, config updates, queued-work
         // drains), so a runtime between boundaries already equals its last
         // commit. Flushing is only needed when the state has never been
-        // persisted or has pending graph nodes; an unconditional commit
+        // persisted, has accepted plugin writes, or has pending graph nodes; an unconditional commit
         // here would bump the head revision on every park/close, disturbing
         // host-side head-CAS expectations for what is durably a no-op.
         if self.state.checkpoint_ref.is_none()
+            || self.state.plugin_state_is_dirty()
             || !self.state.pending_graph_commit().nodes.is_empty()
         {
             let proposed =

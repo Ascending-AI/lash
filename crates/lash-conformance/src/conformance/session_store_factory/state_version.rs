@@ -97,4 +97,32 @@ pub(super) async fn session_state_version_admission_contract(
             current,
         } if found == current + 1
     ));
+    store
+        .stamp_session_state_version_and_corrupt_payload_for_testing(0)
+        .await
+        .expect("stamp snapshot-era marker");
+    for _ in 0..2 {
+        let error = store
+            .load_session()
+            .await
+            .expect_err("old state refused before decode");
+        assert!(matches!(
+            error,
+            crate::StoreError::SessionStateVersionUnsupported {
+                found: 0,
+                current: 1,
+            }
+        ));
+        let error = store
+            .admit_session_state(&lease.fence())
+            .await
+            .expect_err("snapshot-era state cannot enter a plugin-state runtime");
+        assert!(matches!(
+            error,
+            crate::StoreError::SessionStateVersionUnsupported {
+                found: 0,
+                current: 1,
+            }
+        ));
+    }
 }

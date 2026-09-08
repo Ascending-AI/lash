@@ -456,7 +456,8 @@ impl ModelStore {
                 session.checkpoint_head_revision.max(write.revision_after);
             for component in &write.components {
                 match component.kind {
-                    CheckpointComponentWriteKind::Stored { .. } => {
+                    CheckpointComponentWriteKind::Stored { .. }
+                    | CheckpointComponentWriteKind::PluginState { .. } => {
                         session.checkpoint_component_stored_count += 1;
                     }
                     CheckpointComponentWriteKind::UnchangedRef => {

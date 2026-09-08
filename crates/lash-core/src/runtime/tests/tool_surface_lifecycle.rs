@@ -156,7 +156,7 @@ fn build_hidden_session(
     plugin_host: &crate::PluginHost,
     session_id: &str,
     hidden_tool_name: &str,
-    snapshot: Option<&crate::PluginSessionSnapshot>,
+    snapshot: Option<&crate::PluginState>,
 ) -> Arc<crate::PluginSession> {
     let authority = hidden_authority(hidden_tool_name);
     match snapshot {
@@ -1391,7 +1391,7 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
         plugin_host.as_ref(),
         "cold-hidden-child",
         hidden.name,
-        state.plugin_snapshot(),
+        state.plugin_state(),
     );
     let rebuilt = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),

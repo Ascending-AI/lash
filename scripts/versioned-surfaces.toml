@@ -891,3 +891,13 @@ description = "native RLM durable provider call and repair envelopes"
 kind = "rust_serde_shapes"
 paths = ["crates/lash-protocol-rlm/src/native/transport.rs"]
 must_cover = ["Envelope", "Transport"]
+
+[[surface]]
+constant = "CURRENT_SESSION_STATE_VERSION"
+constant_path = "crates/lash-core/src/store/state_version.rs"
+description = "complete session continuation generation including mediated plugin state"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/plugin/state.rs"]
+symbols = ["PluginState", "PluginNamespaceState"]

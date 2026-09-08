@@ -409,8 +409,10 @@ impl Attr {
 }
 
 /// Whether a checkpoint component carried a body at the commit seam.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ComponentBody {
+    /// Decoded plugin namespaces rather than an opaque byte count.
+    Json(serde_json::Value),
     /// The body was present. `logical_bytes` is an encoding-independent size
     /// used only for human comparison.
     Stored { logical_bytes: Option<usize> },
@@ -504,14 +506,26 @@ impl Component {
         }
     }
 
+    /// Render the typed state accepted by a boundary commit.
+    pub fn stored_json(name: impl Into<String>, value: serde_json::Value) -> Self {
+        Self {
+            name: name.into(),
+            body: ComponentBody::Json(value),
+        }
+    }
+
     fn rendered_body(&self) -> String {
-        match self.body {
+        match &self.body {
+            ComponentBody::Json(state) => format!(
+                "stored {}",
+                serde_json::to_string(state).expect("plugin state JSON")
+            ),
             ComponentBody::Stored { .. } if self.name == "tool_state" => {
                 "stored logical=<opaque>".to_string()
             }
             ComponentBody::Stored {
                 logical_bytes: Some(bytes),
-            } => format!("stored logical={}", format_bytes(bytes)),
+            } => format!("stored logical={}", format_bytes(*bytes)),
             ComponentBody::Stored {
                 logical_bytes: None,
             } => "stored logical=unknown".to_string(),
@@ -1083,7 +1097,7 @@ mod tests {
             Entry::commit(session("s"), 0, 1, Usage::none())
                 .component(Component::stored("turn_state", Some(240)))
                 .component(Component::stored("tool_state", Some(6_800)))
-                .component(Component::stored("plugin_snapshot", Some(342)))
+                .component(Component::stored("plugin_state", Some(342)))
                 .component(Component::unchanged_ref("tool_state")),
         );
 
@@ -1093,7 +1107,7 @@ mod tests {
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=240B
         session-001              tool_state            stored logical=<opaque>
-        session-001              plugin_snapshot       stored logical=342B
+        session-001              plugin_state          stored logical=342B
         session-001              tool_state            ref (unchanged)
         "###);
     }

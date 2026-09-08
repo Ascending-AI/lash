@@ -25,6 +25,8 @@ macro_rules! runtime_persistence_tests {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn commit_with_every_payload_family_inside_budget_succeeds() { $runner($crate::RuntimePersistenceLaw::commit_with_every_payload_family_inside_budget_succeeds).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn plugin_state_boundary() { $runner($crate::RuntimePersistenceLaw::plugin_state_boundary).await; }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn load_hydrates_checkpoint_and_usage() { $runner($crate::RuntimePersistenceLaw::load_hydrates_checkpoint_and_usage).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn load_retains_reasoning_only_usage() { $runner($crate::RuntimePersistenceLaw::load_retains_reasoning_only_usage).await; }
@@ -226,6 +228,8 @@ macro_rules! runtime_persistence_reopenable_tests {
         async fn commit_rejects_turn_result_bytes_over_budget() { $runner($crate::RuntimePersistenceLaw::commit_rejects_turn_result_bytes_over_budget).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn commit_with_every_payload_family_inside_budget_succeeds() { $runner($crate::RuntimePersistenceLaw::commit_with_every_payload_family_inside_budget_succeeds).await; }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn plugin_state_boundary() { $runner($crate::RuntimePersistenceLaw::plugin_state_boundary).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn load_hydrates_checkpoint_and_usage() { $runner($crate::RuntimePersistenceLaw::load_hydrates_checkpoint_and_usage).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

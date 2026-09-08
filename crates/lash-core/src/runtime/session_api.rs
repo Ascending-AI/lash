@@ -20,14 +20,10 @@ impl LashRuntime {
         if let Some(session) = self.session.as_ref() {
             let snapshot = session.plugins().tool_registry().export_state();
             self.state.set_tool_state_snapshot(Some(snapshot));
-            let captured = session.plugins().snapshot();
-            crate::runtime::state::store_plugin_snapshot(&mut self.state, captured);
-            self.state.plugin_snapshot_revision =
-                Some(session.plugins().snapshot_revision_fingerprint());
+            self.state.capture_plugin_states(session.plugins());
         } else {
             self.state.set_tool_state_snapshot(None);
-            self.state.set_plugin_snapshot(None);
-            self.state.plugin_snapshot_revision = None;
+            self.state.set_plugin_state(None);
         }
     }
     pub(super) fn active_tool_catalog_shared(
@@ -172,10 +168,7 @@ impl LashRuntime {
         if let Some(session) = self.session.as_ref() {
             let snapshot = session.plugins().tool_registry().export_state();
             state.set_tool_state_snapshot(Some(snapshot));
-            let captured = session.plugins().snapshot();
-            crate::runtime::state::store_plugin_snapshot(&mut state, captured);
-            state.plugin_snapshot_revision =
-                Some(session.plugins().snapshot_revision_fingerprint());
+            state.capture_plugin_states(session.plugins());
         }
         Ok(state)
     }
@@ -1038,6 +1031,9 @@ impl LashRuntime {
                 )
             })?;
         let commit_state = next_config_state.as_mut().unwrap_or(&mut self.state);
+        if let Some(session) = self.session.as_ref() {
+            commit_state.capture_plugin_states(session.plugins());
+        }
         let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 commit_state,

@@ -420,14 +420,16 @@ async fn read_session_state_version_tx(
     lock: bool,
 ) -> Result<u32, StoreError> {
     let suffix = if lock { " FOR UPDATE" } else { "" };
-    let marker: Option<i32> = sqlx::query_scalar(&format!(
+    let marker: Option<Option<i32>> = sqlx::query_scalar(&format!(
         "SELECT session_state_version FROM lash_session_meta WHERE session_id = $1{suffix}"
     ))
     .bind(session_id)
     .fetch_optional(&mut **tx)
     .await
-    .map_err(store_sqlx_error)?
-    .flatten();
+    .map_err(store_sqlx_error)?;
+    let Some(marker) = marker else {
+        return Ok(lash_core::store::CURRENT_SESSION_STATE_VERSION);
+    };
     let marker = marker
         .map(|version| {
             u32::try_from(version).map_err(|_| StoreError::StoredDataCorrupt {

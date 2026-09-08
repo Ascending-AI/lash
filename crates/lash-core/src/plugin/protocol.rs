@@ -37,7 +37,7 @@ pub trait ProtocolSessionPlugin: Send + Sync {
     async fn restore_session(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-        _state: &RuntimeSessionState,
+        _state: ProtocolSessionRestoreView,
     ) -> Result<(), crate::SessionError> {
         Ok(())
     }
@@ -89,6 +89,31 @@ pub trait ProtocolSessionPlugin: Send + Sync {
         _request: &LlmRequest,
     ) -> Result<Option<ProtocolLlmCallAction>, crate::PluginError> {
         Ok(None)
+    }
+}
+
+/// The protocol-owned inputs needed to restore a session.
+///
+/// This view contains no decoded plugin namespaces or handle to full runtime
+/// state. Plugins access their own namespace through their registered store.
+#[derive(Debug)]
+pub struct ProtocolSessionRestoreView {
+    /// Active frame identity, used to reset protocol-local execution on a switch.
+    pub current_frame_node_id: Option<crate::FrameNodeId>,
+    /// Protocol execution root and leaves, or the typed hydration failure.
+    /// Restore implementations retain responsibility for reporting that failure.
+    pub execution_state: Result<Option<HydratedExecutionState>, crate::StoreError>,
+    /// Active history to replay protocol seed and globals events.
+    pub active_events: Vec<crate::SessionHistoryRecord>,
+}
+
+impl ProtocolSessionRestoreView {
+    pub(crate) fn new(state: &RuntimeSessionState) -> Self {
+        Self {
+            current_frame_node_id: state.current_frame_node_id.clone(),
+            execution_state: state.execution_state_hydration(),
+            active_events: state.read_view().active_events().to_vec(),
+        }
     }
 }
 

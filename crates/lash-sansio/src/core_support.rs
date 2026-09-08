@@ -391,6 +391,9 @@ mod blake3_domain_tests {
 
     use super::BLAKE3_DOMAINS;
 
+    // Permanently reserved, but no longer used after FIG-2113.
+    const RETIRED_BLAKE3_DOMAINS: &[&str] = &["lash-plugin-snapshot-revision/v2"];
+
     fn rust_sources_below(root: &Path) -> Vec<PathBuf> {
         fn visit(directory: &Path, sources: &mut Vec<PathBuf>) {
             let mut entries = std::fs::read_dir(directory)
@@ -453,16 +456,34 @@ mod blake3_domain_tests {
         );
 
         let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let used = rust_sources_below(&workspace_root.join("crates"))
+        let used = ["crates", "examples", "runbooks"]
             .into_iter()
+            .flat_map(|root| rust_sources_below(&workspace_root.join(root)))
             .flat_map(|path| {
                 let source = std::fs::read_to_string(&path)
                     .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
                 domain_literals(&source)
             })
             .collect::<BTreeSet<_>>();
+        let retired = RETIRED_BLAKE3_DOMAINS
+            .iter()
+            .map(|d| (*d).to_owned())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(retired.len(), RETIRED_BLAKE3_DOMAINS.len());
+        assert!(
+            retired.is_subset(&registered),
+            "retired domains remain registered"
+        );
+        assert!(
+            used.is_disjoint(&retired),
+            "retired domains must never be reused"
+        );
+        let active = registered
+            .difference(&retired)
+            .cloned()
+            .collect::<BTreeSet<_>>();
         assert_eq!(
-            used, registered,
+            used, active,
             "BLAKE3_DOMAINS must exactly match BLAKE3 domain literals used in workspace Rust sources"
         );
     }

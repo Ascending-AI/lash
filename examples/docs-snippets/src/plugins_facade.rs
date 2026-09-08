@@ -269,10 +269,6 @@ pub(crate) fn plugin_area_facade_witnesses() {
             let _ = transient;
         }
     });
-    // FIG-2104-WITNESS-0061: lash::persistence::HydratedSessionCheckpoint::plugin_snapshot_revision
-    field_witness(|value: &lash::persistence::HydratedSessionCheckpoint| {
-        let _ = &value.plugin_snapshot_revision;
-    });
     // FIG-2104-WITNESS-0062: lash::persistence::PersistedSessionConfig::provider_id
     field_witness(|value: &lash::persistence::PersistedSessionConfig| {
         let _ = &value.provider_id;
@@ -289,30 +285,22 @@ pub(crate) fn plugin_area_facade_witnesses() {
     field_witness(|value: &lash::persistence::RuntimeSessionState| {
         let _ = &value.last_prompt_usage;
     });
-    // FIG-2104-WITNESS-0066: lash::persistence::RuntimeSessionState::plugin_snapshot
-    member_witness(lash::persistence::RuntimeSessionState::plugin_snapshot);
-    // FIG-2104-WITNESS-0067: lash::persistence::RuntimeSessionState::plugin_snapshot_ref
-    member_witness(lash::persistence::RuntimeSessionState::plugin_snapshot_ref);
-    // FIG-2104-WITNESS-0068: lash::persistence::RuntimeSessionState::set_plugin_snapshot
-    member_witness(lash::persistence::RuntimeSessionState::set_plugin_snapshot);
+    // FIG-2104-WITNESS-0066: lash::persistence::RuntimeSessionState::plugin_state
+    member_witness(lash::persistence::RuntimeSessionState::plugin_state);
+    // FIG-2104-WITNESS-0067: lash::persistence::RuntimeSessionState::plugin_state_ref
+    member_witness(lash::persistence::RuntimeSessionState::plugin_state_ref);
+    // FIG-2104-WITNESS-0068: lash::persistence::RuntimeSessionState::set_plugin_state
+    member_witness(lash::persistence::RuntimeSessionState::set_plugin_state);
     // FIG-2104-WITNESS-0069: lash::persistence::RuntimeSessionState::set_tool_state_snapshot
     member_witness(lash::persistence::RuntimeSessionState::set_tool_state_snapshot);
-    // FIG-2104-WITNESS-0070: lash::persistence::RuntimeSessionState::plugin_snapshot_revision
-    field_witness(|value: &lash::persistence::RuntimeSessionState| {
-        let _ = &value.plugin_snapshot_revision;
-    });
-    // FIG-2104-WITNESS-0071: lash::persistence::RuntimeSessionState::refresh_plugin_snapshots
-    member_witness(lash::persistence::RuntimeSessionState::refresh_plugin_snapshots);
+    // FIG-2104-WITNESS-0071: lash::persistence::RuntimeSessionState::refresh_plugin_states
+    member_witness(lash::persistence::RuntimeSessionState::refresh_plugin_states);
     // FIG-2104-WITNESS-0072: lash::persistence::RuntimeSessionState::tool_state_generation
     member_witness(lash::persistence::RuntimeSessionState::tool_state_generation);
     // FIG-2104-WITNESS-0073: lash::persistence::RuntimeSessionState::tool_state_ref
     member_witness(lash::persistence::RuntimeSessionState::tool_state_ref);
     // FIG-2104-WITNESS-0074: lash::persistence::RuntimeSessionState::tool_state_snapshot
     member_witness(lash::persistence::RuntimeSessionState::tool_state_snapshot);
-    // FIG-2104-WITNESS-0075: lash::persistence::SessionCheckpoint::plugin_snapshot_revision
-    field_witness(|value: &lash::persistence::SessionCheckpoint| {
-        let _ = &value.plugin_snapshot_revision;
-    });
     // FIG-2104-WITNESS-0076: lash::persistence::SessionGraph::append_plugin
     member_witness(
         |graph: &mut lash::persistence::SessionGraph,
@@ -597,16 +585,6 @@ pub(crate) fn plugin_area_facade_witnesses() {
     field_witness(|value: &lash::plugins::PluginError| {
         if let lash::plugins::PluginError::SessionExecutionLeaseLost { session_id, .. } = value {
             let _ = session_id;
-        }
-    });
-    // FIG-2104-WITNESS-0133: lash::plugins::PluginError::Snapshot
-    variant_witness(|value: &lash::plugins::PluginError| {
-        matches!(value, lash::plugins::PluginError::Snapshot(..))
-    });
-    // FIG-2104-WITNESS-0134: lash::plugins::PluginError::Snapshot::0
-    field_witness(|value: &lash::plugins::PluginError| {
-        if let lash::plugins::PluginError::Snapshot(field, ..) = value {
-            let _ = field;
         }
     });
     // FIG-2104-WITNESS-0135: lash::plugins::PluginError::StoredDataCorrupt
@@ -927,14 +905,9 @@ pub(crate) fn plugin_area_facade_witnesses() {
     member_witness(lash::plugins::PluginSession::resolve_tool_catalog);
     // FIG-2104-WITNESS-0208: lash::plugins::PluginSession::resolved_tool_catalog
     member_witness(lash::plugins::PluginSession::resolved_tool_catalog);
-    // FIG-2104-WITNESS-0209: lash::plugins::PluginSession::restore
-    member_witness(lash::plugins::PluginSession::restore);
+    member_witness(lash::plugins::PluginSession::export_state);
     // FIG-2104-WITNESS-0210: lash::plugins::PluginSession::session_id
     member_witness(lash::plugins::PluginSession::session_id);
-    // FIG-2104-WITNESS-0211: lash::plugins::PluginSession::snapshot
-    member_witness(lash::plugins::PluginSession::snapshot);
-    // FIG-2104-WITNESS-0212: lash::plugins::PluginSession::snapshot_revision_fingerprint
-    member_witness(lash::plugins::PluginSession::snapshot_revision_fingerprint);
     // FIG-2104-WITNESS-0213: lash::plugins::PluginSession::subagent_context
     member_witness(lash::plugins::PluginSession::subagent_context);
     // FIG-2104-WITNESS-0214: lash::plugins::PluginSession::tool_access
@@ -1471,13 +1444,12 @@ pub(crate) fn plugin_area_facade_witnesses() {
     field_witness(|value: &lash::runtime::SessionSnapshot| {
         let _ = &value.last_prompt_usage;
     });
-    // FIG-2104-WITNESS-0359: lash::runtime::SessionSnapshot::plugin_snapshot_ref
+    // FIG-2104-WITNESS-0359: lash::runtime::SessionSnapshot::plugin_state_ref
     field_witness(|value: &lash::runtime::SessionSnapshot| {
-        let _ = &value.plugin_snapshot_ref;
+        let _ = &value.plugin_state_ref;
     });
-    // FIG-2104-WITNESS-0360: lash::runtime::SessionSnapshot::plugin_snapshot_revision
     field_witness(|value: &lash::runtime::SessionSnapshot| {
-        let _ = &value.plugin_snapshot_revision;
+        let _ = &value.plugin_state_generations;
     });
     // FIG-2104-WITNESS-0361: lash::runtime::SessionSnapshot::tool_state_generation
     field_witness(|value: &lash::runtime::SessionSnapshot| {

@@ -154,7 +154,6 @@ impl SnapshotStore {
                 checkpoint: Some(lash_core::store::HydratedSessionCheckpoint {
                     turn_state,
                     components,
-                    ..Default::default()
                 }),
                 token_ledger: Vec::new(),
                 turn_failure_settlements: Vec::new(),

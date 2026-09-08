@@ -1,13 +1,13 @@
 use super::*;
 
-pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 2;
+pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 3;
 
 /// Encoding implemented for checkpoint-component logical bytes in this build.
 pub const CHECKPOINT_COMPONENT_ENCODING_VERSION: u32 = 2;
 /// Well-known component key used by the runtime's tool registry snapshot.
 pub const TOOL_STATE_CHECKPOINT_COMPONENT: &str = "tool_state";
 /// Well-known component key used by the runtime's plugin-session snapshot.
-pub const PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT: &str = "plugin_snapshot";
+pub const PLUGIN_STATE_CHECKPOINT_COMPONENT: &str = "plugin_state";
 /// Well-known component key used by protocol-owned execution state.
 pub const EXECUTION_STATE_CHECKPOINT_COMPONENT: &str = "execution_state";
 
@@ -19,8 +19,6 @@ pub struct SessionCheckpoint {
     /// Complete keyed component listing. A key absent here is deleted.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub components: std::collections::BTreeMap<String, CheckpointComponentDescriptor>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugin_snapshot_revision: Option<u64>,
 }
 
 impl Default for SessionCheckpoint {
@@ -29,7 +27,6 @@ impl Default for SessionCheckpoint {
             schema_version: SESSION_CHECKPOINT_SCHEMA_VERSION,
             turn_state: crate::PersistedTurnState::default(),
             components: std::collections::BTreeMap::new(),
-            plugin_snapshot_revision: None,
         }
     }
 }
@@ -38,13 +35,11 @@ impl SessionCheckpoint {
     pub fn new(
         turn_state: crate::PersistedTurnState,
         components: std::collections::BTreeMap<String, CheckpointComponentDescriptor>,
-        plugin_snapshot_revision: Option<u64>,
     ) -> Self {
         Self {
             schema_version: SESSION_CHECKPOINT_SCHEMA_VERSION,
             turn_state,
             components,
-            plugin_snapshot_revision,
         }
     }
 
@@ -307,7 +302,6 @@ pub struct HydratedSessionCheckpoint {
     /// Complete keyed component listing. A key absent here is deleted.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub components: std::collections::BTreeMap<String, HydratedCheckpointComponent>,
-    pub plugin_snapshot_revision: Option<u64>,
 }
 
 impl HydratedSessionCheckpoint {
@@ -402,11 +396,7 @@ impl HydratedSessionCheckpoint {
                     .map(|descriptor| (key.clone(), descriptor))
             })
             .collect::<Result<_, StoreError>>()?;
-        Ok(SessionCheckpoint::new(
-            self.turn_state.clone(),
-            components,
-            self.plugin_snapshot_revision,
-        ))
+        Ok(SessionCheckpoint::new(self.turn_state.clone(), components))
     }
 }
 

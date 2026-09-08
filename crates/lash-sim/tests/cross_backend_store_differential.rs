@@ -27,13 +27,13 @@ use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy,
     ForkSessionRequest, HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity,
-    PendingTurnInputDraft, PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry,
-    PluginSnapshotMeta, ProtocolEvent, QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit,
-    RuntimeSessionState, RuntimeTurnCommitStamp, SessionHistoryRecord, SessionMeta,
-    SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage, ToolState, TriggerOwnerScope,
-    TurnInput, TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
-    facade_support::InMemorySessionStore, facade_support::InMemorySessionStoreFactory,
+    PendingTurnInputDraft, PluginNamespaceState, PluginState, ProtocolEvent, QueuedWorkAuthority,
+    QueuedWorkKind, RuntimeCommit, RuntimeSessionState, RuntimeTurnCommitStamp,
+    SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage,
+    ToolState, TriggerOwnerScope, TurnInput, TurnInputApplication, TurnInputClaim,
+    TurnInputIngress, TurnInputState, facade_support::InMemorySessionStore,
+    facade_support::InMemorySessionStoreFactory,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -49,6 +49,8 @@ mod fork_cases;
 mod generated_surface;
 #[path = "cross_backend_store_differential/observations.rs"]
 mod observations;
+#[path = "cross_backend_store_differential/plugin_state_case.rs"]
+mod plugin_state_case;
 #[path = "cross_backend_store_differential/raw_durable_reader.rs"]
 mod raw_durable_reader;
 #[path = "cross_backend_store_differential/session_meta_layout.rs"]
@@ -63,6 +65,7 @@ const SHARED_DATABASE_LOCK_KEY: i64 = 0x4c41_5348_5f50_4754;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CaseName {
+    PluginStateSeam,
     DuplicateWithinAppend,
     DuplicateAcrossCommits,
     AppendDuplicateAfterAppendSeed,
@@ -86,6 +89,7 @@ enum CaseName {
 impl CaseName {
     fn as_str(self) -> &'static str {
         match self {
+            Self::PluginStateSeam => "plugin_state_boundary_fork_rebuild",
             Self::DuplicateWithinAppend => "duplicate_node_id_within_one_append",
             Self::DuplicateAcrossCommits => "duplicate_node_id_across_two_commits",
             Self::AppendDuplicateAfterAppendSeed => "append_duplicate_node_id_after_append_seed",
@@ -686,20 +690,15 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
         "tools": {}
     }))
     .expect("build differential tool state");
-    let plugin_snapshot = PluginSessionSnapshot {
+    let plugin_state = PluginState {
         plugins: [(
             "differential-plugin".to_string(),
-            PluginSnapshotEntry {
-                meta: PluginSnapshotMeta {
-                    plugin_id: "differential-plugin".to_string(),
-                    plugin_version: "1.2.3".to_string(),
-                    revision: 11,
-                    state: Some(serde_json::json!({"mode": "durable"})),
-                },
-                artifacts: vec![PluginSnapshotArtifact {
-                    name: "snapshot.bin".to_string(),
-                    data: vec![4, 2, 4, 2],
-                }],
+            PluginNamespaceState {
+                generation: 11,
+                values: std::collections::BTreeMap::from([(
+                    "state".into(),
+                    serde_json::json!({"mode": "durable"}),
+                )]),
             },
         )]
         .into_iter()
@@ -713,9 +712,9 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
             ),
         ),
         (
-            lash_core::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT.to_string(),
+            lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT.to_string(),
             lash_core::HydratedCheckpointComponent::changed(
-                rmp_serde::to_vec_named(&plugin_snapshot)
+                rmp_serde::to_vec_named(&plugin_state)
                     .expect("encode differential plugin snapshot"),
             ),
         ),
@@ -743,7 +742,6 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
             ..Default::default()
         },
         components,
-        plugin_snapshot_revision: Some(11),
     }
 }
 
@@ -769,7 +767,6 @@ fn checkpoint_from_spec(
             HydratedSessionCheckpoint {
                 turn_state: checkpoint_bodies().turn_state,
                 components,
-                plugin_snapshot_revision: Some(11),
             }
         }
         CheckpointSpec::ClearedComponents => {
@@ -790,7 +787,6 @@ fn checkpoint_from_spec(
             HydratedSessionCheckpoint {
                 turn_state: checkpoint_bodies().turn_state,
                 components,
-                plugin_snapshot_revision: Some(11),
             }
         }
         CheckpointSpec::MissingExecutionStateRef => HydratedSessionCheckpoint {
@@ -1834,14 +1830,14 @@ impl BackendRunner {
                 );
                 assert_eq!(
                     checkpoint
-                        .decode_component::<PluginSessionSnapshot>(
-                            lash_core::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT,
+                        .decode_component::<PluginState>(
+                            lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT,
                         )?
                         .as_ref()
                         .map(|snapshot| serde_json::to_value(snapshot).expect("encode snapshot")),
                     expected
-                        .decode_component::<PluginSessionSnapshot>(
-                            lash_core::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT,
+                        .decode_component::<PluginState>(
+                            lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT,
                         )?
                         .as_ref()
                         .map(|snapshot| serde_json::to_value(snapshot).expect("encode snapshot")),
@@ -2453,6 +2449,13 @@ async fn cross_backend_store_differential_agrees() {
     let sqlite_root = tempfile::tempdir().expect("create SQLite differential root");
     verify_independent_session_meta_layout(sqlite_root.path(), &postgres).await;
     let run_nonce = run_nonce();
+    plugin_state_case::compare_plugin_state(
+        sqlite_root.path(),
+        &postgres,
+        &database_url,
+        &run_nonce,
+    )
+    .await;
     let mut divergences = String::new();
     eprintln!(
         "RUNNING cross-backend store differential; \

@@ -18,8 +18,8 @@ use lash_core::runtime::{
     RuntimeSubject,
 };
 use lash_core::{
-    AttachmentRootSet, LeaseOwnerIdentity, PendingTurnInputDraft, PluginSessionSnapshot,
-    QueuedWorkStore, RuntimeCommit, RuntimeInvocation, RuntimeSessionState, SessionCommitStore,
+    AttachmentRootSet, LeaseOwnerIdentity, PendingTurnInputDraft, PluginState, QueuedWorkStore,
+    RuntimeCommit, RuntimeInvocation, RuntimeSessionState, SessionCommitStore,
     SessionExecutionLeaseStore, SessionStoreFactory, StoreError, ToolState, TurnInput,
     TurnInputIngress, TurnInputStore,
 };
@@ -156,13 +156,12 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
 
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
-        plugin_snapshot_revision: Some(5),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
     };
     state.set_tool_state_snapshot(Some(persisted_tool_state_at_generation(3)));
-    state.set_plugin_snapshot(Some(PluginSessionSnapshot {
+    state.set_plugin_state(Some(PluginState {
         plugins: Default::default(),
     }));
     state.set_execution_state_snapshot(Some(vec![0xDE, 0xAD, 0xBE, 0xEF]));
@@ -500,8 +499,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 51"),
-        "error must report the real expected version 51: {message}"
+        message.contains("schema version 52"),
+        "error must report the real expected version 52: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -537,7 +536,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 51);
+    assert_eq!(user_version, 52);
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
@@ -633,4 +632,34 @@ async fn sqlite_registry_validation_fails_gc_not_session_open() {
             .contains("configured database is not a Lash process registry"),
         "unexpected GC validation error: {error}"
     );
+}
+
+#[tokio::test]
+async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
+    let path = unique_db_path("plugin-state-predecessor");
+    let store = Store::open(&path).await.expect("provision current schema");
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch("PRAGMA user_version = 51;").unwrap();
+    let before: i64 = conn
+        .query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get(0))
+        .unwrap();
+    drop(conn);
+    let error = match Store::open(&path).await {
+        Ok(_) => panic!("snapshot predecessor must be refused"),
+        Err(error) => error.to_string(),
+    };
+    assert!(
+        error.contains("schema version 52") && error.contains("version 51"),
+        "{error}"
+    );
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    let after: i64 = conn
+        .query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 51);
+    assert_eq!(before, after);
 }

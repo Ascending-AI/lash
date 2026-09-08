@@ -958,10 +958,10 @@ impl LashRuntime {
                     ),
                 )
             })?;
-            if let Some(snapshot) = durable_state.plugin_snapshot() {
-                session.plugins().restore(snapshot).map_err(|err| {
+            if let Some(snapshot) = durable_state.plugin_state() {
+                session.plugins().hydrate_state(snapshot).map_err(|err| {
                     (
-                        "plugin_snapshot_restore",
+                        "plugin_state_restore",
                         RuntimeError::new(
                             RuntimeErrorCode::ResidentSessionReloadFailed,
                             err.to_string(),
@@ -974,7 +974,7 @@ impl LashRuntime {
             protocol_session
                 .restore_session(
                     crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                    &durable_state,
+                    crate::plugin::ProtocolSessionRestoreView::new(&durable_state),
                 )
                 .await
                 .map_err(|err| {
@@ -1834,7 +1834,7 @@ impl LashRuntime {
             if let Err(err) = protocol_session
                 .restore_session(
                     crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                    &self.state,
+                    crate::plugin::ProtocolSessionRestoreView::new(&self.state),
                 )
                 .await
             {

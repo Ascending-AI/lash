@@ -92,6 +92,7 @@ impl CurrentSessionCapability {
         let usage_deltas = staged_usage
             .as_ref()
             .map_or(&[][..], |staged| staged.deltas());
+        state.capture_plugin_states(&self.plugins);
         let mut commit =
             crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_staged_usage_and_budget(
                 &state,

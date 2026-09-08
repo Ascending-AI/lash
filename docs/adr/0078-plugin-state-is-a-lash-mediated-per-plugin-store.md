@@ -2,9 +2,7 @@
 
 ## Status
 
-Accepted. Ratified on FIG-2006, which also binds the six invariants this ADR
-implements as an interface. Implemented separately by the FIG-2006 cutover
-children.
+Implemented by FIG-2113. Ratified on FIG-2006, which binds the six invariants this ADR implements as an interface.
 
 ## Context
 
@@ -208,10 +206,8 @@ Two edges, both ruled:
 - **`set` never compares values.** Writing an identical value bumps. This is
   salsa's conservatism, adopted deliberately: value equality on arbitrary JSON
   is a cost paid on every write to avoid a cost paid at most once per boundary,
-  and the content-addressed component (section 6) already collapses the
-  identical-bytes case to an unchanged reference. A spurious bump costs one
-  re-encode and yields the same `BlobRef`, the same descriptor, and the same
-  commit identity.
+  and the generation is encoded in the component body (section 6). An equal
+  write therefore changes the `BlobRef`, descriptor, and commit identity.
 - **`remove` of an absent key is a no-op** and does not bump, returning the
   unchanged generation. This is a membership check, not a value comparison — it
   is free, exact, and prevents a plugin's idempotent cleanup path from forcing a
@@ -245,12 +241,14 @@ every plugin a forgeable route into every other plugin's namespace; and it would
 spread one concept across fifteen structs to deliver a value the closure already
 has.
 
-**Ordering.** The store is hydrated from the checkpoint *before* `session_ready`
-runs. The full sequence is: factory `build` → `register` → session construction
-→ **store hydration** → `session_ready`. So `session_ready` is the first point
-at which a plugin observes durable state, and it is also the point at which the
-old `restore` callback used to run — which is why deleting `restore` costs
-nothing (invariant 6): restore *is* reading the store on rebuild.
+**Ordering.** The store is hydrated from the checkpoint *before* `register`
+runs. The full sequence is: factory `build` → **store hydration** → `register`
+→ session construction → `session_ready`. Registration reads and validates
+writes against durable state; `session_ready` observes that state with the
+accepted registration edits applied exactly once. Deleting the old `restore`
+callback costs nothing (invariant 6): restore *is* reading the store on rebuild.
+Protocol restore receives only the current frame identity, hydrated protocol
+execution state, and active history; it has no decoded plugin namespaces.
 
 Writes are accepted from any of these points, including `register` and
 `session_ready`, and from plugin operations and tasks running off the turn loop.

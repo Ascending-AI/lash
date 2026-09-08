@@ -1415,7 +1415,6 @@ impl<'a> From<&'a crate::SessionNodeRecord> for SessionNodeIntent<'a> {
 struct CheckpointIntent<'a> {
     turn_state: &'a crate::PersistedTurnState,
     components: Vec<CheckpointComponentIntent<'a>>,
-    plugin_snapshot_revision: Option<u64>,
 }
 
 #[derive(serde::Serialize)]
@@ -1454,7 +1453,6 @@ impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
                     }
                 })
                 .collect(),
-            plugin_snapshot_revision: checkpoint.plugin_snapshot_revision,
         }
     }
 }

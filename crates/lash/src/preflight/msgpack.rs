@@ -256,11 +256,11 @@ mod tests {
         let value = serde_json::json!({
             "schema_version": 2u32,
             "turn_state": {"nested": [1, 2, {"deep": true}], "text": "x"},
+            "test_after_nested": 7u32,
             "components": {
                 "execution_state": {"blob_ref": "sha256:abc", "encoding_version": 2u32},
                 "tool_state": {"blob_ref": "sha256:def", "encoding_version": 2u32},
             },
-            "plugin_snapshot_revision": 7u32,
         });
         rmp_serde::to_vec_named(&value).expect("the fixture encodes")
     }
@@ -278,7 +278,7 @@ mod tests {
         );
         assert_eq!(
             Value::root(&bytes)
-                .field("plugin_snapshot_revision")
+                .field("test_after_nested")
                 .and_then(Value::as_u32),
             Some(7),
             "a field after a deeply nested one is still reachable"

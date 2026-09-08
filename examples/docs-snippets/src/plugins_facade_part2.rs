@@ -374,32 +374,18 @@ pub(crate) fn plugin_area_facade_witnesses() {
     variant_witness(|value: &lash::messages::PartKind| {
         matches!(value, lash::messages::PartKind::ToolResult)
     });
-    // FIG-2104-WITNESS-0479: lash::plugins::PluginSessionSnapshot
-    type_witness::<lash::plugins::PluginSessionSnapshot>();
-    // FIG-2104-WITNESS-0480: lash::plugins::PluginSessionSnapshot::plugins
-    field_witness(|value: &lash::plugins::PluginSessionSnapshot| {
+    // FIG-2104-WITNESS-0479: lash::plugins::PluginState
+    type_witness::<lash::plugins::PluginState>();
+    // FIG-2104-WITNESS-0480: lash::plugins::PluginState::plugins
+    field_witness(|value: &lash::plugins::PluginState| {
         let _ = &value.plugins;
     });
-    // FIG-2104-WITNESS-0481: lash::plugins::PluginSnapshotArtifact
-    type_witness::<lash::plugins::PluginSnapshotArtifact>();
-    // FIG-2104-WITNESS-0482: lash::plugins::PluginSnapshotArtifact::data
-    field_witness(|value: &lash::plugins::PluginSnapshotArtifact| {
-        let _ = &value.data;
+    type_witness::<lash::plugins::PluginNamespaceState>();
+    field_witness(|value: &lash::plugins::PluginNamespaceState| {
+        let _ = (&value.generation, &value.values);
     });
-    // FIG-2104-WITNESS-0483: lash::plugins::PluginSnapshotArtifact::name
-    field_witness(|value: &lash::plugins::PluginSnapshotArtifact| {
-        let _ = &value.name;
-    });
-    // FIG-2104-WITNESS-0484: lash::plugins::PluginSnapshotEntry
-    type_witness::<lash::plugins::PluginSnapshotEntry>();
-    // FIG-2104-WITNESS-0485: lash::plugins::PluginSnapshotEntry::artifacts
-    field_witness(|value: &lash::plugins::PluginSnapshotEntry| {
-        let _ = &value.artifacts;
-    });
-    // FIG-2104-WITNESS-0486: lash::plugins::PluginSnapshotEntry::meta
-    field_witness(|value: &lash::plugins::PluginSnapshotEntry| {
-        let _ = &value.meta;
-    });
+    type_witness::<lash::plugins::PluginStateStore>();
+    member_witness(lash::plugins::PluginRegistrar::state);
     // FIG-2104-WITNESS-0487: lash::tools::PreparedToolBatch
     type_witness::<lash::tools::PreparedToolBatch>();
     // FIG-2104-WITNESS-0488: lash::tools::PreparedToolBatch::batch_id

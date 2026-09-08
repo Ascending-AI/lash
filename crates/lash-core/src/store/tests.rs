@@ -263,9 +263,10 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 
 #[test]
 fn intent_hash_golden_vector() {
+    // Checkpoint manifest v3 removes the plugin-reported revision from intent bytes.
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "a600da78b59942da80cbef61c1f63ad83537be3a824d5f1e78031becac6c82de"
+        "a6f3ac26d0455096293da3d24c0c52ee41ee6f5259872a212b327189cee9a3fd"
     );
 }
 
@@ -275,7 +276,7 @@ fn failure_evidence_changes_intent_hash_without_changing_empty_legacy_hash() {
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
     assert_eq!(
         baseline_hash,
-        "a600da78b59942da80cbef61c1f63ad83537be3a824d5f1e78031becac6c82de"
+        "a6f3ac26d0455096293da3d24c0c52ee41ee6f5259872a212b327189cee9a3fd"
     );
 
     let mut with_evidence = baseline;

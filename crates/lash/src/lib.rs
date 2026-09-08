@@ -384,11 +384,15 @@ pub mod plugins {
     pub use lash_core::plugin::{
         CheckpointApplication, CodeExecutionDisposition, CodeExecutorPlugin,
         ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState,
-        PluginAbort, PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry,
-        PrepareTurnRequest, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
-        ProtocolLlmCallAction, ProtocolRuntimeContext, ProtocolSessionContext,
-        ProtocolSessionMaterialization, ProtocolSessionPlugin, RecordedSessionConfig,
+        PluginAbort, PluginNamespaceState, PluginState, PrepareTurnRequest,
+        ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
+        ProtocolRuntimeContext, ProtocolSessionContext, ProtocolSessionMaterialization,
+        ProtocolSessionPlugin, ProtocolSessionRestoreView, RecordedSessionConfig,
         SessionAuthorityContext, SessionCreationConfig, TurnFinalization, TurnPreparation,
+    };
+    /// Host-mediated JSON state, accepted in memory and persisted at boundary commits.
+    pub use lash_core::plugin::{
+        KeyRejection, PluginStateEdit, PluginStateError, PluginStateStore, SessionReadyContext,
     };
     /// Plugin operations: the query / command / task vocabulary. A plugin
     /// author declares an operation by implementing [`PluginOperation`] plus
@@ -411,15 +415,6 @@ pub mod plugins {
         PluginOperationOutcome, PluginOperationReceipt, PluginOwned, PluginQuery,
         PluginQueryContext, PluginRuntimeDirective, PluginTask, PluginTaskContext,
         ProcessReadService, SessionParam, SessionReadService,
-    };
-    /// Durable plugin state: what [`SessionPlugin::snapshot`] writes and
-    /// [`SessionPlugin::restore`] reads back, plus the readiness context a
-    /// plugin is handed once its session exists. The aggregate the runtime
-    /// persists (`PluginSessionSnapshot` and its entries) is an integrator
-    /// seam and stays on `lash-core`: a plugin writes blobs and returns its own
-    /// [`PluginSnapshotMeta`], and never names the collection they land in.
-    pub use lash_core::plugin::{
-        PluginSnapshotMeta, SessionReadyContext, SnapshotReader, SnapshotWriter,
     };
     /// Engine registry and narrowed execution contexts used to host custom process engines.
     pub use lash_core::runtime::{

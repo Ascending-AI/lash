@@ -402,7 +402,6 @@ fn encode_manifest(
         schema_version: lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
         turn_state: lash_core::PersistedTurnState::default(),
         components,
-        plugin_snapshot_revision: None,
     };
     let mut bytes = Vec::new();
     rmp_serde::encode::write_named(&mut bytes, &manifest).expect("encode checkpoint manifest");

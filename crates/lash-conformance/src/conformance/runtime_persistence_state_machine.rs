@@ -4,16 +4,16 @@
 use super::*;
 use crate::StoreError::SessionExecutionLeaseRenewalRefused as RenewalRefused;
 use crate::store::{
-    EXECUTION_STATE_CHECKPOINT_COMPONENT, PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT,
+    EXECUTION_STATE_CHECKPOINT_COMPONENT, PLUGIN_STATE_CHECKPOINT_COMPONENT,
     TOOL_STATE_CHECKPOINT_COMPONENT,
 };
 use crate::{
     LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputDraft,
-    PluginSessionSnapshot, PluginSnapshotEntry, PluginSnapshotMeta, QueuedWorkBatch,
-    QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, RuntimeCommit,
-    RuntimePersistence, RuntimeSessionState, RuntimeUsageDeltaIdentity, SessionExecutionLease,
-    SessionExecutionLeaseClaimOutcome, StoreError, ToolState, TurnInput, TurnInputClaim,
-    TurnInputIngress, facade_support::ToolStateFacadeOps,
+    PluginNamespaceState, PluginState, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
+    QueuedWorkClaimBoundary, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
+    RuntimeUsageDeltaIdentity, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
+    StoreError, ToolState, TurnInput, TurnInputClaim, TurnInputIngress,
+    facade_support::ToolStateFacadeOps,
 };
 use lash_core::testing::conformance_support::ToolStateConformanceAccess;
 use proptest::prelude::*;
@@ -33,7 +33,7 @@ mod usage_conservation;
 pub use attachment_conservation::RuntimePersistenceStateMachineHandles;
 use attachment_conservation::{apply_attachment_operation, assert_attachment_conservation};
 use counterexample::persist_counterexample;
-use generator::{component_selection, generated_case, plugin_snapshot};
+use generator::{component_selection, generated_case, plugin_state};
 use usage_conservation::{
     assert_usage_conservation, confirm_usage, record_usage, register_committed_usage,
     replay_usage_receipt, stage_usage,
@@ -1183,12 +1183,12 @@ fn update_components_after_commit(
         shape,
     )?;
     check_component_ref(
-        "plugin-snapshot",
+        "plugin-state",
         selection.store_plugin,
         before.plugin_value,
         Some(value),
         before.plugin_ref.as_ref(),
-        manifest.component_ref(PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT),
+        manifest.component_ref(PLUGIN_STATE_CHECKPOINT_COMPONENT),
         shape,
     )?;
     if selection.clear_execution {
@@ -1227,7 +1227,7 @@ fn update_components_after_commit(
         .component_ref(TOOL_STATE_CHECKPOINT_COMPONENT)
         .cloned();
     model.components.plugin_ref = manifest
-        .component_ref(PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT)
+        .component_ref(PLUGIN_STATE_CHECKPOINT_COMPONENT)
         .cloned();
     model.components.execution_ref = manifest
         .component_ref(EXECUTION_STATE_CHECKPOINT_COMPONENT)
@@ -1416,7 +1416,6 @@ fn modeled_state(model: &ReferenceModel) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
         head_revision: model.head_revision,
-        plugin_snapshot_revision: model.components.plugin_value.map(u64::from),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.checkpoint_components =
@@ -1427,7 +1426,7 @@ fn modeled_state(model: &ReferenceModel) -> RuntimeSessionState {
                     model.components.tool_ref.clone(),
                 ),
                 (
-                    PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT.to_string(),
+                    PLUGIN_STATE_CHECKPOINT_COMPONENT.to_string(),
                     model.components.plugin_ref.clone(),
                 ),
                 (
@@ -1449,8 +1448,7 @@ fn install_component_bodies(state: &mut RuntimeSessionState, mode: u8, value: u8
         ));
     }
     if selection.store_plugin {
-        state.plugin_snapshot_revision = Some(u64::from(value));
-        state.set_plugin_snapshot(Some(plugin_snapshot(value)));
+        state.set_plugin_state(Some(plugin_state(value)));
     }
     if selection.clear_execution {
         state.set_execution_state_snapshot(None);
@@ -1696,7 +1694,7 @@ async fn assert_model_agreement(
         .ok_or_else(|| "committed checkpoint did not hydrate".to_string())?;
     if checkpoint.component_ref(TOOL_STATE_CHECKPOINT_COMPONENT)
         != model.components.tool_ref.as_ref()
-        || checkpoint.component_ref(PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT)
+        || checkpoint.component_ref(PLUGIN_STATE_CHECKPOINT_COMPONENT)
             != model.components.plugin_ref.as_ref()
         || checkpoint.component_ref(EXECUTION_STATE_CHECKPOINT_COMPONENT)
             != model.components.execution_ref.as_ref()
@@ -1712,22 +1710,21 @@ async fn assert_model_agreement(
     {
         return Err("hydrated tool-state body differs from the reference model".to_string());
     }
-    if checkpoint.plugin_snapshot_revision != model.components.plugin_value.map(u64::from)
-        || checkpoint
-            .decode_component::<PluginSessionSnapshot>(PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT)
-            .map_err(|error| error.to_string())?
+    if checkpoint
+        .decode_component::<PluginState>(PLUGIN_STATE_CHECKPOINT_COMPONENT)
+        .map_err(|error| error.to_string())?
+        .as_ref()
+        .map(json)
+        .transpose()?
+        != model
+            .components
+            .plugin_value
+            .map(plugin_state)
             .as_ref()
             .map(json)
             .transpose()?
-            != model
-                .components
-                .plugin_value
-                .map(plugin_snapshot)
-                .as_ref()
-                .map(json)
-                .transpose()?
     {
-        return Err("hydrated plugin-snapshot body differs from the reference model".to_string());
+        return Err("hydrated plugin-state body differs from the reference model".to_string());
     }
     if checkpoint
         .component_body(EXECUTION_STATE_CHECKPOINT_COMPONENT)
@@ -1751,7 +1748,6 @@ async fn session_snapshot(store: &dyn RuntimePersistence) -> Result<serde_json::
         let checkpoint = loaded.checkpoint.map(|checkpoint| {
             serde_json::json!({
                 "components": checkpoint.components,
-                "plugin_snapshot_revision": checkpoint.plugin_snapshot_revision,
             })
         });
         serde_json::json!({

@@ -340,8 +340,6 @@ pub mod facade_support {
     pub use crate::plugin::SessionStateChangedContext;
     pub use crate::plugin::SessionTurnRequest;
     pub use crate::plugin::ShortCircuitToolDirective;
-    pub use crate::plugin::SnapshotReader;
-    pub use crate::plugin::SnapshotWriter;
     pub use crate::plugin::ToolCatalogContribution;
     pub use crate::plugin::ToolResultProjectionContext;
     pub use crate::plugin::ToolResultProjector;
@@ -352,6 +350,7 @@ pub mod facade_support {
     pub use crate::plugin::TurnResultHookContext;
     pub use crate::plugin::TurnTransformContext;
     pub use crate::plugin::session_types::facade_ops::AgentFrameReasonFacadeOps;
+    pub use crate::plugin::{KeyRejection, PluginStateEdit, PluginStateError, PluginStateStore};
     pub use crate::plugin_stack::PluginStack;
     pub use crate::provider::CacheRetention;
     pub use crate::provider::GenerationRetryGuarantee;
@@ -1073,12 +1072,12 @@ pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};
 pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
-    AppendSessionNodesRequest, FrameNodeId, PluginError, PluginExtensions, PluginOptions,
-    PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry, PluginSnapshotMeta,
-    ProcessEngineContributionContext, ProtocolBeforeLlmCallContext, ProtocolLlmCallAction,
-    SessionContextOverlay, SessionCreateRequest, SessionGraphService, SessionPluginSource,
-    SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint, SessionStateService,
-    SessionToolAccess, SubagentSessionContext,
+    AppendSessionNodesRequest, FrameNodeId, KeyRejection, PluginError, PluginExtensions,
+    PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit, PluginStateError,
+    PluginStateStore, ProcessEngineContributionContext, ProtocolBeforeLlmCallContext,
+    ProtocolLlmCallAction, SessionContextOverlay, SessionCreateRequest, SessionGraphService,
+    SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
+    SessionStateService, SessionToolAccess, SubagentSessionContext,
 };
 pub(crate) use plugin::{
     OpenAgentFrameRequest, OpenAgentFrameResult, PluginRuntimeDirective, SessionTurnInput,

@@ -9,6 +9,7 @@ use super::*;
 #[derive(Clone)]
 pub struct PluginHost {
     factories: Arc<Vec<Arc<dyn PluginFactory>>>,
+    pub(super) export_plugin_namespaces: bool,
     extensions: PluginExtensions,
     sessions: Arc<StdMutex<BTreeMap<String, Weak<PluginSession>>>>,
 }
@@ -24,10 +25,10 @@ struct BuildPluginSessionRequest<'a> {
 enum PluginSessionMaterializationRequest<'a> {
     Creation {
         config: SessionCreationConfig,
-        seed_snapshot: Option<&'a PluginSessionSnapshot>,
+        seed_snapshot: Option<&'a PluginState>,
     },
     Rematerialization {
-        snapshot: &'a PluginSessionSnapshot,
+        snapshot: &'a PluginState,
         config: RecordedSessionConfig,
     },
 }
@@ -35,6 +36,7 @@ enum PluginSessionMaterializationRequest<'a> {
 struct BuiltSessionContributions {
     plugins: Vec<Arc<dyn SessionPlugin>>,
     contributions: PluginContributions,
+    state: Arc<StdMutex<PluginStateRegistry>>,
     triggers: crate::TriggerEventCatalog,
 }
 
@@ -75,6 +77,13 @@ impl RecordedSessionConfig {
 }
 
 impl PluginHost {
+    fn plugin_view(&self) -> Self {
+        Self {
+            export_plugin_namespaces: false,
+            ..self.clone()
+        }
+    }
+
     pub fn empty() -> Self {
         Self::new(Vec::new())
     }
@@ -94,6 +103,7 @@ impl PluginHost {
         );
         Self {
             factories: Arc::new(all_factories),
+            export_plugin_namespaces: true,
             extensions,
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
         }
@@ -107,6 +117,7 @@ impl PluginHost {
     pub fn isolated_registry(&self) -> Self {
         Self {
             factories: Arc::clone(&self.factories),
+            export_plugin_namespaces: self.export_plugin_namespaces,
             extensions: self.extensions.clone(),
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
         }
@@ -165,7 +176,7 @@ impl PluginHost {
     pub fn rematerialize_session(
         &self,
         session_id: impl Into<String>,
-        snapshot: &PluginSessionSnapshot,
+        snapshot: &PluginState,
         config: RecordedSessionConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
         self.rematerialize_session_with_overlay(
@@ -201,7 +212,7 @@ impl PluginHost {
         &self,
         session_id: impl Into<String>,
         parent_session_id: Option<String>,
-        snapshot: &PluginSessionSnapshot,
+        snapshot: &PluginState,
         config: RecordedSessionConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
         self.rematerialize_session_with_parent_and_overlay(
@@ -257,7 +268,7 @@ impl PluginHost {
         &self,
         session_id: impl Into<String>,
         parent_session_id: Option<String>,
-        seed_snapshot: &PluginSessionSnapshot,
+        seed_snapshot: &PluginState,
         tool_catalog_overlay: ToolCatalogContribution,
         tool_snapshot: Option<crate::ToolState>,
         config: SessionCreationConfig,
@@ -278,7 +289,7 @@ impl PluginHost {
         &self,
         session_id: impl Into<String>,
         parent_session_id: Option<String>,
-        snapshot: &PluginSessionSnapshot,
+        snapshot: &PluginState,
         tool_catalog_overlay: ToolCatalogContribution,
         tool_snapshot: Option<crate::ToolState>,
         config: RecordedSessionConfig,
@@ -298,7 +309,7 @@ impl PluginHost {
     pub fn rematerialize_session_with_overlay(
         &self,
         session_id: impl Into<String>,
-        snapshot: &PluginSessionSnapshot,
+        snapshot: &PluginState,
         tool_catalog_overlay: ToolCatalogContribution,
         tool_snapshot: Option<crate::ToolState>,
         config: RecordedSessionConfig,
@@ -355,12 +366,14 @@ impl PluginHost {
         let BuiltSessionContributions {
             plugins,
             contributions,
+            state,
             triggers,
-        } = self.build_session_contributions(&ctx)?;
+        } = self.build_session_contributions(&ctx, snapshot)?;
         let registry = build_tool_registry(&contributions, tool_snapshot)?;
         let tools = Arc::clone(&registry) as Arc<dyn ToolProvider>;
 
         let session = Arc::new(PluginSession {
+            state,
             host: self.clone(),
             session_id: ctx.session_id,
             plugins,
@@ -374,15 +387,17 @@ impl PluginHost {
             contributions,
         });
         self.register_session(&session_id, &session)?;
-        let ready = SessionReadyContext {
-            session_id: session.session_id.clone(),
-            host: self.clone(),
-        };
+        session.state.lock_recover().initialize(snapshot)?;
         for plugin in &session.plugins {
-            plugin.session_ready(ready.clone())?;
-        }
-        if let Some(snapshot) = snapshot {
-            session.restore(snapshot)?;
+            plugin.session_ready(SessionReadyContext {
+                session_id: session.session_id.clone(),
+                host: self.plugin_view(),
+                state: PluginStateStore::bind(
+                    &session.session_id,
+                    plugin.id(),
+                    Arc::clone(&session.state),
+                ),
+            })?;
         }
         Ok(session)
     }
@@ -390,13 +405,21 @@ impl PluginHost {
     fn build_session_contributions(
         &self,
         ctx: &PluginSessionContext,
+        snapshot: Option<&PluginState>,
     ) -> Result<BuiltSessionContributions, PluginError> {
+        let state = Arc::new(StdMutex::new(PluginStateRegistry::registering(snapshot)));
         let mut plugins = Vec::new();
         let mut reg = PluginRegistrar::new();
         for factory in self.factories() {
             let plugin = factory.build(ctx)?;
             reg.registering_plugin_id = Some(plugin.id().to_string());
+            reg.state = Some(PluginStateStore::bind(
+                &ctx.session_id,
+                plugin.id(),
+                Arc::clone(&state),
+            ));
             plugin.register(&mut reg)?;
+            reg.state = None;
             reg.registering_plugin_id = None;
             plugins.push(plugin);
         }
@@ -420,6 +443,7 @@ impl PluginHost {
                 PluginError::Registration(format!("invalid trigger event catalog: {message}"))
             })?;
         Ok(BuiltSessionContributions {
+            state,
             plugins,
             contributions,
             triggers,
@@ -437,7 +461,7 @@ impl PluginHost {
             extensions: self.extensions.clone(),
             parent_session_id: None,
         };
-        let built = self.build_session_contributions(&ctx)?;
+        let built = self.build_session_contributions(&ctx, None)?;
         build_tool_registry(&built.contributions, None)
     }
 
@@ -476,7 +500,15 @@ impl PluginHost {
             ));
         };
         match weak.upgrade() {
-            Some(session) => Ok(session),
+            Some(session) => {
+                if self.export_plugin_namespaces == session.host.export_plugin_namespaces {
+                    Ok(session)
+                } else {
+                    let mut view = (*session).clone();
+                    view.host = self.clone();
+                    Ok(Arc::new(view))
+                }
+            }
             None => {
                 sessions.remove(session_id);
                 Err(PluginOperationInvokeError::UnknownSession(

@@ -42,6 +42,7 @@ mod hostile_input;
 mod lineage;
 mod live_replay;
 mod observer_intent;
+mod plugin_state;
 mod process_change_feed;
 mod process_change_horizon;
 mod process_continuation_store;
@@ -86,6 +87,7 @@ pub use helpers::*;
 pub use lineage::*;
 pub use live_replay::*;
 pub use observer_intent::*;
+pub use plugin_state::plugin_state_boundary_trace;
 pub use process_change_horizon::*;
 pub use process_continuation_store::*;
 pub use process_prune_reclaim::*;
@@ -116,14 +118,14 @@ use std::time::Duration;
 use crate::{
     AgentFrameReason, AttachmentId, AttachmentIntent, AwaitEventWaitIdentity, DeliveryPolicy,
     EffectHost, ExecutionScope, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
-    LiveReplayStoreError, LiveReplaySubscribeOutcome, ModelSpec, PluginSessionSnapshot,
-    ProtocolEvent, ProtocolTurnOptions, QueuedWorkBatch, QueuedWorkBatchDraft,
-    QueuedWorkClaimBoundary, QueuedWorkPayload, Resolution, ResolveOutcome, RuntimeCommit,
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeInvocation, RuntimePersistence, RuntimeScope, RuntimeSessionState, RuntimeSubject,
-    RuntimeTurnCommitStamp, ScopedEffectController, SessionMeta, SessionNodePayload,
-    SessionNodeRecord, SessionObservationEvent, SessionObservationEventPayload, SessionPolicy,
+    LiveReplayStoreError, LiveReplaySubscribeOutcome, ModelSpec, PluginState, ProtocolEvent,
+    ProtocolTurnOptions, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaimBoundary,
+    QueuedWorkPayload, Resolution, ResolveOutcome, RuntimeCommit, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
+    RuntimePersistence, RuntimeScope, RuntimeSessionState, RuntimeSubject, RuntimeTurnCommitStamp,
+    ScopedEffectController, SessionMeta, SessionNodePayload, SessionNodeRecord,
+    SessionObservationEvent, SessionObservationEventPayload, SessionPolicy,
     SessionProcessEventKind, SessionQueueEventKind, SessionRelation, SessionRevision, StoreError,
     TokenLedgerEntry, TokenUsage, ToolState, TurnActivity, TurnEvent,
 };

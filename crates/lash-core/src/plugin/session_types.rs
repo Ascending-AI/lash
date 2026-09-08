@@ -125,9 +125,10 @@ pub struct SessionSnapshot {
     /// Read-only projection of the hydrated plugin-snapshot reference. Applying
     /// a snapshot does not write this field; the resident component set wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugin_snapshot_ref: Option<crate::store::BlobRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugin_snapshot_revision: Option<u64>,
+    pub plugin_state_ref: Option<crate::store::BlobRef>,
+    /// Host-owned mediated generations from the resident plugin-state component.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub plugin_state_generations: std::collections::BTreeMap<String, u64>,
     /// Read-only projection of the hydrated execution-state reference. Applying
     /// a snapshot does not write this field; the resident component set wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -153,8 +154,8 @@ impl SessionSnapshot {
             protocol_turn_options: ProtocolTurnOptions::default(),
             tool_state_ref: None,
             tool_state_generation: None,
-            plugin_snapshot_ref: None,
-            plugin_snapshot_revision: None,
+            plugin_state_ref: None,
+            plugin_state_generations: Default::default(),
             execution_state_ref: None,
             token_ledger: Vec::new(),
             checkpoint_ref: None,

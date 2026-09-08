@@ -218,7 +218,7 @@ impl TurnBoundary {
         state.policy = policy;
         state.turn_index = turn_index;
         if let Some(plugins) = plugins.as_ref() {
-            state.refresh_plugin_snapshots(plugins.as_ref());
+            state.capture_plugin_states(plugins.as_ref());
         }
         Ok(())
     }
@@ -285,7 +285,7 @@ impl TurnBoundary {
                 .apply(state)
                 .map_err(super::runtime_error_from_store_commit)?;
             if let Some(plugins) = plugins {
-                state.refresh_plugin_snapshots(plugins);
+                state.capture_plugin_states(plugins);
             }
         }
         let protocol_events = self.apply_event_delta(event_delta);
@@ -465,7 +465,7 @@ impl TurnBoundary {
             )?;
         }
         if let Some(plugins) = plugins {
-            state.refresh_plugin_snapshots(plugins);
+            state.capture_plugin_states(plugins);
         }
         execution_state_update.apply(state)?;
         materialize_terminal_output(

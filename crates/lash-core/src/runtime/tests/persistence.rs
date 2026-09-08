@@ -898,3 +898,123 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
 // ADR 0069: direct turns enter through the same durable acceptance the queued
 // ingress uses, so the in-memory store owes the same laws the durable backends
 // do.
+
+#[tokio::test]
+async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
+    struct BrokenRead {
+        inner: Arc<RecordingStore>,
+        read: Mutex<Option<crate::PersistedSessionRead>>,
+        loads: std::sync::atomic::AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl crate::store::RuntimePersistenceDecorator for BrokenRead {
+        fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+            self.inner.as_ref()
+        }
+        async fn load_session(
+            &self,
+        ) -> Result<Option<crate::PersistedSessionRead>, crate::StoreError> {
+            if let Some(read) = self.read.lock_recover().clone() {
+                self.loads.fetch_add(1, Ordering::SeqCst);
+                return Ok(Some(read));
+            }
+            crate::SessionCommitStore::load_session(self.inner.as_ref()).await
+        }
+        async fn load_session_head_meta(
+            &self,
+        ) -> Result<Option<crate::SessionHeadMeta>, crate::StoreError> {
+            if let Some(read) = self.read.lock_recover().as_ref() {
+                return Ok(Some(crate::SessionHeadMeta {
+                    schema_version: crate::CURRENT_SESSION_STATE_VERSION,
+                    session_id: read.session_id.clone(),
+                    head_revision: read.head_revision,
+                    config: read.config.clone(),
+                    current_frame_node_id: read.current_frame_node_id.clone(),
+                    checkpoint_ref: read.checkpoint_ref.clone(),
+                    leaf_node_id: read.graph.leaf_node_id.clone(),
+                }));
+            }
+            crate::SessionCommitStore::load_session_head_meta(self.inner.as_ref()).await
+        }
+    }
+    let store = Arc::new(BrokenRead {
+        inner: Arc::new(RecordingStore::default()),
+        read: Mutex::new(None),
+        loads: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        test_host_config(),
+        store.clone(),
+    )
+    .await;
+    runtime
+        .state
+        .set_execution_state_snapshot(Some(b"old-frame-root".to_vec()));
+    let old_frame = runtime.state.current_frame_node_id.clone();
+    let mut replacement = runtime.state.clone();
+    crate::runtime::state::open_agent_frame_in_state_with_clock(
+        &mut replacement,
+        crate::OpenAgentFrameRequest::new(
+            crate::FrameKey::from_caller_material("review-new-frame").unwrap(),
+            crate::AgentFrameReason::new("review"),
+        ),
+        &crate::testing::TestClock::new(1000),
+    );
+    assert_ne!(replacement.current_frame_node_id, old_frame);
+    replacement
+        .session_graph
+        .validate_resident_integrity()
+        .unwrap();
+    let config = crate::RuntimeCommit::persisted_state_for_test(&replacement, &[]).config;
+    let mut checkpoint = crate::HydratedSessionCheckpoint::default();
+    checkpoint.turn_state.turn_index = usize::MAX;
+    *store.read.lock_recover() = Some(crate::PersistedSessionRead {
+        session_id: replacement.session_id.clone(),
+        head_revision: runtime.state.head_revision + 1,
+        config,
+        current_frame_node_id: replacement.current_frame_node_id.clone(),
+        graph: replacement.session_graph.clone(),
+        checkpoint_ref: Some("new-checkpoint".to_string().into()),
+        checkpoint: Some(checkpoint),
+        token_ledger: Vec::new(),
+        turn_failure_settlements: Vec::new(),
+    });
+    let first = runtime.refresh_session_graph_from_store().await;
+    assert!(matches!(
+        first,
+        Err(SessionError::Store {
+            source: crate::StoreError::CheckpointTurnIndexOutOfRange { .. },
+            ..
+        })
+    ));
+    let second = runtime.refresh_session_graph_from_store().await;
+    assert!(second.is_ok());
+    eprintln!(
+        "STALE_REFRESH first={first:?} second={second:?} loads={} old_frame={old_frame:?} new_frame={:?} execution={:?}",
+        store.loads.load(Ordering::SeqCst),
+        runtime.state.current_frame_node_id,
+        runtime.state.execution_state_hydration()
+    );
+    eprintln!(
+        "STALE_CAPTURE {:?}",
+        runtime
+            .state
+            .checkpoint_components
+            .build_checkpoint(crate::PersistedTurnState::default())
+            .map(|c| c.components.keys().cloned().collect::<Vec<_>>())
+    );
+    assert!(
+        runtime.state.execution_state_hydration().unwrap().is_none(),
+        "failed checkpoint adoption retained the previous frame execution under the new head; retry skipped hydration"
+    );
+    assert!(matches!(
+        runtime
+            .state
+            .checkpoint_components
+            .build_checkpoint(crate::PersistedTurnState::default()),
+        Err(crate::StoreError::IncompleteCheckpointComponentSet)
+    ));
+}

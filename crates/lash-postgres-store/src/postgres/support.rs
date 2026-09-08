@@ -596,7 +596,6 @@ pub(crate) async fn get_checkpoint_tx(
     Ok(Some(HydratedSessionCheckpoint {
         turn_state: manifest.turn_state,
         components,
-        plugin_snapshot_revision: manifest.plugin_snapshot_revision,
     }))
 }
 

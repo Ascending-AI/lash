@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 78);
+    assert_eq!(PostgresStorage::schema_version(), 79);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -234,13 +234,20 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
                  CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL)
                      AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL));
          UPDATE lash_schema_versions
-            SET version = 78
+            SET version = 79
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)
     .await
     .expect("refresh refusal fixture pending-input and process-lease catalog");
     upgrade_prior_fixture_frame_identity(&pool).await;
+    sqlx::query("UPDATE lash_session_meta SET session_state_version = $1")
+        .bind(i32::try_from(lash_core::store::CURRENT_SESSION_STATE_VERSION).unwrap())
+        .execute(&pool)
+        .await
+        .expect(
+            "refresh enclosing session-state admission marker for the component refusal witness",
+        );
     // Keep the component-v1 payload as the refusal witness while refreshing
     // the enclosing head so hydration reaches that intended boundary.
     sqlx::query(
@@ -251,6 +258,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .execute(&pool)
     .await
     .expect("refresh refusal fixture head schema without changing its checkpoint");
+    upgrade_prior_fixture_checkpoint_manifests(&pool).await;
     pool.close().await;
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -262,6 +270,57 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     )
     .expect("write refreshed Postgres refusal fixture catalog");
     drop_fixture_schema(&database_url).await;
+}
+
+// Author-time envelope refresh only: retain the deliberately obsolete leaf bytes
+// and encoding descriptor so the refusal fixture reaches component admission.
+async fn upgrade_prior_fixture_checkpoint_manifests(pool: &sqlx::PgPool) {
+    use lash_core::store::{BlobRef, SESSION_CHECKPOINT_SCHEMA_VERSION, SessionCheckpoint};
+    let blobs: Vec<(String, Vec<u8>)> = sqlx::query_as("SELECT hash, content FROM lash_blobs")
+        .fetch_all(pool)
+        .await
+        .expect("read refusal fixture blobs");
+    for (old_hash, bytes) in blobs {
+        let Ok(mut value) = rmp_serde::from_slice::<serde_json::Value>(&bytes) else {
+            continue;
+        };
+        if value.get("turn_state").is_none()
+            || value
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64)
+                == Some(u64::from(SESSION_CHECKPOINT_SCHEMA_VERSION))
+        {
+            continue;
+        }
+        value["schema_version"] = SESSION_CHECKPOINT_SCHEMA_VERSION.into();
+        let checkpoint: SessionCheckpoint = serde_json::from_value(value)
+            .expect("decode refreshed checkpoint envelope without changing component descriptors");
+        let bytes =
+            rmp_serde::to_vec_named(&checkpoint).expect("encode refreshed checkpoint envelope");
+        let new_hash = BlobRef::for_content(&bytes).0;
+        sqlx::query(
+            "INSERT INTO lash_blobs (hash, content) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING",
+        )
+        .bind(&new_hash)
+        .bind(&bytes)
+        .execute(pool)
+        .await
+        .expect("write refreshed checkpoint root");
+        for table in [
+            "lash_sessions",
+            "lash_node_anchors",
+            "lash_checkpoint_blob_refs",
+        ] {
+            sqlx::query(&format!(
+                "UPDATE {table} SET checkpoint_ref = $1 WHERE checkpoint_ref = $2"
+            ))
+            .bind(&new_hash)
+            .bind(&old_hash)
+            .execute(pool)
+            .await
+            .expect("retarget fixture checkpoint root");
+        }
+    }
 }
 
 fn schema_table_ddl(table: &str) -> &'static str {

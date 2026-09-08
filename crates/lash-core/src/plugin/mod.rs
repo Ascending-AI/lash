@@ -24,7 +24,8 @@ mod services;
 mod session_obj;
 pub(crate) use session_obj::plugin_lifecycle_hook_issue;
 pub(crate) mod session_types;
-mod snapshot;
+mod state;
+use state::PluginStateRegistry;
 mod tool_catalog;
 mod trigger_registry;
 
@@ -61,7 +62,7 @@ pub use protocol::{
     EXECUTION_STATE_LEAF_MIN_BODY_BYTES, ExecutionStateComponentSnapshot, ExecutionStateSnapshot,
     HydratedExecutionState, PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
     ProtocolLlmCallAction, ProtocolRuntimeContext, ProtocolSessionContext,
-    ProtocolSessionMaterialization, ProtocolSessionPlugin,
+    ProtocolSessionMaterialization, ProtocolSessionPlugin, ProtocolSessionRestoreView,
 };
 pub use registrar::{
     ContextRegistrations, ExecutionRegistrations, OutputRegistrations,
@@ -94,10 +95,9 @@ pub use session_types::{
     SessionObserverIntentAttribution, SessionPluginSource, SessionRelation, SessionSnapshot,
     SessionStartPoint, SessionToolAccess, SubagentSessionContext,
 };
-pub(crate) use snapshot::{InMemorySnapshotReader, InMemorySnapshotWriter};
-pub use snapshot::{
-    PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry, PluginSnapshotMeta,
-    SnapshotReader, SnapshotWriter,
+pub use state::{
+    KeyRejection, PluginNamespaceState, PluginState, PluginStateEdit, PluginStateError,
+    PluginStateStore,
 };
 pub use tool_catalog::{
     AbortTurnDirective, AfterToolCallPluginDirective, AfterTurnPluginDirective,
@@ -307,6 +307,7 @@ mod tests {
         }
 
         fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+            reg.state().set("session_id", json!(self.session_id))?;
             reg.tools().provider(Arc::new(MockToolProvider))?;
             reg.prompt().contribute(Arc::new(|_ctx| {
                 Box::pin(async move {
@@ -348,18 +349,6 @@ mod tests {
                     })
                 })?;
             Ok(())
-        }
-
-        fn snapshot(
-            &self,
-            _writer: &mut dyn SnapshotWriter,
-        ) -> Result<PluginSnapshotMeta, PluginError> {
-            Ok(PluginSnapshotMeta {
-                plugin_id: self.id().to_string(),
-                plugin_version: self.version().to_string(),
-                revision: self.snapshot_revision(),
-                state: Some(json!({"session_id": self.session_id})),
-            })
         }
     }
 
@@ -816,7 +805,7 @@ mod tests {
     fn snapshot_round_trip_preserves_plugin_entries() {
         let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
         let session = host.build_session("root").expect("session");
-        let snapshot = session.snapshot().expect("snapshot");
+        let snapshot = session.export_state();
         assert!(snapshot.plugins.contains_key("mock"));
         let restored = host
             .rematerialize_session(
@@ -825,7 +814,7 @@ mod tests {
                 RecordedSessionConfig::new(ProtocolTurnOptions::default()),
             )
             .expect("restored");
-        let restored_snapshot = restored.snapshot().expect("snapshot");
+        let restored_snapshot = restored.export_state();
         assert!(restored_snapshot.plugins.contains_key("mock"));
     }
 

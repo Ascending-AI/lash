@@ -393,7 +393,7 @@ async fn append_conformance_runtime(
     // The protocol-session capability is embedder-supplied; the in-tree fake is
     // enough here because this suite never runs a turn.
     let host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
-    let plugins = match state.plugin_snapshot() {
+    let plugins = match state.plugin_state() {
         Some(snapshot) => host.rematerialize_session(
             request.session_id.clone(),
             snapshot,

@@ -111,6 +111,7 @@ pub(crate) struct PluginContributions {
 }
 
 pub struct PluginRegistrar {
+    pub(super) state: Option<super::PluginStateStore>,
     pub(crate) contributions: PluginContributions,
     pub(crate) registering_plugin_id: Option<String>,
     tool_names: BTreeSet<String>,
@@ -488,8 +489,16 @@ impl ExecutionRegistrations<'_> {
 }
 
 impl PluginRegistrar {
+    /// The host-owned namespace bound to the registering plugin.
+    pub fn state(&self) -> super::PluginStateStore {
+        self.state
+            .clone()
+            .expect("registrar is bound during registration")
+    }
+
     pub(crate) fn new() -> Self {
         Self {
+            state: None,
             contributions: PluginContributions::default(),
             registering_plugin_id: None,
             tool_names: BTreeSet::new(),
