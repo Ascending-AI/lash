@@ -1405,7 +1405,6 @@ async fn delete_session_from_catalog(
             for table in [
                 "pending_turn_inputs",
                 "turn_cancel_requests",
-                "attachment_manifest",
                 "runtime_turn_commits",
                 "session_execution_leases",
                 "usage_deltas",
@@ -1417,6 +1416,8 @@ async fn delete_session_from_catalog(
                 )
                 .map_err(sqlite_error)?;
             }
+            tx.execute(attachments::RECLAIM_DELETED_ATTACHMENT_ROOTS, [])
+                .map_err(sqlite_error)?;
             // Trigger manifests are the one artifact-ref namespace with an exact
             // session owner. Module, raw-artifact, and process-environment refs are
             // content-addressed factory services with no safe session attribution;

@@ -1069,9 +1069,9 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             .expect("arm");
         let fence = writer.await.expect("join writer").expect("fenced write");
 
-        let holds_ref =
-            lash_core::AttachmentManifest::holds_ref(&*store, &session_id, &attachment_id)
-                .expect("holds_ref");
+        let contains_ref = lash_core::AttachmentManifest::list_all_refs(&*store)
+            .map(|refs| refs.contains(&attachment_id))
+            .expect("contains_ref");
         match (armed, fence) {
             // The sweeper won: the delete is armed and the writer parked
             // without recording anything, so no bytes can land inside it.
@@ -1080,7 +1080,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
                 lash_core::AttachmentWriteFence::ReclamationInFlight,
             ) => {
                 assert!(
-                    !holds_ref,
+                    !contains_ref,
                     "round {round}: a parked writer records no intent"
                 );
             }
@@ -1091,7 +1091,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
                 lash_core::AttachmentWriteFence::Granted,
             ) => {
                 assert!(
-                    holds_ref,
+                    contains_ref,
                     "round {round}: a granted writer records its intent"
                 );
             }
@@ -1105,7 +1105,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         lash_core::AttachmentRootSet::release_attachment_condemnation(&factory, &attachment_id)
             .await
             .expect("release");
-        if holds_ref {
+        if contains_ref {
             lash_core::AttachmentManifest::forget(&*store, &session_id, &attachment_id)
                 .expect("forget the ref");
         }

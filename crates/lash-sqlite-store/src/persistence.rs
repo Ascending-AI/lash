@@ -442,6 +442,7 @@ impl SessionCommitStore for Store {
         Store::load_session_head_meta(self).await
     }
 
+    /// FIG-653: session-relative history reads enforce graph membership, not authorization.
     async fn load_node(
         &self,
         node_id: &str,

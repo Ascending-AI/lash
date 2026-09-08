@@ -553,7 +553,10 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 StoreOperation::Commit {
                     label: "adopt_attachment_in_runtime_commit",
                     expected_head_revision: 0,
-                    graph: append(Vec::new(), None),
+                    graph: append(
+                        vec![NodeSpec::new("active-frame", None, "attachment-prefix")],
+                        Some("active-frame"),
+                    ),
                     turn_commit: Some(TurnCommitSpec {
                         turn_id: "attachment-adoption",
                     }),
@@ -561,6 +564,9 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     usage: false,
                     adopt_attachment: true,
                 },
+                StoreOperation::PinLeaf,
+                StoreOperation::Rewind,
+                StoreOperation::UnpinLeaf,
             ],
         },
         GeneratedCase {

@@ -479,9 +479,8 @@ mod tests {
     }
 
     // The flipped attachment contract against a real S3 backend: identical
-    // bytes from two sessions dedup to one object, the session-boundary guard
-    // keeps a session from resolving another's blob, and GC collects the blob
-    // only once no session references it.
+    // bytes from two sessions dedup to one object, reads resolve across session
+    // boundaries, and GC collects the blob only after its final root disappears.
     #[tokio::test]
     async fn shared_bytes_isolation_and_gc_when_minio_configured() {
         let Some(mut config) = minio_config_from_env() else {
@@ -497,7 +496,7 @@ mod tests {
             config.prefix.as_deref().unwrap_or("tests"),
             unique_case_suffix()
         ));
-        lash_conformance::attachment_ownership_isolation_with_store(
+        lash_conformance::attachment_reference_lifecycle_with_store(
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::new(S3AttachmentStore::from_config(config).expect("store"))
                 as Arc<dyn AttachmentStore>,

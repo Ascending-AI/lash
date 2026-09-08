@@ -1007,17 +1007,13 @@ pub fn content_id(bytes: &[u8]) -> AttachmentId {
 /// `(session_id, attachment_id)` refs, and a `session_id`. Every `put` records
 /// a write-ahead intent in the manifest *before* the bytes hit the backend, so
 /// a crash between `put` and the next durable commit surfaces as an uncommitted
-/// manifest row that GC reconciles. Every `get` first checks the manifest holds
-/// a ref for this session — the session-boundary guard that replaces physical
-/// per-session isolation: a turn in one session can never resolve another
-/// session's content-addressed blob by guessing its hash. `delete` drops the
-/// session's manifest ref and leaves the blob in place; the bytes die later via
-/// [`reclaim_unreferenced_attachments`] once no session references them.
+/// manifest row that GC reconciles. FIG-653: `get` resolves content addresses
+/// directly, including fork-inherited references; hosts own authorization.
+/// `delete` forgets a manifest ref only when retained graph history no longer
+/// needs it. Bytes die through [`reclaim_unreferenced_attachments`] after the
+/// final root disappears.
 ///
-/// Ephemeral runtimes (no durable reference store) wrap their backend with a
-/// [`NoopAttachmentManifest`] via [`SessionAttachmentStore::ephemeral`], so
-/// consumers still see exactly one type. A no-op manifest imposes no boundary
-/// guard (reads pass straight through) and records nothing.
+/// Ephemeral runtimes use [`NoopAttachmentManifest`] and track no durable roots.
 pub struct SessionAttachmentStore {
     backend: Arc<dyn AttachmentStore>,
     manifest: Arc<dyn AttachmentManifest>,
@@ -1263,21 +1259,9 @@ impl SessionAttachmentStore {
         Ok(reference)
     }
 
+    /// Resolve by content address, including references inherited through a fork.
+    /// FIG-653: hosts own read authorization; an absent backend id is NotFound.
     pub async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        // Session-boundary guard: refuse to resolve a blob this session never
-        // referenced, even if the backend physically holds identical bytes for
-        // another session.
-        let holds_ref = self
-            .manifest
-            .holds_ref(&self.session_id, id)
-            .map_err(|err| {
-                AttachmentStoreError::Backend(format!(
-                    "failed to check attachment manifest for `{id}`: {err}"
-                ))
-            })?;
-        if !holds_ref {
-            return Err(AttachmentStoreError::NotFound(id.clone()));
-        }
         self.backend.get(id).await
     }
 
@@ -1293,8 +1277,8 @@ impl SessionAttachmentStore {
     }
 }
 
-/// No-op [`AttachmentManifest`] for ephemeral facades: records nothing, imposes
-/// no boundary guard (`holds_ref` returns `true`), and exposes no refs. The
+/// No-op [`AttachmentManifest`] for ephemeral facades: records nothing and
+/// exposes no refs. The
 /// backend is the sole source of truth for these runtimes.
 pub struct NoopAttachmentManifest;
 
@@ -1320,14 +1304,6 @@ impl AttachmentManifest for NoopAttachmentManifest {
 
     fn forget(&self, _session_id: &str, _attachment_id: &AttachmentId) -> Result<(), StoreError> {
         Ok(())
-    }
-
-    fn holds_ref(
-        &self,
-        _session_id: &str,
-        _attachment_id: &AttachmentId,
-    ) -> Result<bool, StoreError> {
-        Ok(true)
     }
 
     fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
@@ -1382,14 +1358,6 @@ impl AttachmentManifest for PersistenceManifestAdapter {
         attachment_id: &AttachmentId,
     ) -> Result<(), crate::StoreError> {
         AttachmentManifest::forget(&*self.0, session_id, attachment_id)
-    }
-
-    fn holds_ref(
-        &self,
-        session_id: &str,
-        attachment_id: &AttachmentId,
-    ) -> Result<bool, crate::StoreError> {
-        AttachmentManifest::holds_ref(&*self.0, session_id, attachment_id)
     }
 
     fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {

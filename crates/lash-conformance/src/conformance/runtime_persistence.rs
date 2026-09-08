@@ -9580,10 +9580,7 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
     );
 }
 
-/// The durable manifest is the reference layer: it answers `holds_ref` for the
-/// session-boundary guard, exposes every live ref (intent or committed) for the
-/// GC root set, and drops refs on `forget`. Both intents and commits count as
-/// live refs; a forgotten ref disappears from both queries.
+/// Manifest rows are GC roots, not read authorization (FIG-653).
 async fn attachment_manifest_reference_tracking_and_gc_root_set(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -9609,34 +9606,6 @@ async fn attachment_manifest_reference_tracking_and_gc_root_set(
         .commit_refs("root", std::slice::from_ref(&committed_id))
         .expect("commit attachment ref");
 
-    // Boundary guard: both an intent and a commit are live refs for their
-    // session; another session (or an unknown id) holds no ref.
-    assert!(
-        store.holds_ref("root", &intent_id).expect("holds intent"),
-        "an uncommitted intent is a live ref"
-    );
-    assert!(
-        store
-            .holds_ref("root", &committed_id)
-            .expect("holds commit"),
-        "a committed attachment is a live ref"
-    );
-    assert!(
-        !store
-            .holds_ref("other-session", &committed_id)
-            .expect("no cross-session ref"),
-        "a ref belongs only to its own session"
-    );
-    assert!(
-        !store
-            .holds_ref(
-                "root",
-                &AttachmentId::parse("sha256:never-referenced").expect("valid attachment id")
-            )
-            .expect("no ref for unknown id"),
-        "an id never referenced holds no ref"
-    );
-
     // Root set: every live ref, intent or committed.
     let refs = store.list_all_refs().expect("list all refs");
     assert!(refs.contains(&intent_id), "intents feed the GC root set");
@@ -9657,10 +9626,13 @@ async fn attachment_manifest_reference_tracking_and_gc_root_set(
         "a committed attachment is not listed as uncommitted"
     );
 
-    // Forget drops the ref from both the boundary guard and the root set.
+    // Forget drops the ref from the root set.
     store.forget("root", &intent_id).expect("forget intent ref");
     assert!(
-        !store.holds_ref("root", &intent_id).expect("ref dropped"),
+        !store
+            .list_all_refs()
+            .map(|refs| refs.contains(&intent_id))
+            .expect("ref dropped"),
         "a forgotten ref is no longer held"
     );
     assert!(

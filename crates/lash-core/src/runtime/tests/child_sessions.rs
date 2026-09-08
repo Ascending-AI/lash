@@ -455,9 +455,8 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
         bytes.get(&id).await.expect("child attachment bytes").bytes,
         vec![4, 2, 4, 2]
     );
-    // ...but reference isolation is now manifest-based: the child session holds
-    // the ref, the root session never does. A managed child starts with its own
-    // empty manifest, so it cannot resolve a blob the root put and vice versa.
+    // Manifest ownership attributes liveness to the child (FIG-653), while
+    // reads resolve content addresses across sessions.
     let child_store = child_factory
         .stores()
         .into_iter()
@@ -470,13 +469,16 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
         })
         .expect("child store");
     assert!(
-        crate::AttachmentManifest::holds_ref(&*child_store, "attachment-child", &id)
+        crate::AttachmentManifest::list_all_refs(&*child_store)
+            .map(|refs| refs.contains(&id))
             .expect("child manifest lookup"),
         "child session must hold the ref it wrote"
     );
     assert!(
-        !crate::AttachmentManifest::holds_ref(&*root_store, "root", &id)
-            .expect("root manifest lookup"),
+        !root_store
+            .attachment_manifest_entries()
+            .iter()
+            .any(|entry| entry.session_id == "root" && entry.attachment_id == id),
         "root session must not hold a ref for the child's attachment"
     );
 }

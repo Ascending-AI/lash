@@ -12,6 +12,18 @@
 //! Every DB body is a synchronous rusqlite closure handed to `conn.call`
 //! (reads) or `conn.write` (read-then-write); only the wrapper call is awaited.
 
+/// FIG-653: graph retention is a prune precondition for committed attachment roots.
+/// Owner-level retention deliberately includes suffix attachments: the manifest
+/// has no node edge. Forks and pins keep these rows until their final prefix dies.
+pub(crate) const RECLAIM_DELETED_ATTACHMENT_ROOTS: &str =
+    "DELETE FROM attachment_manifest AS manifest
+ WHERE EXISTS (SELECT 1 FROM deleted_sessions AS deleted
+               WHERE deleted.session_id = manifest.session_id)
+   AND (manifest.committed_at_ms IS NULL OR NOT EXISTS (
+       SELECT 1 FROM graph_nodes AS node
+       WHERE node.session_id = manifest.session_id AND node.tombstoned = 0
+   ))";
+
 use super::*;
 #[cfg(feature = "lashlang")]
 use lash_sansio::sync::MutexExt;
@@ -747,6 +759,7 @@ impl AttachmentManifest for Store {
             let process_registry_attached = self.process_registry_attached;
             self.conn
                 .write(move |tx| {
+                    tx.execute(RECLAIM_DELETED_ATTACHMENT_ROOTS, [])?;
                     // One conditional DELETE composes age with owner-death proof.
                     // The attached process DB makes the NOT EXISTS predicate part
                     // of this same SQLite statement/transaction, avoiding a
@@ -823,37 +836,18 @@ impl AttachmentManifest for Store {
                 .call(move |conn| {
                     conn.execute(
                         "DELETE FROM attachment_manifest
-                         WHERE session_id = ?1 AND attachment_id = ?2",
+                         WHERE session_id = ?1 AND attachment_id = ?2 AND (
+                             committed_at_ms IS NULL OR NOT EXISTS (
+                                 SELECT 1 FROM graph_nodes AS node
+                                 WHERE node.session_id = attachment_manifest.session_id
+                                   AND node.tombstoned = 0
+                             ))",
                         params![session_id, attachment_id],
                     )
                 })
                 .await
                 .map_err(sqlite_error)?;
             Ok(())
-        })
-    }
-
-    fn holds_ref(
-        &self,
-        session_id: &str,
-        attachment_id: &AttachmentId,
-    ) -> Result<bool, StoreError> {
-        block_on_store(async {
-            let session_id = session_id.to_string();
-            let attachment_id = attachment_id.as_str().to_string();
-            self.conn
-                .call(move |conn| {
-                    conn.query_row(
-                        "SELECT 1 FROM attachment_manifest
-                         WHERE session_id = ?1 AND attachment_id = ?2",
-                        params![session_id, attachment_id],
-                        |_| Ok(()),
-                    )
-                    .optional()
-                    .map(|found| found.is_some())
-                })
-                .await
-                .map_err(sqlite_error)
         })
     }
 

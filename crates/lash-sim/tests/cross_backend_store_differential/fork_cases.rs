@@ -111,6 +111,11 @@ impl BackendRunner {
                 Ok(None)
             }
             StoreOperation::Rewind => {
+                let attachment_rooted = self
+                    .factory()
+                    .live_attachment_refs(0)
+                    .await?
+                    .contains(&differential_attachment_id());
                 let node_id = self
                     .current_leaf_node_id
                     .clone()
@@ -139,6 +144,15 @@ impl BackendRunner {
                     .delete_session(&self.session_id)
                     .await
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
+                if attachment_rooted {
+                    assert!(
+                        self.factory()
+                            .live_attachment_refs(0)
+                            .await?
+                            .contains(&differential_attachment_id()),
+                        "FIG-2501: surviving fork retains the deleted parent's attachment root"
+                    );
+                }
                 let rewound = self
                     .factory()
                     .fork_at(&ForkSessionRequest {

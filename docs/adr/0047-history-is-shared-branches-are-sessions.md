@@ -95,10 +95,9 @@ exclusivity. Processes remain independent durable objects and stay outside
 stored history-node reachability.
 
 Effect-journal identity and lifecycle retirement are implemented as recorded by
-ADR 0025. The attachment/blob part remains pending: explicit attachment-edge
-relations, bounded reclaim surfaces, and the `holds_ref` deletion belong to the
-FIG-653 L7 retention work. Current attachment liveness still uses manifest rows
-and commit-receipt predicates.
+ADR 0025. FIG-2501 removes the attachment membership read probe and protects
+manifest roots with graph retention (see below). Bounded receipt reclamation
+remains the next FIG-653 layer; live turn intents still use receipt supersession.
 
 ## Store leaf validation versus caller branch liveness
 
@@ -184,3 +183,17 @@ id directly. The shared-history and branch-as-session rulings are unchanged.
   amendment. Process event folding and weak observation are orthogonal to
   immutable session history, and processes remain outside stored history
   reachability.
+
+## Attachment prefix retention (FIG-2501 / FIG-653)
+
+Attachment reads resolve content addresses directly; hosts own authorization.
+History point reads retain fork-lineage graph membership, and process waits
+retain observer subscription semantics. Neither relationship gate is authorization.
+
+Committed attachment manifest rows survive owner deletion while any of that
+owner's graph nodes remain retained. The graph's existing head/child/pin
+retirement protocol supplies the prune precondition. A deleted owner's
+uncommitted intents are removed, and GC reconciles committed roots after the
+last retained node disappears, including after unpin. No schema bump is needed.
+This deliberately retains all of the owner's committed attachments while any
+prefix survives: the manifest has no exact node-to-attachment edge.

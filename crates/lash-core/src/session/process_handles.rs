@@ -64,6 +64,7 @@ impl RuntimeExecutionContext<'_> {
         ))
     }
 
+    /// FIG-653: observer validation enforces subscription relationships, not authorization.
     async fn authorize_handle(
         &self,
         process_ref: &crate::ProcessRef,

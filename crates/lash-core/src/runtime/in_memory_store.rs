@@ -195,8 +195,7 @@ pub struct InMemorySessionStore {
     pending_turn_inputs: Mutex<Vec<InMemoryPendingTurnInput>>,
     pending_turn_input_next_seq: Mutex<u64>,
     turn_cancel_requests: Mutex<HashMap<String, crate::TurnCancelRequestRecord>>,
-    attachment_manifest:
-        Mutex<HashMap<(String, crate::AttachmentId), crate::AttachmentManifestEntry>>,
+    attachment_manifest: SharedAttachmentManifest,
     /// Per-digest attachment GC condemnation state, shared with every store the
     /// same factory owns because the digest is factory-global: the writer's
     /// intent insert and the sweeper's condemn CAS must meet here.
@@ -292,6 +291,7 @@ impl InMemorySessionStore {
             Arc::new(Mutex::new(HashSet::new())),
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
         )
     }
 
@@ -309,6 +309,7 @@ impl InMemorySessionStore {
         deleted_session_ids: Arc<Mutex<HashSet<String>>>,
         session_catalog: SharedSessionCatalog,
         attachment_condemnations: SharedAttachmentCondemnations,
+        attachment_manifest: SharedAttachmentManifest,
     ) -> Self {
         warn_process_owner_death_degraded("InMemorySessionStore::with_shared_history");
         Self {
@@ -340,7 +341,7 @@ impl InMemorySessionStore {
             pending_turn_inputs: Mutex::new(Vec::new()),
             pending_turn_input_next_seq: Mutex::new(0),
             turn_cancel_requests: Mutex::new(HashMap::new()),
-            attachment_manifest: Mutex::new(HashMap::new()),
+            attachment_manifest,
             attachment_condemnations,
             #[cfg(any(test, feature = "testing"))]
             claim_after_lease_validation_hook: Mutex::new(None),
@@ -1022,6 +1023,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         Ok(self.session_head_meta.lock_recover().clone())
     }
 
+    /// FIG-653: fork-lineage visibility is graph membership, not authorization.
     async fn load_node(
         &self,
         node_id: &str,
@@ -1565,3 +1567,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
 
 #[cfg(any(test, feature = "testing"))]
 pub use factory::lineage_conformance_support::handles as in_memory_lineage_handles;
+
+type SharedAttachmentManifest =
+    Arc<Mutex<HashMap<(String, crate::AttachmentId), crate::AttachmentManifestEntry>>>;

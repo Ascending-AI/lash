@@ -203,21 +203,20 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         session_id: &str,
         attachment_id: &crate::AttachmentId,
     ) -> Result<(), crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        let owners = self.global_node_owners.lock_recover();
+        let tombstoned = self.tombstoned_node_ids.lock_recover();
+        let retained = owners
+            .iter()
+            .any(|(node, owner)| owner == session_id && !tombstoned.contains(node));
         self.attachment_manifest
             .lock_recover()
-            .remove(&(session_id.to_string(), attachment_id.clone()));
+            .retain(|(owner, id), entry| {
+                owner != session_id
+                    || id != attachment_id
+                    || (retained && entry.committed_at_epoch_ms.is_some())
+            });
         Ok(())
-    }
-
-    fn holds_ref(
-        &self,
-        session_id: &str,
-        attachment_id: &crate::AttachmentId,
-    ) -> Result<bool, crate::store::StoreError> {
-        Ok(self
-            .attachment_manifest
-            .lock_recover()
-            .contains_key(&(session_id.to_string(), attachment_id.clone())))
     }
 
     fn has_live_ref_for_id(
@@ -320,19 +319,18 @@ mod attachment_reconciliation_tests {
 
         assert!(
             store
-                .holds_ref(
-                    "s",
-                    &crate::AttachmentId::parse("kept").expect("valid attachment id")
-                )
+                .list_all_refs()
+                .map(|refs| refs
+                    .contains(&crate::AttachmentId::parse("kept").expect("valid attachment id")))
                 .unwrap(),
             "a refreshed intent (timestamp past the cutoff) must survive reconciliation"
         );
         assert!(
             !store
-                .holds_ref(
-                    "s",
+                .list_all_refs()
+                .map(|refs| refs.contains(
                     &crate::AttachmentId::parse("collected").expect("valid attachment id")
-                )
+                ))
                 .unwrap(),
             "a stale aged intent must be reconciled away"
         );
@@ -363,9 +361,17 @@ mod attachment_reconciliation_tests {
 
         store.forget_aged_uncommitted_intents(cutoff).unwrap();
         assert!(
-            store.holds_ref("s", &committed).unwrap(),
+            store
+                .list_all_refs()
+                .map(|refs| refs.contains(&committed))
+                .unwrap(),
             "a committed ref survives reconciliation regardless of its intent age"
         );
-        assert!(!store.holds_ref("s", &orphan).unwrap());
+        assert!(
+            !store
+                .list_all_refs()
+                .map(|refs| refs.contains(&orphan))
+                .unwrap()
+        );
     }
 }

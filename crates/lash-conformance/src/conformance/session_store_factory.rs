@@ -55,7 +55,7 @@ pub async fn session_store_factory<F>(
     config_commands::session_store_factory_bounds_config_command_claims(make()).await;
     session_store_factory_never_used_delete_is_noop(make()).await;
     session_store_factory_rejects_writes_after_delete(make()).await;
-    attachment_ownership_isolation(make()).await;
+    attachment_reference_lifecycle(make()).await;
     session_store_factory_attachment_large_cutoff_conformance(make()).await;
     session_store_factory_attachment_gc_fence_state_machine(make()).await;
     session_store_factory_fenced_sweep_collects_and_releases(make()).await;
@@ -817,20 +817,19 @@ pub async fn process_prune_deletes_owned_session_stores(
 }
 
 /// Exercise the shared-bytes attachment contract: identical bytes across
-/// sessions dedup to one blob, the session-boundary guard keeps sessions from
-/// resolving each other's blobs, and mark-and-sweep GC collects a blob only
-/// once no session references it.
-pub async fn attachment_ownership_isolation(factory: Arc<dyn crate::SessionStoreFactory>) {
-    attachment_ownership_isolation_with_store(
+/// sessions dedup to one blob, reads resolve across session boundaries, and
+/// mark-and-sweep GC collects a blob only once no retained root references it.
+pub async fn attachment_reference_lifecycle(factory: Arc<dyn crate::SessionStoreFactory>) {
+    attachment_reference_lifecycle_with_store(
         factory,
         Arc::new(crate::InMemoryAttachmentStore::new()),
     )
     .await;
 }
 
-/// Run [`attachment_ownership_isolation`] against a concrete flat byte backend,
+/// Run [`attachment_reference_lifecycle`] against a concrete flat byte backend,
 /// combining manifest reference tracking with the shared physical layout.
-pub async fn attachment_ownership_isolation_with_store(
+pub async fn attachment_reference_lifecycle_with_store(
     factory: Arc<dyn crate::SessionStoreFactory>,
     backend: Arc<dyn crate::AttachmentStore>,
 ) {
@@ -886,14 +885,14 @@ pub async fn attachment_ownership_isolation_with_store(
         .commit_refs(&a_request.session_id, std::slice::from_ref(&a_ref.id))
         .expect("commit a's attachment ref");
 
-    // Boundary guard: session B never referenced A's blob, so its facade get
-    // must NotFound even though the backend physically holds the bytes.
-    assert!(
-        matches!(
-            session_b.get(&a_ref.id).await,
-            Err(AttachmentStoreError::NotFound(_))
-        ),
-        "session B must not resolve session A's committed blob"
+    // FIG-653: the reference layer owns liveness, not read authorization.
+    assert_eq!(
+        session_b
+            .get(&a_ref.id)
+            .await
+            .expect("cross-session content read")
+            .bytes,
+        vec![6, 2, 6, 4]
     );
     backend
         .get(&a_ref.id)
@@ -2200,8 +2199,9 @@ async fn session_store_factory_attachment_gc_fence_state_machine(
         "a writer must park while the physical delete is in flight"
     );
     assert!(
-        !crate::AttachmentManifest::holds_ref(&*store, &request.session_id, &attachment_id)
-            .expect("holds_ref"),
+        !crate::AttachmentManifest::list_all_refs(&*store)
+            .map(|refs| refs.contains(&attachment_id))
+            .expect("contains_ref"),
         "a parked writer must record no intent"
     );
 

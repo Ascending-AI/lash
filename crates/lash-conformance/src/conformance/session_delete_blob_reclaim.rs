@@ -233,6 +233,8 @@ pub async fn session_delete_blob_reclaim_conformance<F>(backend: &str, make: F)
 where
     F: Fn() -> SessionDeleteBlobHandles,
 {
+    attachment_prefix_retention(backend, make(), false).await;
+    attachment_prefix_retention(backend, make(), true).await;
     session_delete_reclaims_exclusive_checkpoint_blobs(backend, make()).await;
     session_delete_keeps_fork_shared_checkpoint_blobs(backend, make()).await;
     session_delete_reclaims_content_aliased_checkpoint_roots(backend, make()).await;
@@ -460,4 +462,149 @@ impl SessionDeleteBlobProbe for crate::InMemorySessionStoreFactory {
     async fn fail_next_blob_delete(&self) {
         self.fail_next_session_blob_delete_for_testing();
     }
+}
+
+/// FIG-2501: fork and pin roots protect attachment bytes after owner deletion.
+async fn attachment_prefix_retention(
+    backend_name: &str,
+    handles: SessionDeleteBlobHandles,
+    pinned: bool,
+) {
+    let request = session_store_request(
+        "attachment-prefix-parent",
+        "session-delete-blob-reclaim-model",
+        crate::SessionRelation::Root,
+    );
+    let store = handles.factory.create_store(&request).await.unwrap();
+    let bytes: Arc<dyn crate::AttachmentStore> = Arc::new(crate::InMemoryAttachmentStore::new());
+    let parent =
+        crate::SessionAttachmentStore::new(bytes.clone(), store.clone(), &request.session_id);
+    let reference = parent
+        .put(
+            vec![1, 2, 3],
+            crate::AttachmentCreateMeta::new(
+                crate::MediaType::parse("image/png").unwrap(),
+                None,
+                None,
+            ),
+        )
+        .await
+        .expect("put shared-prefix attachment");
+    let mut state = crate::RuntimeSessionState {
+        session_id: request.session_id.clone(),
+        ..crate::RuntimeSessionState::new(request.policy.clone())
+    };
+    state.ensure_agent_frame_initialized();
+    state.session_graph.append_message(crate::Message {
+        id: "shared-image".into(),
+        role: crate::MessageRole::User,
+        origin: None,
+        parts: Arc::new(vec![crate::Part::attachment_part(
+            "shared-image-part".into(),
+            String::new(),
+            Some(lash_sansio::PartAttachment {
+                source: crate::AttachmentSource::Stored {
+                    attachment_ref: reference.clone(),
+                },
+            }),
+        )]),
+    });
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.committed_attachment_ids = vec![reference.id.clone()];
+    let receipt = store.commit_runtime_state(commit).await.unwrap();
+    let leaf_node_id = receipt.committed_leaf_node_id.unwrap();
+    if pinned {
+        handles.factory.pin(&leaf_node_id).await.unwrap();
+    }
+    let fork_request = crate::ForkSessionRequest {
+        pending_observer_intents: Vec::new(),
+        session_id: "attachment-prefix-child".to_string(),
+        node_id: leaf_node_id.clone(),
+        relation: crate::SessionRelation::Root,
+        policy: request.policy.clone(),
+    };
+    handles
+        .factory
+        .fork_at(&fork_request)
+        .await
+        .expect("fork prefix");
+    let fork = handles
+        .factory
+        .open_existing_store(&session_store_request(
+            &fork_request.session_id,
+            "session-delete-blob-reclaim-model",
+            crate::SessionRelation::Root,
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    let inherited = fork.load_session().await.unwrap().unwrap();
+    assert!(
+        inherited
+            .graph
+            .nodes
+            .iter()
+            .any(|node| serde_json::to_string(node)
+                .unwrap()
+                .contains(reference.id.as_str())),
+        "fork history retains the stored image reference"
+    );
+    let child = crate::SessionAttachmentStore::new(bytes.clone(), fork, &fork_request.session_id);
+    assert_eq!(
+        child
+            .get(&reference.id)
+            .await
+            .expect("fork reads shared-prefix attachment")
+            .bytes,
+        vec![1, 2, 3]
+    );
+    handles
+        .factory
+        .delete_session(&request.session_id)
+        .await
+        .unwrap();
+    if pinned {
+        handles
+            .factory
+            .delete_session(&fork_request.session_id)
+            .await
+            .unwrap();
+    }
+    let policy = crate::AttachmentReclamationPolicy {
+        grace_period_ms: 0,
+        empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
+    };
+    crate::reclaim_unreferenced_attachments(handles.factory.as_ref(), bytes.as_ref(), policy)
+        .await
+        .unwrap();
+    assert_eq!(
+        child
+            .get(&reference.id)
+            .await
+            .expect("surviving fork/pin retains attachment after parent deletion")
+            .bytes,
+        vec![1, 2, 3],
+        "{backend_name}"
+    );
+    if pinned {
+        handles.factory.unpin(&leaf_node_id).await.unwrap();
+    } else {
+        handles
+            .factory
+            .delete_session(&fork_request.session_id)
+            .await
+            .unwrap();
+    }
+    let report =
+        crate::reclaim_unreferenced_attachments(handles.factory.as_ref(), bytes.as_ref(), policy)
+            .await
+            .unwrap();
+    assert_eq!(
+        report.reclaimed_count, 1,
+        "{backend_name}: last reader gone collects orphan"
+    );
+    assert!(matches!(
+        bytes.get(&reference.id).await,
+        Err(crate::AttachmentStoreError::NotFound(_))
+    ));
 }

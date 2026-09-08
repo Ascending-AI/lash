@@ -542,6 +542,7 @@ impl SessionCommitStore for PostgresSessionStore {
         Ok(meta)
     }
 
+    /// FIG-653: fork-lineage visibility is graph membership, not authorization.
     async fn load_node(&self, node_id: &str) -> Result<Option<SessionNodeRecord>, StoreError> {
         let session_id = &self.session_id;
         let mut connection = acquire_runtime_connection(&self.pool).await?;

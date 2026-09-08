@@ -1773,7 +1773,6 @@ lash::persistence::AttachmentManifest::commit_refs
 lash::persistence::AttachmentManifest::forget
 lash::persistence::AttachmentManifest::forget_aged_uncommitted_intents
 lash::persistence::AttachmentManifest::has_live_ref_for_id
-lash::persistence::AttachmentManifest::holds_ref
 lash::persistence::AttachmentManifest::list_all_refs
 lash::persistence::AttachmentManifest::list_uncommitted
 lash::persistence::AttachmentManifest::record_intent
@@ -2367,7 +2366,6 @@ lash::persistence::RuntimePersistenceDecorator::forget_aged_uncommitted_intents
 lash::persistence::RuntimePersistenceDecorator::gc_unreachable
 lash::persistence::RuntimePersistenceDecorator::get_session_execution_lease
 lash::persistence::RuntimePersistenceDecorator::has_live_ref_for_id
-lash::persistence::RuntimePersistenceDecorator::holds_ref
 lash::persistence::RuntimePersistenceDecorator::inner
 lash::persistence::RuntimePersistenceDecorator::list_all_refs
 lash::persistence::RuntimePersistenceDecorator::list_pending_queued_work

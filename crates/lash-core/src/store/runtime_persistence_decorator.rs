@@ -75,14 +75,6 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         self.inner().forget(session_id, attachment_id)
     }
 
-    fn holds_ref(
-        &self,
-        session_id: &str,
-        attachment_id: &crate::AttachmentId,
-    ) -> Result<bool, StoreError> {
-        self.inner().holds_ref(session_id, attachment_id)
-    }
-
     fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, StoreError> {
         self.inner().list_all_refs()
     }
@@ -515,14 +507,6 @@ where
         attachment_id: &crate::AttachmentId,
     ) -> Result<(), StoreError> {
         RuntimePersistenceDecorator::forget(self, session_id, attachment_id)
-    }
-
-    fn holds_ref(
-        &self,
-        session_id: &str,
-        attachment_id: &crate::AttachmentId,
-    ) -> Result<bool, StoreError> {
-        RuntimePersistenceDecorator::holds_ref(self, session_id, attachment_id)
     }
 
     fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, StoreError> {
