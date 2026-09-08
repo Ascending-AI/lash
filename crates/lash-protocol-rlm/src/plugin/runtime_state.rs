@@ -9,7 +9,7 @@ use crate::dialect::{RlmDialect, RlmDialectRegistry, RlmDialectSession};
 use crate::projection::{RlmProjectedBindings, RlmProjectionExtension, decode_rlm_protocol_event};
 use crate::rlm_support::SharedBoundVariablesPrompt;
 
-pub(super) struct RlmRuntimeState {
+pub(crate) struct RlmRuntimeState {
     dialect_registry: RlmDialectRegistry,
     dialect: Arc<dyn RlmDialect>,
     session_projected_bindings: tokio::sync::Mutex<RlmProjectedBindings>,
@@ -19,7 +19,7 @@ pub(super) struct RlmRuntimeState {
 }
 
 impl RlmRuntimeState {
-    pub(super) fn new(
+    pub(crate) fn new(
         dialect_registry: RlmDialectRegistry,
         dialect: Arc<dyn RlmDialect>,
     ) -> Result<Self, SessionError> {
@@ -40,7 +40,7 @@ impl RlmRuntimeState {
     }
 
     #[cfg(test)]
-    pub(super) fn new_lashlang_for_tests() -> Result<Self, SessionError> {
+    pub(crate) fn new_lashlang_for_tests() -> Result<Self, SessionError> {
         Self::new_for_tests("lashlang")
     }
 
@@ -83,7 +83,7 @@ impl RlmRuntimeState {
         Self::new(RlmDialectRegistry::new([dialect, typescript]), active)
     }
 
-    pub(super) async fn projected_binding_prompt_contributions(
+    pub(crate) async fn projected_binding_prompt_contributions(
         &self,
     ) -> Vec<lash_core::PromptContribution> {
         let bindings = self.session_projected_bindings.lock().await;
@@ -93,11 +93,11 @@ impl RlmRuntimeState {
         )
     }
 
-    pub(super) fn dialect_prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
+    pub(crate) fn dialect_prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
         self.dialect.prompt_vocabulary()
     }
 
-    pub(super) fn shared_bound_variables_prompt(&self) -> SharedBoundVariablesPrompt {
+    pub(crate) fn shared_bound_variables_prompt(&self) -> SharedBoundVariablesPrompt {
         Arc::clone(&self.bound_variables_prompt)
     }
 
@@ -124,7 +124,7 @@ impl RlmRuntimeState {
             .collect()
     }
 
-    pub(super) async fn apply_session_extension(
+    pub(crate) async fn apply_session_extension(
         &self,
         extension: lash_core::ProtocolSessionExtensionHandle,
     ) -> Result<(), SessionError> {
@@ -148,7 +148,7 @@ impl RlmRuntimeState {
         Ok(())
     }
 
-    pub(super) async fn validate_turn_extension(
+    pub(crate) async fn validate_turn_extension(
         &self,
         extension: &lash_core::ProtocolTurnExtensionHandle,
     ) -> Result<(), SessionError> {
@@ -170,7 +170,7 @@ impl RlmRuntimeState {
             .map_err(|err| SessionError::Protocol(err.to_string()))
     }
 
-    pub(super) async fn restore_runtime_session_state(
+    pub(crate) async fn restore_runtime_session_state(
         &self,
         state: &lash_core::runtime::RuntimeSessionState,
     ) -> Result<(), SessionError> {
@@ -212,7 +212,7 @@ impl RlmRuntimeState {
         Ok(())
     }
 
-    pub(super) async fn append_session_nodes(
+    pub(crate) async fn append_session_nodes(
         &self,
         nodes: &[lash_core::SessionAppendNode],
     ) -> Result<(), SessionError> {
@@ -233,7 +233,7 @@ impl RlmRuntimeState {
         Ok(())
     }
 
-    pub(super) async fn execute_code(
+    pub(crate) async fn execute_code(
         &self,
         ctx: lash_core::RuntimeExecutionContext<'_>,
         request: lash_core::ExecRequest,
@@ -255,7 +255,7 @@ impl RlmRuntimeState {
         result
     }
 
-    pub(super) fn execution_state_dirty(&self) -> bool {
+    pub(crate) fn execution_state_dirty(&self) -> bool {
         // A contended `try_lock` means a cell is running, and a running cell
         // is dirty by construction.
         self.execution
@@ -264,17 +264,17 @@ impl RlmRuntimeState {
             .unwrap_or(true)
     }
 
-    pub(super) async fn snapshot_execution_state(
+    pub(crate) async fn snapshot_execution_state(
         &self,
     ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
         self.execution.lock().await.snapshot_execution_state()
     }
 
-    pub(super) async fn probe_execution_state_capture(&self) -> Result<(), SessionError> {
+    pub(crate) async fn probe_execution_state_capture(&self) -> Result<(), SessionError> {
         self.execution.lock().await.probe_execution_state_capture()
     }
 
-    pub(super) async fn hydrated_execution_state(
+    pub(crate) async fn hydrated_execution_state(
         &self,
     ) -> Result<Option<lash_core::plugin::HydratedExecutionState>, SessionError> {
         self.execution
@@ -284,7 +284,7 @@ impl RlmRuntimeState {
             .map(Some)
     }
 
-    pub(super) async fn acknowledge_execution_state_capture(&self) {
+    pub(crate) async fn acknowledge_execution_state_capture(&self) {
         let _ = self
             .execution
             .lock()
@@ -292,11 +292,11 @@ impl RlmRuntimeState {
             .acknowledge_execution_state_capture();
     }
 
-    pub(super) async fn abort_execution_state_capture(&self) {
+    pub(crate) async fn abort_execution_state_capture(&self) {
         let _ = self.execution.lock().await.abort_execution_state_capture();
     }
 
-    pub(super) async fn settle_code_execution(
+    pub(crate) async fn settle_code_execution(
         &self,
         disposition: lash_core::plugin::CodeExecutionDisposition,
     ) -> Result<(), SessionError> {
@@ -311,7 +311,7 @@ impl RlmRuntimeState {
         Ok(())
     }
 
-    pub(super) async fn restore_execution_state(
+    pub(crate) async fn restore_execution_state(
         &self,
         state: &lash_core::plugin::HydratedExecutionState,
     ) -> Result<(), SessionError> {
@@ -382,12 +382,12 @@ impl RlmRuntimeState {
     }
 }
 
-pub(super) struct RlmCodeExecutor {
+pub(crate) struct RlmCodeExecutor {
     state: Arc<RlmRuntimeState>,
 }
 
 impl RlmCodeExecutor {
-    pub(super) fn new(state: Arc<RlmRuntimeState>) -> Self {
+    pub(crate) fn new(state: Arc<RlmRuntimeState>) -> Self {
         Self { state }
     }
 }
@@ -451,7 +451,7 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
     }
 }
 
-pub(super) fn reject_reserved_projected_binding_names(
+pub(crate) fn reject_reserved_projected_binding_names(
     bindings: &RlmProjectedBindings,
 ) -> Result<(), SessionError> {
     if bindings.names().any(|name| name == "history") {

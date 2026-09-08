@@ -21,16 +21,22 @@ pub(crate) async fn run_task(
     model: &str,
     api_key: &str,
     run: usize,
+    channel: lash::rlm::RlmChannel,
 ) -> (World, RunEvidence) {
+    let started = std::time::Instant::now();
+    let telemetry = Arc::new(crate::telemetry::Telemetry::default());
     let world = SharedWorld::new(task.seed.clone());
     let result = tokio::time::timeout(
         TURN_TIMEOUT,
-        run_turn(task, dialect, model, api_key, run, &world),
+        run_turn(
+            task, dialect, model, api_key, run, channel, &world, &telemetry,
+        ),
     )
     .await;
     let final_world = world.snapshot();
     match result {
-        Ok(Ok(output)) => {
+        Ok(Ok((output, decisions))) => {
+            let attempts = telemetry.rows(&decisions);
             let iterations = output
                 .activities
                 .iter()
@@ -66,6 +72,8 @@ pub(crate) async fn run_task(
             (
                 final_world,
                 RunEvidence {
+                    attempts,
+                    wall_ms: started.elapsed().as_millis(),
                     completed: output.is_success(),
                     completion_error: (!output.is_success())
                         .then(|| format!("turn outcome: {:?}", output.result.outcome)),
@@ -79,6 +87,8 @@ pub(crate) async fn run_task(
         Ok(Err(error)) => (
             final_world,
             RunEvidence {
+                attempts: telemetry.rows(&[]),
+                wall_ms: started.elapsed().as_millis(),
                 completion_error: Some(format!("{error:#}")),
                 ..RunEvidence::default()
             },
@@ -86,6 +96,8 @@ pub(crate) async fn run_task(
         Err(_) => (
             final_world,
             RunEvidence {
+                attempts: telemetry.rows(&[]),
+                wall_ms: started.elapsed().as_millis(),
                 completion_error: Some(format!(
                     "turn exceeded the {} second wall-clock limit",
                     TURN_TIMEOUT.as_secs()
@@ -96,14 +108,17 @@ pub(crate) async fn run_task(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_turn(
     task: &Task,
     dialect: lash::rlm::RlmDialect,
     model: &str,
     api_key: &str,
     run: usize,
+    channel: lash::rlm::RlmChannel,
     world: &SharedWorld,
-) -> Result<lash::TurnOutput> {
+    telemetry: &Arc<crate::telemetry::Telemetry>,
+) -> Result<(lash::TurnOutput, Vec<String>)> {
     let provider = ProviderHandle::new(
         OpenAiCompatibleProvider::new(api_key.to_string(), OPENROUTER_BASE_URL)
             .with_compat(OpenAiCompat::openrouter())
@@ -118,33 +133,43 @@ async fn run_turn(
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .wall_clock(lash::rlm::WallClockBound::secs(30))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-            .build(),
+            .build()
+            .with_channel(channel),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = LashCore::rlm_builder(lash::TurnBudget::bounded(TURN_BUDGET), factory)
-        .no_progress_budget(lash::NoProgressBudget::bounded(NO_PROGRESS_BUDGET))
-        .without_queued_work()
-        .plugins(lash::plugins::runtime_plugin_stack())
-        .provider(provider)
-        .model(
-            lash::ModelSpec::builder(model)
-                .context_window_tokens(200_000)
-                .build()
-                .context("build model metadata")?,
-        )
-        .tools(world.provider())
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "toolbench",
-            format!("run-{run}-{}-{}", dialect.language_id(), task.id),
-        ))
-        .context("build Lash core")?;
+    let core = LashCore::rlm_builder(
+        lash::TurnBudget::bounded(if task.id == "__native_probe" {
+            1
+        } else {
+            TURN_BUDGET
+        }),
+        factory,
+    )
+    .no_progress_budget(lash::NoProgressBudget::bounded(NO_PROGRESS_BUDGET))
+    .without_queued_work()
+    .plugins(lash::plugins::runtime_plugin_stack().configure(|stack| {
+        stack.push(telemetry.plugin());
+    }))
+    .provider(provider)
+    .model(
+        lash::ModelSpec::builder(model)
+            .context_window_tokens(200_000)
+            .build()
+            .context("build model metadata")?,
+    )
+    .tools(world.provider())
+    .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+    .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+    .process_env_store(Arc::new(
+        lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+    ))
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "toolbench",
+        format!("run-{run}-{}-{}", dialect.language_id(), task.id),
+    ))
+    .context("build Lash core")?;
     let session_id = format!("toolbench-{run}-{}-{}", dialect.language_id(), task.id);
     let session = core
         .session(session_id)
@@ -159,11 +184,68 @@ async fn run_turn(
         .open()
         .await
         .context("open toolbench session")?;
-    session
+    let result = session
         .turn(TurnInput::text(task.prompt))
         .require_finish()
         .context("require RLM finish value")?
-        .run()
+        .stream_to(telemetry.as_ref())
         .await
-        .context("run toolbench turn")
+        .context("run toolbench turn")?;
+    let decisions = session
+        .read_view()
+        .active_events()
+        .iter()
+        .filter_map(|record| {
+            let lash::persistence::SessionHistoryRecord::Protocol(event) = record else {
+                return None;
+            };
+            if event.plugin_id != lash::rlm::RLM_PROTOCOL_PLUGIN_ID {
+                return None;
+            }
+            let diagnostic = event.payload.get("RlmDiagnostic")?;
+            let phase = diagnostic.get("phase")?.as_str()?;
+            if !["llm_extraction", "native_extraction"].contains(&phase) {
+                return None;
+            }
+            diagnostic
+                .get("payload")?
+                .get("decision")?
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect();
+    Ok((
+        lash::TurnOutput {
+            result,
+            activities: telemetry.activities(),
+        },
+        decisions,
+    ))
+}
+
+pub(crate) async fn preflight(
+    task: &Task,
+    dialect: lash::rlm::RlmDialect,
+    model: &str,
+    api_key: &str,
+) -> Result<(), String> {
+    let mut probe = task.clone();
+    probe.id = "__native_probe";
+    probe.prompt = "Call execute_code exactly once with code that finishes with the number 1. Do not call any host operations.";
+    let (_, evidence) = run_task(
+        &probe,
+        dialect,
+        model,
+        api_key,
+        0,
+        lash::rlm::RlmChannel::NativeTool,
+    )
+    .await;
+    if evidence.completed && evidence.finish_value == Some(serde_json::json!(1)) {
+        Ok(())
+    } else {
+        Err(evidence
+            .completion_error
+            .unwrap_or_else(|| "native one-call probe did not finish with 1".to_string()))
+    }
 }

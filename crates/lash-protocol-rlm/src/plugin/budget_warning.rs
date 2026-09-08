@@ -4,10 +4,10 @@ use lash_sansio::sync::RwLockExt;
 
 use crate::driver::SharedPromptUsage;
 
-pub(super) const BUDGET_WARNING_STATUS: &str = "rlm_context_budget_warning";
+pub(crate) const BUDGET_WARNING_STATUS: &str = "rlm_context_budget_warning";
 
-pub(super) struct BudgetUsageObserver {
-    pub(super) cell: SharedPromptUsage,
+pub(crate) struct BudgetUsageObserver {
+    pub(crate) cell: SharedPromptUsage,
 }
 
 #[async_trait::async_trait]

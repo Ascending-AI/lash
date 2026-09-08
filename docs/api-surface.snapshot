@@ -3339,6 +3339,11 @@ lash::plugins::PluginError::ProcessWakeDeliveryFormatVersionMismatch::found
 lash::plugins::PluginError::ProcessWorklistCursorBackendMismatch
 lash::plugins::PluginError::ProcessWorklistCursorBackendMismatch::actual
 lash::plugins::PluginError::ProcessWorklistCursorBackendMismatch::expected
+lash::plugins::PluginError::RecordedSessionConfigConflict
+lash::plugins::PluginError::RecordedSessionConfigConflict::field
+lash::plugins::PluginError::RecordedSessionConfigConflict::plugin_id
+lash::plugins::PluginError::RecordedSessionConfigConflict::recorded
+lash::plugins::PluginError::RecordedSessionConfigConflict::requested
 lash::plugins::PluginError::Registration
 lash::plugins::PluginError::Registration::0
 lash::plugins::PluginError::ReservedProcessEvent
@@ -7478,6 +7483,10 @@ lash::rlm::ProjectionRegistry
 lash::rlm::ProjectionRegistry::new
 lash::rlm::ProjectionRegistry::register_memory
 lash::rlm::RLM_PROTOCOL_PLUGIN_ID
+lash::rlm::RlmChannel
+lash::rlm::RlmChannel::Cell
+lash::rlm::RlmChannel::NativeTool
+lash::rlm::RlmChannel::from_env
 lash::rlm::RlmCreateExtras
 lash::rlm::RlmCreateExtras::dialect
 lash::rlm::RlmCreateExtras::final_answer_format
@@ -7505,6 +7514,7 @@ lash::rlm::RlmProjectedBindings::names
 lash::rlm::RlmProjectedBindings::new
 lash::rlm::RlmProtocolPluginConfig
 lash::rlm::RlmProtocolPluginConfig::builder
+lash::rlm::RlmProtocolPluginConfig::channel
 lash::rlm::RlmProtocolPluginConfig::continue_as_soft_warn_tokens
 lash::rlm::RlmProtocolPluginConfig::instruction_limit
 lash::rlm::RlmProtocolPluginConfig::lashlang_abilities
@@ -7513,6 +7523,7 @@ lash::rlm::RlmProtocolPluginConfig::max_output_chars
 lash::rlm::RlmProtocolPluginConfig::memory_limit
 lash::rlm::RlmProtocolPluginConfig::prompt_features
 lash::rlm::RlmProtocolPluginConfig::wall_clock
+lash::rlm::RlmProtocolPluginConfig::with_channel
 lash::rlm::RlmProtocolPluginConfig::with_lashlang_abilities
 lash::rlm::RlmProtocolPluginConfig::with_lashlang_language_features
 lash::rlm::RlmProtocolPluginConfigBuilder

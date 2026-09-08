@@ -176,8 +176,11 @@ impl RlmSessionExt for crate::LashSession {
         let resolved = lash_protocol_rlm::apply_rlm_session_config_post_open(&recorded, &requested)
             .map_err(RlmSessionConfigError::Conflict)?;
         if resolved != recorded {
-            let options = lash_protocol_rlm::rlm_session_config_options(&resolved)
+            let mut options = lash_protocol_rlm::rlm_session_config_options(&resolved)
                 .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))?;
+            if let Some(channel) = runtime.protocol_turn_options().payload.get("channel") {
+                options.payload["channel"] = channel.clone();
+            }
             runtime
                 .set_protocol_turn_options(options)
                 .await
@@ -197,7 +200,7 @@ pub use lash_lashlang_runtime::{
 };
 pub use lash_protocol_rlm::{
     ExecutionBounds, InstructionBound, MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID,
-    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
+    RlmChannel, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
     RlmSessionConfigDecodeError, TypeExpr, TypeField, UnsetBound, WallClockBound, format_type_expr,
     rlm_plugin_session_dialect, rlm_session_dialect,
 };

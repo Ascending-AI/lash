@@ -9,7 +9,9 @@ mod dialect;
 mod driver;
 mod executor;
 mod feedback;
+mod native;
 mod plugin;
+pub use native::{NATIVE_EXECUTE_TOOL_NAME, RlmNativeToolPlugin};
 mod projection;
 mod protocol;
 mod rlm_support;
@@ -31,7 +33,7 @@ pub use lashlang::{NamedDataType, TypeExpr, TypeField, format_type_expr};
 pub use plugin::{
     ExecutionBounds, InstructionBound, LashlangCompileSurface, LashlangCompileSurfaceRequest,
     LashlangModuleCompileError, LashlangModuleCompileRequest, MemoryBound, ModuleCompileOutput,
-    RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmLanguageFeatures, RlmProtocolPluginConfig,
+    RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmChannel, RlmLanguageFeatures, RlmProtocolPluginConfig,
     RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmSessionConfigDecodeError,
     UnsetBound, WallClockBound, apply_rlm_session_config_if_unset,
     apply_rlm_session_config_post_open, rlm_lashlang_surface, rlm_plugin_session_dialect,

@@ -303,6 +303,11 @@ impl PluginFactory for RlmProtocolPluginFactory {
 
     fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         let config = rlm_protocol_config(self.config.clone(), self.process_lifecycle()?);
+        super::channel::validate_channel(
+            &ctx.protocol_turn_options,
+            self.config.channel,
+            ctx.materialization,
+        )?;
         let lashlang_surface = LashlangSurface::new(
             config.lashlang_abilities.into_engine(),
             config.lashlang_language_features.into_engine(),
@@ -342,6 +347,14 @@ impl PluginFactory for RlmProtocolPluginFactory {
         let dialect = dialect_registry
             .resolve(selected.language_id())
             .map_err(|error| PluginError::Session(error.to_string()))?;
+        if config.channel == super::RlmChannel::NativeTool {
+            return Ok(Arc::new(crate::native::RlmNativeToolPlugin {
+                config,
+                dialect,
+                dialect_registry,
+                last_prompt_usage: Arc::new(RwLock::new(None)),
+            }));
+        }
         Ok(Arc::new(RlmProtocolPlugin {
             config,
             dialect,

@@ -58,6 +58,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     let api_key = std::env::var(OPENROUTER_API_KEY_ENV).unwrap_or_default();
     // The ambient default for the boot session and for any session the roster
     // does not know; a per-session choice made in the UI overrides it.
+    let rlm_channel = lash::rlm::RlmChannel::from_env().map_err(anyhow::Error::msg)?;
     let rlm_dialect = lash::rlm::RlmDialect::from_env()
         .map_err(|refusal| anyhow!(refusal))?
         // Unset is the Lashlang default, stated like any named id.
@@ -249,6 +250,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             .wall_clock(lash::rlm::WallClockBound::secs(30))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
+            .with_channel(rlm_channel)
             .with_lashlang_abilities(workbench_lashlang_abilities()),
         Arc::clone(&artifact_store),
     )

@@ -2,7 +2,7 @@ use lash_core::plugin::{
     BeforeToolCallPluginDirective, PluginError, ReplaceToolArgsDirective, ToolCallHookContext,
 };
 
-pub(super) fn normalize_projected_tool_args(
+pub(crate) fn normalize_projected_tool_args(
     ctx: ToolCallHookContext,
 ) -> Result<Vec<BeforeToolCallPluginDirective>, PluginError> {
     let original = ctx.args;
