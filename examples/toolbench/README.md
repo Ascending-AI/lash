@@ -47,8 +47,8 @@ target/debug/toolbench --channel standard --model openai/gpt-5.6-sol \
 Standard uses `LashCore::standard_builder` with no RLM plugin. The same host
 names, schemas and handlers are exposed as ordinary provider-native tools.
 Task sentences are shared across cohorts; one prompt builder appends the
-channel's constraints. Task tool references such as `kv.get` correspond to
-the catalog's ordinary tool name `kv_get`.
+channel's constraints and renders standard prompts with the catalog's
+ordinary underscore-separated tool names.
 
 Standard adds `submit`, requiring `{"value": <any JSON>}`. Its handler records
 the value and returns `ToolControl::Finish`, so no later model output is needed
@@ -56,8 +56,8 @@ or graded. Multiple submits in a response batch are counted before argument/ID v
 and fail with `repeated submit`; the first submitted value remains the graded
 value.
 
-The common grader checks the unchanged finish matchers (including
-NumericString), exact world equality, and exact host call count, excluding
+The common grader checks the finish matchers (including Numeric), exact world
+equality, and exact host call count, excluding
 submit. Standard must submit exactly once and use at most three provider
 round-trips. RLM retains at most two code executions, at most two failed
 executions, and no repeated identical execution error. Every row records
