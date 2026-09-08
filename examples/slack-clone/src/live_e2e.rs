@@ -72,8 +72,7 @@ fn price_for(model: &str) -> Option<ModelPrice> {
             cache_read_usd_per_token: 0.000_000_2,
             cache_write_usd_per_token: 0.000_002_5,
         }),
-        // The dated slug avoids a moving alias. Unknown overrides are rejected
-        // rather than assigned a guessed price.
+        // The dated slug avoids a moving alias. Unknown overrides are rejected, never guess-priced.
         DEFAULT_STANDARD_MODEL => Some(ModelPrice {
             input_usd_per_token: 0.000_000_14,
             output_usd_per_token: 0.000_000_28,
