@@ -112,7 +112,7 @@ mod tests {
             .insert("status".to_string(), "ready".to_string());
         Task {
             id: "grader-fixture",
-            prompt: "fixture",
+            prompt: "fixture".into(),
             seed,
             expected_world,
             finish: FinishMatcher::Exact(json!("saved")),
