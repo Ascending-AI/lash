@@ -1559,6 +1559,9 @@ jobs:
       - name: Check seed corpus integrity
         run: python3 scripts/check_fuzz_corpus.py
 
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
+
       - name: Install nightly Rust and cargo-fuzz
         run: |
           set -euo pipefail

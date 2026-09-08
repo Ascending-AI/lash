@@ -115,7 +115,7 @@ trap cleanup EXIT
 
 # Several services share the host-binary runtime image. Pull it once with
 # retries so a transient Docker Hub HEAD error doesn't fail compose startup.
-bash scripts/docker-pull-with-retry.sh ubuntu:24.04
+for image in $("${compose[@]}" config --images); do bash scripts/docker-pull-with-retry.sh "$image"; done
 "${compose[@]}" up -d postgres minio minio-init restate mock-provider worker-a worker-b worker-proxy
 deadline=$((SECONDS + 60))
 while true; do
