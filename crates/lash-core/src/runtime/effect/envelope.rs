@@ -1083,6 +1083,8 @@ const _: () = assert!(std::mem::size_of::<RuntimeEffectOutcome>() <= 128);
 /// from refs rather than persisted in the effect envelope.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LlmRequestSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<Arc<str>>,
     pub model: String,
     pub messages: Vec<LlmMessage>,
     pub tools: Arc<Vec<LlmToolSpec>>,
@@ -1129,6 +1131,7 @@ impl LlmRequestSpec {
             }
         }
         Ok(Self {
+            instructions: request.instructions.clone(),
             model: request.model.clone(),
             messages,
             tools: Arc::clone(&request.tools),
@@ -1147,6 +1150,7 @@ impl LlmRequestSpec {
         provider_trace: Option<LlmProviderTraceSender>,
     ) -> CoreLlmRequest {
         CoreLlmRequest {
+            instructions: self.instructions,
             model: self.model,
             messages: self.messages,
             resolved_stored: Default::default(),

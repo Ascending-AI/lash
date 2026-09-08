@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 52,
+  "fixture_schema_version": 53,
   "head_revision": 4,
   "node_ids_in_read_order": [
     "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940",
@@ -593,7 +593,7 @@
   },
   "queue_batch_id": "qwb:ef3744a04c94fb45e8b79895843cd983d065b8ed4f70c75105a65e8454265d38",
   "pending_input_id": "durable-read-pending-input",
-  "process_env_ref": "process-env:v4:blake3:daf76b156fd4e60c481117453fb793e488e495df6d82e16c190df609fb200377",
+  "process_env_ref": "process-env:v5:blake3:121c494b7d7665eb7b77c0e0abf8cd09def126dae90dec99489179196c702a1c",
   "await_event_key": {
     "scope": {
       "type": "turn",

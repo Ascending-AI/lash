@@ -57,6 +57,7 @@ impl LlmHttpTransport for RecordingTransport {
 
 fn request() -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "claude-test".to_string(),
         messages: vec![LlmMessage::text(
             LlmRole::User,

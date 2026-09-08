@@ -5815,6 +5815,7 @@ fn test_sleep_envelope(duration_ms: u64) -> RuntimeEffectEnvelope {
 
 fn llm_spec() -> lash_core::LlmRequestSpec {
     lash_core::LlmRequestSpec {
+        instructions: None,
         model: "model".to_string(),
         messages: Vec::new(),
         tools: Arc::new(Vec::new()),

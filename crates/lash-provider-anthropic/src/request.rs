@@ -4,6 +4,7 @@
 
 use crate::policy::AnthropicThinkingConfig;
 use crate::support::*;
+use lash_core::llm::types::LlmMessage;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct BreakpointAddress {
@@ -115,6 +116,41 @@ impl AnthropicProvider {
         }
     }
 
+    fn message_has_content(msg: &LlmMessage) -> bool {
+        msg.blocks.iter().any(|block| match block {
+            LlmContentBlock::Text { text, .. } => !text.trim().is_empty(),
+            LlmContentBlock::Attachment { source } => source.media_type().is_some(),
+            LlmContentBlock::ToolCall { .. } | LlmContentBlock::ToolResult { .. } => true,
+            LlmContentBlock::Reasoning { text, replay, .. } => {
+                !text.trim().is_empty()
+                    || replay
+                        .as_ref()
+                        .is_some_and(|meta| meta.redacted && meta.signature.is_some())
+            }
+        })
+    }
+
+    fn native_feedback_content(msg: &LlmMessage) -> bool {
+        matches!(msg.role, LlmRole::System)
+            && msg
+                .blocks
+                .iter()
+                .all(|block| matches!(block, LlmContentBlock::Text { text, .. } if !text.trim().is_empty()))
+            && !msg.blocks.is_empty()
+    }
+
+    // Judge the emitted neighbors: a tagged fallback is a user block, not
+    // part of a native section. Lash has no server-tool-result variant.
+    fn native_feedback_position(req: &LlmRequest, index: usize, out: &[Value]) -> bool {
+        let before = out.last().and_then(|message| message["role"].as_str());
+        let after = req.messages[index + 1..].iter().find(|msg| {
+            !Self::native_feedback_content(msg)
+                && (matches!(msg.role, LlmRole::System) || Self::message_has_content(msg))
+        });
+        matches!(before, Some("user" | "system"))
+            && after.is_none_or(|msg| matches!(msg.role, LlmRole::Assistant))
+    }
+
     /// Build the `messages` array for Anthropic Messages API. Each lash
     /// `LlmMessage` becomes one wire message; adjacent same-role messages
     /// get merged to match Anthropic's alternation rules.
@@ -122,29 +158,52 @@ impl AnthropicProvider {
         &self,
         req: &LlmRequest,
     ) -> (Option<String>, Vec<Value>, Option<BreakpointAddress>) {
-        let mut system_prompt: Option<String> = None;
+        let system_prompt = req.instructions.as_deref().map(str::to_owned);
         let mut out: Vec<Value> = Vec::new();
         let mut breakpoint = None;
-        let mut first_system_seen = false;
-
-        for msg in &req.messages {
-            // First system message is the real system prompt; hoist it
-            // into the top-level `system` field. Subsequent system
-            // messages (runtime feedback) become user turns so the
-            // conversation ends on a user boundary.
-            if matches!(msg.role, LlmRole::System) && !first_system_seen {
-                first_system_seen = true;
-                let text = collect_text(&msg.blocks);
-                if !text.is_empty() {
-                    system_prompt = Some(text);
-                }
-                continue;
-            }
-
-            let wire_role = Self::role_name(&msg.role);
+        for (index, msg) in req.messages.iter().enumerate() {
+            let feedback = matches!(msg.role, LlmRole::System);
+            let native = Self::native_feedback_content(msg)
+                && req.model_capability.native_mid_conversation_system
+                && Self::native_feedback_position(req, index, &out);
+            let wire_role = if native {
+                "system"
+            } else {
+                Self::role_name(&msg.role)
+            };
             let mut blocks: Vec<Value> = Vec::new();
             let mut marked_block_index = None;
-            for block in msg.blocks.iter() {
+            let tagged;
+            let source_blocks = if feedback && !native {
+                let mut fallback = vec![LlmContentBlock::Text {
+                    text: format!(
+                        "<runtime_feedback>{}</runtime_feedback>",
+                        collect_text(&msg.blocks)
+                    )
+                    .into(),
+                    response_meta: None,
+                    cache_breakpoint: msg.blocks.iter().any(|block| {
+                        matches!(
+                            block,
+                            LlmContentBlock::Text {
+                                cache_breakpoint: true,
+                                ..
+                            }
+                        )
+                    }),
+                }];
+                fallback.extend(
+                    msg.blocks
+                        .iter()
+                        .filter(|block| !matches!(block, LlmContentBlock::Text { .. }))
+                        .cloned(),
+                );
+                tagged = fallback;
+                tagged.as_slice()
+            } else {
+                msg.blocks.as_slice()
+            };
+            for block in source_blocks {
                 if let Some(value) = Self::content_block_value(req, block) {
                     if matches!(
                         block,
@@ -275,7 +334,10 @@ impl AnthropicProvider {
 
         if breakpoint.is_none()
             && let Some(last_msg) = messages.last_mut()
-            && last_msg.get("role").and_then(|v| v.as_str()) == Some("user")
+            && matches!(
+                last_msg.get("role").and_then(|v| v.as_str()),
+                Some("user" | "system")
+            )
             && let Some(content) = last_msg.get_mut("content").and_then(|c| c.as_array_mut())
             && let Some(last_block) = content.last_mut()
             && last_block.is_object()
@@ -506,16 +568,12 @@ impl AnthropicProvider {
     }
 }
 
-/// Join all `Text` blocks in a message into a single string, separated by
-/// blank lines. Non-text blocks are ignored. Used to collapse a multi-block
-/// system message into the top-level `system` field.
+/// Concatenate feedback text without changing any text bytes. Non-text
+/// blocks remain separate content blocks in the fallback user message.
 fn collect_text(blocks: &[LlmContentBlock]) -> String {
     let mut out = String::new();
     for block in blocks {
         if let LlmContentBlock::Text { text, .. } = block {
-            if !out.is_empty() {
-                out.push_str("\n\n");
-            }
             out.push_str(text);
         }
     }

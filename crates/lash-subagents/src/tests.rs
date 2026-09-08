@@ -1289,6 +1289,11 @@ impl SeedProbe {
 
 fn request_text(request: &LlmRequest) -> String {
     let mut out = String::new();
+    if let Some(instructions) = &request.instructions {
+        out.push_str("instructions\n");
+        out.push_str(instructions);
+        out.push('\n');
+    }
     for message in &request.messages {
         let role = match message.role {
             LlmRole::System => "system",

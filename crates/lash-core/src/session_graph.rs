@@ -235,10 +235,12 @@ pub struct SessionNodeRecord {
 /// pre-v3 decode path below projects that legacy value into response parts
 /// before typed decoding when the parts carry no visible assistant prose.
 ///
+/// Version 11 carries host instruction roles and native feedback capabilities.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as a forward-only fence rather than a
 /// counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 10;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 11;
 
 /// Generation of a body written before the stamp existed.
 ///

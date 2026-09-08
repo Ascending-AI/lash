@@ -1348,14 +1348,11 @@ fn iteration_execution_environment_sync_can_refresh_prompt_and_tools() {
     let (_, request) = find_llm_call(&effects).expect("second llm call");
     assert_eq!(request.tools.len(), 1);
     assert_eq!(request.tools[0].name, "new_tool");
-    assert!(request.messages.iter().any(|message| {
-        message.role == crate::llm::types::LlmRole::System
-            && message.blocks.iter().any(|block| {
-                matches!(
-                    block,
-                    crate::llm::types::LlmContentBlock::Text { text, .. }
-                        if text.as_ref() == "updated prompt"
-                )
-            })
-    }));
+    assert_eq!(request.instructions.as_deref(), Some("updated prompt"));
+    assert!(
+        request
+            .messages
+            .iter()
+            .all(|message| message.role != crate::llm::types::LlmRole::System)
+    );
 }

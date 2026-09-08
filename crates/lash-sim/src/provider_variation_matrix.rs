@@ -921,6 +921,7 @@ fn matrix_request(
         ..Default::default()
     };
     LlmRequest {
+        instructions: None,
         model: model.to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
         resolved_stored: Default::default(),

@@ -365,18 +365,12 @@ pub(crate) fn composition_tool_fingerprint(tool: &LlmToolSpec) -> [u8; 32] {
 
 pub(crate) fn trace_composition_key(req: &LlmRequest, tool_fingerprints: &[[u8; 32]]) -> [u8; 32] {
     debug_assert_eq!(req.tools.len(), tool_fingerprints.len());
-    let mut hash = Blake3DomainHasher::new("lash-model-facing-composition/v2");
-    if let Some(message) = req
-        .messages
-        .first()
-        .filter(|message| matches!(message.role, LlmRole::System))
-    {
-        for block in message.blocks.iter() {
-            if let LlmContentBlock::Text { text, .. } = block {
-                hash.update(text.len().to_le_bytes());
-                hash.update(text.as_bytes());
-            }
-        }
+    let mut hash = Blake3DomainHasher::new("lash-model-facing-composition/v3");
+    hash.update([u8::from(req.instructions.is_some())]);
+    hash.update(req.model_capability.instruction_role.as_str().as_bytes());
+    if let Some(text) = &req.instructions {
+        hash.update(text.len().to_le_bytes());
+        hash.update(text.as_bytes());
     }
     hash.update(tool_fingerprints.len().to_le_bytes());
     for fingerprint in tool_fingerprints {
@@ -397,21 +391,7 @@ pub(crate) fn trace_composition_snapshot(
 ) -> CompositionTraceSnapshot {
     #[cfg(test)]
     COMPOSITION_SCHEMA_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
-    let rendered_system_prompt = req
-        .messages
-        .first()
-        .filter(|message| matches!(message.role, LlmRole::System))
-        .map(|message| {
-            message
-                .blocks
-                .iter()
-                .filter_map(|block| match block {
-                    LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
-                    _ => None,
-                })
-                .collect::<String>()
-        })
-        .unwrap_or_default();
+    let rendered_system_prompt = req.instructions.as_deref().unwrap_or_default().to_owned();
     let tool_schemas = req.tools.iter().map(trace_tool_spec).collect::<Vec<_>>();
     let fingerprint = fingerprint
         .iter()
@@ -1078,3 +1058,7 @@ mod span_identity_tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "trace_feedback_tests.rs"]
+mod feedback_tests;

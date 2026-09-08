@@ -13,6 +13,12 @@ use serde::{Deserialize, Serialize};
 /// Capability metadata for a single model on a route, supplied by the host.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelCapability {
+    /// Native instruction role on Responses, Codex, and Chat Completions.
+    #[serde(default, skip_serializing_if = "InstructionRole::is_system")]
+    pub instruction_role: InstructionRole,
+    /// Anthropic native runtime feedback at legal conversation positions.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub native_mid_conversation_system: bool,
     /// Host acceptance revision retained with the session policy.
     #[serde(
         default,
@@ -33,6 +39,26 @@ pub struct ModelCapability {
     /// Whether this model lets a caller set the sampling temperature.
     #[serde(default, skip_serializing_if = "SamplingCapability::is_default")]
     pub sampling: SamplingCapability,
+}
+
+/// Host-supplied instruction role; model identifiers never select authority.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InstructionRole {
+    #[default]
+    System,
+    Developer,
+}
+impl InstructionRole {
+    pub fn is_system(&self) -> bool {
+        *self == Self::System
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Developer => "developer",
+        }
+    }
 }
 
 /// Host-supplied Google wire dialect; model identifiers never select it.
@@ -195,7 +221,9 @@ impl std::error::Error for ModelEffortValidationError {}
 
 impl ModelCapability {
     pub fn is_empty(&self) -> bool {
-        self.attachment_acceptance.is_empty()
+        self.instruction_role.is_system()
+            && !self.native_mid_conversation_system
+            && self.attachment_acceptance.is_empty()
             && self.google_dialect.is_legacy()
             && self.reasoning.is_none()
             && self.cache_control.is_none()
@@ -337,6 +365,8 @@ mod tests {
 
     fn capability(reasoning: Option<ReasoningCapability>) -> ModelCapability {
         ModelCapability {
+            instruction_role: Default::default(),
+            native_mid_conversation_system: false,
             attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning,
@@ -697,6 +727,35 @@ impl AttachmentAcceptanceRule {
                 | AttachmentSource::Stored { .. }
                 | AttachmentSource::ExternalUrl { .. },
             ) => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod instruction_tests {
+    use super::*;
+    #[test]
+    fn host_instruction_capabilities_serialize_when_nondefault() {
+        let default: ModelCapability = serde_json::from_str("{}").unwrap();
+        assert_eq!(default.instruction_role, InstructionRole::System);
+        assert!(!default.native_mid_conversation_system);
+        assert!(default.is_empty());
+        for capability in [
+            ModelCapability {
+                instruction_role: InstructionRole::Developer,
+                ..Default::default()
+            },
+            ModelCapability {
+                native_mid_conversation_system: true,
+                ..Default::default()
+            },
+        ] {
+            assert!(!capability.is_empty());
+            let json = serde_json::to_value(&capability).unwrap();
+            assert_eq!(
+                serde_json::from_value::<ModelCapability>(json).unwrap(),
+                capability
+            );
         }
     }
 }

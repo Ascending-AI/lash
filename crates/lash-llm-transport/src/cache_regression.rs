@@ -95,6 +95,7 @@ mod tests {
 
     fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         LlmRequest {
+            instructions: None,
             model: "model".to_string(),
             messages,
             resolved_stored: Default::default(),

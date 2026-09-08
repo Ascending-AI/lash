@@ -6,7 +6,7 @@ use crate::{AttachmentRef, MediaType, SchemaContract};
 
 pub use crate::llm::capability::{
     AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-    AttachmentMimeSource, CacheControlDialect, GoogleDialect, ModelCapability,
+    AttachmentMimeSource, CacheControlDialect, GoogleDialect, InstructionRole, ModelCapability,
     ModelEffortValidationCategory, ModelEffortValidationError, ReasoningCapability,
     ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
     StreamTermination,
@@ -916,6 +916,9 @@ impl GenerationReceipt {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LlmRequest {
+    /// Initial session instructions, separate from runtime feedback in messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<Arc<str>>,
     pub model: String,
     pub messages: Vec<LlmMessage>,
     /// Request-local bytes resolved through the session guard for `Stored`

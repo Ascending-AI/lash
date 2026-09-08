@@ -401,6 +401,7 @@ fn panic_tool_definition() -> ToolDefinition {
 
 fn request() -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "panic-test-model".to_string(),
         messages: Vec::new(),
         resolved_stored: Default::default(),

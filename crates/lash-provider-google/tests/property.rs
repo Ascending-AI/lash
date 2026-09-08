@@ -95,6 +95,7 @@ fn reasoning_stream_bytes() -> Vec<u8> {
 
 fn request(deltas: Arc<Mutex<Vec<String>>>) -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "gemini-3.1-pro-preview".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
         resolved_stored: Default::default(),

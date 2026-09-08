@@ -37,6 +37,7 @@ fn assert_streamed_envelope_contract<T>(
 
 fn streamed_llm_request() -> RemoteLlmRequest {
     RemoteLlmRequest {
+        instructions: None,
         request_id: "request-stream".to_string(),
         scope: RemoteLlmRequestScope::new(
             "session-stream",

@@ -28,6 +28,7 @@ async fn rank(call: ToolCall<'_>) -> ToolOutcome {
     };
 
     let request = DirectRequest {
+        instructions: None,
         model: model.model,
         model_variant: model.model_variant,
         model_capability: model.model_capability,

@@ -68,7 +68,7 @@ pub(crate) enum CodexTransport {
 /// machinery is shared verbatim from [`crate::responses_shared`].
 /// This module owns only the Codex-specific surface: the
 /// `chatgpt.com/backend-api/codex/responses` endpoint, the `codex_cli_rs`
-/// originator/User-Agent headers, the system→`instructions` request shape with
+/// originator/User-Agent headers, the explicit `instructions` request shape with
 /// tool-result image folding, and Codex error/quota classification.
 #[derive(Clone, Debug)]
 pub struct CodexProvider {
@@ -223,8 +223,7 @@ impl CodexProvider {
         let req = safe_request.as_ref();
         shared::validate_responses_attachments(req, "OpenAI Codex")?;
         let tools = Self::build_tools(req)?;
-        let (instructions, input) =
-            shared::build_responses_input(req, shared::ResponsesInputOptions::CODEX);
+        let input = shared::build_responses_input(req, shared::ResponsesInputOptions::CODEX);
         let requested_reasoning = reasoning_intent(req);
         let policy = resolve_generation_policy(
             &req.generation,
@@ -234,7 +233,6 @@ impl CodexProvider {
         );
         let mut body = json!({
             "model": req.model,
-            "instructions": instructions,
             "input": input,
             "tools": tools,
             "parallel_tool_calls": !req.tools.is_empty(),
@@ -245,6 +243,9 @@ impl CodexProvider {
                 "verbosity": "medium",
             },
         });
+        if let Some(instructions) = &req.instructions {
+            body["instructions"] = json!(instructions);
+        }
         // `tool_choice` is only meaningful when the request advertises tools.
         // In RLM mode we intentionally send `tools: []` because tools are
         // documented in the prompt body and invoked via `lashlang`, not the

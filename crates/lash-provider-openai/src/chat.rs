@@ -82,8 +82,15 @@ impl OpenAiCompatibleProvider {
 
     fn build_chat_messages(req: &LlmRequest) -> Vec<Value> {
         let mut messages = Vec::new();
+        if let Some(instructions) = &req.instructions {
+            messages.push(json!({"role": req.model_capability.instruction_role.as_str(), "content": [{"type": "text", "text": instructions}]}));
+        }
         for msg in &req.messages {
-            let role = role_name(&msg.role);
+            let role = if matches!(msg.role, LlmRole::System) {
+                req.model_capability.instruction_role.as_str()
+            } else {
+                role_name(&msg.role)
+            };
             let mut text_parts = Vec::new();
             let mut tool_calls = Vec::new();
             let mut reasoning_details = Vec::new();
@@ -299,7 +306,7 @@ impl OpenAiCompatibleProvider {
                 for message in messages.iter_mut().rev() {
                     if matches!(
                         message.get("role").and_then(Value::as_str),
-                        Some("user" | "assistant")
+                        Some("user" | "assistant" | "system" | "developer")
                     ) && Self::add_cache_control_to_text_content(message, &cache_control)
                     {
                         break;
@@ -315,14 +322,10 @@ impl OpenAiCompatibleProvider {
             };
         }
 
-        for message in messages.iter_mut() {
-            if matches!(
-                message.get("role").and_then(Value::as_str),
-                Some("system" | "developer")
-            ) {
-                Self::add_cache_control_to_text_content(message, &cache_control);
-                break;
-            }
+        if req.instructions.is_some()
+            && let Some(message) = messages.first_mut()
+        {
+            Self::add_cache_control_to_text_content(message, &cache_control);
         }
         if let Some(last_tool) = tools.last_mut() {
             last_tool["cache_control"] = cache_control.clone();
@@ -331,7 +334,7 @@ impl OpenAiCompatibleProvider {
         for message in messages.iter_mut().rev() {
             if matches!(
                 message.get("role").and_then(Value::as_str),
-                Some("user" | "assistant")
+                Some("user" | "assistant" | "system" | "developer")
             ) && Self::add_cache_control_to_marked_text_content(message, &cache_control)
             {
                 applied_explicit_breakpoint = true;
@@ -342,7 +345,7 @@ impl OpenAiCompatibleProvider {
             for message in messages.iter_mut().rev() {
                 if matches!(
                     message.get("role").and_then(Value::as_str),
-                    Some("user" | "assistant")
+                    Some("user" | "assistant" | "system" | "developer")
                 ) && Self::add_cache_control_to_text_content(message, &cache_control)
                 {
                     break;

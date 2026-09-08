@@ -116,6 +116,8 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
                     .build()
                     .expect("model limits")
                     .with_capability(lash_core::ModelCapability {
+                        instruction_role: Default::default(),
+                        native_mid_conversation_system: false,
                         attachment_acceptance: Default::default(),
                         cache_control: Some(cache_control),
                         ..lash_core::ModelCapability::default()

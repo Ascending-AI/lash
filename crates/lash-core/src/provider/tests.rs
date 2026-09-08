@@ -720,6 +720,7 @@ impl Provider for MetricsTransport {
 
 pub(super) fn empty_request() -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "model".to_string(),
         messages: Vec::new(),
         resolved_stored: Default::default(),

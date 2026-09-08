@@ -86,6 +86,7 @@ mod tests {
         model_capability.attachment_acceptance =
             crate::attachment_test_capability().attachment_acceptance;
         LlmRequest {
+            instructions: None,
             model: "gemini-3.1-pro-preview".to_string(),
             messages: vec![LlmMessage::text(LlmRole::User, "hello")],
             resolved_stored: Default::default(),
@@ -719,6 +720,8 @@ mod tests {
 
     fn effort_capability(efforts: &[&str]) -> ModelCapability {
         ModelCapability {
+            instruction_role: Default::default(),
+            native_mid_conversation_system: false,
             attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
@@ -737,6 +740,8 @@ mod tests {
 
     fn budget_capability(entries: &[(&str, u32)]) -> ModelCapability {
         ModelCapability {
+            instruction_role: Default::default(),
+            native_mid_conversation_system: false,
             attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {

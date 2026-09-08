@@ -18,7 +18,7 @@
 //! Each provider keeps only its genuine specifics: the OpenAI provider owns
 //! `build_responses_request_body` (surrogate sanitisation, OpenRouter/local
 //! field gating, assistant-message id flushing); Codex owns its request body
-//! (system→`instructions` hoisting and tool-result image folding), its
+//! (ordered runtime feedback and tool-result image folding), its
 //! endpoint/headers, and its failure classification.
 
 use serde_json::{Value, json};
@@ -213,7 +213,7 @@ pub fn build_tools_with_capabilities(
 /// The handful of genuine deltas between the direct-OpenAI and Codex flavours
 /// of the Responses `input` array. Everything else — the per-message block
 /// loop, the reasoning-replay item shape, function_call/function_call_output
-/// emission, the `system → instructions` hoist — is identical.
+/// emission, runtime feedback projection — is identical.
 #[derive(Clone, Copy, Debug)]
 pub struct ResponsesInputOptions {
     /// Responses assistant history is emitted as `message` items with stable
@@ -374,30 +374,15 @@ fn reasoning_replay_item(text: &str, replay: Option<&ProviderReasoningReplay>) -
     Some(item)
 }
 
-/// Build the Responses `(instructions, input)` pair shared by both the direct
-/// OpenAI provider and Codex. System-role text is hoisted into `instructions`;
-/// the remaining blocks become the `input` array. `opts` selects the few real
-/// provider deltas (synthetic assistant ids, tool-result image folding).
-pub fn build_responses_input(
-    req: &LlmRequest,
-    opts: ResponsesInputOptions,
-) -> (String, Vec<Value>) {
-    let mut instructions: Vec<String> = Vec::new();
+/// Build ordered Responses input shared by the direct provider and Codex.
+pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> Vec<Value> {
     let mut input: Vec<Value> = Vec::new();
-
     for (message_index, msg) in req.messages.iter().enumerate() {
-        if matches!(msg.role, LlmRole::System) {
-            for block in msg.blocks.iter() {
-                if let LlmContentBlock::Text { text, .. } = block
-                    && !text.is_empty()
-                {
-                    instructions.push(text.to_string());
-                }
-            }
-            continue;
-        }
-
-        let role = role_name(&msg.role);
+        let role = if matches!(msg.role, LlmRole::System) {
+            req.model_capability.instruction_role.as_str()
+        } else {
+            role_name(&msg.role)
+        };
         let is_user = matches!(msg.role, LlmRole::User);
         let mut pending_content: Vec<Value> = Vec::new();
         let mut pending_meta: Option<ResponseTextMeta> = None;
@@ -569,7 +554,7 @@ pub fn build_responses_input(
         }
     }
 
-    (instructions.join("\n\n"), input)
+    input
 }
 
 /// For each `ToolResult` block in `msg`, the Codex-folded image parts (its

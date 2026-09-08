@@ -536,10 +536,10 @@ pub mod remote {
             RemoteAttemptRecord, RemoteDiagnostic, RemoteExecutionEvidence,
             RemoteExecutionEvidenceCollectionInterruption, RemoteGenerationOptionOutcome,
             RemoteGenerationOptions, RemoteGenerationReceipt, RemoteGoogleDialect,
-            RemoteLlmCallRecord, RemoteLlmContentBlock, RemoteLlmMessage, RemoteLlmOutputPart,
-            RemoteLlmOutputSpec, RemoteLlmRequest, RemoteLlmRequestScope, RemoteLlmResponse,
-            RemoteLlmRole, RemoteLlmTerminalReason, RemoteLlmToolChoice, RemoteLlmToolSpec,
-            RemoteModelCapability, RemoteModelIntent, RemoteNormalizedError,
+            RemoteInstructionRole, RemoteLlmCallRecord, RemoteLlmContentBlock, RemoteLlmMessage,
+            RemoteLlmOutputPart, RemoteLlmOutputSpec, RemoteLlmRequest, RemoteLlmRequestScope,
+            RemoteLlmResponse, RemoteLlmRole, RemoteLlmTerminalReason, RemoteLlmToolChoice,
+            RemoteLlmToolSpec, RemoteModelCapability, RemoteModelIntent, RemoteNormalizedError,
             RemoteProtocolPosition, RemoteProviderFailureKind, RemoteProviderFileScope,
             RemoteProviderMetadata, RemoteProviderReasoningReplay, RemoteProviderReplayDrop,
             RemoteProviderReplayDropReason, RemoteProviderReplayKind, RemoteProviderReplayMeta,
@@ -870,7 +870,7 @@ pub mod provider {
     };
     pub use lash_core::{
         AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-        AttachmentMimeSource, CacheControlDialect, GoogleDialect, ModelCapability,
+        AttachmentMimeSource, CacheControlDialect, GoogleDialect, InstructionRole, ModelCapability,
         ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,
         SamplingCapability, StreamTermination, facade_support::GenerationRetryGuarantee,
         facade_support::LlmTimeouts, facade_support::Provider, facade_support::ProviderComponents,

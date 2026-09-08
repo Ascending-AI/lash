@@ -617,6 +617,7 @@ mod tests {
         provider_trace: LlmProviderTraceSender,
     ) -> LlmRequest {
         LlmRequest {
+            instructions: None,
             model: model.to_string(),
             messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
             resolved_stored: Default::default(),

@@ -101,7 +101,7 @@ pub use work_claim::{WorkClaim, WorkCompletion};
 fn default_root_session_id() -> String {
     "root".to_string()
 }
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 6;
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 7;
 
 #[cfg(test)]
 mod prompt_persistence_compat_tests;

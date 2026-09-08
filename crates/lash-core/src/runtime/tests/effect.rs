@@ -2314,6 +2314,7 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
     let image_bytes = vec![137, 80, 78, 71];
     let expected_attachment_id = crate::attachments::content_id(&image_bytes).to_string();
     let request = LlmRequest {
+        instructions: None,
         model: "mock-model".to_string(),
         messages: vec![LlmMessage::new(
             LlmRole::User,

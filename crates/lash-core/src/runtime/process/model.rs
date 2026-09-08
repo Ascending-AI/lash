@@ -313,8 +313,8 @@ impl ProcessExecutionEnvSpec {
 
     /// Content-addresses the exact bytes persisted by [`Self::to_store_bytes`].
     ///
-    /// Version 3 adds the required turn-budget policy field.
-    /// Store backends reject older schema versions and must be recreated; a
+    /// Version 5 adds host instruction capabilities to the policy.
+    /// Older environment references are refused at load and must be recreated; a
     /// future byte-format change requires a new textual family version and the
     /// same explicit old-row policy. These bytes follow the final binary's
     /// serde-json feature set; enabling order-preserving maps is therefore an
@@ -337,8 +337,8 @@ impl ProcessExecutionEnvSpec {
 
 fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvRef {
     ProcessExecutionEnvRef::new(format!(
-        "process-env:v4:blake3:{}",
-        crate::stable_hash::blake3_hex("lash-process-env/v4", bytes)
+        "process-env:v5:blake3:{}",
+        crate::stable_hash::blake3_hex("lash-process-env/v5", bytes)
     ))
 }
 
@@ -422,6 +422,11 @@ pub async fn load_process_execution_env(
         .ok_or_else(|| {
             crate::PluginError::Session(format!("missing process execution env `{env_ref}`"))
         })?;
+    if process_execution_env_ref_for_bytes(&bytes) != *env_ref {
+        return Err(crate::PluginError::Session(format!(
+            "unsupported or mismatched process execution env reference `{env_ref}`; recreate the environment"
+        )));
+    }
     ProcessExecutionEnvSpec::from_store_bytes(&bytes).map_err(|err| {
         crate::PluginError::Session(format!(
             "failed to decode process execution env `{env_ref}`: {err}"

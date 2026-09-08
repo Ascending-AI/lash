@@ -2151,21 +2151,10 @@ fn last_user_text(request: &LlmRequest) -> String {
 
 fn system_text(request: &LlmRequest) -> String {
     request
-        .messages
-        .iter()
-        .find(|message| message.role == LlmRole::System)
-        .map(|message| {
-            message
-                .blocks
-                .iter()
-                .filter_map(|block| match block {
-                    LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
+        .instructions
+        .as_deref()
         .unwrap_or_default()
+        .to_owned()
 }
 
 #[cfg(feature = "rlm")]

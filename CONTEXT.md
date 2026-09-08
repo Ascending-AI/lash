@@ -124,3 +124,6 @@
 The CLI owns presentation state: editor contents, overlays, scroll position, process focus, and disposable draft metadata. The runtime and store own durable work and operational state.
 
 The `lash` facade owns app-facing vocabulary. Lower-level crates may expose integration plumbing for sibling crates, but facade modules should publish canonical Lash terms rather than leaking implementation or legacy names.
+
+- **Initial Instructions**: The configured session prompt carried in `LlmRequest.instructions`, separate from conversation messages. Only this field populates a provider's initial-instruction slot. _Avoid_: first System message, hoisted feedback.
+- **Runtime Feedback**: A System message in the conversation, such as an output-limit retry, checkpoint directive, or turn-limit notice. It stays at its conversation position, using native instruction authority where legal or the user-authority `<runtime_feedback>` fallback. _Avoid_: initial instructions, moved system prompt. See [[ADR 0083]].

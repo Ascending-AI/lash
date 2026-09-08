@@ -98,18 +98,27 @@ impl GoogleOAuthProvider {
         };
 
         for msg in &req.messages {
-            if matches!(msg.role, LlmRole::System) {
-                // System content is hoisted into `systemInstruction` on the
-                // Gemini request, not the `contents` list.
-                continue;
-            }
             let role = match msg.role {
                 LlmRole::Assistant => "model",
                 LlmRole::User | LlmRole::System => "user",
             };
 
             let mut parts: Vec<Value> = Vec::new();
-            for block in msg.blocks.iter() {
+            if matches!(msg.role, LlmRole::System) {
+                let text = msg
+                    .blocks
+                    .iter()
+                    .filter_map(|block| match block {
+                        LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+                        _ => None,
+                    })
+                    .collect::<String>();
+                parts.push(json!({"text": format!("<runtime_feedback>{text}</runtime_feedback>")}));
+            }
+            for block in msg.blocks.iter().filter(|block| {
+                !matches!(msg.role, LlmRole::System)
+                    || !matches!(block, LlmContentBlock::Text { .. })
+            }) {
                 match block {
                     LlmContentBlock::Text {
                         text,
@@ -129,7 +138,7 @@ impl GoogleOAuthProvider {
                         parts.push(part);
                     }
                     LlmContentBlock::Attachment { source } => {
-                        if matches!(msg.role, LlmRole::User) {
+                        if matches!(msg.role, LlmRole::User | LlmRole::System) {
                             parts.push(
                                 attachment_parts
                                     .iter()
@@ -253,26 +262,9 @@ impl GoogleOAuthProvider {
     }
 
     fn system_instruction(req: &LlmRequest) -> Option<Value> {
-        let mut parts: Vec<String> = Vec::new();
-        for msg in &req.messages {
-            if !matches!(msg.role, LlmRole::System) {
-                continue;
-            }
-            for block in msg.blocks.iter() {
-                if let LlmContentBlock::Text { text, .. } = block
-                    && !text.is_empty()
-                {
-                    parts.push(text.to_string());
-                }
-            }
-        }
-        if parts.is_empty() {
-            None
-        } else {
-            Some(json!({
-                "parts": [{ "text": parts.join("\n\n") }],
-            }))
-        }
+        req.instructions
+            .as_ref()
+            .map(|text| json!({"parts": [{"text": text}]}))
     }
 
     fn thinking_config_from_capability(req: &LlmRequest) -> Option<GoogleThinkingConfig> {

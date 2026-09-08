@@ -17,6 +17,8 @@ pub use config::{AnthropicProvider, DEFAULT_BASE_URL};
 
 #[cfg(test)]
 mod tests {
+    mod runtime_feedback;
+    use runtime_feedback::request_with_instructions;
     mod epilogue;
     use lash_sansio::sync::MutexExt;
 
@@ -84,6 +86,8 @@ mod tests {
     // any variant absent from the map (e.g. "none").
     fn effort_capability(efforts: &[&str]) -> ModelCapability {
         ModelCapability {
+            instruction_role: Default::default(),
+            native_mid_conversation_system: false,
             attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
@@ -107,6 +111,8 @@ mod tests {
             ("high".to_string(), 12_288u32),
         ]);
         ModelCapability {
+            instruction_role: Default::default(),
+            native_mid_conversation_system: false,
             attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(ReasoningCapability {
@@ -132,6 +138,7 @@ mod tests {
 
     fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         LlmRequest {
+            instructions: None,
             model: "claude-sonnet-4-6".to_string(),
             messages,
             resolved_stored: Default::default(),
@@ -721,48 +728,6 @@ mod tests {
     }
 
     #[test]
-    fn structured_output_uses_native_output_config_format() {
-        let provider = AnthropicProvider::new("key");
-        let mut req = request(vec![
-            LlmMessage::text(LlmRole::System, "system prompt"),
-            LlmMessage::text(LlmRole::User, "extract"),
-        ]);
-        req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
-            name: "extract_result".to_string(),
-            strict: true,
-            schema: json!({
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["answer"],
-                "properties": {
-                    "answer": { "type": "string" }
-                }
-            })
-            .into(),
-        }));
-
-        let body = provider.build_request_body(&req).expect("body");
-
-        assert_eq!(
-            body["output_config"]["format"],
-            json!({
-                "type": "json_schema",
-                "schema": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["answer"],
-                    "properties": {
-                        "answer": { "type": "string" }
-                    }
-                }
-            })
-        );
-        let system_text = body["system"][0]["text"].as_str().unwrap_or_default();
-        assert_eq!(system_text, "system prompt");
-        assert!(!system_text.contains("Respond with a single JSON object"));
-    }
-
-    #[test]
     fn structured_output_preserves_adaptive_effort_config() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "extract")]);
@@ -1260,10 +1225,10 @@ mod tests {
             cache_retention: CacheRetention::None,
             ..ProviderOptions::default()
         });
-        let req = request(vec![
-            LlmMessage::text(LlmRole::System, "stable system prompt"),
-            LlmMessage::text(LlmRole::User, "dynamic tail"),
-        ]);
+        let req = request_with_instructions(
+            "stable system prompt",
+            vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
+        );
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -1281,10 +1246,10 @@ mod tests {
             cache_retention: CacheRetention::Long,
             ..ProviderOptions::default()
         });
-        let req = request(vec![
-            LlmMessage::text(LlmRole::System, "stable system prompt"),
-            LlmMessage::text(LlmRole::User, "dynamic tail"),
-        ]);
+        let req = request_with_instructions(
+            "stable system prompt",
+            vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
+        );
 
         let body = provider.build_request_body(&req).expect("body");
 

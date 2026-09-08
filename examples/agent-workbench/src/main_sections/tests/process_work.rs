@@ -446,8 +446,8 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     .expect("derive process execution environment identity");
     let execution_env_digest = execution_env_ref
         .as_str()
-        .strip_prefix("process-env:v4:blake3:")
-        .expect("process execution environment uses the v3 identity family");
+        .strip_prefix("process-env:v5:blake3:")
+        .expect("process execution environment uses the v5 identity family");
     assert_eq!(execution_env_digest.len(), 64);
     assert!(
         execution_env_digest

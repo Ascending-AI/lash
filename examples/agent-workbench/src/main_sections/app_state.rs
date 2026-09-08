@@ -1051,6 +1051,8 @@ pub(crate) fn with_workbench_model_capability(model: lash::ModelSpec) -> lash::M
 
 pub(crate) fn workbench_model_capability() -> lash::provider::ModelCapability {
     lash::provider::ModelCapability {
+        instruction_role: Default::default(),
+        native_mid_conversation_system: false,
         attachment_acceptance: workbench_attachment_acceptance().into(),
         google_dialect: Default::default(),
         reasoning: Some(lash::provider::ReasoningCapability {

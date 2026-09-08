@@ -126,17 +126,11 @@ impl LlmToolsProvider {
             .direct_completions()
             .complete(
                 DirectRequest {
+                    instructions: Some(Arc::from("Answer the focused sub-question using only the supplied task and inputs. Return only JSON matching the requested result wrapper. Use kind=\"error\" with a concise error only when the task cannot be answered from the supplied inputs.")),
                     model,
                     model_variant,
                     model_capability,
                     messages: vec![
-                        DirectMessage {
-                            role: DirectRole::System,
-                            parts: vec![DirectPart::Text(
-                                "Answer the focused sub-question using only the supplied task and inputs. Return only JSON matching the requested result wrapper. Use kind=\"error\" with a concise error only when the task cannot be answered from the supplied inputs."
-                                    .to_string(),
-                            )],
-                        },
                         DirectMessage {
                             role: DirectRole::User,
                             parts: vec![DirectPart::Text(prompt)],

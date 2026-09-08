@@ -33,6 +33,7 @@ impl lash_llm_transport::LlmHttpTransport for CapturingTransport {
 
 fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "claude-sonnet-4-6".to_string(),
         messages,
         resolved_stored: Default::default(),

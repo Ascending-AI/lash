@@ -1542,7 +1542,10 @@ fn benchmark_stream_profile_for_request(
             | RuntimePerfScenario::RlmObliqueStackMix
             | RuntimePerfScenario::DeepTurnComposition
     ) || scenario.is_high_traffic())
-        && request_text(request).contains("Subagent capability: default. Depth: 1/5.")
+        && request
+            .instructions
+            .as_deref()
+            .is_some_and(|text| text.contains("Subagent capability: default. Depth: 1/5."))
     {
         if matches!(scenario, RuntimePerfScenario::DeepTurnComposition) {
             return text_profile(lashlang_block(
@@ -2272,6 +2275,7 @@ fn request_text(request: &LlmRequest) -> String {
 
 fn empty_request() -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "mock-model".to_string(),
         messages: Vec::new(),
         resolved_stored: Default::default(),

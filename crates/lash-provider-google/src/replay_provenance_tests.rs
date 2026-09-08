@@ -38,6 +38,7 @@ impl lash_llm_transport::LlmHttpTransport for CapturingTransport {
 
 fn request() -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "gemini-2.5-pro".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
         resolved_stored: Default::default(),
