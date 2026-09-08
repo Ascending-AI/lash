@@ -70,7 +70,7 @@ pub async fn session_store_factory<F>(
 
 #[cfg(test)]
 pub(super) async fn session_config_settlement_timeout_is_typed() {
-    config_commands::session_config_settlement_timeout_is_typed().await;
+    Box::pin(config_commands::session_config_settlement_timeout_is_typed()).await;
 }
 
 #[cfg(test)]

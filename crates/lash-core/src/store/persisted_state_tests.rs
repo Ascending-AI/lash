@@ -16,6 +16,7 @@ fn persisted_state_hydrates_provider_id_without_live_provider_rebinding() {
                 generation: crate::GenerationOptions::default(),
                 tool_access: crate::SessionToolAccess::default(),
                 subagent: None,
+                protocol_turn_options: None,
             },
             checkpoint_ref: None,
             token_ledger: Vec::new(),
@@ -172,4 +173,90 @@ fn session_meta_rejects_extra_observer_inheritance_variants() {
         error.to_string().contains("expected map with a single key"),
         "externally tagged enum must reject the second variant key: {error}"
     );
+}
+
+fn options(payload: serde_json::Value) -> crate::ProtocolTurnOptions {
+    crate::ProtocolTurnOptions { payload }
+}
+
+fn head_with_protocol_turn_options(
+    config_options: Option<crate::ProtocolTurnOptions>,
+) -> SessionHead {
+    let mut config = crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
+    config.protocol_turn_options = config_options;
+    SessionHead {
+        session_id: "stored".to_string(),
+        head_revision: 3,
+        current_frame_node_id: None,
+        graph: crate::SessionGraph::default(),
+        config,
+        checkpoint_ref: None,
+        token_ledger: Vec::new(),
+    }
+}
+
+fn checkpoint_with_protocol_turn_options(
+    options: crate::ProtocolTurnOptions,
+) -> HydratedSessionCheckpoint {
+    let mut state =
+        crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    state.checkpoint_components =
+        crate::runtime::state::RuntimeCheckpointComponents::complete_empty();
+    state.protocol_turn_options = options;
+    build_checkpoint_from_persisted_state(&state).expect("build fixture checkpoint")
+}
+
+/// FIG-2479: the commanded head value (SESSION_HEAD_META v6) is authoritative
+/// over the checkpoint's persisted-turn-state copy on cold load.
+#[test]
+fn head_protocol_turn_options_override_the_checkpoint_copy_on_load() {
+    let head_options = options(serde_json::json!({"dialect": "head-settled"}));
+    let checkpoint = checkpoint_with_protocol_turn_options(options(
+        serde_json::json!({"dialect": "stale-checkpoint-copy"}),
+    ));
+    let state = persisted_session_state_from_head(
+        head_with_protocol_turn_options(Some(head_options.clone())),
+        Some(checkpoint),
+    )
+    .expect("valid persisted state");
+    assert_eq!(state.protocol_turn_options, head_options);
+}
+
+/// A pre-v6-content head (`protocol_turn_options: None`) keeps the legacy
+/// checkpoint fallback.
+#[test]
+fn absent_head_protocol_turn_options_fall_back_to_the_checkpoint_copy() {
+    let checkpoint_options = options(serde_json::json!({"dialect": "checkpoint-copy"}));
+    let checkpoint = checkpoint_with_protocol_turn_options(checkpoint_options.clone());
+    let state =
+        persisted_session_state_from_head(head_with_protocol_turn_options(None), Some(checkpoint))
+            .expect("valid persisted state");
+    assert_eq!(state.protocol_turn_options, checkpoint_options);
+}
+
+/// Refusal witness (FIG-2479): a v5 head — the immediate predecessor of the
+/// protocol-turn-options head generation — is refused by the strict
+/// schema-version fence every store backend decodes through.
+#[test]
+fn immediate_predecessor_head_meta_v5_is_refused() {
+    const PREDECESSOR: u32 = 5;
+    assert_eq!(
+        PREDECESSOR + 1,
+        SESSION_HEAD_META_SCHEMA_VERSION,
+        "session-head schema adjacency pin"
+    );
+    let err = decode_versioned_json_record::<SessionHeadPayload>(
+        &format!(r#"{{"schema_version":{PREDECESSOR}}}"#),
+        "SessionHeadMeta",
+        SESSION_HEAD_META_SCHEMA_VERSION,
+    )
+    .expect_err("v5 session head must be refused");
+    assert!(matches!(
+        err,
+        StoreError::UnsupportedRecordSchemaVersion {
+            record_kind: "SessionHeadMeta",
+            actual: PREDECESSOR,
+            expected: SESSION_HEAD_META_SCHEMA_VERSION
+        }
+    ));
 }

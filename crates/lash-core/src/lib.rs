@@ -771,7 +771,7 @@ pub use triggers::{
 };
 pub(crate) const PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProtocolTurnOptions {
     pub payload: serde_json::Value,
 }

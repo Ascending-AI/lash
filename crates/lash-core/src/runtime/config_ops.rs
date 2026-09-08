@@ -47,6 +47,13 @@ pub struct ApplyConfigPatch {
     pub generation: Option<crate::GenerationOverlay>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_budget: Option<crate::TurnBudget>,
+    /// Protocol-owned turn options. Unlike the other fields this durable fact
+    /// lives on the runtime session state rather than inside
+    /// [`crate::SessionPolicy`], but it settles through the same commanded
+    /// path: the drain commit publishes it to the session head (v6) and to
+    /// resident state in one step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_turn_options: Option<crate::ProtocolTurnOptions>,
 }
 
 impl Default for ApplyConfigPatch {
@@ -58,6 +65,7 @@ impl Default for ApplyConfigPatch {
             prompt: None,
             generation: None,
             turn_budget: None,
+            protocol_turn_options: None,
         }
     }
 }
@@ -114,6 +122,19 @@ impl ApplyConfigPatch {
             && self.prompt.is_none()
             && self.generation.is_none()
             && self.turn_budget.is_none()
+            && self.protocol_turn_options.is_none()
+    }
+
+    /// Publish every settled field to resident session state.
+    ///
+    /// Policy-homed fields land through [`Self::apply_to`]; the protocol turn
+    /// options land on their runtime-state home. Both publications happen only
+    /// after the durable head accepted the same values.
+    pub(super) fn apply_to_state(&self, state: &mut crate::RuntimeSessionState) {
+        self.apply_to(&mut state.policy);
+        if let Some(options) = self.protocol_turn_options.as_ref() {
+            state.protocol_turn_options = options.clone();
+        }
     }
 }
 
@@ -165,25 +186,7 @@ impl LashRuntime {
             .await;
         let durable_patch = ApplyConfigPatch::between(&previous, &candidate);
         if !durable_patch.is_empty() {
-            match self
-                .submit_apply_config_patch(durable_patch)
-                .await
-                .map_err(|error| SessionError::Protocol(error.to_string()))?
-            {
-                super::SessionCommandSettlement::Durable(receipt) => drop(receipt),
-                super::SessionCommandSettlement::Rejected(error) => {
-                    return Err(SessionError::Protocol(format!(
-                        "session config command rejected before acceptance: {}",
-                        error.message
-                    )));
-                }
-                super::SessionCommandSettlement::Pending(receipt) => {
-                    return Err(SessionError::SessionCommandPending(receipt));
-                }
-                super::SessionCommandSettlement::Cancelled(receipt) => {
-                    return Err(SessionError::SessionCommandCancelled(receipt));
-                }
-            }
+            self.settle_config_patch(durable_patch).await?;
         }
         // These fields are explicitly live policy, not part of the durable
         // session-head config. Publish them only after the durable-classified
@@ -198,6 +201,76 @@ impl LashRuntime {
         self.notify_session_config_changed(previous)
             .await
             .map_err(|error| SessionError::Protocol(error.to_string()))
+    }
+
+    /// Submit a durable config patch and map its settlement to the session
+    /// setter contract: enqueue-failure = rejected error, drain-commit =
+    /// durable success, pending/cancelled = their typed errors.
+    async fn settle_config_patch(&mut self, patch: ApplyConfigPatch) -> Result<(), SessionError> {
+        match self
+            .submit_apply_config_patch(patch)
+            .await
+            .map_err(|error| SessionError::Protocol(error.to_string()))?
+        {
+            super::SessionCommandSettlement::Durable(receipt) => {
+                drop(receipt);
+                Ok(())
+            }
+            super::SessionCommandSettlement::Rejected(error) => {
+                Err(SessionError::Protocol(format!(
+                    "session config command rejected before acceptance: {}",
+                    error.message
+                )))
+            }
+            super::SessionCommandSettlement::Pending(receipt) => {
+                Err(SessionError::SessionCommandPending(receipt))
+            }
+            super::SessionCommandSettlement::Cancelled(receipt) => {
+                Err(SessionError::SessionCommandCancelled(receipt))
+            }
+        }
+    }
+
+    /// Override protocol-owned turn options for this session through the
+    /// commanded durable write (FIG-2479).
+    ///
+    /// The patch settles like every other session-config command: the durable
+    /// head accepts the value before resident state publishes it, so a
+    /// successful return means the options are durable. Restating the current
+    /// value is a no-op.
+    pub async fn set_protocol_turn_options(
+        &mut self,
+        options: crate::ProtocolTurnOptions,
+    ) -> Result<(), SessionError> {
+        self.apply_protocol_turn_options_patch(options).await
+    }
+
+    /// Override protocol-owned turn options through the commanded durable
+    /// write (FIG-2479).
+    ///
+    /// Existing `FrameOpen` nodes are immutable historical snapshots; the next
+    /// opened frame captures the settled value.
+    pub async fn set_protocol_turn_options_all_frames(
+        &mut self,
+        options: crate::ProtocolTurnOptions,
+    ) -> Result<(), SessionError> {
+        self.apply_protocol_turn_options_patch(options).await
+    }
+
+    async fn apply_protocol_turn_options_patch(
+        &mut self,
+        options: crate::ProtocolTurnOptions,
+    ) -> Result<(), SessionError> {
+        self.reload_invalidated_resident_session_state_for_session()
+            .await?;
+        if self.state.protocol_turn_options == options {
+            return Ok(());
+        }
+        self.settle_config_patch(ApplyConfigPatch {
+            protocol_turn_options: Some(options),
+            ..ApplyConfigPatch::default()
+        })
+        .await
     }
 
     pub async fn set_prompt_template(

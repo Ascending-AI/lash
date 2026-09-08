@@ -401,3 +401,95 @@ async fn freshness_skips_hydration_when_nothing_changed() {
         resident_head
     );
 }
+
+fn commanded_turn_options(dialect: &str) -> crate::ProtocolTurnOptions {
+    crate::ProtocolTurnOptions {
+        payload: serde_json::json!({ "dialect": dialect }),
+    }
+}
+
+/// FIG-2479: the protocol-turn-options setter settles through the commanded
+/// durable write — the session head accepts the value before resident state
+/// publishes it.
+#[tokio::test]
+async fn protocol_turn_options_settle_through_the_commanded_write() {
+    let (mut runtime, store) = freshness_runtime().await;
+    let options = commanded_turn_options("commanded-durable");
+
+    runtime
+        .set_protocol_turn_options(options.clone())
+        .await
+        .expect("settle protocol turn options durably");
+
+    assert_eq!(
+        runtime.protocol_turn_options(),
+        &options,
+        "resident state must publish the settled value"
+    );
+    let head = store
+        .load_session_head_meta()
+        .await
+        .expect("read durable head")
+        .expect("session head exists");
+    assert_eq!(
+        head.config.protocol_turn_options,
+        Some(options),
+        "the durable head must have accepted the value at settlement time"
+    );
+}
+
+/// FIG-2479 regression: options set before an invalidation reload survive it
+/// via the head — the reload restores the commanded head value, not stale
+/// resident or checkpoint state.
+#[tokio::test]
+async fn protocol_turn_options_set_before_invalidation_reload_survive_via_the_head() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+    let options = commanded_turn_options("survives-invalidation-reload");
+
+    runtime
+        .set_protocol_turn_options(options.clone())
+        .await
+        .expect("settle protocol turn options durably");
+    runtime.invalidate_resident_session_state();
+    runtime
+        .reload_invalidated_resident_session_state_for_session()
+        .await
+        .expect("reload invalidated resident session state");
+
+    assert_eq!(
+        runtime.protocol_turn_options(),
+        &options,
+        "an invalidation reload must restore the settled options from the head"
+    );
+    let head = store
+        .load_session_head_meta()
+        .await
+        .expect("read durable head")
+        .expect("session head exists");
+    assert_eq!(
+        head.config.protocol_turn_options,
+        Some(options),
+        "the reload source is the durable head row"
+    );
+}
+
+/// The all-frames setter shares the commanded settlement path.
+#[tokio::test]
+async fn protocol_turn_options_all_frames_setter_settles_durably() {
+    let (mut runtime, store) = freshness_runtime().await;
+    let options = commanded_turn_options("all-frames-commanded");
+
+    runtime
+        .set_protocol_turn_options_all_frames(options.clone())
+        .await
+        .expect("settle all-frames protocol turn options durably");
+
+    assert_eq!(runtime.protocol_turn_options(), &options);
+    let head = store
+        .load_session_head_meta()
+        .await
+        .expect("read durable head")
+        .expect("session head exists");
+    assert_eq!(head.config.protocol_turn_options, Some(options));
+}

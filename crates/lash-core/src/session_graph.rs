@@ -385,6 +385,13 @@ pub struct PersistedSessionConfig {
     /// ambient worker state.
     #[serde(default)]
     pub subagent: Option<crate::SubagentSessionContext>,
+    /// Commanded durable protocol turn options (SESSION_HEAD_META v6).
+    ///
+    /// `None` is reserved for heads written before this field existed and for
+    /// creation rows written before the first state commit; restore then falls
+    /// back to the checkpoint copy. `Some` is authoritative on cold load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_turn_options: Option<crate::ProtocolTurnOptions>,
 }
 
 impl PersistedSessionConfig {
@@ -403,6 +410,7 @@ impl PersistedSessionConfig {
             generation: crate::GenerationOptions::default(),
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,
+            protocol_turn_options: None,
         }
     }
 }
@@ -417,6 +425,7 @@ impl From<&crate::SessionPolicy> for PersistedSessionConfig {
             generation: policy.generation.clone(),
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,
+            protocol_turn_options: None,
         }
     }
 }
@@ -823,8 +832,10 @@ impl SessionNodeRecord {
 
     /// Provider and model captured by this frame boundary.
     pub fn frame_config(&self) -> Option<PersistedSessionConfig> {
-        let (_, assignment, _) = self.frame_open()?;
-        Some(PersistedSessionConfig::from(&assignment.policy))
+        let (_, assignment, protocol_turn_options) = self.frame_open()?;
+        let mut config = PersistedSessionConfig::from(&assignment.policy);
+        config.protocol_turn_options = Some(protocol_turn_options.clone());
+        Some(config)
     }
 
     /// Decodes a plugin node body for store and protocol implementors, returning `None` when the

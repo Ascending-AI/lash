@@ -660,7 +660,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_config_settlement_timeout_is_typed() {
-        session_store_factory::session_config_settlement_timeout_is_typed().await;
+        Box::pin(session_store_factory::session_config_settlement_timeout_is_typed()).await;
     }
 
     #[tokio::test]

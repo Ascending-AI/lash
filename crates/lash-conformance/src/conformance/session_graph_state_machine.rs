@@ -219,7 +219,7 @@ where
         runner.run(&generated_case(), |case| {
             runtime.block_on(async {
                 let factory = make(case.seed).await;
-                let shape = replay_case(case.seed, factory, &case.operations).await?;
+                let shape = Box::pin(replay_case(case.seed, factory, &case.operations)).await?;
                 prop_assert!(
                     shape.ancestor_appends_committed > 0,
                     "generated alphabet starvation: no ancestor-based append committed"
@@ -1566,7 +1566,9 @@ where
 {
     assert_on_fresh_factory(make, seed, |factory| async move {
         let operations = generated_prefix();
-        replay_case(seed, factory, &operations).await.map(|_| ())
+        Box::pin(replay_case(seed, factory, &operations))
+            .await
+            .map(|_| ())
     })
     .await?;
     assert_on_fresh_factory(make, seed.wrapping_add(1), |factory| async move {
@@ -1580,7 +1582,7 @@ where
             SessionGraphContractOp::ColdReload { session: 0 },
             SessionGraphContractOp::ReachabilitySweep,
         ];
-        replay_case(seed.wrapping_add(1), factory, &operations)
+        Box::pin(replay_case(seed.wrapping_add(1), factory, &operations))
             .await
             .map(|_| ())
     })
@@ -1603,7 +1605,7 @@ where
                 node: 0,
             },
         ];
-        replay_case(seed.wrapping_add(2), factory, &operations)
+        Box::pin(replay_case(seed.wrapping_add(2), factory, &operations))
             .await
             .map(|_| ())
     })

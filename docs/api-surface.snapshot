@@ -2114,6 +2114,7 @@ lash::persistence::PersistedSessionConfig::generation
 lash::persistence::PersistedSessionConfig::model
 lash::persistence::PersistedSessionConfig::new
 lash::persistence::PersistedSessionConfig::prompt
+lash::persistence::PersistedSessionConfig::protocol_turn_options
 lash::persistence::PersistedSessionConfig::provider_id
 lash::persistence::PersistedSessionConfig::subagent
 lash::persistence::PersistedSessionConfig::tool_access
@@ -7596,6 +7597,7 @@ lash::runtime::ApplyConfigPatch
 lash::runtime::ApplyConfigPatch::generation
 lash::runtime::ApplyConfigPatch::model
 lash::runtime::ApplyConfigPatch::prompt
+lash::runtime::ApplyConfigPatch::protocol_turn_options
 lash::runtime::ApplyConfigPatch::provider_id
 lash::runtime::ApplyConfigPatch::schema_version
 lash::runtime::ApplyConfigPatch::turn_budget

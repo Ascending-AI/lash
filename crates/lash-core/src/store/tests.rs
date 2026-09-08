@@ -265,7 +265,7 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 fn intent_hash_golden_vector() {
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "aa6a3de6d4d7b04559afd414f682c40544ef4b0a234bee61b7cf3fe511d4ef16"
+        "a600da78b59942da80cbef61c1f63ad83537be3a824d5f1e78031becac6c82de"
     );
 }
 
@@ -275,7 +275,7 @@ fn failure_evidence_changes_intent_hash_without_changing_empty_legacy_hash() {
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
     assert_eq!(
         baseline_hash,
-        "aa6a3de6d4d7b04559afd414f682c40544ef4b0a234bee61b7cf3fe511d4ef16"
+        "a600da78b59942da80cbef61c1f63ad83537be3a824d5f1e78031becac6c82de"
     );
 
     let mut with_evidence = baseline;

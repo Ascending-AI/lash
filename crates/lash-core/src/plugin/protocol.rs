@@ -236,17 +236,24 @@ impl<'a> ProtocolRuntimeContext<'a> {
         self.runtime.protocol_turn_options()
     }
 
-    /// Set the durable protocol turn options and mirror them to the current
-    /// agent frame only.
+    /// Record the durable protocol turn options this materialization resolved,
+    /// mirrored to the current agent frame only.
+    ///
+    /// Materialization is the initialization half of the FIG-2479 contract:
+    /// the value recorded here is published durably by the materialization
+    /// commit before any queued command work. Mid-run changes go through the
+    /// commanded `LashRuntime::set_protocol_turn_options` write instead.
     pub fn set_protocol_turn_options(&mut self, options: crate::ProtocolTurnOptions) {
-        self.runtime.set_protocol_turn_options(options);
+        self.runtime
+            .record_materialized_protocol_turn_options(options);
     }
 
-    /// Set the durable protocol turn options and mirror them to **every** agent
-    /// frame. Apply-at-open semantics: the last applied value is recorded on the
-    /// session and all frames.
+    /// Record the durable protocol turn options this materialization resolved,
+    /// mirrored to **every** agent frame. Apply-at-open semantics: the last
+    /// applied value is recorded on the session and all frames.
     pub fn set_protocol_turn_options_all_frames(&mut self, options: crate::ProtocolTurnOptions) {
-        self.runtime.set_protocol_turn_options_all_frames(options);
+        self.runtime
+            .record_materialized_protocol_turn_options(options);
     }
 }
 

@@ -68,21 +68,24 @@ impl LashRuntime {
         };
         Ok(session.plugins().tool_registry().export_state())
     }
-    /// Override protocol-owned turn options for this session.
-    pub fn set_protocol_turn_options(&mut self, options: crate::ProtocolTurnOptions) {
-        self.state.protocol_turn_options = options;
-    }
-
     /// The durable protocol turn options recorded on the session.
     pub fn protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
         self.state.effective_protocol_turn_options()
     }
 
-    /// Override protocol-owned turn options during materialization.
+    /// Record protocol-owned turn options while a session materializes.
     ///
-    /// Existing `FrameOpen` nodes are immutable historical snapshots; the next
-    /// opened frame captures this live value.
-    pub fn set_protocol_turn_options_all_frames(&mut self, options: crate::ProtocolTurnOptions) {
+    /// This is the initialization half of the FIG-2479 contract: protocol
+    /// materialization hooks run before the session has a committed head, and
+    /// [`Self::configure_protocol_on_materialize`] marks the resulting config
+    /// dirty so `persist_materialized_protocol_config` publishes it durably
+    /// before any queued command work. Mid-run changes never come through
+    /// here — they use the commanded
+    /// [`Self::set_protocol_turn_options`] path instead.
+    pub(crate) fn record_materialized_protocol_turn_options(
+        &mut self,
+        options: crate::ProtocolTurnOptions,
+    ) {
         self.state.protocol_turn_options = options;
     }
 
@@ -276,6 +279,12 @@ impl LashRuntime {
                 source,
             }
         })?;
+        // The commanded head value is authoritative over the checkpoint's
+        // turn-state copy (FIG-2479); `None` means a pre-v6-content head, so
+        // the checkpoint fallback above stands.
+        if let Some(options) = head.config.protocol_turn_options.as_ref() {
+            self.state.protocol_turn_options = options.clone();
+        }
         self.resident_graph_head_stale
             .store(false, Ordering::Release);
         Ok(())
@@ -714,7 +723,7 @@ impl LashRuntime {
                 // live-owned policy fields (FIG-1875's adoption half remains
                 // out of scope). Once this command's durable completion is
                 // observed, publish the exact settled patch locally.
-                publish_patch.apply_to(&mut self.state.policy);
+                publish_patch.apply_to_state(&mut self.state);
                 return Ok(crate::runtime::SessionCommandSettlement::Durable(
                     handle.receipt,
                 ));
@@ -989,7 +998,7 @@ impl LashRuntime {
                     unreachable!("config-only command group was checked above")
                 };
                 patch.validate()?;
-                patch.apply_to(&mut next_state.policy);
+                patch.apply_to_state(next_state);
             }
         } else {
             debug_assert_eq!(commands.len(), 1, "non-config commands remain exclusive");
