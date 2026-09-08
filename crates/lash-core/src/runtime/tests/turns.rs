@@ -1134,7 +1134,11 @@ async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_pr
         Some(reopen_executor),
     );
     let plugins = crate::PluginHost::new(vec![reopen_factory])
-        .build_session("root")
+        .rematerialize_session(
+            "root",
+            durable.plugin_state().expect("durable plugin state"),
+            crate::plugin::RecordedSessionConfig::new(durable.protocol_turn_options.clone()),
+        )
         .expect("reopen plugins");
     let _reopened = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
@@ -1260,7 +1264,11 @@ async fn caller_supplied_key_colliding_with_existing_frame_preserves_execution_s
         Some(reopen_code_executor),
     );
     let plugins = crate::PluginHost::new(vec![reopen_factory])
-        .build_session("root")
+        .rematerialize_session(
+            "root",
+            durable.plugin_state().expect("durable plugin state"),
+            crate::plugin::RecordedSessionConfig::new(durable.protocol_turn_options.clone()),
+        )
         .expect("cold-reopen plugins");
     let _reopened = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
@@ -2553,7 +2561,7 @@ async fn plugin_turn_budget_mutation_survives_park_and_reload() {
         .expect("load parked session")
         .expect("parked session exists");
     let plugin_host = crate::PluginHost::new(vec![turn_budget_config_mutator(persisted_budget)]);
-    let plugins = match reloaded_state.plugin_snapshot() {
+    let plugins = match reloaded_state.plugin_state() {
         Some(snapshot) => plugin_host.rematerialize_session(
             "root",
             snapshot,

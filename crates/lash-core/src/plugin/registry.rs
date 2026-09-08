@@ -15,9 +15,9 @@ use super::{
     ErasedPluginOperationInvokeFuture, PluginCommand, PluginCommandHandler, PluginError,
     PluginHost, PluginLifecycleEventHook, PluginOperationFailure, PluginOperationOutcome,
     PluginOperationRegistration, PluginOperationSpec, PluginQuery, PluginQueryHandler,
-    PluginQueryInvokeFuture, PluginRegistrar, PluginSnapshotMeta, PluginTask, PluginTaskHandler,
-    PromptContributor, SessionConfigMutator, SessionToolAccess, SnapshotReader, SnapshotWriter,
-    SubagentSessionContext, ToolCatalogContributor, ToolResultProjector, TurnContextTransform,
+    PluginQueryInvokeFuture, PluginRegistrar, PluginTask, PluginTaskHandler, PromptContributor,
+    SessionConfigMutator, SessionToolAccess, SubagentSessionContext, ToolCatalogContributor,
+    ToolResultProjector, TurnContextTransform,
 };
 use crate::{PluginOptions, ToolProvider};
 
@@ -435,6 +435,7 @@ impl PluginSessionContext {
 
 #[derive(Clone)]
 pub struct SessionReadyContext {
+    pub state: super::PluginStateStore,
     pub session_id: String,
     pub host: PluginHost,
 }
@@ -447,30 +448,6 @@ pub trait SessionPlugin: Send + Sync {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError>;
-
-    fn snapshot(
-        &self,
-        _writer: &mut dyn SnapshotWriter,
-    ) -> Result<PluginSnapshotMeta, PluginError> {
-        Ok(PluginSnapshotMeta {
-            plugin_id: self.id().to_string(),
-            plugin_version: self.version().to_string(),
-            revision: self.snapshot_revision(),
-            state: None,
-        })
-    }
-
-    fn snapshot_revision(&self) -> u64 {
-        0
-    }
-
-    fn restore(
-        &self,
-        _meta: &PluginSnapshotMeta,
-        _reader: &dyn SnapshotReader,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
 
     fn session_ready(&self, _ctx: SessionReadyContext) -> Result<(), PluginError> {
         Ok(())

@@ -550,7 +550,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// runtime-turn-commit identity CHECK now accepts a populated hash and version
 /// with a NULL requested-node count. Existing catalogs are rejected rather
 /// than migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 51;
+/// ADR 0078 replaces plugin snapshots with mediated namespace state; older
+/// catalogs are refused before any prior payload can be read.
+pub(crate) const SCHEMA_VERSION: i32 = 52;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

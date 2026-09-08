@@ -299,7 +299,9 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // runtime-turn-commit identity CHECK now accepts a populated hash and version
 // with a NULL requested-node count. Component-77 stores must be recreated;
 // there is no migration into this generation.
-const SCHEMA_VERSION: i32 = 78;
+// ADR 0078 replaces plugin snapshots with mediated namespace state; older
+// catalogs are refused before any prior payload can be read.
+const SCHEMA_VERSION: i32 = 79;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

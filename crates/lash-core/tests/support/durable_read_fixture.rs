@@ -9,23 +9,23 @@ use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentManifest, AwaitEventKey, AwaitEventWaitIdentity,
     BoundaryReason, Clock, DeliveryPolicy, EffectHost, ExecResponse, ExecutionScope, LashSchema,
     LeaseClaimNonce, LeaseOwnerIdentity, MessageOrigin, MessageRole, OperationId, PartKind,
-    PendingTurnInputDraft, PersistedSegmentHandover, PluginSessionSnapshot, PluginSnapshotArtifact,
-    PluginSnapshotEntry, PluginSnapshotMeta, ProcessAwaitOutput, ProcessChange,
-    ProcessChangeCursor, ProcessCompletionAuthority, ProcessContinuationStore,
-    ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
-    ProcessIdentity, ProcessInput, ProcessOriginator, ProcessProvenance, ProcessRegistration,
-    ProcessRegistry, ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
-    ProjectionWatermark, ProtocolTurnOptions, RecoveryContract, Resolution, ResolveOutcome,
-    RuntimeCommit, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimePersistence,
-    RuntimeScope, RuntimeSessionState, SegmentHandover, SessionAppendNode, SessionNodePayload,
-    SessionPolicy, SessionRelation, SessionScope, SessionStoreCreateRequest, SessionStoreFactory,
-    StoreError, TextProjectionMetadata, TokenLedgerEntry, TokenUsage, TriggerCommand,
-    TriggerCommandOutcome, TriggerDeliveryReservationOutcome, TriggerInputBinding,
-    TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope,
-    TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress,
-    WaitKind, WaitState,
+    PendingTurnInputDraft, PersistedSegmentHandover, PluginNamespaceState, PluginState,
+    ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
+    ProcessContinuationStore, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
+    ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput, ProcessOriginator,
+    ProcessProvenance, ProcessRegistration, ProcessRegistry, ProcessStatus, ProcessValueSelector,
+    ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark, ProtocolTurnOptions,
+    RecoveryContract, Resolution, ResolveOutcome, RuntimeCommit, RuntimeEffectCommand,
+    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeInvocation, RuntimePersistence, RuntimeScope, RuntimeSessionState, SegmentHandover,
+    SessionAppendNode, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TextProjectionMetadata,
+    TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
+    TriggerDeliveryReservationOutcome, TriggerInputBinding, TriggerMutationOutcome,
+    TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
+    TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
+    WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -151,8 +151,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         serde_json::from_value(serde_json::json!({"generation": 887, "tools": {}}))
             .expect("build distinctive fixture tool state"),
     ));
-    loaded.plugin_snapshot_revision = Some(4);
-    loaded.set_plugin_snapshot(Some(fixture_plugin_snapshot()));
+    loaded.set_plugin_state(Some(fixture_plugin_state()));
     loaded.set_execution_state_snapshot(Some(vec![0x46, 0x49, 0x47, 0x38, 0x38, 0x37]));
     let usage = TokenLedgerEntry {
         source: "durable-read-turn".to_string(),
@@ -620,21 +619,16 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(
         serde_json::to_value(
             checkpoint
-                .decode_component::<PluginSessionSnapshot>(
-                    lash_core::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT,
+                .decode_component::<PluginState>(
+                    lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT,
                 )
                 .expect("decode durable fixture plugin snapshot")
                 .as_ref()
                 .expect("durable fixture semantic drift: plugin snapshot disappeared")
         )
         .expect("encode fixture plugin snapshot"),
-        serde_json::to_value(fixture_plugin_snapshot()).expect("encode expected plugin snapshot"),
+        serde_json::to_value(fixture_plugin_state()).expect("encode expected plugin snapshot"),
         "durable fixture semantic drift: plugin snapshot content changed"
-    );
-    assert_eq!(
-        checkpoint.plugin_snapshot_revision,
-        Some(4),
-        "durable fixture semantic drift: plugin snapshot revision changed"
     );
     assert_eq!(
         checkpoint.component_body(lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT),
@@ -1410,21 +1404,16 @@ fn fixture_session_request(session_id: &str) -> SessionStoreCreateRequest {
     }
 }
 
-fn fixture_plugin_snapshot() -> PluginSessionSnapshot {
-    PluginSessionSnapshot {
+fn fixture_plugin_state() -> PluginState {
+    PluginState {
         plugins: BTreeMap::from([(
             "durable-read-snapshot-plugin".to_string(),
-            PluginSnapshotEntry {
-                meta: PluginSnapshotMeta {
-                    plugin_id: "durable-read-snapshot-plugin".to_string(),
-                    plugin_version: "8.8.7".to_string(),
-                    revision: 887,
-                    state: Some(serde_json::json!({"fixture": "plugin-state", "value": 887})),
-                },
-                artifacts: vec![PluginSnapshotArtifact {
-                    name: "durable-read-artifact.bin".to_string(),
-                    data: vec![8, 8, 7],
-                }],
+            PluginNamespaceState {
+                generation: 887,
+                values: std::collections::BTreeMap::from([(
+                    "state".into(),
+                    serde_json::json!({"fixture": "plugin-state", "value": 887}),
+                )]),
             },
         )]),
     }

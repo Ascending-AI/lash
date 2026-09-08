@@ -319,7 +319,7 @@ impl InMemorySessionStore {
             bound_session_id: Mutex::new(None),
             session_head_meta: Mutex::new(None),
             session_meta: Mutex::new(None),
-            session_state_version: Mutex::new(None),
+            session_state_version: Mutex::new(Some(crate::store::CURRENT_SESSION_STATE_VERSION)),
             corrupt_session_payload_for_testing: std::sync::atomic::AtomicBool::new(false),
             session_graph: Mutex::new(crate::SessionGraph::default()),
             global_session_graph,

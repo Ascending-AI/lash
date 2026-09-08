@@ -2,9 +2,7 @@
 
 ## Status
 
-Accepted. Ratified on FIG-2006, which also binds the six invariants this ADR
-implements as an interface. Implemented separately by the FIG-2006 cutover
-children.
+Implemented by FIG-2113. Ratified on FIG-2006, which binds the six invariants this ADR implements as an interface.
 
 ## Context
 

@@ -4,8 +4,6 @@
 pub enum PluginError {
     #[error("plugin registration error: {0}")]
     Registration(String),
-    #[error("plugin snapshot error: {0}")]
-    Snapshot(String),
     #[error("plugin invoke error: {0}")]
     Invoke(String),
     /// A bounded before-tool-call reinspection attempted to replace arguments again.

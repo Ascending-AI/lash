@@ -37,7 +37,6 @@ pub(super) struct CheckpointObservation {
     /// Complete keyed projection: descriptor identity and exact logical bytes
     /// are compared for every component, including keys unknown to Lash core.
     pub(super) components: BTreeMap<String, (lash_core::CheckpointComponentDescriptor, Vec<u8>)>,
-    pub(super) plugin_snapshot_revision: Option<u64>,
 }
 
 pub(super) fn checkpoint_observation(
@@ -71,7 +70,6 @@ pub(super) fn checkpoint_observation(
         turn_state: serde_json::to_value(&checkpoint.turn_state)
             .expect("encode checkpoint turn state"),
         components,
-        plugin_snapshot_revision: checkpoint.plugin_snapshot_revision,
     }
 }
 
@@ -130,7 +128,6 @@ pub(super) async fn read_postgres_checkpoint_observation(
         HydratedSessionCheckpoint {
             turn_state: manifest.turn_state,
             components,
-            plugin_snapshot_revision: manifest.plugin_snapshot_revision,
         },
     ))
 }

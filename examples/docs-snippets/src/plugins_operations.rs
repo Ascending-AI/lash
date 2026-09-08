@@ -15,20 +15,21 @@
 use std::sync::Arc;
 
 use lash::plugins::{
-    CodeExecutionDisposition, CodeExecutorPlugin, ExecRequest, ExecResponse, PluginCommand,
-    PluginCommandContext, PluginError, PluginFactory, PluginOperation, PluginOperationFailure,
-    PluginOperationInvokeError, PluginOperationOutcome, PluginOperationReceipt, PluginOwned,
-    PluginQuery, PluginQueryContext, PluginRegistrar, PluginRuntimeDirective, PluginRuntimeEvent,
-    PluginSessionContext, PluginSnapshotMeta, PluginTask, PluginTaskContext, ProcessReadService,
-    RuntimeExecutionContext, SessionParam, SessionPlugin, SessionReadService, SessionReadyContext,
-    SnapshotReader, SnapshotWriter,
+    CodeExecutionDisposition, CodeExecutorPlugin, ExecRequest, ExecResponse, KeyRejection,
+    PluginCommand, PluginCommandContext, PluginError, PluginFactory, PluginHost, PluginOperation,
+    PluginOperationFailure, PluginOperationInvokeError, PluginOperationOutcome,
+    PluginOperationReceipt, PluginOwned, PluginQuery, PluginQueryContext, PluginRegistrar,
+    PluginRuntimeDirective, PluginRuntimeEvent, PluginSessionContext, PluginStateEdit,
+    PluginStateError, PluginStateStore, PluginTask, PluginTaskContext, ProcessReadService,
+    RecordedSessionConfig, RuntimeExecutionContext, SessionParam, SessionPlugin,
+    SessionReadService, SessionReadyContext,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 const PLUGIN_ID: &str = "docs-plan";
 const SESSION: &str = "docs-plugin-operations";
-const PLAN_BLOB: &str = "plan.json";
+const PLAN_KEY: &str = "plan";
 
 /// Minimal stateful executor shape showing the response-handoff contract that
 /// a protocol plugin uses to retain a cell checkpoint until Lash settles it.
@@ -219,7 +220,7 @@ async fn review_plan(
 /// it accumulated so a reloaded session picks up where the last one stopped.
 #[derive(Default)]
 struct PlanPlugin {
-    plan: std::sync::Mutex<Vec<String>>,
+    state: std::sync::OnceLock<PluginStateStore>,
 }
 
 impl SessionPlugin for PlanPlugin {
@@ -228,6 +229,7 @@ impl SessionPlugin for PlanPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+        let _state = reg.state();
         reg.execution()
             .code_executor(Arc::new(DocsCodeExecutor::default()))?;
         reg.operations().typed_query::<ReadPlan, _, _>(read_plan)?;
@@ -236,38 +238,15 @@ impl SessionPlugin for PlanPlugin {
         reg.operations().typed_task::<ReviewPlan, _, _>(review_plan)
     }
 
-    fn snapshot(&self, writer: &mut dyn SnapshotWriter) -> Result<PluginSnapshotMeta, PluginError> {
-        let plan = self.plan.lock().expect("plan mutex").clone();
-        let encoded = serde_json::to_vec(&plan)
-            .map_err(|err| PluginError::Session(format!("encode plan: {err}")))?;
-        writer.write_blob(PLAN_BLOB.to_string(), encoded);
-        Ok(PluginSnapshotMeta {
-            plugin_id: self.id().to_string(),
-            plugin_version: self.version().to_string(),
-            revision: self.snapshot_revision(),
-            state: None,
-        })
-    }
-
-    fn snapshot_revision(&self) -> u64 {
-        1
-    }
-
-    fn restore(
-        &self,
-        _meta: &PluginSnapshotMeta,
-        reader: &dyn SnapshotReader,
-    ) -> Result<(), PluginError> {
-        let Some(bytes) = reader.read_blob(PLAN_BLOB) else {
-            return Ok(());
-        };
-        let plan: Vec<String> = serde_json::from_slice(bytes)
-            .map_err(|err| PluginError::Session(format!("decode plan: {err}")))?;
-        *self.plan.lock().expect("plan mutex") = plan;
-        Ok(())
-    }
-
-    fn session_ready(&self, _ctx: SessionReadyContext) -> Result<(), PluginError> {
+    fn session_ready(&self, ctx: SessionReadyContext) -> Result<(), PluginError> {
+        assert_eq!(ctx.state.plugin_id(), self.id());
+        assert_eq!(ctx.state.session_id(), ctx.session_id);
+        if ctx.state.get(PLAN_KEY).is_none() {
+            ctx.state
+                .set_as(PLAN_KEY, &vec!["ship the facade".to_string()])?;
+            state_operations(ctx.state.clone())?;
+        }
+        self.state.set(ctx.state).expect("ready once");
         Ok(())
     }
 }
@@ -284,50 +263,86 @@ impl PluginFactory for PlanPluginFactory {
     }
 }
 
-/// A host-side blob store standing in for whatever the embedder persists
-/// plugin artifacts to. Snapshot writing and restore reading are two halves of
-/// one contract, so the example implements both against the same bytes.
-#[derive(Default)]
-struct PlanBlobs {
-    blobs: Vec<(String, Vec<u8>)>,
+// A state-only host never runs turns, but still declares its protocol capability.
+struct StateOnlyProtocol;
+impl lash::plugins::ProtocolSessionPlugin for StateOnlyProtocol {}
+impl lash::plugins::ProtocolDriverPlugin for StateOnlyProtocol {
+    fn build_preamble(
+        &self,
+        _: lash::plugins::ProtocolBuildInput,
+    ) -> lash::plugins::TurnDriverPreamble {
+        unreachable!("state-only witness never runs a turn")
+    }
 }
-
-impl SnapshotWriter for PlanBlobs {
-    fn write_blob(&mut self, name: String, data: Vec<u8>) {
-        self.blobs.push((name, data));
+impl PluginFactory for StateOnlyProtocol {
+    fn id(&self) -> &'static str {
+        "state-only-protocol"
+    }
+    fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+        Ok(Arc::new(Self))
+    }
+}
+impl SessionPlugin for StateOnlyProtocol {
+    fn id(&self) -> &'static str {
+        "state-only-protocol"
+    }
+    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+        reg.protocol().session(Arc::new(Self))?;
+        reg.protocol().protocol_driver(Arc::new(Self))
     }
 }
 
-impl SnapshotReader for PlanBlobs {
-    fn read_blob(&self, name: &str) -> Option<&[u8]> {
-        self.blobs
-            .iter()
-            .find(|(blob, _)| blob == name)
-            .map(|(_, data)| data.as_slice())
-    }
-}
-
-/// Round-trip a plugin's durable state the way the runtime does at reload.
-fn plan_survives_a_snapshot_restore_round_trip() {
-    let plugin = PlanPlugin::default();
-    plugin
-        .plan
-        .lock()
-        .expect("plan mutex")
-        .push("ship the facade".to_string());
-    let mut blobs = PlanBlobs::default();
-    let meta: PluginSnapshotMeta = plugin.snapshot(&mut blobs).expect("plan snapshots");
-    assert_eq!(meta.plugin_id, PLUGIN_ID);
-    assert_eq!(meta.plugin_version, "1");
-    assert_eq!(meta.revision, 1);
-    assert!(meta.state.is_none());
-
-    let reloaded = PlanPlugin::default();
-    reloaded.restore(&meta, &blobs).expect("plan restores");
+/// JSON state survives reconstruction and a child inherits an independent copy.
+fn plan_survives_a_state_round_trip() {
+    let host = PluginHost::new(vec![
+        Arc::new(PlanPluginFactory),
+        Arc::new(StateOnlyProtocol),
+    ]);
+    let session = host.build_session("plan-parent").expect("session");
+    let state = session.export_state();
     assert_eq!(
-        *reloaded.plan.lock().expect("plan mutex"),
-        vec!["ship the facade".to_string()]
+        state.plugins[PLUGIN_ID].values[PLAN_KEY],
+        serde_json::json!(["ship the facade"])
     );
+    let restored = host
+        .rematerialize_session(
+            "plan-restored",
+            &state,
+            RecordedSessionConfig::new(Default::default()),
+        )
+        .expect("restored");
+    assert_eq!(restored.export_state(), state);
+}
+
+/// A cloned capability observes writes immediately; guard failure is atomic.
+fn state_operations(state: PluginStateStore) -> Result<(), PluginStateError> {
+    let clone = state.clone();
+    let generation = state.set("count", serde_json::json!(1))?;
+    assert_eq!(clone.get("count"), Some(serde_json::json!(1)));
+    assert_eq!(state.get_as::<u64>("count")?, Some(1));
+    assert!(state.keys().contains(&"count".to_string()));
+    state.apply_guarded(
+        generation,
+        vec![PluginStateEdit::Set {
+            key: "count".into(),
+            value: serde_json::json!(2),
+        }],
+    )?;
+    assert!(
+        matches!(state.apply_guarded(generation, vec![]), Err(PluginStateError::GenerationConflict { expected, actual }) if expected == generation && actual == generation + 1)
+    );
+    state.apply(vec![PluginStateEdit::Remove {
+        key: "count".into(),
+    }])?;
+    assert_eq!(state.remove("count")?, state.generation());
+    assert!(matches!(
+        state.set("", serde_json::Value::Null),
+        Err(PluginStateError::InvalidKey {
+            reason: KeyRejection::Empty,
+            ..
+        })
+    ));
+    Ok(())
 }
 
 fn core() -> lash::Result<lash::LashCore> {
@@ -427,7 +442,7 @@ async fn plugin_operations_round_trip() -> anyhow::Result<()> {
         lash::EmbedError::Control(PluginOperationInvokeError::Unknown(ref name))
             if name == "docs.no_such_operation"
     ));
-    plan_survives_a_snapshot_restore_round_trip();
+    plan_survives_a_state_round_trip();
     Ok(())
 }
 

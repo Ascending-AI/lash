@@ -589,14 +589,14 @@ mod tests {
         .expect("shared-factory snippet must build");
 
         assert_facade_exports_typed_attachment_parse_errors();
-        assert_eq!(initial_session_state_generation(), (0, 0));
+        assert_eq!(initial_session_state_generation(), (1, 1));
         let refusal = lash::persistence::StoreError::SessionStateVersionNewerThanRuntime {
             found: lash::persistence::CURRENT_SESSION_STATE_VERSION + 1,
             current: lash::persistence::CURRENT_SESSION_STATE_VERSION,
         };
         assert_eq!(
             newer_session_state_requires_runtime_upgrade(&refusal),
-            Some((1, 0))
+            Some((2, 1))
         );
         enumerate_sessions()
             .await

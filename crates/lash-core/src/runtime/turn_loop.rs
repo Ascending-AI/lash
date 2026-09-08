@@ -958,10 +958,10 @@ impl LashRuntime {
                     ),
                 )
             })?;
-            if let Some(snapshot) = durable_state.plugin_snapshot() {
-                session.plugins().restore(snapshot).map_err(|err| {
+            if let Some(snapshot) = durable_state.plugin_state() {
+                session.plugins().hydrate_state(snapshot).map_err(|err| {
                     (
-                        "plugin_snapshot_restore",
+                        "plugin_state_restore",
                         RuntimeError::new(
                             RuntimeErrorCode::ResidentSessionReloadFailed,
                             err.to_string(),

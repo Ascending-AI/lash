@@ -367,7 +367,7 @@ fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips()
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.set_tool_state_snapshot(Some(crate::ToolState::default()));
-    state.set_plugin_snapshot(Some(crate::PluginSessionSnapshot::default()));
+    state.set_plugin_state(Some(crate::PluginState::default()));
     state.set_execution_state_snapshot(Some(vec![1, 2, 3]));
     state.ensure_agent_frame_initialized();
 
@@ -377,7 +377,7 @@ fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips()
         "head_revision",
         "persisted_node_ids",
         "tool_state_snapshot",
-        "plugin_snapshot",
+        "plugin_state",
         "execution_state_snapshot",
     ] {
         assert!(
@@ -394,7 +394,7 @@ fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips()
     assert_eq!(hydrated.policy.recorded_provider_id(), "mock");
     assert_eq!(hydrated.head_revision, 0);
     assert!(hydrated.tool_state_snapshot().is_none());
-    assert!(hydrated.plugin_snapshot().is_none());
+    assert!(hydrated.plugin_state().is_none());
     assert!(hydrated.execution_state_snapshot().is_none());
     assert!(!hydrated.agent_frames.is_empty());
 }
@@ -443,7 +443,7 @@ fn boxed_runtime_authority_keeps_flat_json_and_legacy_defaults() {
 }
 
 #[test]
-fn reconciled_generation_forces_next_plugin_snapshot_export() {
+fn reconciled_generation_forces_next_plugin_state_export() {
     let names = Arc::new(Mutex::new(vec!["dynamic_one".to_string()]));
     let tools: Arc<dyn crate::ToolProvider> = Arc::new(DynamicSnapshotTools {
         names: Arc::clone(&names),
@@ -465,7 +465,7 @@ fn reconciled_generation_forces_next_plugin_snapshot_export() {
         .expect("live surface restore");
     assert_eq!(report.generation, persisted_generation + 1);
 
-    state.refresh_plugin_snapshots(&plugins);
+    state.refresh_plugin_states(&plugins);
     let refreshed = state
         .tool_state_snapshot()
         .expect("generation change re-exports the tool snapshot");
@@ -482,7 +482,7 @@ fn incomplete_checkpoint_component_projection_is_a_typed_error() {
 
     let error = state
         .checkpoint_components
-        .build_checkpoint(crate::PersistedTurnState::default(), None)
+        .build_checkpoint(crate::PersistedTurnState::default())
         .expect_err("snapshot projection cannot prove the complete keyed set");
 
     assert!(matches!(

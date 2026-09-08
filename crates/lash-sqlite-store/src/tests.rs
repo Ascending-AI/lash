@@ -274,7 +274,6 @@ fn checkpoint_with_unchanged_components(manifest: &SessionCheckpoint) -> Hydrate
                 )
             })
             .collect(),
-        plugin_snapshot_revision: manifest.plugin_snapshot_revision,
     }
 }
 

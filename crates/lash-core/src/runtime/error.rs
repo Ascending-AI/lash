@@ -340,6 +340,7 @@ pub(super) fn session_commit_error(
     match source {
         source @ (crate::store::StoreError::SessionDeleted { .. }
         | crate::store::StoreError::SessionStateVersionNewerThanRuntime { .. }
+        | crate::store::StoreError::SessionStateVersionUnsupported { .. }
         | crate::store::StoreError::HeadRevisionConflict { .. }
         | crate::store::StoreError::AppendOperationIdentityConflict { .. }
         | crate::store::StoreError::AppendReceiptRequestedNodeCountCorrupt { .. }

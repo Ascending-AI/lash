@@ -98,6 +98,10 @@ pub enum StoreError {
         "session state version {found} is newer than this runtime's version {current}; upgrade the runtime before opening this session"
     )]
     SessionStateVersionNewerThanRuntime { found: u32, current: u32 },
+    #[error(
+        "session state version {found} has no conversion chain to {current}; drain sessions and recreate the store with this version"
+    )]
+    SessionStateVersionUnsupported { found: u32, current: u32 },
     #[error("invalid session id: {reason}")]
     InvalidSessionId { reason: &'static str },
     #[error(
@@ -502,6 +506,7 @@ impl StoreError {
             Self::SessionNotBound => "SessionNotBound",
             Self::SessionResolutionAmbiguous { .. } => "SessionResolutionAmbiguous",
             Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
+            Self::SessionStateVersionUnsupported { .. } => "SessionStateVersionUnsupported",
             Self::SessionStateVersionNewerThanRuntime { .. } => {
                 "SessionStateVersionNewerThanRuntime"
             }

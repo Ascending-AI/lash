@@ -315,9 +315,9 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         .expect("permit manufacturing a row the DDL now forbids");
     raw.execute(
         "INSERT INTO session_meta
-         (session_id, relation_kind)
-         VALUES ('corrupt', 'corrupt')",
-        [],
+         (session_id, relation_kind, session_state_version)
+         VALUES ('corrupt', 'corrupt', ?1)",
+        [i64::from(lash_core::store::CURRENT_SESSION_STATE_VERSION)],
     )
     .expect("insert malformed relation");
     raw.pragma_update(None, "ignore_check_constraints", false)

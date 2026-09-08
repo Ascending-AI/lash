@@ -34,7 +34,10 @@ enum ResidentCheckpointComponentBody {
         snapshot: Option<crate::ToolState>,
         generation: Option<u64>,
     },
-    PluginSnapshot(Option<crate::PluginSessionSnapshot>),
+    PluginState {
+        snapshot: Option<crate::PluginState>,
+        generations: std::collections::BTreeMap<String, u64>,
+    },
     ExecutionState(Option<Vec<u8>>),
     Opaque(Option<Vec<u8>>),
 }
@@ -135,12 +138,15 @@ impl RuntimeCheckpointComponents {
                 },
             );
         }
-        if let Some(blob_ref) = snapshot.plugin_snapshot_ref.clone() {
+        if let Some(blob_ref) = snapshot.plugin_state_ref.clone() {
             result.entries.insert(
-                crate::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT.to_string(),
+                crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT.to_string(),
                 ResidentCheckpointComponent {
                     descriptor: Some(Self::descriptor(blob_ref)),
-                    body: ResidentCheckpointComponentBody::PluginSnapshot(None),
+                    body: ResidentCheckpointComponentBody::PluginState {
+                        snapshot: None,
+                        generations: snapshot.plugin_state_generations.clone(),
+                    },
                     dirty: false,
                 },
             );
@@ -184,10 +190,14 @@ impl RuntimeCheckpointComponents {
                         generation,
                     }
                 }
-                crate::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT => {
-                    ResidentCheckpointComponentBody::PluginSnapshot(
-                        checkpoint.decode_component::<crate::PluginSessionSnapshot>(key)?,
-                    )
+                crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT => {
+                    let snapshot = checkpoint
+                        .decode_component::<crate::PluginState>(key)?
+                        .expect("present plugin-state component");
+                    ResidentCheckpointComponentBody::PluginState {
+                        generations: plugin_generations(&snapshot),
+                        snapshot: Some(snapshot),
+                    }
                 }
                 crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT => {
                     ResidentCheckpointComponentBody::ExecutionState(
@@ -251,7 +261,6 @@ impl RuntimeCheckpointComponents {
     pub(crate) fn build_checkpoint(
         &self,
         turn_state: crate::PersistedTurnState,
-        plugin_snapshot_revision: Option<u64>,
     ) -> Result<crate::store::HydratedSessionCheckpoint, crate::StoreError> {
         if self.completeness != CheckpointComponentCompleteness::Complete {
             return Err(crate::StoreError::IncompleteCheckpointComponentSet);
@@ -264,9 +273,10 @@ impl RuntimeCheckpointComponents {
                         snapshot: Some(snapshot),
                         ..
                     } => crate::store::encode_checkpoint_component(key, snapshot)?,
-                    ResidentCheckpointComponentBody::PluginSnapshot(Some(snapshot)) => {
-                        crate::store::encode_checkpoint_component(key, snapshot)?
-                    }
+                    ResidentCheckpointComponentBody::PluginState {
+                        snapshot: Some(snapshot),
+                        ..
+                    } => crate::store::encode_checkpoint_component(key, snapshot)?,
                     ResidentCheckpointComponentBody::ExecutionState(Some(bytes))
                     | ResidentCheckpointComponentBody::Opaque(Some(bytes)) => {
                         let copied = bytes.clone();
@@ -296,7 +306,6 @@ impl RuntimeCheckpointComponents {
         Ok(crate::store::HydratedSessionCheckpoint {
             turn_state,
             components,
-            plugin_snapshot_revision,
         })
     }
 
@@ -354,18 +363,28 @@ impl RuntimeCheckpointComponents {
         );
     }
 
-    fn plugin_snapshot(&self) -> Option<&crate::PluginSessionSnapshot> {
-        match self.component(crate::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT) {
+    fn plugin_state(&self) -> Option<&crate::PluginState> {
+        match self.component(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT) {
             Some(ResidentCheckpointComponent {
-                body: ResidentCheckpointComponentBody::PluginSnapshot(snapshot),
+                body: ResidentCheckpointComponentBody::PluginState { snapshot, .. },
                 ..
             }) => snapshot.as_ref(),
             _ => None,
         }
     }
 
-    fn set_plugin_snapshot(&mut self, snapshot: Option<crate::PluginSessionSnapshot>) {
-        let key = crate::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT.to_string();
+    fn plugin_generations(&self) -> Option<&std::collections::BTreeMap<String, u64>> {
+        match self.component(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT) {
+            Some(ResidentCheckpointComponent {
+                body: ResidentCheckpointComponentBody::PluginState { generations, .. },
+                ..
+            }) => Some(generations),
+            _ => None,
+        }
+    }
+
+    fn set_plugin_state(&mut self, snapshot: Option<crate::PluginState>) {
+        let key = crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT.to_string();
         let Some(snapshot) = snapshot else {
             self.entries.remove(&key);
             return;
@@ -378,7 +397,10 @@ impl RuntimeCheckpointComponents {
             key,
             ResidentCheckpointComponent {
                 descriptor,
-                body: ResidentCheckpointComponentBody::PluginSnapshot(Some(snapshot)),
+                body: ResidentCheckpointComponentBody::PluginState {
+                    generations: plugin_generations(&snapshot),
+                    snapshot: Some(snapshot),
+                },
                 dirty: true,
             },
         );
@@ -541,7 +563,7 @@ impl RuntimeCheckpointComponents {
         // This compares the store result with the complete intent already held
         // in process. It performs no store lookup and does not infer permission
         // from the bodiless descriptor shape produced after adoption.
-        self.build_checkpoint(crate::PersistedTurnState::default(), None)
+        self.build_checkpoint(crate::PersistedTurnState::default())
             .and_then(|checkpoint| checkpoint.manifest())
             .is_ok_and(|resident| resident.components == manifest.components)
     }
@@ -563,7 +585,7 @@ impl RuntimeCheckpointComponents {
             let dirty = component.dirty;
             match &mut component.body {
                 ResidentCheckpointComponentBody::ToolState { snapshot, .. } => *snapshot = None,
-                ResidentCheckpointComponentBody::PluginSnapshot(snapshot) => *snapshot = None,
+                ResidentCheckpointComponentBody::PluginState { snapshot, .. } => *snapshot = None,
                 ResidentCheckpointComponentBody::ExecutionState(snapshot) => *snapshot = None,
                 // Keyed execution-state leaves are the same class of body: once
                 // the durable ref is authoritative, the encoded bytes are a
@@ -640,8 +662,6 @@ pub struct RuntimeSessionState {
     #[serde(skip, default)]
     #[doc(hidden)]
     pub checkpoint_components: RuntimeCheckpointComponents,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugin_snapshot_revision: Option<u64>,
     /// Cost-accounting ledger. Every LLM call (parent turns, subagent
     /// children, compaction, observers, background helpers) contributes an
     /// entry keyed by `(source, model)`. Separate from `token_usage`
@@ -678,7 +698,6 @@ impl RuntimeSessionState {
             protocol_turn_options: crate::ProtocolTurnOptions::default(),
             authority: Box::default(),
             checkpoint_components: RuntimeCheckpointComponents::complete_empty(),
-            plugin_snapshot_revision: None,
             token_ledger: Vec::new(),
             checkpoint_ref: None,
             head_revision: 0,
@@ -707,7 +726,6 @@ impl RuntimeSessionState {
             protocol_turn_options: snapshot.protocol_turn_options,
             authority: Box::default(),
             checkpoint_components,
-            plugin_snapshot_revision: snapshot.plugin_snapshot_revision,
             token_ledger: snapshot.token_ledger,
             checkpoint_ref: snapshot.checkpoint_ref,
             head_revision: 0,
@@ -732,8 +750,12 @@ impl RuntimeSessionState {
             protocol_turn_options: self.protocol_turn_options.clone(),
             tool_state_ref: self.tool_state_ref().cloned(),
             tool_state_generation: self.tool_state_generation(),
-            plugin_snapshot_ref: self.plugin_snapshot_ref().cloned(),
-            plugin_snapshot_revision: self.plugin_snapshot_revision,
+            plugin_state_ref: self.plugin_state_ref().cloned(),
+            plugin_state_generations: self
+                .checkpoint_components
+                .plugin_generations()
+                .cloned()
+                .unwrap_or_default(),
             execution_state_ref: self.execution_state_ref().cloned(),
             token_ledger: self.token_ledger.clone(),
             checkpoint_ref: self.checkpoint_ref.clone(),
@@ -754,7 +776,6 @@ impl RuntimeSessionState {
         self.token_usage = snapshot.token_usage.clone();
         self.last_prompt_usage = snapshot.last_prompt_usage.clone();
         self.protocol_turn_options = snapshot.protocol_turn_options.clone();
-        self.plugin_snapshot_revision = snapshot.plugin_snapshot_revision;
         self.token_ledger = snapshot.token_ledger.clone();
         self.checkpoint_ref = snapshot.checkpoint_ref.clone();
     }
@@ -852,19 +873,25 @@ impl RuntimeSessionState {
     }
 
     /// Durable reference for the well-known plugin-snapshot component.
-    pub fn plugin_snapshot_ref(&self) -> Option<&crate::store::BlobRef> {
+    pub fn plugin_state_ref(&self) -> Option<&crate::store::BlobRef> {
         self.checkpoint_components
-            .component_ref(crate::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT)
+            .component_ref(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
     }
 
     /// Typed resident view of the well-known plugin-snapshot component.
-    pub fn plugin_snapshot(&self) -> Option<&crate::PluginSessionSnapshot> {
-        self.checkpoint_components.plugin_snapshot()
+    pub fn plugin_state(&self) -> Option<&crate::PluginState> {
+        self.checkpoint_components.plugin_state()
     }
 
     /// Replace or explicitly delete the well-known plugin-snapshot component.
-    pub fn set_plugin_snapshot(&mut self, snapshot: Option<crate::PluginSessionSnapshot>) {
-        self.checkpoint_components.set_plugin_snapshot(snapshot);
+    pub fn set_plugin_state(&mut self, snapshot: Option<crate::PluginState>) {
+        self.checkpoint_components.set_plugin_state(snapshot);
+    }
+
+    pub(crate) fn plugin_state_is_dirty(&self) -> bool {
+        self.checkpoint_components
+            .component(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
+            .is_some_and(|component| component.dirty)
     }
 
     /// Durable reference for the well-known execution-state component.
@@ -890,7 +917,6 @@ impl RuntimeSessionState {
         self.session_graph
             .apply_realized_node_timestamps(&result.realized_node_timestamps);
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
-        self.plugin_snapshot_revision = result.manifest.plugin_snapshot_revision;
         let committed_components_match = self
             .checkpoint_components
             .manifest_matches_resident_commit_intent(&result.manifest);
@@ -974,7 +1000,7 @@ impl RuntimeSessionState {
 
     /// Updates plugin snapshots state for protocol and process-engine implementors while
     /// materializing or restoring protocol session state.
-    pub fn refresh_plugin_snapshots(&mut self, plugins: &crate::PluginSession) {
+    pub fn refresh_plugin_states(&mut self, plugins: &crate::PluginSession) {
         let tool_registry = plugins.tool_registry();
         let generation = tool_registry.generation();
         if self.tool_state_ref().is_none() || self.tool_state_generation() != Some(generation) {
@@ -982,31 +1008,13 @@ impl RuntimeSessionState {
             self.set_tool_state_snapshot(Some(snapshot));
         }
 
-        let revision = plugins.snapshot_revision_fingerprint();
-        if self.plugin_snapshot_ref().is_none() || self.plugin_snapshot_revision != Some(revision) {
-            store_plugin_snapshot(self, plugins.snapshot());
+        let generations = plugins.state_generations();
+        let captured = self.checkpoint_components.plugin_generations();
+        if !generations.is_empty()
+            && (self.plugin_state_ref().is_none() || captured != Some(&generations))
+        {
+            self.set_plugin_state(Some(plugins.export_state()));
         }
-        self.plugin_snapshot_revision = Some(revision);
-    }
-}
-
-/// Persist a freshly captured plugin snapshot, logging and **retaining the prior
-/// snapshot** when the capture fails.
-///
-/// A failed capture (`Err`) previously collapsed to `None` via `.ok()`, erasing
-/// the last good snapshot — so the next cold rebuild would restore an empty
-/// plugin surface even though a valid snapshot had been captured earlier. Keep
-/// the prior value and surface the error instead.
-pub(crate) fn store_plugin_snapshot(
-    target: &mut RuntimeSessionState,
-    captured: Result<crate::PluginSessionSnapshot, crate::PluginError>,
-) {
-    match captured {
-        Ok(snapshot) => target.set_plugin_snapshot(Some(snapshot)),
-        Err(err) => tracing::warn!(
-            error = %err,
-            "failed to capture plugin snapshot; retaining the prior snapshot",
-        ),
     }
 }
 
@@ -1228,7 +1236,6 @@ pub(crate) fn apply_session_checkpoint(
 ) -> Result<(), crate::StoreError> {
     let Some(checkpoint) = checkpoint else {
         state.checkpoint_components = RuntimeCheckpointComponents::complete_empty();
-        state.plugin_snapshot_revision = None;
         state.ensure_agent_frame_initialized();
         return Ok(());
     };
@@ -1241,7 +1248,6 @@ pub(crate) fn apply_session_checkpoint(
     state.token_usage = checkpoint.turn_state.token_usage.clone();
     state.last_prompt_usage = checkpoint.turn_state.last_prompt_usage.clone();
     state.protocol_turn_options = checkpoint.turn_state.protocol_turn_options.clone();
-    state.plugin_snapshot_revision = checkpoint.plugin_snapshot_revision;
     state.checkpoint_components = RuntimeCheckpointComponents::from_hydrated(&checkpoint)?;
     state.ensure_agent_frame_initialized();
     Ok(())
@@ -1291,6 +1297,12 @@ pub(crate) fn adopt_durable_head(
     state.current_frame_node_id = head.current_frame_node_id.clone();
     state.checkpoint_ref = head.checkpoint_ref.clone();
     state.token_ledger = head.token_ledger.clone();
+    state.checkpoint_components = if head.checkpoint_ref.is_some() {
+        RuntimeCheckpointComponents::unproven()
+    } else {
+        RuntimeCheckpointComponents::complete_empty()
+    };
+    state.ensure_agent_frame_initialized();
     state.head_revision = head.head_revision;
     state.persisted_node_ids = head
         .graph
@@ -1571,40 +1583,10 @@ fn session_append_node_draft(
     }
 }
 
-#[cfg(test)]
-mod plugin_snapshot_tests {
-    use super::store_plugin_snapshot;
-    use crate::{PluginError, PluginSessionSnapshot, RuntimeSessionState};
-
-    fn state() -> RuntimeSessionState {
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    }
-
-    #[test]
-    fn ok_capture_overwrites_target() {
-        let mut target = state();
-        store_plugin_snapshot(&mut target, Ok(PluginSessionSnapshot::default()));
-        assert!(
-            target.plugin_snapshot().is_some(),
-            "a successful capture must be stored"
-        );
-    }
-
-    #[test]
-    fn failed_capture_retains_prior_snapshot() {
-        // The regression this guards: a failed snapshot capture used to collapse
-        // to `None` via `.ok()`, erasing the last good snapshot so the next cold
-        // rebuild would restore an empty plugin surface. A failure must leave the
-        // prior snapshot intact.
-        let mut target = state();
-        target.set_plugin_snapshot(Some(PluginSessionSnapshot::default()));
-        store_plugin_snapshot(
-            &mut target,
-            Err(PluginError::Snapshot("capture failed".to_string())),
-        );
-        assert!(
-            target.plugin_snapshot().is_some(),
-            "a failed capture must retain the prior snapshot, not erase it"
-        );
-    }
+fn plugin_generations(state: &crate::PluginState) -> std::collections::BTreeMap<String, u64> {
+    state
+        .plugins
+        .iter()
+        .map(|(id, namespace)| (id.clone(), namespace.generation))
+        .collect()
 }

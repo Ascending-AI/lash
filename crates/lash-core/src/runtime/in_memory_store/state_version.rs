@@ -4,7 +4,12 @@ use super::InMemorySessionStore;
 
 impl InMemorySessionStore {
     pub(super) fn read_session_state_version_in_memory(&self) -> Result<u32, crate::StoreError> {
-        crate::store::resolve_session_state_version(*self.session_state_version.lock_recover())
+        let marker = *self.session_state_version.lock_recover();
+        if marker.is_none() && self.session_meta.lock_recover().is_none() {
+            // As in SQL, no metadata row means no saved continuation to admit.
+            return Ok(crate::store::CURRENT_SESSION_STATE_VERSION);
+        }
+        crate::store::resolve_session_state_version(marker)
     }
 
     pub(super) fn admit_session_state_in_memory(

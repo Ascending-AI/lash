@@ -306,7 +306,6 @@ impl Store {
         Ok(Some(HydratedSessionCheckpoint {
             turn_state: record.turn_state,
             components,
-            plugin_snapshot_revision: record.plugin_snapshot_revision,
         }))
     }
 

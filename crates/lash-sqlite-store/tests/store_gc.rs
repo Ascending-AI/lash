@@ -1,9 +1,8 @@
 use lash_core::store::GraphAppend;
 use lash_core::{
-    Message, MessageRole, ModelSpec, Part, PluginSessionSnapshot, RuntimeCommit,
-    RuntimeSessionState, SessionCommitStore, SessionPolicy, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState,
-    facade_support::shared_parts,
+    Message, MessageRole, ModelSpec, Part, PluginState, RuntimeCommit, RuntimeSessionState,
+    SessionCommitStore, SessionPolicy, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
+    StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState, facade_support::shared_parts,
 };
 use lash_sqlite_store::{BlobArtifactDescriptor, SqliteSessionStoreFactory, Store};
 
@@ -56,19 +55,18 @@ async fn factory_state(
 async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
     let store = Store::memory().await.expect("store");
     let tool_state = persisted_tool_state_at_generation(7);
-    let plugin_snapshot = PluginSessionSnapshot {
+    let plugin_state = PluginState {
         plugins: Default::default(),
     };
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
         turn_index: 1,
-        plugin_snapshot_revision: Some(11),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
     };
     state.set_tool_state_snapshot(Some(tool_state));
-    state.set_plugin_snapshot(Some(plugin_snapshot));
+    state.set_plugin_state(Some(plugin_state));
     store
         .admit_and_bind_session(&lash_core::SessionBinding::root(state.session_id.clone()))
         .await
@@ -99,7 +97,7 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
         .expect("dynamic state ref")
         .clone();
     let plugin_ref = checkpoint
-        .component_ref(lash_core::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT)
+        .component_ref(lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
         .expect("plugin snapshot ref")
         .clone();
     assert!(

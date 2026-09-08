@@ -255,7 +255,7 @@ pub(crate) fn plugin_area_facade_witnesses() {
     member_witness(
         |host: &lash::plugins::PluginHost,
          session_id: String,
-         snapshot: &lash::plugins::PluginSessionSnapshot,
+         snapshot: &lash::plugins::PluginState,
          config: lash::plugins::RecordedSessionConfig| {
             host.rematerialize_session(session_id, snapshot, config)
         },
@@ -264,7 +264,7 @@ pub(crate) fn plugin_area_facade_witnesses() {
     member_witness(
         |host: &lash::plugins::PluginHost,
          session_id: String,
-         snapshot: &lash::plugins::PluginSessionSnapshot,
+         snapshot: &lash::plugins::PluginState,
          overlay: lash::plugins::ToolCatalogContribution,
          tool_snapshot: Option<lash::tools::ToolState>,
          config: lash::plugins::RecordedSessionConfig| {
@@ -282,7 +282,7 @@ pub(crate) fn plugin_area_facade_witnesses() {
         |host: &lash::plugins::PluginHost,
          session_id: String,
          parent_session_id: Option<String>,
-         snapshot: &lash::plugins::PluginSessionSnapshot,
+         snapshot: &lash::plugins::PluginState,
          config: lash::plugins::RecordedSessionConfig| {
             host.rematerialize_session_with_parent(session_id, parent_session_id, snapshot, config)
         },
@@ -292,7 +292,7 @@ pub(crate) fn plugin_area_facade_witnesses() {
         |host: &lash::plugins::PluginHost,
          session_id: String,
          parent_session_id: Option<String>,
-         snapshot: &lash::plugins::PluginSessionSnapshot,
+         snapshot: &lash::plugins::PluginState,
          overlay: lash::plugins::ToolCatalogContribution,
          tool_snapshot: Option<lash::tools::ToolState>,
          config: lash::plugins::RecordedSessionConfig| {

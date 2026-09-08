@@ -137,6 +137,8 @@ fn build_runtime_state(
     base.session_id = session_id;
     base.head_revision = 0;
     base.checkpoint_components.complete_for_new_session()?;
+    // The child captures its own live namespaces at its first boundary.
+    base.set_plugin_state(None);
     base.policy = policy.clone();
     base.authority.tool_access = request.tool_access.clone();
     base.authority.subagent = request.subagent.clone();

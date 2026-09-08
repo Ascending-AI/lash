@@ -17,8 +17,21 @@ use super::state::{
 impl LashRuntime {
     /// Replace the host-owned state envelope.
     pub fn set_persisted_state(&mut self, state: RuntimeSessionState) -> Result<(), SessionError> {
-        let mut state = state;
         if let Some(session) = self.session.as_ref() {
+            if let Some(snapshot) = state.plugin_state() {
+                session
+                    .plugins()
+                    .hydrate_state(snapshot)
+                    .map_err(SessionError::Plugin)?;
+            } else if let Some(reference) = state.plugin_state_ref()
+                && self.state.plugin_state_ref() != Some(reference)
+                && !session.plugins().matches_state_ref(reference)
+            {
+                return Err(SessionError::Protocol(
+                    "bodyless plugin state must match the live session's hydrated checkpoint"
+                        .into(),
+                ));
+            }
             session.invalidate_runtime_caches();
             // Restore the persisted tool catalog so the live registry matches the
             // state being installed (mirrors `from_host_state`). Without this the
@@ -41,13 +54,6 @@ impl LashRuntime {
                     );
                 }
             }
-            let snapshot = state.plugin_snapshot().cloned().unwrap_or_default();
-            session
-                .plugins()
-                .restore(&snapshot)
-                .map_err(|err| SessionError::Protocol(err.to_string()))?;
-            state.plugin_snapshot_revision =
-                Some(session.plugins().snapshot_revision_fingerprint());
         }
         self.state = state;
         Ok(())
@@ -649,6 +655,7 @@ impl LashRuntime {
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            self.stamp_live_plugin_state();
             self.append_plugin_runtime_event_nodes(&nodes, operation_scope.clone())
                 .await?;
         }
@@ -776,6 +783,7 @@ impl LashRuntime {
         else {
             return Ok(());
         };
+        self.stamp_live_plugin_state();
         let operation = crate::OperationId::new(operation_scope, "plugin-operation-state");
         let (commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
@@ -808,5 +816,126 @@ impl LashRuntime {
         self.state.apply_persisted_commit_result(result);
         self.state.mark_node_ids_persisted(persisted_node_ids);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod plugin_state_boundary_tests {
+    use super::*;
+    use crate::SessionStoreFactory;
+    use crate::plugin::{PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin};
+    use crate::testing::checkpoint_observer::{
+        CheckpointComponentWriteKind, CheckpointWriteCollector, ObservedSessionStoreFactory,
+    };
+
+    #[derive(Clone, Default)]
+    struct MockPlugin(Arc<std::sync::OnceLock<crate::PluginStateStore>>);
+    impl PluginFactory for MockPlugin {
+        fn id(&self) -> &'static str {
+            "event-state"
+        }
+        fn build(
+            &self,
+            _: &PluginSessionContext,
+        ) -> Result<Arc<dyn SessionPlugin>, crate::PluginError> {
+            Ok(Arc::new(self.clone()))
+        }
+    }
+    impl SessionPlugin for MockPlugin {
+        fn id(&self) -> &'static str {
+            "event-state"
+        }
+        fn register(&self, reg: &mut PluginRegistrar) -> Result<(), crate::PluginError> {
+            self.0.set(reg.state()).expect("one session");
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn plugin_event_boundary_itself_contains_the_accepted_state_write() {
+        let collector = CheckpointWriteCollector::default();
+        let factory = ObservedSessionStoreFactory::new(
+            Arc::new(crate::facade_support::InMemorySessionStoreFactory::new()),
+            collector.clone(),
+        );
+        let policy = crate::SessionPolicy {
+            model: crate::ModelSpec::builder("plugin-state-model")
+                .context_window_tokens(4096)
+                .build()
+                .unwrap(),
+            ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+        };
+        let store = factory
+            .create_store(&crate::SessionStoreCreateRequest {
+                session_id: "event-state".into(),
+                relation: crate::SessionRelation::Root,
+                policy: policy.clone(),
+                pending_observer_intents: vec![],
+            })
+            .await
+            .unwrap();
+        let fixture = MockPlugin::default();
+        let mut factories = crate::testing::test_standard_protocol_factories();
+        factories.push(Arc::new(fixture.clone()));
+        let plugins = crate::PluginHost::new(factories)
+            .build_session("event-state")
+            .unwrap();
+        let mut runtime = LashRuntime::from_persistent_embedded_state(
+            policy.clone(),
+            crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+            )),
+            crate::PersistentRuntimeServices::new(plugins, store),
+            RuntimeSessionState {
+                session_id: "event-state".into(),
+                ..RuntimeSessionState::new(policy)
+            },
+            crate::testing::runtime_lease_owner(),
+        )
+        .await
+        .unwrap();
+        let before = collector.events().len();
+        fixture
+            .0
+            .get()
+            .unwrap()
+            .set("value", serde_json::json!(42))
+            .unwrap();
+        runtime
+            .apply_plugin_operation_effects(
+                "event-state",
+                vec![crate::PluginRuntimeEvent::Status {
+                    key: "state".into(),
+                    label: "written".into(),
+                    detail: None,
+                }],
+                vec![],
+                crate::ExecutionScope::runtime_operation("event-write"),
+            )
+            .await
+            .unwrap();
+        let bodyless = runtime.export_persistence_state();
+        fixture
+            .0
+            .get()
+            .unwrap()
+            .set("value", serde_json::json!(99))
+            .unwrap();
+        runtime.apply_persistence_state(bodyless).unwrap();
+        assert_eq!(
+            fixture.0.get().unwrap().get("value"),
+            Some(serde_json::json!(99)),
+            "reapplying the resident checkpoint must preserve newer live writes"
+        );
+        let events = collector.events();
+        let first_boundary = &events[before];
+        assert!(
+            first_boundary.components.iter().any(|component| matches!(
+                &component.kind, CheckpointComponentWriteKind::PluginState { state }
+                    if state.plugins["event-state"].values["value"] == serde_json::json!(42)
+            )),
+            "the event commit, not a later repair commit, must carry the accepted plugin write"
+        );
     }
 }

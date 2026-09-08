@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 /// The value keeps its historical `lash.sim.` prefix because generated
 /// simulation trace artifacts embed it; the observer itself is no longer
 /// simulator-specific.
-pub const CHECKPOINT_WRITE_EVENT_SCHEMA: &str = "lash.sim.checkpoint-write-event.v3";
+pub const CHECKPOINT_WRITE_EVENT_SCHEMA: &str = "lash.sim.checkpoint-write-event.v4";
 
 /// One checkpoint component observed at the successful store-commit seam.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -32,7 +32,7 @@ pub struct CheckpointComponentWrite {
 pub enum CheckpointComponent {
     TurnState,
     ToolState,
-    PluginSnapshot,
+    PluginState,
     ExecutionState,
 }
 
@@ -41,7 +41,7 @@ impl CheckpointComponent {
         match self {
             Self::TurnState => "turn_state",
             Self::ToolState => "tool_state",
-            Self::PluginSnapshot => "plugin_snapshot",
+            Self::PluginState => "plugin_state",
             Self::ExecutionState => "execution_state",
         }
     }
@@ -50,6 +50,10 @@ impl CheckpointComponent {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum CheckpointComponentWriteKind {
+    /// Decoded plugin state, including the host-owned generations.
+    PluginState {
+        state: crate::PluginState,
+    },
     /// Body present at the commit seam. `logical_bytes` is the size of the
     /// encoding-independent JSON projection used only for human comparison;
     /// it is not a backend's MessagePack/compressed byte count.
@@ -470,14 +474,22 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
             .component_body(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT)
             .map(|body| Some(body.len())),
     );
-    record_component(
-        &mut components,
-        CheckpointComponent::PluginSnapshot,
-        checkpoint.component_ref(crate::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT),
-        checkpoint
-            .component_body(crate::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT)
-            .map(|body| Some(body.len())),
-    );
+    if let Some(body) = checkpoint.component_body(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT) {
+        let state = rmp_serde::from_slice::<crate::PluginState>(body)
+            .expect("runtime plugin state encodes");
+        components.push(CheckpointComponentWrite {
+            component: CheckpointComponent::PluginState,
+            kind: CheckpointComponentWriteKind::PluginState { state },
+        });
+    } else if checkpoint
+        .component_ref(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
+        .is_some()
+    {
+        components.push(CheckpointComponentWrite {
+            component: CheckpointComponent::PluginState,
+            kind: CheckpointComponentWriteKind::UnchangedRef,
+        });
+    }
     // Execution state is an opaque `Vec<u8>` the engine owns, so it is recorded
     // as written without a size. Measuring it the way typed components are
     // measured would serialize the bytes as a JSON decimal array, which reports

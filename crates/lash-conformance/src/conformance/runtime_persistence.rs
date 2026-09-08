@@ -537,6 +537,7 @@ pub async fn runtime_persistence_clock_expiry(
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug)]
 pub enum RuntimePersistenceLaw {
+    plugin_state_boundary,
     commit_increments_head_and_round_trips_agent_frames,
     concurrent_head_revision_cas_applies_exactly_once,
     commit_rejects_a_different_session_id,
@@ -649,6 +650,7 @@ async fn runtime_persistence_suite<F>(
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     match law {
+        RuntimePersistenceLaw::plugin_state_boundary => { super::plugin_state::plugin_state_boundary_law(make).await; },
         RuntimePersistenceLaw::commit_increments_head_and_round_trips_agent_frames => { commit_increments_head_and_round_trips_agent_frames(make("root")).await; },
         RuntimePersistenceLaw::concurrent_head_revision_cas_applies_exactly_once => { concurrent_head_revision_cas_applies_exactly_once(make("concurrent-head-cas")).await; },
         RuntimePersistenceLaw::commit_rejects_a_different_session_id => { commit_rejects_a_different_session_id(make("alpha")).await; },
@@ -3642,13 +3644,12 @@ async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence
 async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "hydrated".to_string(),
-        plugin_snapshot_revision: Some(12),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.set_tool_state_snapshot(Some(
         ToolState::default().with_generation_for_conformance(9),
     ));
-    state.set_plugin_snapshot(Some(PluginSessionSnapshot {
+    state.set_plugin_state(Some(PluginState {
         plugins: Default::default(),
     }));
     let usage = TokenLedgerEntry {
@@ -3682,7 +3683,6 @@ async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) 
             .generation(),
         9
     );
-    assert_eq!(checkpoint.plugin_snapshot_revision, Some(12));
     assert_eq!(read.token_ledger.len(), 1);
     assert_eq!(read.token_ledger[0].usage.input_tokens, 11);
 }
@@ -6379,7 +6379,6 @@ fn persisted_session_read_snapshot(
         let checkpoint = loaded.checkpoint.map(|checkpoint| {
             serde_json::json!({
                 "components": checkpoint.components,
-                "plugin_snapshot_revision": checkpoint.plugin_snapshot_revision,
             })
         });
         serde_json::json!({

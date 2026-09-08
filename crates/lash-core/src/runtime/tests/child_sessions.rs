@@ -350,7 +350,7 @@ async fn existing_session_start_propagates_unknown_checkpoint_component_into_chi
     let child_state = child_handle.observe().persisted_state.clone();
     let first_root = child_state
         .checkpoint_components
-        .build_checkpoint(crate::PersistedTurnState::default(), None)
+        .build_checkpoint(crate::PersistedTurnState::default())
         .expect("child first checkpoint root");
     let carried = first_root
         .components
