@@ -1783,10 +1783,21 @@ async fn refreshed_head_provider_id_overrides_the_resident_copy() -> Result<()> 
         .run()
         .await
         .expect_err("the adopted head names a provider this host has not registered");
-    assert!(
-        format!("{error:?}").contains("other-provider"),
-        "the refusal names the adopted provider id: {error:?}"
-    );
+    match &error {
+        crate::EmbedError::Runtime(runtime_error) => {
+            assert_eq!(
+                runtime_error.code,
+                lash_core::RuntimeErrorCode::LlmProvider,
+                "the refusal is the typed provider-resolution error"
+            );
+            assert!(
+                runtime_error.message.contains("other-provider"),
+                "the typed refusal names the adopted provider id: {}",
+                runtime_error.message
+            );
+        }
+        other => panic!("expected a typed provider-resolution refusal, got: {other:?}"),
+    }
     Ok(())
 }
 
@@ -2195,9 +2206,10 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
 }
 
 #[tokio::test]
-async fn open_with_state_reconciles_live_policy_without_rewriting_frame_history() -> Result<()> {
+async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history() -> Result<()> {
     let session_id = "reconcile-open-with-state";
     let persisted = conflicting_reopen_state(session_id);
+    let supplied_model = persisted.policy.model.clone();
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let builder_model = model_spec("builder-model", None, 77_777);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
@@ -2213,7 +2225,9 @@ async fn open_with_state_reconciles_live_policy_without_rewriting_frame_history(
         .export_persisted_state()
         .await
         .expect("export persisted state");
-    assert_eq!(state.policy.model, builder_model);
+    // The spec named no model, so the supplied state's model survives:
+    // core defaults are construction fallbacks, not per-open seeds.
+    assert_eq!(state.policy.model, supplied_model);
     assert_eq!(
         state
             .current_agent_frame()
@@ -2240,9 +2254,10 @@ async fn open_with_state_reconciles_live_policy_without_rewriting_frame_history(
 }
 
 #[tokio::test]
-async fn queued_worker_state_load_reconciles_live_policy_without_rewriting_history() -> Result<()> {
+async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history() -> Result<()> {
     let session_id = "reconcile-queued-worker";
     let persisted = conflicting_reopen_state(session_id);
+    let durable_model = persisted.policy.model.clone();
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let store = SnapshotStore::with_state(persisted);
     let policy = lash_core::SessionPolicy {
@@ -2260,7 +2275,9 @@ async fn queued_worker_state_load_reconciles_live_policy_without_rewriting_histo
         60_000,
     )
     .await?;
-    assert_eq!(state.policy.model, policy.model);
+    // A stateless worker's load carries no host spec at all: the durable
+    // head's recorded model is authoritative over the resolved fallback.
+    assert_eq!(state.policy.model, durable_model);
     assert_eq!(
         state
             .current_agent_frame()

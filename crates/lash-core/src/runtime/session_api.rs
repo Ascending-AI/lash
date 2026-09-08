@@ -642,7 +642,6 @@ impl LashRuntime {
         patch: super::ApplyConfigPatch,
         idempotency_key: impl Into<String>,
     ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
-        let publish_patch = patch.clone();
         let accepted = match self
             .accept_session_command(
                 crate::SessionCommand::ApplyConfigPatch {
@@ -664,8 +663,7 @@ impl LashRuntime {
                 Ok(crate::runtime::SessionCommandSettlement::Durable(receipt))
             }
             AcceptedSessionCommand::Queued(handle) => {
-                self.await_session_command_settlement(handle, &publish_patch)
-                    .await
+                self.await_session_command_settlement(handle).await
             }
         }
     }
@@ -673,7 +671,6 @@ impl LashRuntime {
     async fn await_session_command_settlement(
         &mut self,
         handle: crate::runtime::SessionCommandSettlementHandle,
-        publish_patch: &super::ApplyConfigPatch,
     ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
         let store = self
             .session
@@ -714,12 +711,15 @@ impl LashRuntime {
                 self.refresh_session_graph_from_store()
                     .await
                     .map_err(runtime_error_from_session_command_refresh)?;
-                // The refresh above adopts the durable head, which already
-                // carries this command's committed values (head-authoritative
-                // adoption, FIG-1875). Re-publishing the settled patch is an
-                // idempotent belt for the bounded-probe failure edge, where
-                // the refresh may keep the resident graph without hydrating.
-                publish_patch.apply_to_state(&mut self.state);
+                // The refresh adopts the durable head, which already carries
+                // this command's committed values — or newer ones from a
+                // later writer (head-authoritative adoption, FIG-1875). Every
+                // successful refresh path either confirms the resident state
+                // already carries the drain commit or fully hydrates the
+                // head, and probe failures propagate as errors, so there is
+                // no edge that needs the patch re-published residently.
+                // Reapplying it here would overwrite a newer settled head
+                // with this command's older values, resident-only.
                 return Ok(crate::runtime::SessionCommandSettlement::Durable(
                     handle.receipt,
                 ));

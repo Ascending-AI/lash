@@ -257,6 +257,15 @@ pub mod facade_support {
         registry.resolve_catalog_contract(name)
     }
 
+    /// Guard-write the facade's reopen-reconciled seed to the durable head
+    /// (seed-then-write, FIG-1875). Facade `open` is the only caller.
+    pub async fn settle_reopen_seeded_config(
+        runtime: &mut crate::LashRuntime,
+        persisted: &crate::PersistedSessionConfig,
+    ) -> Result<(), crate::SessionError> {
+        runtime.settle_reopen_seeded_config(persisted).await
+    }
+
     pub use crate::attachments::AttachmentGcFence;
     pub use crate::attachments::AttachmentReclamationPolicy;
     pub use crate::attachments::AttachmentReclamationReport;

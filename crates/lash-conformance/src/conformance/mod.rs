@@ -670,6 +670,11 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn superseded_config_settlement_adopts_the_newer_head() {
+        Box::pin(session_store_factory::superseded_config_settlement_adopts_the_newer_head()).await;
+    }
+
+    #[tokio::test]
     async fn in_memory_session_delete_blob_reclaim_conformance() {
         session_delete_blob_reclaim_conformance("in-memory", || {
             let factory = Arc::new(crate::InMemorySessionStoreFactory::new());

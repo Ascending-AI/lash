@@ -79,6 +79,11 @@ pub(super) async fn cancelled_session_config_settlement_is_typed() {
     config_commands::cancelled_session_config_settlement_is_typed().await;
 }
 
+#[cfg(test)]
+pub(super) async fn superseded_config_settlement_adopts_the_newer_head() {
+    Box::pin(config_commands::superseded_config_settlement_adopts_the_newer_head()).await;
+}
+
 /// Hold a backend to the read-only session-view contract.
 ///
 /// The factory must expose committed history, tree, and usage while another

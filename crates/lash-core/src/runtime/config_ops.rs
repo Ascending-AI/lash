@@ -148,6 +148,43 @@ impl SessionConfigPatch {
     }
 }
 
+/// Content-addressed identity for the reopen seed commit (FIG-1875).
+///
+/// The identity folds in the hash of the full commit intent — the reconciled
+/// seed config plus the head state it reconciled against — following the
+/// `initial-park` precedent in [`super::state::boundary_operation`]'s audit
+/// table: an exact retry of the same seed against the same head replays under
+/// the journaled-determinism guard, while different content (a later reopen
+/// with a different seed, or the same seed against an advanced head) mints a
+/// different operation and commits fresh. A per-session constant identity
+/// would instead make the guard refuse every second differing reopen.
+fn reopen_seed_operation(
+    state: &crate::RuntimeSessionState,
+    commit_budget: crate::CommitBudget,
+) -> Result<crate::OperationId, crate::StoreError> {
+    let preview_operation = super::state::boundary_operation(
+        &state.session_id,
+        "session-open-preview",
+        "record-seeded-config",
+    );
+    let mut graph = state.pending_graph_commit();
+    graph.derive_node_ids(&state.session_id, &preview_operation)?;
+    let preview =
+        crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
+            state,
+            graph,
+            &[],
+            preview_operation,
+            commit_budget,
+        )?;
+    let content_hash = preview.turn_commit_hash()?;
+    Ok(super::state::boundary_operation(
+        &state.session_id,
+        &format!("content:{content_hash}"),
+        "record-seeded-config",
+    ))
+}
+
 impl LashRuntime {
     /// Apply a mid-run configuration change; see [`SessionConfigPatch`] for
     /// what each field leaves alone and what it replaces.
@@ -244,15 +281,29 @@ impl LashRuntime {
     /// active this early, so the seed publishes as one direct fenced head
     /// commit (the same guard-write shape as protocol materialization)
     /// rather than a mid-run session command.
-    #[doc(hidden)]
-    pub async fn settle_reopen_seeded_config(
+    ///
+    /// The commit identity is content-addressed (the `initial-park` pattern):
+    /// a retry of the same reconciled seed against the same head replays the
+    /// original commit through the determinism guard, while a later reopen
+    /// with a different seed — or against an advanced head — hashes to a new
+    /// operation and is admitted as a new commit.
+    ///
+    /// Facade-only: reached through [`crate::facade_support`].
+    pub(crate) async fn settle_reopen_seeded_config(
         &mut self,
         persisted: &crate::PersistedSessionConfig,
     ) -> Result<(), SessionError> {
         let policy = &self.state.policy;
+        // A legacy promptless head (`prompt: None`) matches a default-empty
+        // resident prompt layer: neither carries prompt content, so treating
+        // them as differing would mint a spurious open-time commit.
+        let prompt_differs = match persisted.prompt.as_ref() {
+            Some(prompt) => prompt != &policy.prompt,
+            None => policy.prompt != crate::PromptLayer::default(),
+        };
         let seed_differs = persisted.provider_id != policy.provider_id
             || persisted.model != policy.model
-            || persisted.prompt.as_ref() != Some(&policy.prompt)
+            || prompt_differs
             || persisted.generation != policy.generation;
         if !seed_differs {
             return Ok(());
@@ -260,11 +311,8 @@ impl LashRuntime {
         let Some(store) = self.services.store.clone() else {
             return Ok(());
         };
-        let operation = super::state::boundary_operation(
-            &self.state.session_id,
-            "session-open",
-            "record-seeded-config",
-        );
+        let operation = reopen_seed_operation(&self.state, self.host.core.durability.commit_budget)
+            .map_err(|error| SessionError::Protocol(error.to_string()))?;
         let (commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 &mut self.state,
@@ -456,5 +504,42 @@ impl LashRuntime {
         session.refresh_tool_catalog().await?;
         self.stamp_live_plugin_state();
         Ok(report)
+    }
+}
+
+#[cfg(test)]
+mod reopen_seed_identity_tests {
+    use super::reopen_seed_operation;
+
+    #[test]
+    fn reopen_seed_identity_is_stable_for_replay_and_distinguishes_seeds() {
+        let mut state = crate::RuntimeSessionState {
+            session_id: "reopen-seed-identity".to_string(),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        state.ensure_agent_frame_initialized();
+        let budget = crate::CommitBudget::bounded(1024 * 1024, 512);
+        let first = reopen_seed_operation(&state, budget).expect("first seed identity");
+
+        let mut retry_state = state.clone();
+        retry_state.head_revision = 41;
+        let retry = reopen_seed_operation(&retry_state, budget).expect("retry seed identity");
+
+        let mut changed_state = retry_state;
+        changed_state.policy.prompt = crate::PromptLayer::new().with_contribution(
+            crate::PromptContribution::guidance("Host", "A DIFFERENT RECONCILED SEED"),
+        );
+        let changed = reopen_seed_operation(&changed_state, budget).expect("changed seed identity");
+
+        assert_eq!(
+            first, retry,
+            "optimistic head movement alone must not change replay identity"
+        );
+        assert_ne!(
+            first, changed,
+            "a different reconciled seed must not reuse the first receipt"
+        );
     }
 }

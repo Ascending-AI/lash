@@ -40,3 +40,55 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
     assert_eq!(policy.generation, expected_generation);
     Ok(())
 }
+
+/// A commanded config change is durable across an incidental reopen: a host
+/// that reopens the session with a default spec (no model, no generation)
+/// keeps the settled durable values instead of reseeding core defaults over
+/// them. This pins the failure class where a cold observer open reverted a
+/// mid-run model change (FIG-1875 seed-then-write + presence-aware
+/// reconciliation).
+#[tokio::test]
+async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
+
+    let session = core.session("incidental-reopen").open().await?;
+    session
+        .turn(TurnInput::text("establish head"))
+        .run()
+        .await?;
+    let commanded_model = model_spec("commanded-model", None, 64_000);
+    let commanded_generation = lash_core::GenerationOptions {
+        temperature: Some(lash_core::NonNegativeFiniteF64::new(0.55).expect("temperature")),
+        ..lash_core::GenerationOptions::default()
+    };
+    session
+        .admin()
+        .config()
+        .update(SessionConfigPatch {
+            model: Some(commanded_model.clone()),
+            generation: Some(lash_core::facade_support::GenerationOverlay::Replace(
+                commanded_generation.clone(),
+            )),
+            ..SessionConfigPatch::default()
+        })
+        .await?;
+    session.close().await?;
+
+    let reopened = core.session("incidental-reopen").open().await?;
+    let policy = reopened.policy_snapshot();
+    assert_eq!(
+        policy.model, commanded_model,
+        "a default-spec reopen keeps the commanded durable model"
+    );
+    assert_eq!(
+        policy.generation, commanded_generation,
+        "a default-spec reopen keeps the commanded durable generation"
+    );
+    Ok(())
+}

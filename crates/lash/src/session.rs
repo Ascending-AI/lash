@@ -161,11 +161,17 @@ impl SessionBuilder {
             });
         }
         let supplied_prompt = state.policy.prompt.clone();
+        let supplied_model = state.policy.model.clone();
+        let supplied_generation = state.policy.generation.clone();
         reconcile_loaded_state_policy(
             &mut state,
             &policy,
             self.spec.prompt.is_some(),
             Some(&supplied_prompt),
+            self.spec.model.is_some(),
+            Some(&supplied_model),
+            self.spec.generation.is_some(),
+            Some(&supplied_generation),
         );
         Box::pin(self.open_resolved(state, store, None)).await
     }
@@ -210,6 +216,10 @@ impl SessionBuilder {
                     policy,
                     self.spec.prompt.is_some(),
                     loaded.config.prompt.as_ref(),
+                    self.spec.model.is_some(),
+                    Some(&loaded.config.model),
+                    self.spec.generation.is_some(),
+                    Some(&loaded.config.generation),
                 );
                 return Ok((state, Some(loaded.config)));
             }
@@ -282,8 +292,7 @@ impl SessionBuilder {
         // again by the end of open. Adoption thereafter is head-wins with no
         // preservation lists.
         if let Some(persisted_config) = reopened_persisted_config.as_ref() {
-            runtime
-                .settle_reopen_seeded_config(persisted_config)
+            lash_core::facade_support::settle_reopen_seeded_config(&mut runtime, persisted_config)
                 .await?;
         }
         let process_work = env.process_work();
@@ -388,7 +397,16 @@ pub(crate) async fn load_state_from_store(
             requested: session_id.to_string(),
         });
     }
-    reconcile_loaded_state_policy(&mut state, policy, false, loaded.config.prompt.as_ref());
+    reconcile_loaded_state_policy(
+        &mut state,
+        policy,
+        false,
+        loaded.config.prompt.as_ref(),
+        false,
+        Some(&loaded.config.model),
+        false,
+        Some(&loaded.config.generation),
+    );
     Ok(state)
 }
 
@@ -396,21 +414,32 @@ pub(crate) async fn load_state_from_store(
 ///
 /// ADR 0030's single resolution point: the host supplies the session's
 /// configuration when it constructs *or reopens* a session, and that value is
-/// reconciled before the runtime starts. Model, turn budget, and generation
-/// options come from the host, and a mid-run
-/// [`LashRuntime::update_session_config`](lash_core::facade_support::LashRuntime::update_session_config)
-/// change lasts until the host reopens with a spec that says otherwise, for
-/// every one of them alike.
+/// reconciled before the runtime starts. Presence is what carries authority:
+/// a spec field the host explicitly set at this open wins over the durable
+/// head, while an unset field keeps the durable value — core defaults are
+/// construction-time fallbacks, not per-open seeds, so an incidental reopen
+/// with a default spec never reverts a settled mid-run
+/// [`update_session_config`](lash_core::facade_support::LashRuntime::update_session_config)
+/// change. The turn budget stays host/live-owned and always follows the
+/// resolved policy.
 ///
 /// The recorded `provider_id` always survives. A present host prompt wins;
 /// otherwise a present persisted prompt fills the gap. Legacy heads with no
 /// prompt field keep the host/core reconstruction, and explicit persisted
 /// empty layers remain authoritative when the host supplies no replacement.
+/// The persisted model fills an unset host model only when the head actually
+/// recorded one (non-empty id), mirroring how the core builder only fills an
+/// empty model.
+#[allow(clippy::too_many_arguments)]
 fn reconcile_loaded_state_policy(
     state: &mut RuntimeSessionState,
     policy: &SessionPolicy,
     host_prompt_is_present: bool,
     persisted_prompt: Option<&PromptLayer>,
+    host_model_is_present: bool,
+    persisted_model: Option<&lash_core::ModelSpec>,
+    host_generation_is_present: bool,
+    persisted_generation: Option<&lash_core::GenerationOptions>,
 ) {
     let recorded_provider_id = state.policy.recorded_provider_id().to_string();
     state.policy = policy.clone();
@@ -419,6 +448,15 @@ fn reconcile_loaded_state_policy(
     }
     if !host_prompt_is_present && let Some(persisted_prompt) = persisted_prompt {
         state.policy.prompt = persisted_prompt.clone();
+    }
+    if !host_model_is_present
+        && let Some(persisted_model) = persisted_model
+        && !persisted_model.id.is_empty()
+    {
+        state.policy.model = persisted_model.clone();
+    }
+    if !host_generation_is_present && let Some(persisted_generation) = persisted_generation {
+        state.policy.generation = persisted_generation.clone();
     }
 }
 
@@ -1474,12 +1512,13 @@ mod reconcile_tests {
             .expect("valid test model")
     }
 
-    /// The host's policy wins for reopen-selected fields, including generation
-    /// options: ADR 0030 resolves the session model at open, so a reopen cannot
-    /// pair the host's new model with the store's old sampling. The recorded
-    /// provider id survives from the store. Prompt authority is presence-aware.
+    /// An explicitly present host spec wins for reopen-selected fields,
+    /// including generation options: ADR 0030 resolves the session model at
+    /// open, so a reopen that names a model cannot pair it with the store's
+    /// old sampling. The recorded provider id survives from the store.
+    /// Authority is presence-aware for prompt, model, and generation alike.
     #[test]
-    fn host_policy_wins_over_loaded_state_including_generation() {
+    fn present_host_spec_wins_over_loaded_state_including_generation() {
         let persisted_prompt = lash_core::PromptLayer::new().with_contribution(
             lash_core::PromptContribution::guidance("Persisted", "persisted prompt"),
         );
@@ -1512,12 +1551,95 @@ mod reconcile_tests {
             ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
 
-        reconcile_loaded_state_policy(&mut state, &host, true, Some(&persisted_prompt));
+        let persisted_model = model("recorded-model");
+        let persisted_generation = lash_core::GenerationOptions {
+            seed: Some(7),
+            ..Default::default()
+        };
+        reconcile_loaded_state_policy(
+            &mut state,
+            &host,
+            true,
+            Some(&persisted_prompt),
+            true,
+            Some(&persisted_model),
+            true,
+            Some(&persisted_generation),
+        );
 
         assert_eq!(state.policy.provider_id, "recorded-provider");
         assert_eq!(state.policy.model.id, "host-model");
         assert_eq!(state.policy.generation, host.generation);
         assert_eq!(state.policy.prompt, host.prompt);
+    }
+
+    /// An unset host spec field keeps the durable head's value: core defaults
+    /// are construction-time fallbacks, not per-open seeds, so an incidental
+    /// reopen with a default spec never reverts a settled mid-run config
+    /// change. The persisted model only fills the gap when the head actually
+    /// recorded one (non-empty id).
+    #[test]
+    fn absent_host_spec_fields_keep_the_durable_head_values() {
+        let mut state = RuntimeSessionState {
+            session_id: "session".to_string(),
+            policy: SessionPolicy {
+                provider_id: "recorded-provider".to_string(),
+                model: model("recorded-model"),
+                generation: lash_core::GenerationOptions {
+                    seed: Some(7),
+                    ..Default::default()
+                },
+                ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            },
+            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
+        };
+        let host = SessionPolicy {
+            provider_id: "host-provider".to_string(),
+            model: model("core-default-model"),
+            generation: lash_core::GenerationOptions::default(),
+            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        };
+        let persisted_model = model("recorded-model");
+        let persisted_generation = lash_core::GenerationOptions {
+            seed: Some(7),
+            ..Default::default()
+        };
+
+        reconcile_loaded_state_policy(
+            &mut state,
+            &host,
+            false,
+            None,
+            false,
+            Some(&persisted_model),
+            false,
+            Some(&persisted_generation),
+        );
+
+        assert_eq!(state.policy.provider_id, "recorded-provider");
+        assert_eq!(state.policy.model.id, "recorded-model");
+        assert_eq!(state.policy.generation, persisted_generation);
+
+        // A head that never recorded a model (empty id) does not override the
+        // resolved host model.
+        let mut unrecorded = RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ));
+        unrecorded.session_id = "session".to_string();
+        let empty_model = lash_core::ModelSpec::default();
+        reconcile_loaded_state_policy(
+            &mut unrecorded,
+            &host,
+            false,
+            None,
+            false,
+            Some(&empty_model),
+            false,
+            None,
+        );
+        assert_eq!(unrecorded.policy.model.id, "core-default-model");
     }
 
     #[test]
@@ -1539,7 +1661,7 @@ mod reconcile_tests {
             ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
 
-        reconcile_loaded_state_policy(&mut state, &host, false, None);
+        reconcile_loaded_state_policy(&mut state, &host, false, None, true, None, false, None);
 
         assert_eq!(state.policy.provider_id, "host-provider");
         assert_eq!(state.policy.model.id, "host-model");

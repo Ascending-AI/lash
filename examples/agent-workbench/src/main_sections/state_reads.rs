@@ -31,7 +31,7 @@ pub(crate) async fn read_state_projection(
 ) -> Result<StateProjectionReads, AppError> {
     if !active_turn {
         let session = state
-            .open_session(session_id)
+            .open_session_for_observation(session_id)
             .await
             .map_err(|error| state.session_admission_error(session_id, "api.state", error))?;
         let snapshot = session.observe().recoverable_chat_snapshot();
