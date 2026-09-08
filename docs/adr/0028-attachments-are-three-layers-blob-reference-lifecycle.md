@@ -212,3 +212,28 @@ is gone. Exact node-to-attachment edges would provide finer reclamation, but
 are not required for safety and would consume a store-schema change. Live-turn
 intent reconciliation still uses receipt supersession; terminal receipt
 reclamation is coupled to the permanent deleted-session proof in FIG-2502.
+
+## Cross-version consequences
+
+This cutover changes the durable attachment format, so — per lash's
+reject-and-recreate doctrine (there is no migration chain) — durable state from
+before this release is **rejected loudly and recreated**, not migrated. The
+attachment manifest is gated by a store schema-version bump: SQLite session
+databases originally moved to `user_version = 10` and the single Postgres schema
+component to version 11. Durable owner binding subsequently bumps them to 12 and
+14 respectively. A pre-cutover database is rejected at open with a "delete and start
+fresh" error, because its committed manifest rows carry canonical URIs and blob
+references that named the old physical per-session layout, which the flat
+content-addressed store cannot resolve.
+
+Consequently, the **old `sessions/` blob trees are unreachable garbage** once the
+manifest is recreated: nothing references them and no code path can read them.
+Operators delete them manually. The exact patterns:
+
+- File backend: the `sessions/<session-hash>/...` subtrees under the attachments
+  root (the flat store now writes only under `sha256/<first2>/<hash>`).
+- S3 backend: the `<prefix>/sessions/...` key prefix (the flat store now writes
+  only under `<prefix>/sha256/<first2>/<hash>`).
+
+No lash lever touches these paths; they are outside the flat store's `sha256/`
+keyspace, so GC never enumerates them.
