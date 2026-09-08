@@ -35,10 +35,12 @@ Execution, finish-schema validation, semantic trajectory, catalog, control tools
 bound variables and checkpoint identity are shared. Drivers, history projectors,
 response normalization and transport prompts are separate implementations.
 The existing cell observation renderer supplies the native tool-result bytes.
-Native parked-driver state starts at format version 1 and strictly refuses other
-versions; the shared executor snapshot format is unchanged. Ordered assistant
+Native parked-driver state uses format version 2 after removing unused prose and
+strictly refuses other versions; the shared executor snapshot format is unchanged. Ordered assistant
 Parts, including provider ids and opaque replay metadata, live
-in `native_transport` diagnostic envelopes keyed by semantic step id. The native
+in version-1 `native_transport` diagnostic envelopes keyed by semantic step id.
+Transport decoding tolerates the original unstamped shape, refuses newer versions,
+and surfaces malformed bindings as projection degradation without panicking. The native
 projector emits each call and its result together; terminal suppression and
 failure scrubbing remove complete exchanges. Provider signatures are never
 reconstructed. Existing `lashlang:` and `lashlang_step_*` durable identities stay.

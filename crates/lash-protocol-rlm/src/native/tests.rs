@@ -141,6 +141,8 @@ fn run(
         )],
         None => vec![text("<lashlang>\nfinish 1\n</lashlang>")],
     };
+    let attempted_finish =
+        matches!(&exec, Some(Ok(response)) if response.terminal_finish.is_some());
     let mut effects = reply(&mut machine, &initial, parts);
     if let Some(result) = exec {
         let id = effects
@@ -216,7 +218,11 @@ fn run(
                         .iter()
                         .any(|step: &lash_rlm_types::RlmTrajectoryEntry| step.error.is_some())
                     {
-                        "error"
+                        if attempted_finish {
+                            "schema_mismatch"
+                        } else {
+                            "error"
+                        }
                     } else {
                         "execution"
                     }

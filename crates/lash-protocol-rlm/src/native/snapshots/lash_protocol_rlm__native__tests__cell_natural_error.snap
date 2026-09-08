@@ -1,0 +1,42 @@
+---
+source: crates/lash-protocol-rlm/src/native/tests.rs
+expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
+---
+[
+  {
+    "role": "Assistant",
+    "blocks": [
+      {
+        "Text": {
+          "text": "<lashlang>\nfinish 1\n</lashlang>",
+          "response_meta": null,
+          "cache_breakpoint": false
+        }
+      }
+    ]
+  },
+  {
+    "role": "User",
+    "blocks": [
+      {
+        "Text": {
+          "text": "runtime error\n\nNext: the host failed while handling this block. Retry it; if the failure persists, report the host problem.",
+          "response_meta": null,
+          "cache_breakpoint": true
+        }
+      }
+    ]
+  },
+  {
+    "role": "User",
+    "blocks": [
+      {
+        "Text": {
+          "text": "\n\n\n=== CURRENT ITERATION: 2 ===\n\n\n=== BOUND VARIABLES ===\n\nThese variables are already bound in lashlang. Access them directly in `<lashlang>` blocks; do not recreate them manually.\nSmall values are shown in full; larger ones show only a truncated preview (record keys, or the head and tail of a list/string) — but the variable still holds its COMPLETE value. A short preview never means state was lost; `print` the variable (or the part you need) to see the rest.\nNever write a field name you haven't seen in the key sets below — guessed field names silently produce zeros rather than errors. If a name is not listed, it does not exist on that value.\n\nAvailable variables:\n- `history`: `list[HistoryItem]`, read-only (descriptor: `list[any]`)\n\nSchema:\n```text\ntype HistoryItem =\n  | { kind: \"message\", id: str, role: enum[\"user\", \"system\", \"assistant\", \"event\"], content: str, attachments?: list[HistoryAttachment] }\n  | { kind: \"lashlang_step\", id: str, protocol_iteration: int, code: str, output: list[str], images?: list[HistoryImage], error?: str | null, final_output?: any | null }\ntype HistoryAttachment = { id: str, media_type?: str | null, label?: str | null, source: str, reference: str }\ntype HistoryImage = { id: str, media_type: str, width?: int | null, height?: int | null, bytes: int, label?: str | null }\n```\n\nRuntime notes:\n- `history` currently has 1 entry\n\n\n=== FINALIZATION ===\n\nThis turn uses natural termination. Each assistant response must choose exactly one of these shapes:\n\n1. Continue working: include a paired `<lashlang>...</lashlang>` block. Brief prose may appear before the block; that prose is commentary/status for the action that follows. A block without `finish` is progress and continues the loop.\n2. Finish with prose: write prose with no `<lashlang>` block. A prose-only response immediately ends the turn as the final answer. Use this only when the task is complete and no work remains.\n3. Finish with a computed/raw value: call `finish <value>` inside a paired `<lashlang>...</lashlang>` block. This ends the turn with that value.\n\nEvery message before the final answer must contain a paired `<lashlang>...</lashlang>` block. Any message may also contain prose; when prose accompanies a Lashlang block, it is commentary/status for the action that follows. Unaccompanied prose is final-answer-only. If any work remains, do not write prose-only. Never say you will continue, inspect, patch, wait, monitor, validate, or retry unless the same response also contains the `<lashlang>` block that does it.\n\nExample multi-step natural turn:\n\nI’ll inspect the current value first.\n<lashlang>\npreview = slice(to_string(value), 0, 400)\nprint(preview)\n</lashlang>\n\n<lashlang>\nresult = format(\"Checked: {}\", preview)\nprint(result)\n</lashlang>\n\nDone. I inspected the value and summarized the result.",
+          "response_meta": null,
+          "cache_breakpoint": false
+        }
+      }
+    ]
+  }
+]
