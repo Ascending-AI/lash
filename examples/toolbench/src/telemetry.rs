@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 pub(crate) struct Telemetry {
     activities: Mutex<Vec<TurnActivity>>,
     costs: Mutex<Vec<Option<Value>>>,
+    submit_calls: std::sync::atomic::AtomicUsize,
 }
 #[async_trait::async_trait]
 impl TurnActivitySink for Telemetry {
@@ -17,6 +18,16 @@ impl TurnActivitySink for Telemetry {
     }
 }
 impl Telemetry {
+    pub(crate) fn submit_count(&self) -> usize {
+        self.submit_calls.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn record_submits(&self, parts: &[lash::direct::LlmOutputPart]) {
+        let count = parts.iter().filter(|part| matches!(part, lash::direct::LlmOutputPart::ToolCall { tool_name, .. } if tool_name == "submit")).count();
+        self.submit_calls
+            .fetch_add(count, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub(crate) fn activities(&self) -> Vec<TurnActivity> {
         self.activities
             .lock()
@@ -30,6 +41,7 @@ impl Telemetry {
             lash::plugins::PluginSpec::new().with_assistant_response(Arc::new(move |ctx| {
                 let telemetry = Arc::clone(&telemetry);
                 Box::pin(async move {
+                    telemetry.record_submits(&ctx.response.parts);
                     let cost = ctx
                         .response
                         .provider_usage
@@ -67,5 +79,22 @@ impl Telemetry {
                 })
             })
         }).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn duplicate_submit_is_counted_before_argument_or_id_validation() {
+        let telemetry = Telemetry::default();
+        let call = lash::direct::LlmOutputPart::ToolCall {
+            call_id: "duplicate".into(),
+            tool_name: "submit".into(),
+            input_json: "{}".into(),
+            replay: None,
+        };
+        telemetry.record_submits(&[call.clone(), call]);
+        assert_eq!(telemetry.submit_count(), 2);
     }
 }

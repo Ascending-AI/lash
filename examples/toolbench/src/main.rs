@@ -1,5 +1,6 @@
 mod grading;
 mod runtime;
+mod summary;
 mod tasks;
 mod telemetry;
 mod world;
@@ -40,18 +41,39 @@ enum ChannelSelection {
     Cell,
     #[value(alias = "native_tool")]
     Native,
+    Standard,
 }
 impl ChannelSelection {
-    fn channel(self) -> lash::rlm::RlmChannel {
-        match self {
-            Self::Cell => lash::rlm::RlmChannel::Cell,
-            Self::Native => lash::rlm::RlmChannel::NativeTool,
-        }
-    }
     fn name(self) -> &'static str {
         match self {
             Self::Cell => "cell",
             Self::Native => "native",
+            Self::Standard => "standard",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum ChannelSet {
+    Paired,
+    All,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ReasoningEffort {
+    None,
+    Low,
+    Medium,
+    High,
+}
+impl ReasoningEffort {
+    fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
         }
     }
 }
@@ -64,7 +86,7 @@ struct Args {
     /// Pair the same task/model/dialect in randomized channel order.
     #[arg(long)]
     paired: bool,
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, alias = "runs", default_value_t = 1)]
     repetitions: usize,
     /// Maximum simultaneous task runs; start at 4–8 for OpenRouter.
     #[arg(long, default_value_t = 1)]
@@ -74,10 +96,12 @@ struct Args {
     results_file: std::path::PathBuf,
     /// OpenRouter model identifier.
     #[arg(long, env = "OPENROUTER_MODEL", default_value = DEFAULT_MODEL)]
-    model: String,
-    /// Number of independent attempts per task and dialect.
-    #[arg(long, default_value_t = 1)]
-    runs: usize,
+    model: Vec<String>,
+    /// Include standard alongside the paired RLM cohorts.
+    #[arg(long, value_enum, default_value_t = ChannelSet::Paired)]
+    channel_set: ChannelSet,
+    #[arg(long, value_enum, default_value_t = ReasoningEffort::None)]
+    reasoning_effort: ReasoningEffort,
     /// Run both dialects or select one.
     #[arg(long, value_enum, default_value_t = DialectSelection::Both)]
     dialect: DialectSelection,
@@ -90,139 +114,160 @@ struct Args {
 }
 
 #[derive(Debug, Serialize)]
-struct BenchResult {
-    model: String,
-    runs: usize,
-    results: Vec<TaskResult>,
-    summaries: Vec<Summary>,
-    all_passed: bool,
-}
-
-#[derive(Debug, Serialize)]
 struct TaskResult {
+    model: String,
+    reasoning_effort: ReasoningEffort,
     run: usize,
     id: String,
     dialect: String,
     channel: String,
     wall_ms: u128,
     passed: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     failure_reason: Option<String>,
+    rounds: usize,
     iterations: usize,
     tool_call_count: usize,
+    submit_count: usize,
     failed_exec_iterations: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
     finish_value: Option<Value>,
     seed: World,
     checker: String,
-}
-
-#[derive(Debug, Serialize)]
-struct Summary {
-    dialect: String,
-    channel: String,
-    passed: usize,
-    total: usize,
-    pass_rate: f64,
+    usage: summary::Usage,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     let args = Args::parse();
-    if args.runs == 0 || args.repetitions == 0 {
-        bail!("--runs and --repetitions must be at least 1");
+    if args.repetitions == 0 || args.concurrency == 0 {
+        bail!("--repetitions/--runs and --concurrency must be at least 1");
     }
     let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
     if api_key.trim().is_empty() {
-        bail!("OPENROUTER_API_KEY is not set; load the repository .env before running toolbench");
+        bail!("OPENROUTER_API_KEY is not set");
     }
-
     let tasks = selected_tasks(&args.task)?;
-    if args.concurrency == 0 {
-        bail!("--concurrency must be at least 1");
-    }
     let writer =
         Mutex::new(std::fs::File::create(&args.results_file).context("create results JSONL")?);
-    let supported = args.dialect.dialects();
-    // Capability is a route-level probe, performed once before any work starts.
-    if (args.paired || args.channel == ChannelSelection::Native)
-        && let Err(reason) =
-            runtime::preflight(&tasks[0], supported[0], &args.model, &api_key).await
-    {
-        let row = serde_json::json!({"kind":"excluded_route","route":"openrouter","model":args.model,"reason":reason});
-        write_row(&mut *writer.lock().await, &row)?;
-        if !args.allow_partial {
-            bail!("native route preflight failed: {reason}");
-        }
-        return Ok(());
-    }
-    let runs = if args.paired {
-        args.repetitions
-    } else {
-        args.runs
-    };
     let mut random = std::fs::File::open("/dev/urandom").context("open random order source")?;
-    let work = build_work_list(&tasks, supported, runs, args.paired, args.channel, || {
-        let mut coin = [0u8];
-        std::io::Read::read_exact(&mut random, &mut coin)?;
-        Ok(coin[0] & 1 == 1)
-    })?;
+    let mut template = build_work_list(
+        &tasks,
+        args.dialect.dialects(),
+        args.repetitions,
+        args.paired || args.channel_set == ChannelSet::All,
+        args.channel,
+        || {
+            let mut coin = [0u8];
+            std::io::Read::read_exact(&mut random, &mut coin)?;
+            Ok(coin[0] & 1 == 1)
+        },
+    )?;
+    if args.channel_set == ChannelSet::All {
+        template.extend(build_work_list(
+            &tasks,
+            args.dialect.dialects(),
+            args.repetitions,
+            false,
+            ChannelSelection::Standard,
+            || Ok(false),
+        )?);
+    }
+    let probes = args
+        .model
+        .iter()
+        .enumerate()
+        .flat_map(|(model_index, _)| {
+            [ChannelSelection::Native, ChannelSelection::Standard]
+                .into_iter()
+                .filter(|channel| template.iter().any(|item| item.channel == *channel))
+                .map(move |channel| WorkItem {
+                    model_index,
+                    run: 0,
+                    dialect: args.dialect.dialects()[0],
+                    task_index: 0,
+                    channel,
+                })
+        })
+        .collect();
+    let exclusions = run_work_list(probes, args.concurrency, |item| {
+        let args = &args;
+        let tasks = &tasks;
+        let api_key = &api_key;
+        let writer = &writer;
+        async move {
+            let model = &args.model[item.model_index];
+            match runtime::preflight(&tasks[0], item.dialect, model, api_key, item.channel, args.reasoning_effort).await {
+                Ok(()) => Ok(None),
+                Err(reason) => {
+                    write_row(&mut *writer.lock().await, &serde_json::json!({"kind":"excluded_route","route":"openrouter","model":model,"channel":item.channel.name(),"dialect":item.dialect_name(),"reasoning_effort":args.reasoning_effort,"rounds":0,"reason":reason}))?;
+                    Ok(Some((item.model_index, item.channel)))
+                }
+            }
+        }
+    }).await?.into_iter().flatten().collect::<Vec<_>>();
+    // Interleave models so a busy route cannot serialize entire model cohorts.
+    let work = template
+        .into_iter()
+        .flat_map(|item| {
+            (0..args.model.len()).map(move |model_index| WorkItem {
+                model_index,
+                ..item
+            })
+        })
+        .filter(|item| !exclusions.contains(&(item.model_index, item.channel)))
+        .collect();
     let mut results = run_work_list(work, args.concurrency, |item| {
         let tasks = &tasks;
         let args = &args;
         let api_key = &api_key;
         let writer = &writer;
         async move {
-        let task = &tasks[item.task_index];
-        let (final_world, evidence) = runtime::run_task(
-            task, item.dialect, &args.model, api_key, item.run, item.channel.channel(),
-        ).await;
-        let grade = grade(task, &final_world, &evidence);
-        let mut file = writer.lock().await;
-        for attempt in &evidence.attempts {
-            let mut row = attempt.clone();
-            let fields = row.as_object_mut().expect("attempt is an object");
-            fields.extend(serde_json::json!({"kind":"attempt", "task":task.id,"model":args.model,"route":"openrouter","dialect":item.dialect.language_id(),"channel":item.channel.name(),"repetition":item.run,"success":grade.passed,"grade":grade,"task_wall_ms":evidence.wall_ms}).as_object().expect("metadata object").clone());
+            let task = &tasks[item.task_index];
+            let model = &args.model[item.model_index];
+            let (final_world, evidence) = runtime::run_task(task, item.dialect, model, api_key, item.run, item.channel, args.reasoning_effort).await;
+            let grade = grade(task, &final_world, &evidence);
+            let usage = summary::Usage::from_attempts(&evidence.attempts);
+            let mut file = writer.lock().await;
+            for attempt in &evidence.attempts {
+                let mut row = attempt.clone();
+                row.as_object_mut().expect("attempt object").extend(serde_json::json!({"kind":"attempt","task":task.id,"model":model,"route":"openrouter","dialect":item.dialect_name(),"channel":item.channel.name(),"reasoning_effort":args.reasoning_effort,"rounds":evidence.rounds,"repetition":item.run,"success":grade.passed,"grade":grade,"task_wall_ms":evidence.wall_ms}).as_object().expect("metadata object").clone());
+                write_row(&mut file, &row)?;
+            }
+            let result = TaskResult {
+                model: model.clone(), reasoning_effort: args.reasoning_effort,
+                run: item.run, id: task.id.into(), dialect: item.dialect_name().into(), channel: item.channel.name().into(),
+                wall_ms: evidence.wall_ms, passed: grade.passed, failure_reason: grade.failure_reason,
+                rounds: evidence.rounds, iterations: evidence.iterations, tool_call_count: evidence.tool_call_count,
+                submit_count: evidence.submit_count, failed_exec_iterations: evidence.failed_execution_errors.len(),
+                finish_value: evidence.finish_value, seed: task.seed.clone(),
+                checker: if item.channel == ChannelSelection::Standard { format!("{}; exact world; exactly {} host calls; submit once; at most 3 model responses; 120 s", task.finish.describe(), task.tool_calls) } else { task.checker_description() }, usage,
+            };
+            let mut row = serde_json::to_value(&result)?;
+            row.as_object_mut().expect("result object").extend(serde_json::json!({"kind":"task_result","task":task.id,"route":"openrouter","repetition":item.run,"success":result.passed,"grade":{"passed":result.passed,"failure_reason":result.failure_reason}}).as_object().expect("metadata object").clone());
             write_row(&mut file, &row)?;
+            file.flush()?;
+            Ok(result)
         }
-        write_row(&mut file, &serde_json::json!({"kind":"task_result","task":task.id,"model":args.model,"route":"openrouter","dialect":item.dialect.language_id(),"channel":item.channel.name(),"repetition":item.run,"success":grade.passed,"grade":grade,"wall_ms":evidence.wall_ms}))?;
-        file.flush()?;
-        Ok(TaskResult {
-            run: item.run,
-            id: task.id.to_string(),
-            dialect: item.dialect.language_id().to_string(),
-            channel: item.channel.name().to_string(),
-            wall_ms: evidence.wall_ms,
-            passed: grade.passed,
-            failure_reason: grade.failure_reason,
-            iterations: evidence.iterations,
-            tool_call_count: evidence.tool_call_count,
-            failed_exec_iterations: evidence.failed_execution_errors.len(),
-            finish_value: evidence.finish_value,
-            seed: task.seed.clone(),
-            checker: task.checker_description(),
-        })
-    }}).await?;
+    }).await?;
     results.sort_by(|a, b| {
-        (a.run, &a.dialect, &a.id, &a.channel).cmp(&(b.run, &b.dialect, &b.id, &b.channel))
+        (&a.model, a.run, &a.dialect, &a.id, &a.channel)
+            .cmp(&(&b.model, b.run, &b.dialect, &b.id, &b.channel))
     });
-    print_table(&results);
-    let summaries = summarize(&results);
-    let all_passed = !results.is_empty() && results.iter().all(|result| result.passed);
-    let output = BenchResult {
-        model: args.model,
-        runs,
-        results,
-        summaries,
-        all_passed,
-    };
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&output).context("serialize bench results")?
-    );
-    if !output.all_passed && !args.allow_partial {
-        bail!("one or more toolbench tasks failed");
+    let summaries = summary::aggregate(&results);
+    for summary in &summaries {
+        let mut row = serde_json::to_value(summary)?;
+        row["kind"] = "summary".into();
+        write_row(&mut *writer.lock().await, &row)?;
+    }
+    let markdown = summary::markdown(&summaries);
+    print!("{markdown}");
+    let mut summary_path = args.results_file.as_os_str().to_os_string();
+    summary_path.push(".summary.md");
+    std::fs::write(summary_path, markdown).context("write summary Markdown")?;
+    if (!exclusions.is_empty() || results.is_empty() || results.iter().any(|row| !row.passed))
+        && !args.allow_partial
+    {
+        bail!("one or more toolbench tasks failed or cohorts were excluded");
     }
     Ok(())
 }
@@ -237,10 +282,21 @@ fn write_row(file: &mut std::fs::File, row: &Value) -> Result<()> {
 
 #[derive(Clone, Copy, Debug)]
 struct WorkItem {
+    model_index: usize,
     run: usize,
     dialect: lash::rlm::RlmDialect,
     task_index: usize,
     channel: ChannelSelection,
+}
+
+impl WorkItem {
+    fn dialect_name(&self) -> &'static str {
+        if self.channel == ChannelSelection::Standard {
+            "none"
+        } else {
+            self.dialect.language_id()
+        }
+    }
 }
 
 fn build_work_list(
@@ -253,7 +309,11 @@ fn build_work_list(
 ) -> Result<Vec<WorkItem>> {
     let mut work = Vec::new();
     for run in 1..=runs {
-        for &dialect in dialects {
+        for &dialect in if !paired && channel == ChannelSelection::Standard {
+            &dialects[..1]
+        } else {
+            dialects
+        } {
             for task_index in 0..tasks.len() {
                 let channels = if paired {
                     if reverse_pair()? {
@@ -265,6 +325,7 @@ fn build_work_list(
                     vec![channel]
                 };
                 work.extend(channels.into_iter().map(|channel| WorkItem {
+                    model_index: 0,
                     run,
                     dialect,
                     task_index,
@@ -333,59 +394,6 @@ fn selected_tasks(task_ids: &[String]) -> Result<Vec<Task>> {
         .collect())
 }
 
-fn print_table(results: &[TaskResult]) {
-    eprintln!("\nrun channel dialect     task                 pass iter tools failed-exec reason");
-    eprintln!("--- ------- ----------- -------------------- ---- ---- ----- ----------- ------");
-    for result in results {
-        eprintln!(
-            "{:<3} {:<7} {:<11} {:<20} {:<4} {:>4} {:>5} {:>11} {}",
-            result.run,
-            result.channel,
-            result.dialect,
-            result.id,
-            if result.passed { "yes" } else { "no" },
-            result.iterations,
-            result.tool_call_count,
-            result.failed_exec_iterations,
-            result.failure_reason.as_deref().unwrap_or("")
-        );
-    }
-    for summary in summarize(results) {
-        eprintln!(
-            "{} / {}: {}/{} passed ({:.1}%)",
-            summary.dialect,
-            summary.channel,
-            summary.passed,
-            summary.total,
-            summary.pass_rate * 100.0
-        );
-    }
-}
-
-fn summarize(results: &[TaskResult]) -> Vec<Summary> {
-    let mut summaries = Vec::new();
-    for dialect in lash::rlm::RlmDialect::ALL {
-        for channel in ["cell", "native"] {
-            let matching = results
-                .iter()
-                .filter(|row| row.dialect == dialect.language_id() && row.channel == channel)
-                .collect::<Vec<_>>();
-            if matching.is_empty() {
-                continue;
-            }
-            let passed = matching.iter().filter(|row| row.passed).count();
-            summaries.push(Summary {
-                dialect: dialect.language_id().to_string(),
-                channel: channel.to_string(),
-                passed,
-                total: matching.len(),
-                pass_rate: passed as f64 / matching.len() as f64,
-            });
-        }
-    }
-    summaries
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,6 +406,35 @@ mod tests {
             item.task_index,
             item.channel.name(),
         )
+    }
+
+    #[test]
+    fn repeatable_models_and_run_alias_parse() {
+        let args = Args::parse_from([
+            "toolbench",
+            "--model",
+            "a",
+            "--model",
+            "b",
+            "--runs",
+            "2",
+            "--reasoning-effort",
+            "medium",
+        ]);
+        assert_eq!(args.model, ["a", "b"]);
+        assert_eq!(args.repetitions, 2);
+        assert_eq!(args.reasoning_effort, ReasoningEffort::Medium);
+        let work = build_work_list(
+            &task_pack(),
+            args.dialect.dialects(),
+            1,
+            false,
+            ChannelSelection::Standard,
+            || Ok(false),
+        )
+        .unwrap();
+        assert_eq!(work.len(), 16);
+        assert!(work.iter().all(|item| item.dialect_name() == "none"));
     }
 
     #[test]

@@ -11,6 +11,9 @@ pub(crate) const IDENTICAL_ERROR_LIMIT: usize = 2;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RunEvidence {
+    pub(crate) standard: bool,
+    pub(crate) rounds: usize,
+    pub(crate) submit_count: usize,
     pub(crate) attempts: Vec<serde_json::Value>,
     pub(crate) wall_ms: u128,
     pub(crate) completed: bool,
@@ -75,6 +78,19 @@ pub(crate) fn grade(task: &Task, final_world: &World, evidence: &RunEvidence) ->
         ));
     }
 
+    if evidence.wall_ms > 120_000 {
+        failures.push("task exceeded the 120 second wall-clock limit".to_string());
+    }
+    if evidence.standard {
+        if evidence.submit_count > 1 {
+            failures.push("repeated submit".to_string());
+        } else if evidence.submit_count == 0 {
+            failures.push("missing submit".to_string());
+        }
+        if evidence.rounds > 3 {
+            failures.push("task requires at most three model responses".to_string());
+        }
+    }
     if evidence.code_blocks.len() > 2 {
         failures.push("task requires at most two code executions".to_string());
     }
@@ -128,6 +144,31 @@ mod tests {
             tool_call_count: 1,
             ..RunEvidence::default()
         }
+    }
+
+    #[test]
+    fn standard_repeated_submit_and_rounds_cap_are_rejected() {
+        let task = fixture();
+        let mut evidence = passing_evidence();
+        evidence.standard = true;
+        evidence.submit_count = 1;
+        evidence.rounds = 3;
+        assert!(grade(&task, &task.expected_world, &evidence).passed);
+        evidence.submit_count = 2;
+        assert!(
+            grade(&task, &task.expected_world, &evidence)
+                .failure_reason
+                .unwrap()
+                .contains("repeated submit")
+        );
+        evidence.submit_count = 1;
+        evidence.rounds = 4;
+        assert!(
+            grade(&task, &task.expected_world, &evidence)
+                .failure_reason
+                .unwrap()
+                .contains("at most three model responses")
+        );
     }
 
     #[test]
