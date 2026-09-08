@@ -53,6 +53,10 @@ pub(crate) struct Task {
 }
 
 impl Task {
+    pub(crate) fn prompt_for(&self, standard: bool) -> String {
+        build_prompt(&self.prompt, self.tool_calls, standard)
+    }
+
     pub(crate) fn checker_description(&self) -> String {
         format!(
             "{}; exact seeded-world equality; exactly {} tool call(s); turn completes; at most 2 code executions; at most 2 failed executions; no repeated identical execution error",
@@ -200,15 +204,26 @@ fn write_task(
     mutate_expected(&mut expected_world);
     Task {
         id,
-        prompt: format!(
-            "{prompt} Use at most two code executions and exactly {tool_calls} host tool call(s) total; allow at most {} failed executions and never repeat an identical execution error; leave all other world state unchanged.",
-            crate::grading::MAX_FAILED_EXECUTIONS,
-        ),
+        prompt: prompt.replace("Use code to ", ""),
         seed,
         expected_world,
         finish,
         tool_calls,
     }
+}
+
+fn build_prompt(prompt: &str, tool_calls: usize, standard: bool) -> String {
+    let constraint = if standard {
+        format!(
+            "Call exactly {tool_calls} host tool(s) total, then call submit exactly once with the final value; leave all other world state unchanged."
+        )
+    } else {
+        format!(
+            "Use at most two code executions and exactly {tool_calls} host tool call(s) total; allow at most {} failed executions and never repeat an identical execution error; leave all other world state unchanged.",
+            crate::grading::MAX_FAILED_EXECUTIONS
+        )
+    };
+    format!("{prompt} {constraint}")
 }
 
 fn append_deploy_mail(world: &mut World) {
@@ -226,17 +241,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn standard_prompt_uses_shared_task_and_submit_constraint() {
+        for task in task_pack() {
+            let prompt = task.prompt_for(true);
+            assert!(prompt.starts_with(&task.prompt));
+            assert!(prompt.contains(&format!(
+                "Call exactly {} host tool(s) total, then call submit exactly once",
+                task.tool_calls
+            )));
+            assert!(!prompt.contains("code"));
+            assert!(!prompt.contains("executions"));
+        }
+    }
+
+    #[test]
     fn every_task_discloses_the_grading_budget() {
         let tasks = task_pack();
         assert_eq!(tasks.len(), 16);
         for task in tasks {
             assert!(
-                task.prompt.contains("at most two code executions"),
+                task.prompt_for(false)
+                    .contains("at most two code executions"),
                 "{}",
                 task.id
             );
             assert!(
-                task.prompt.contains(&format!(
+                task.prompt_for(false).contains(&format!(
                     "exactly {} host tool call(s) total",
                     task.tool_calls
                 )),
@@ -244,12 +274,13 @@ mod tests {
                 task.id
             );
             assert!(
-                task.prompt.contains("at most 2 failed executions"),
+                task.prompt_for(false)
+                    .contains("at most 2 failed executions"),
                 "{}",
                 task.id
             );
             assert!(
-                task.prompt
+                task.prompt_for(false)
                     .contains("never repeat an identical execution error"),
                 "{}",
                 task.id

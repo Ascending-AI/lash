@@ -15,13 +15,15 @@ const TURN_BUDGET: usize = 8;
 const NO_PROGRESS_BUDGET: usize = 3;
 const TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_task(
     task: &Task,
     dialect: lash::rlm::RlmDialect,
     model: &str,
     api_key: &str,
     run: usize,
-    channel: lash::rlm::RlmChannel,
+    channel: crate::ChannelSelection,
+    effort: crate::ReasoningEffort,
 ) -> (World, RunEvidence) {
     let started = std::time::Instant::now();
     // Every run owns its world, telemetry, provider and in-memory stores. No
@@ -31,7 +33,7 @@ pub(crate) async fn run_task(
     let result = tokio::time::timeout(
         TURN_TIMEOUT,
         run_turn(
-            task, dialect, model, api_key, run, channel, &world, &telemetry,
+            task, dialect, model, api_key, run, channel, effort, &world, &telemetry,
         ),
     )
     .await;
@@ -74,12 +76,19 @@ pub(crate) async fn run_task(
             (
                 final_world,
                 RunEvidence {
+                    standard: channel == crate::ChannelSelection::Standard,
+                    rounds: attempts.len(),
+                    submit_count: telemetry.submit_count(),
                     attempts,
                     wall_ms: started.elapsed().as_millis(),
                     completed: output.is_success(),
                     completion_error: (!output.is_success())
                         .then(|| format!("turn outcome: {:?}", output.result.outcome)),
-                    finish_value: output.final_value().cloned(),
+                    finish_value: if channel == crate::ChannelSelection::Standard {
+                        world.submissions().first().cloned()
+                    } else {
+                        output.final_value().cloned()
+                    },
                     iterations,
                     code_blocks: output
                         .activities
@@ -89,7 +98,12 @@ pub(crate) async fn run_task(
                             _ => None,
                         })
                         .collect(),
-                    tool_call_count: output.result.tool_calls.len(),
+                    tool_call_count: output
+                        .result
+                        .tool_calls
+                        .iter()
+                        .filter(|call| call.tool != "submit")
+                        .count(),
                     failed_execution_errors,
                 },
             )
@@ -97,6 +111,10 @@ pub(crate) async fn run_task(
         Ok(Err(error)) => (
             final_world,
             RunEvidence {
+                standard: channel == crate::ChannelSelection::Standard,
+                rounds: telemetry.rows(&[]).len(),
+                submit_count: telemetry.submit_count(),
+                finish_value: world.submissions().first().cloned(),
                 attempts: telemetry.rows(&[]),
                 wall_ms: started.elapsed().as_millis(),
                 completion_error: Some(format!("{error:#}")),
@@ -106,6 +124,10 @@ pub(crate) async fn run_task(
         Err(_) => (
             final_world,
             RunEvidence {
+                standard: channel == crate::ChannelSelection::Standard,
+                rounds: telemetry.rows(&[]).len(),
+                submit_count: telemetry.submit_count(),
+                finish_value: world.submissions().first().cloned(),
                 attempts: telemetry.rows(&[]),
                 wall_ms: started.elapsed().as_millis(),
                 completion_error: Some(format!(
@@ -125,7 +147,8 @@ async fn run_turn(
     model: &str,
     api_key: &str,
     run: usize,
-    channel: lash::rlm::RlmChannel,
+    channel: crate::ChannelSelection,
+    effort: crate::ReasoningEffort,
     world: &SharedWorld,
     telemetry: &Arc<crate::telemetry::Telemetry>,
 ) -> Result<(lash::TurnOutput, Vec<String>)> {
@@ -138,60 +161,79 @@ async fn run_turn(
             })
             .into_components(),
     );
-    let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::builder()
-            .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-            .wall_clock(lash::rlm::WallClockBound::secs(30))
-            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-            .build()
-            .with_channel(channel),
-        Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
-    );
-    let core = LashCore::rlm_builder(
-        lash::TurnBudget::bounded(if task.id == "__native_probe" {
-            1
+    let budget = lash::TurnBudget::bounded(if task.id.starts_with("__") {
+        1
+    } else if channel == crate::ChannelSelection::Standard {
+        3
+    } else {
+        TURN_BUDGET
+    });
+    let builder = match channel {
+        crate::ChannelSelection::Standard => LashCore::standard_builder(budget),
+        crate::ChannelSelection::Cell | crate::ChannelSelection::Native => {
+            let factory = lash::rlm::RlmProtocolPluginFactory::new(
+                lash::rlm::RlmProtocolPluginConfig::builder()
+                    .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                    .wall_clock(lash::rlm::WallClockBound::secs(30))
+                    .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                    .build()
+                    .with_channel(if channel == crate::ChannelSelection::Cell {
+                        lash::rlm::RlmChannel::Cell
+                    } else {
+                        lash::rlm::RlmChannel::NativeTool
+                    }),
+                Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
+            );
+            LashCore::rlm_builder(budget, factory)
+        }
+    };
+    let core = builder
+        .no_progress_budget(lash::NoProgressBudget::bounded(NO_PROGRESS_BUDGET))
+        .without_queued_work()
+        .plugins(lash::plugins::runtime_plugin_stack().configure(|stack| {
+            stack.push(telemetry.plugin());
+        }))
+        .provider(provider)
+        .model(model_spec(model, effort)?)
+        .tools(if channel == crate::ChannelSelection::Standard {
+            world.standard_provider()
         } else {
-            TURN_BUDGET
-        }),
-        factory,
-    )
-    .no_progress_budget(lash::NoProgressBudget::bounded(NO_PROGRESS_BUDGET))
-    .without_queued_work()
-    .plugins(lash::plugins::runtime_plugin_stack().configure(|stack| {
-        stack.push(telemetry.plugin());
-    }))
-    .provider(provider)
-    .model(
-        lash::ModelSpec::builder(model)
-            .context_window_tokens(200_000)
-            .build()
-            .context("build model metadata")?,
-    )
-    .tools(world.provider())
-    .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-    .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-    .process_env_store(Arc::new(
-        lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-    ))
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "toolbench",
-        format!("run-{run}-{}-{}", dialect.language_id(), task.id),
-    ))
-    .context("build Lash core")?;
+            world.provider()
+        })
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "toolbench",
+            format!("run-{run}-{}-{}", dialect.language_id(), task.id),
+        ))
+        .context("build Lash core")?;
     let session_id = format!("toolbench-{run}-{}-{}", dialect.language_id(), task.id);
-    let session = core
-        .session(session_id)
-        .plugin_option(lash::rlm::RLM_PROTOCOL_PLUGIN_ID, session_options(dialect))
-        .context("encode dialect session option")?
+    let session_builder = core.session(session_id);
+    let session_builder = if channel == crate::ChannelSelection::Standard {
+        session_builder
+    } else {
+        session_builder
+            .plugin_option(lash::rlm::RLM_PROTOCOL_PLUGIN_ID, session_options(dialect))
+            .context("encode dialect session option")?
+    };
+    let session = session_builder
         .open()
         .await
         .context("open toolbench session")?;
-    let result = session
-        .turn(TurnInput::text(task.prompt.clone()))
-        .require_finish()
-        .context("require RLM finish value")?
+    let turn = session.turn(TurnInput::text(
+        task.prompt_for(channel == crate::ChannelSelection::Standard),
+    ));
+    let turn = if channel == crate::ChannelSelection::Standard {
+        turn
+    } else {
+        turn.require_finish().context("require RLM finish value")?
+    };
+    let result = turn
         .stream_to(telemetry.as_ref())
         .await
         .context("run toolbench turn")?;
@@ -230,34 +272,36 @@ async fn run_turn(
 /// Native capability probes are sampled model behaviour, so one stochastic
 /// miss must not exclude a whole cohort; the route is excluded only when
 /// every probe attempt fails.
-const PREFLIGHT_ATTEMPTS: usize = 3;
+const PREFLIGHT_ATTEMPTS: usize = 2;
 
 pub(crate) async fn preflight(
     task: &Task,
     dialect: lash::rlm::RlmDialect,
     model: &str,
     api_key: &str,
+    channel: crate::ChannelSelection,
+    effort: crate::ReasoningEffort,
 ) -> Result<(), String> {
     let mut probe = task.clone();
     probe.id = "__native_probe";
     probe.prompt = "Call execute_code exactly once with code that finishes with the number 1. Do not call any host operations.".into();
+    if channel == crate::ChannelSelection::Standard {
+        probe.prompt = "Call submit exactly once with value set to the JSON number 1, not the string \"1\". Do not call any host tools.".into();
+    }
+    probe.tool_calls = 0;
+    probe.expected_world = probe.seed.clone();
+    probe.finish = crate::tasks::FinishMatcher::Exact(serde_json::json!(1));
     let mut failures = Vec::with_capacity(PREFLIGHT_ATTEMPTS);
     for attempt in 0..PREFLIGHT_ATTEMPTS {
-        let (_, evidence) = run_task(
-            &probe,
-            dialect,
-            model,
-            api_key,
-            attempt,
-            lash::rlm::RlmChannel::NativeTool,
-        )
-        .await;
-        if evidence.completed && evidence.finish_value == Some(serde_json::json!(1)) {
+        let (_, evidence) =
+            run_task(&probe, dialect, model, api_key, attempt, channel, effort).await;
+        if crate::grading::grade(&probe, &probe.seed, &evidence).passed {
             return Ok(());
         }
         failures.push(evidence.completion_error.unwrap_or_else(|| {
             format!(
-                "native one-call probe finished with {:?} instead of 1",
+                "{} one-call probe finished with {:?} instead of 1",
+                channel.name(),
                 evidence.finish_value
             )
         }));
@@ -266,6 +310,26 @@ pub(crate) async fn preflight(
         "{PREFLIGHT_ATTEMPTS} probe attempts failed: {}",
         failures.join(" | ")
     ))
+}
+
+fn model_spec(model: &str, effort: crate::ReasoningEffort) -> Result<lash::ModelSpec> {
+    use lash::provider::{ModelCapability, ReasoningCapability, ReasoningSelection};
+    let variant = match effort {
+        crate::ReasoningEffort::None => ReasoningSelection::ProviderDefault,
+        _ => ReasoningSelection::Effort(effort.name().into()),
+    };
+    lash::ModelSpec::builder(model)
+        .context_window_tokens(200_000)
+        .variant(variant)
+        .capability(ModelCapability {
+            reasoning: Some(ReasoningCapability {
+                efforts: vec!["low".into(), "medium".into(), "high".into()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .build()
+        .context("build model metadata")
 }
 
 fn session_options(dialect: lash::rlm::RlmDialect) -> lash::rlm::RlmCreateExtras {
@@ -278,6 +342,36 @@ fn session_options(dialect: lash::rlm::RlmDialect) -> lash::rlm::RlmCreateExtras
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reasoning_selection_is_shared_and_none_keeps_provider_default() {
+        use crate::ReasoningEffort;
+        use lash::provider::ReasoningSelection;
+        for effort in [
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+        ] {
+            let spec = super::model_spec("route/model", effort).unwrap();
+            assert_eq!(
+                spec.variant,
+                ReasoningSelection::Effort(effort.name().into())
+            );
+            assert!(
+                spec.capability
+                    .reasoning
+                    .unwrap()
+                    .efforts
+                    .contains(&effort.name().to_string())
+            );
+        }
+        assert_eq!(
+            super::model_spec("route/model", ReasoningEffort::None)
+                .unwrap()
+                .variant,
+            ReasoningSelection::ProviderDefault
+        );
+    }
+
     #[test]
     fn benchmark_sessions_use_raw_finish_values_for_every_dialect() {
         for dialect in lash::rlm::RlmDialect::ALL {
