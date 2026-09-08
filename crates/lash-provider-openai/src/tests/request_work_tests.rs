@@ -93,3 +93,59 @@ fn bounded_error_projection_preserves_retry_delay_and_message_after_large_echo()
         }
     );
 }
+
+#[test]
+fn request_work_budget_counts_repeated_stored_image_occurrences() {
+    for (occurrences, byte_len) in [(100, 32_768), (100, 1024), (1, 30_000)] {
+        let id = lash_core::AttachmentId::parse("repeated-image").unwrap();
+        let source = AttachmentSource::stored(lash_core::AttachmentRef {
+            id: id.clone(),
+            media_type: lash_core::MediaType::parse("image/png").unwrap(),
+            byte_len: byte_len as u64,
+            type_metadata: None,
+            label: None,
+        });
+        let mut req = request(vec![LlmMessage::new(
+            LlmRole::User,
+            vec![
+                LlmContentBlock::Attachment {
+                    source: Box::new(source)
+                };
+                occurrences
+            ],
+        )]);
+        req.resolved_stored.insert(id, vec![0; byte_len]);
+        assert!(needs_blocking(&req));
+    }
+}
+
+#[test]
+fn request_work_budget_rejects_large_field_before_json_writer() {
+    let large = "x".repeat(1024 * 1024);
+    let text = request(vec![LlmMessage::text(LlmRole::User, large.clone())]);
+    let mut model = request(Vec::new());
+    model.model = large.clone();
+    let mut scope = request(Vec::new());
+    scope.scope.request_id = large.clone();
+    let mut schema = request(Vec::new());
+    schema.tools = Arc::new(vec![LlmToolSpec {
+        name: "tool".into(),
+        description: String::new(),
+        input_schema: json!({"properties": {"field": {"description": large}}}).into(),
+        output_schema: Default::default(),
+    }]);
+    let inline = request(vec![LlmMessage::new(
+        LlmRole::User,
+        vec![LlmContentBlock::Attachment {
+            source: Box::new(AttachmentSource::inline(
+                lash_core::MediaType::parse("image/png").unwrap(),
+                vec![0; 1024 * 1024],
+            )),
+        }],
+    )]);
+    for req in [text, model, scope, schema, inline] {
+        crate::request_work::PROBE_WRITES.with(|writes| writes.set(0));
+        assert!(needs_blocking(&req));
+        crate::request_work::PROBE_WRITES.with(|writes| assert_eq!(writes.get(), 0));
+    }
+}

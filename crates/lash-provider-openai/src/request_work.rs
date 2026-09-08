@@ -3,6 +3,8 @@ use base64::Engine;
 use serde::Serialize;
 use std::io::{self, Write};
 
+mod raw_budget;
+
 // 64 KiB of source JSON (or resolved bytes) is enough to warrant a blocking
 // task. The bounded sizing pass stops at this limit; small requests avoid the
 // scheduling hop. Count JSON too so large text/tool schemas also leave Tokio.
@@ -21,12 +23,19 @@ pub(crate) fn attachment_data_url(media_type: &str, bytes: &[u8]) -> String {
     url
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static PROBE_WRITES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 struct SizeProbe {
     remaining: usize,
 }
 
 impl Write for SizeProbe {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        #[cfg(test)]
+        PROBE_WRITES.with(|writes| writes.set(writes.get() + 1));
         self.remaining = self
             .remaining
             .checked_sub(bytes.len())
@@ -40,13 +49,43 @@ impl Write for SizeProbe {
 }
 
 pub(crate) fn needs_blocking(request: &crate::support::LlmRequest) -> bool {
+    // Traverse raw lengths before JSON's escaping scanner can touch a large
+    // string. The traversal charges every node and stops at the same budget,
+    // including for many empty fields or large byte sequences.
+    if !raw_budget::RawBudget::fits(request, BLOCKING_THRESHOLD) {
+        return true;
+    }
     let mut remaining = BLOCKING_THRESHOLD;
     for bytes in request.resolved_stored.values() {
-        let Some(rest) = remaining.checked_sub(bytes.len()) else {
+        let Some(rest) = remaining.checked_sub(bytes.len().max(1)) else {
             return true;
         };
         remaining = rest;
     }
+    // The cache is deduplicated; materialization is not. Charge each inline
+    // or stored occurrence for its final data URL, without allocating it.
+    // Raw traversal above bounds this message/block walk as well.
+    for block in request
+        .messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+    {
+        if let crate::support::LlmContentBlock::Attachment { source } = block
+            && let Some(bytes) = request.attachment_bytes(source)
+        {
+            let expanded = base64::encoded_len(bytes.len(), true)
+                .and_then(|len| len.checked_add(13))
+                .and_then(|len| {
+                    len.checked_add(source.media_type().map_or(0, |mime| mime.as_str().len()))
+                });
+            let Some(rest) = expanded.and_then(|len| remaining.checked_sub(len)) else {
+                return true;
+            };
+            remaining = rest;
+        }
+    }
+    // Only bounded, small raw fields reach the escaping JSON writer. Keep
+    // its aggregate check for punctuation and escape expansion.
     serde_json::to_writer(&mut SizeProbe { remaining }, request).is_err()
 }
 
