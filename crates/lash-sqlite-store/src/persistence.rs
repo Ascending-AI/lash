@@ -1199,20 +1199,9 @@ impl SessionCommitStore for Store {
                             turn_cancel_input_outcome.affected_inputs.push(affected);
                         }
                     }
-                    if !commit.committed_attachment_ids.is_empty() {
-                        let now = now as i64;
-                        let mut stmt = tx
-                            .prepare(
-                                "UPDATE attachment_manifest
-                                 SET committed_at_ms = COALESCE(committed_at_ms, ?1)
-                                 WHERE attachment_id = ?2 AND session_id = ?3",
-                            )
-                            .map_err(sqlite_error)?;
-                        for id in &commit.committed_attachment_ids {
-                            stmt.execute(params![now, id.as_str(), commit.session_id])
-                                .map_err(sqlite_error)?;
-                        }
-                    }
+                    crate::attachments::commit_attachment_refs_conn(
+                        tx, &commit.session_id, &commit.committed_attachment_ids, now as i64,
+                    )?;
                     if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
                         tx.execute(
                             "UPDATE attachment_manifest

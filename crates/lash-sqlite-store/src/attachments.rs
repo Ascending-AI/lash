@@ -41,6 +41,45 @@ pub(crate) const RAW_ARTIFACT_NAMESPACE: &str = "lashlang_artifact";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 pub(crate) const CURRENT_TRIGGER_MANIFEST_NAMESPACE: &str = "lashlang_trigger_manifest";
 
+/// Adopt stored references under the boundary transaction, including a new
+/// receiver root when only another session has ever put the bytes.
+pub(crate) fn commit_attachment_refs_conn(
+    tx: &rusqlite::Connection,
+    session_id: &str,
+    attachment_ids: &[AttachmentId],
+    now: i64,
+) -> Result<(), StoreError> {
+    for id in attachment_ids {
+        let deleting: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM attachment_condemnations
+             WHERE attachment_id = ?1 AND phase = 'deleting')",
+                params![id.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(sqlite_error)?;
+        if deleting {
+            return Err(StoreError::Backend(format!(
+                "cannot adopt attachment `{id}` while physical deletion is in flight"
+            )));
+        }
+        tx.execute(
+            "DELETE FROM attachment_condemnations WHERE attachment_id = ?1 AND phase = 'condemned'",
+            params![id.as_str()],
+        )
+        .map_err(sqlite_error)?;
+        tx.execute(
+            "INSERT INTO attachment_manifest
+             (attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms)
+             VALUES (?2, ?3, ?4, ?1, ?1)
+             ON CONFLICT (session_id, attachment_id) DO UPDATE
+             SET committed_at_ms = COALESCE(attachment_manifest.committed_at_ms, excluded.committed_at_ms)",
+            params![now, id.as_str(), session_id, format!("lash-attachment://blake3/{id}")],
+        ).map_err(sqlite_error)?;
+    }
+    Ok(())
+}
+
 impl Store {
     async fn put_artifact_ref_blob(
         &self,
@@ -656,27 +695,13 @@ impl AttachmentManifest for Store {
         }
         block_on_store(async {
             let session_id = session_id.to_string();
-            let attachment_ids: Vec<String> = attachment_ids
-                .iter()
-                .map(|id| id.as_str().to_string())
-                .collect();
+            let attachment_ids = attachment_ids.to_vec();
             let now = self.clock.timestamp_ms() as i64;
             self.conn
                 .write_flow(move |tx| {
                     let outcome: Result<(), StoreError> = (|| {
                         crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
-                        let mut stmt = tx
-                            .prepare(
-                                "UPDATE attachment_manifest
-                         SET committed_at_ms = COALESCE(committed_at_ms, ?1)
-                         WHERE attachment_id = ?2 AND session_id = ?3",
-                            )
-                            .map_err(sqlite_error)?;
-                        for id in &attachment_ids {
-                            stmt.execute(params![now, id, session_id])
-                                .map_err(sqlite_error)?;
-                        }
-                        Ok(())
+                        commit_attachment_refs_conn(tx, &session_id, &attachment_ids, now)
                     })();
                     Ok(match outcome {
                         Ok(()) => TxOutcome::Commit(Ok(())),

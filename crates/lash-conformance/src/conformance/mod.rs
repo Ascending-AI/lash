@@ -23,6 +23,9 @@
 
 pub use lash_core::testing::coordinate_tool_provider_with_services;
 
+mod attachment_adoption;
+pub use attachment_adoption::cross_owner_attachment_adoption_conformance;
+
 mod artifact_store;
 mod attachment_owner;
 mod attachment_store;

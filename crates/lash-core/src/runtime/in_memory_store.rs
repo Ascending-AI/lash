@@ -1397,6 +1397,13 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             (pending, requests, outcome)
         };
 
+        // Refuse an armed attachment delete before publishing staged boundary
+        // state. The same factory transaction excludes attachment GC.
+        self.commit_attachment_refs_in_memory(
+            &commit.session_id,
+            &commit.committed_attachment_ids,
+            transaction_now,
+        )?;
         *self.queued_work.lock_recover() = staged_queued_work;
         *self.wake_redelivery_fences.lock_recover() = staged_wake_redelivery_fences;
         *self.queued_work_next_seq.lock_recover() = staged_queued_work_next_seq;
@@ -1450,11 +1457,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 .insert(commit.session_id.clone(), roots);
         }
         *self.checkpoint.lock_recover() = Some(hydrated_checkpoint);
-        self.commit_attachment_refs_in_memory(
-            &commit.session_id,
-            &commit.committed_attachment_ids,
-            transaction_now,
-        );
         self.commit_turn_attachment_intents(
             &commit.session_id,
             &commit.turn_commit,

@@ -192,6 +192,14 @@ attachment read guard and its membership capability are removed. History point
 reads still enforce graph membership, and process waits enforce observer
 subscription relationships. Hosts own authorization at their edge.
 
+A boundary commit adopting a stored content address also acquires a committed
+manifest root for the receiving session, even if that session never put the
+bytes. Root acquisition and graph publication share one transaction; failure
+leaves no new root. Adoption uses the existing digest fence, revoking an unarmed
+condemnation and refusing a physical delete already in flight. The receiver's
+root then follows the same owner-level retention rule as any other attachment.
+This closes cross-session adoption without changing tables or versions.
+
 The schema-free mechanism retains a deleted owner's committed manifest rows
 while any of that owner's graph nodes remain retained by a head, child, or pin.
 The final prefix retirement makes those roots reclaimable on the next sweep.

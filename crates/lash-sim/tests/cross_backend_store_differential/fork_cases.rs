@@ -1,5 +1,23 @@
 use super::*;
 
+/// Agreement alone misses a missing-root defect shared by every backend.
+/// Apply the same independent byte-survival and rollback oracle to all three.
+pub(super) async fn cross_owner_attachment_adoption(
+    sqlite_root: &Path,
+    postgres: &PostgresStorage,
+) {
+    let factories: [Arc<dyn SessionStoreFactory>; 3] = [
+        Arc::new(InMemorySessionStoreFactory::new()),
+        Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+            sqlite_root.join("cross-owner"),
+        )),
+        Arc::new(postgres.session_store_factory()),
+    ];
+    for factory in factories {
+        lash_conformance::cross_owner_attachment_adoption_conformance(factory).await;
+    }
+}
+
 pub(super) fn fence_precedence_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::ForkFencePrecedence,

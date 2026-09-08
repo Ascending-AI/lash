@@ -2495,6 +2495,7 @@ async fn cross_backend_store_differential_agrees() {
         divergences.is_empty(),
         "cross-backend durable state diverged:{divergences}"
     );
+    fork_cases::cross_owner_attachment_adoption(sqlite_root.path(), &postgres).await;
     assert_storage_failure_mappings_agree(sqlite_root.path(), &postgres).await;
     eprintln!(
         "PASSED cross-backend store differential; \

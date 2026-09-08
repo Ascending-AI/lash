@@ -237,19 +237,16 @@ pub trait AttachmentManifest: Send + Sync {
     /// out-of-band entry point for hosts that want to commit an id
     /// outside the normal turn-commit flow.
     ///
-    /// Commit is an *update in place* of an existing intent row, never an
-    /// insert: it stamps `committed_at_epoch_ms` on rows that already exist for
-    /// `(session_id, attachment_id)` and no-ops on ids with no row. This is
-    /// deliberate and sound in both edge cases:
+    /// Adoption acquires this session's own committed root, inserting a row
+    /// when the bytes were put only by another session. Existing intent metadata
+    /// and the first commit timestamp are preserved. A foreign owner's deletion
+    /// cannot release the receiver's root.
     ///
-    /// * An id with no row in *this* session (e.g. an attachment carried in from
-    ///   conversation history or a parent session) is already rooted by the
-    ///   session that recorded its intent — this session needs no row of its own.
-    /// * An id whose intent was *reconciled away* by GC (after its durable owner
-    ///   was proven dead and the retention window elapsed) also no-ops:
-    ///   because commit never re-inserts, it cannot resurrect a committed ref to
-    ///   bytes GC may already have collected. The read side surfaces the missing
-    ///   bytes as `NotFound` rather than through a dangling root.
+    /// Acquisition shares the attachment GC fence: it revokes an unarmed
+    /// condemnation and refuses an already armed physical delete. Normal runtime
+    /// adoption and graph publication succeed or roll back in one transaction.
+    /// This records reachability of supplied stored references; it does not put
+    /// bytes or validate their existence in the host's separate blob store.
     fn commit_refs(
         &self,
         session_id: &str,

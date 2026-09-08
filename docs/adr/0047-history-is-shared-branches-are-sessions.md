@@ -190,6 +190,11 @@ Attachment reads resolve content addresses directly; hosts own authorization.
 History point reads retain fork-lineage graph membership, and process waits
 retain observer subscription semantics. Neither relationship gate is authorization.
 
+Committing a stored attachment reference acquires a manifest root for the
+committing session, including references first put by another session. The
+boundary transaction owns this acquisition and its attachment GC fence, so
+successful adoption cannot be separated from publication of its receiver root.
+
 Committed attachment manifest rows survive owner deletion while any of that
 owner's graph nodes remain retained. The graph's existing head/child/pin
 retirement protocol supplies the prune precondition. A deleted owner's

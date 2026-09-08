@@ -9,21 +9,43 @@ use super::InMemorySessionStore;
 use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
+    /// The caller holds the factory write transaction. Check the whole batch
+    /// before mutating it, so an armed delete leaves no partially adopted roots.
     pub(super) fn commit_attachment_refs_in_memory(
         &self,
         session_id: &str,
         attachment_ids: &[crate::AttachmentId],
         committed_at_epoch_ms: u64,
-    ) {
-        let mut manifest = self.attachment_manifest.lock_recover();
-        for attachment_id in attachment_ids {
-            if let Some(entry) = manifest.get_mut(&(session_id.to_string(), attachment_id.clone()))
-            {
-                entry
-                    .committed_at_epoch_ms
-                    .get_or_insert(committed_at_epoch_ms);
+    ) -> Result<(), crate::StoreError> {
+        let mut condemnations = self.attachment_condemnations.lock_recover();
+        for id in attachment_ids {
+            if matches!(
+                condemnations.get(id),
+                Some(super::AttachmentCondemnationPhase::Deleting)
+            ) {
+                return Err(crate::StoreError::Backend(format!(
+                    "cannot adopt attachment `{id}` while physical deletion is in flight"
+                )));
             }
         }
+        let mut manifest = self.attachment_manifest.lock_recover();
+        for id in attachment_ids {
+            condemnations.remove(id);
+            manifest
+                .entry((session_id.to_string(), id.clone()))
+                .or_insert_with(|| crate::AttachmentManifestEntry {
+                    attachment_id: id.clone(),
+                    session_id: session_id.to_string(),
+                    canonical_uri: format!("lash-attachment://blake3/{id}"),
+                    intent_at_epoch_ms: committed_at_epoch_ms,
+                    committed_at_epoch_ms: None,
+                    owner_kind: None,
+                    owner_id: None,
+                })
+                .committed_at_epoch_ms
+                .get_or_insert(committed_at_epoch_ms);
+        }
+        Ok(())
     }
 
     pub(super) fn commit_turn_attachment_intents(
@@ -135,8 +157,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         let committed_at_epoch_ms = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(session_id)?;
-        self.commit_attachment_refs_in_memory(session_id, attachment_ids, committed_at_epoch_ms);
-        Ok(())
+        self.commit_attachment_refs_in_memory(session_id, attachment_ids, committed_at_epoch_ms)
     }
 
     fn list_uncommitted(
