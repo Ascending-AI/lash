@@ -22,13 +22,18 @@ impl ManagedSessionCapability {
                 &plan.session_id,
                 "create-session",
             );
-            let (commit, persisted_node_ids) =
+            let (mut commit, persisted_node_ids) =
                 crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                     &mut persisted_state,
                     &[],
                     operation,
                     materialized.runtime.host.core.durability.commit_budget,
                 )
+                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+            // Stamp last: the semantic-boundary identity hashes the commit's
+            // canonical request content, so every content edit must precede it.
+            commit
+                .stamp_semantic_boundary()
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;
             // Lane-less by construction: the child is being created before it
             // owns an execution lane. A parent guard, if present, names a

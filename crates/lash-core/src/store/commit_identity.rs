@@ -27,6 +27,9 @@ pub enum RuntimeCommitReceiptDecision {
     Replay,
     /// The append operation id was reused for different semantic request content.
     AppendIdentityConflict,
+    /// The semantic-boundary operation id was reused for different canonical
+    /// request content.
+    SemanticBoundaryIdentityConflict,
     /// The receipt has no comparable append identity and its commit hash differs.
     RuntimeCommitConflict,
     /// Matching receipt evidence carries contradictory requested-node counts.
@@ -89,6 +92,23 @@ pub fn decide_runtime_commit_receipt(
                 stored: Some(*stored_count),
                 attempted: Some(*attempted_count),
             };
+        } else if let (
+            AppendRequestIdentity::SemanticBoundary {
+                operation: stored_operation,
+                encoding_version: stored_version,
+                request_hash: stored_hash,
+            },
+            AppendRequestIdentity::SemanticBoundary {
+                operation: attempted_operation,
+                encoding_version: attempted_version,
+                request_hash: attempted_hash,
+            },
+        ) = (stored_identity, attempted_identity)
+            && stored_operation == attempted_operation
+            && stored_version == attempted_version
+            && stored_hash != attempted_hash
+        {
+            return RuntimeCommitReceiptDecision::SemanticBoundaryIdentityConflict;
         }
         return RuntimeCommitReceiptDecision::Replay;
     }
@@ -121,23 +141,71 @@ pub fn decide_runtime_commit_receipt(
         return RuntimeCommitReceiptDecision::Replay;
     }
 
+    if let (
+        AppendRequestIdentity::SemanticBoundary {
+            operation: stored_operation,
+            encoding_version: stored_version,
+            request_hash: stored_hash,
+        },
+        AppendRequestIdentity::SemanticBoundary {
+            operation: attempted_operation,
+            encoding_version: attempted_version,
+            request_hash: attempted_hash,
+        },
+    ) = (stored_identity, attempted_identity)
+        && stored_operation == attempted_operation
+        && stored_version == attempted_version
+    {
+        // The semantic-boundary answer to "same request retried?": a rebuilt
+        // commit whose canonical request matches replays even after the head
+        // has advanced; a differing canonical encoding is refused, never
+        // silently deduplicated.
+        if stored_hash != attempted_hash {
+            return RuntimeCommitReceiptDecision::SemanticBoundaryIdentityConflict;
+        }
+        return RuntimeCommitReceiptDecision::Replay;
+    }
+
     RuntimeCommitReceiptDecision::RuntimeCommitConflict
 }
 
-pub(super) fn validate_append_receipt_identity(
-    completed: &RuntimeTurnCommitStamp,
-) -> Result<(), StoreError> {
-    if matches!(
-        completed.append_request_identity,
-        AppendRequestIdentity::Append { .. }
-    ) && completed.operation.key != "append-session-nodes"
-    {
-        return Err(StoreError::Backend(format!(
-            "append receipt identity metadata is invalid for operation `{}`",
-            completed.operation.key
-        )));
+pub(super) fn validate_receipt_identity(commit: &RuntimeCommit) -> Result<(), StoreError> {
+    let completed = &commit.turn_commit;
+    match &completed.append_request_identity {
+        AppendRequestIdentity::PlainCommit => Ok(()),
+        AppendRequestIdentity::Append { .. } => {
+            if completed.operation.key != "append-session-nodes" {
+                return Err(StoreError::Backend(format!(
+                    "append receipt identity metadata is invalid for operation `{}`",
+                    completed.operation.key
+                )));
+            }
+            Ok(())
+        }
+        AppendRequestIdentity::SemanticBoundary {
+            operation,
+            encoding_version,
+            request_hash,
+        } => {
+            if completed.operation.key != operation.operation_key() {
+                return Err(StoreError::Backend(format!(
+                    "semantic-boundary receipt identity `{}` is invalid for operation `{}`",
+                    operation.operation_key(),
+                    completed.operation.key
+                )));
+            }
+            super::semantic_boundary::validate_semantic_boundary_commit_is_pure(commit)?;
+            let (expected_version, expected_hash) =
+                super::semantic_boundary::semantic_boundary_request_identity(commit, *operation)?;
+            if *encoding_version != expected_version || *request_hash != expected_hash {
+                return Err(StoreError::Backend(format!(
+                    "semantic-boundary receipt identity does not match the canonical `{}` request encoding",
+                    operation.operation_key()
+                )));
+            }
+            Ok(())
+        }
     }
-    Ok(())
 }
 
 fn push_len_prefixed(encoded: &mut Vec<u8>, bytes: &[u8]) {

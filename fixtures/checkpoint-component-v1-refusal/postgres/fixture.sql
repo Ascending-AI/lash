@@ -462,6 +462,7 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_turn_commits (
     request_identity_hash text,
     requested_node_count bigint,
     identity_encoding_version integer,
+    CONSTRAINT lash_runtime_turn_commits_append_identity_all_or_none CHECK ((((request_identity_hash IS NULL) = (identity_encoding_version IS NULL)) AND ((requested_node_count IS NULL) OR (request_identity_hash IS NOT NULL)))),
     CONSTRAINT lash_runtime_turn_commits_check CHECK ((((request_identity_hash IS NULL) = (requested_node_count IS NULL)) AND ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL))))
 );
 
@@ -937,7 +938,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 77);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 78);
 
 
 --

@@ -25,6 +25,7 @@ pub mod queued_work;
 mod realization;
 mod runtime_commit;
 mod runtime_commit_plan;
+mod semantic_boundary;
 pub(crate) mod session_execution_lease;
 mod state_version;
 #[cfg(any(test, feature = "testing"))]
@@ -69,7 +70,7 @@ pub use queued_work::{
 pub use realization::commit_runtime_state_verified;
 pub use runtime_commit::{
     AppendRequestIdentity, RuntimeCommit, RuntimeCommitReceipt, RuntimeTurnCommitStamp,
-    RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
+    RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SemanticBoundaryOperation,
 };
 #[doc(hidden)]
 pub use runtime_commit_plan::{
@@ -443,7 +444,7 @@ impl RuntimeCommit {
                 turn_id: completed.operation.storage_key()?,
             });
         }
-        commit_identity::validate_append_receipt_identity(completed)?;
+        commit_identity::validate_receipt_identity(self)?;
         self.validate_usage_delta_identities()?;
         Ok(())
     }

@@ -1745,6 +1745,10 @@ lash::persistence::AppendRequestIdentity::Append::request_hash
 lash::persistence::AppendRequestIdentity::Append::requested_ancestor_node_id
 lash::persistence::AppendRequestIdentity::Append::requested_node_count
 lash::persistence::AppendRequestIdentity::PlainCommit
+lash::persistence::AppendRequestIdentity::SemanticBoundary
+lash::persistence::AppendRequestIdentity::SemanticBoundary::encoding_version
+lash::persistence::AppendRequestIdentity::SemanticBoundary::operation
+lash::persistence::AppendRequestIdentity::SemanticBoundary::request_hash
 lash::persistence::AttachmentCondemnation
 lash::persistence::AttachmentCondemnation::AlreadyCondemned
 lash::persistence::AttachmentCondemnation::Condemned
@@ -2310,6 +2314,7 @@ lash::persistence::RuntimeCommit::release_session_execution_lease
 lash::persistence::RuntimeCommit::releasing_session_execution_lease
 lash::persistence::RuntimeCommit::session_execution_lease_fence
 lash::persistence::RuntimeCommit::session_id
+lash::persistence::RuntimeCommit::stamp_semantic_boundary
 lash::persistence::RuntimeCommit::turn_commit
 lash::persistence::RuntimeCommit::turn_commit_hash
 lash::persistence::RuntimeCommit::turn_input_applications
@@ -2461,6 +2466,12 @@ lash::persistence::SelectedQueuedWorkClaimOutcome::expect
 lash::persistence::SelectedQueuedWorkClaimOutcome::map
 lash::persistence::SelectedQueuedWorkClaimOutcome::new
 lash::persistence::SelectedQueuedWorkClaimOutcome::ok_or_else
+lash::persistence::SemanticBoundaryOperation
+lash::persistence::SemanticBoundaryOperation::CreateSession
+lash::persistence::SemanticBoundaryOperation::RecordConfig
+lash::persistence::SemanticBoundaryOperation::UsageLedger
+lash::persistence::SemanticBoundaryOperation::from_operation_key
+lash::persistence::SemanticBoundaryOperation::operation_key
 lash::persistence::SessionAdmission
 lash::persistence::SessionAdmission::Created
 lash::persistence::SessionAdmission::Rebound
@@ -2838,6 +2849,9 @@ lash::persistence::StoreError::RuntimeTurnCommitConflict::session_id
 lash::persistence::StoreError::RuntimeTurnCommitConflict::turn_id
 lash::persistence::StoreError::SelectedQueuedWorkRequiresInterruptedComposition
 lash::persistence::StoreError::SelectedQueuedWorkRequiresInterruptedComposition::required_batch_ids
+lash::persistence::StoreError::SemanticBoundaryIdentityConflict
+lash::persistence::StoreError::SemanticBoundaryIdentityConflict::operation_key
+lash::persistence::StoreError::SemanticBoundaryIdentityConflict::session_id
 lash::persistence::StoreError::SessionBindingMismatch
 lash::persistence::StoreError::SessionBindingMismatch::attempted_session_id
 lash::persistence::StoreError::SessionBindingMismatch::bound_session_id

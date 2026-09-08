@@ -1,4 +1,6 @@
 //! FIG-869: stable boundary names do not imply semantic request replay.
+//! FIG-2480: operations that adopt the `SemanticBoundary` receipt identity
+//! replay rebuilt same-request retries and refuse differing canonical content.
 //! Exercise real SQLite receipt adjudication with an intervening committed head.
 
 use lash_core::{
@@ -26,11 +28,23 @@ fn commit_state(boundary: &str, key: &str, state: &RuntimeSessionState) -> Runti
         .0
 }
 
-async fn plain_boundary_retry_after_head_advance(boundary: &str, key: &str) {
+fn semantic_commit_state(boundary: &str, key: &str, state: &RuntimeSessionState) -> RuntimeCommit {
+    let mut commit = commit_state(boundary, key, state);
+    commit
+        .stamp_semantic_boundary()
+        .expect("semantic-boundary stamp");
+    commit
+}
+
+async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
     let directory = tempfile::tempdir().expect("database directory");
     let path = directory.path().join("session.db");
     let store = Store::open(&path).await.expect("SQLite store");
-    let first = commit(boundary, key, 0);
+    let state = RuntimeSessionState {
+        session_id: "root".into(),
+        ..RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded))
+    };
+    let first = semantic_commit_state(boundary, key, &state);
     let original = store
         .commit_runtime_state(first.clone())
         .await
@@ -53,21 +67,34 @@ async fn plain_boundary_retry_after_head_advance(boundary: &str, key: &str) {
     assert!(replay.receipt_replayed);
     assert_eq!(replay.head_revision, original.head_revision);
     assert_eq!(replay.checkpoint_ref, original.checkpoint_ref);
-    let head_only = store
-        .commit_runtime_state(commit(boundary, key, advanced.head_revision))
-        .await
-        .expect("CAS revision alone is excluded from canonical identity");
-    assert!(head_only.receipt_replayed);
+    // FIG-2480: a rebuilt same-request retry at the advanced head is answered
+    // from durable receipt evidence, not refused for its moved commit hash.
     let loaded = lash_core::store::load_persisted_session_state(&store)
         .await
         .expect("load advanced state")
         .expect("advanced state");
     let rebuilt = store
-        .commit_runtime_state(commit_state(boundary, key, &loaded))
-        .await;
+        .commit_runtime_state(semantic_commit_state(boundary, key, &loaded))
+        .await
+        .expect("rebuilt same-request retry replays");
+    assert!(rebuilt.receipt_replayed);
+    assert_eq!(rebuilt.head_revision, original.head_revision);
+    assert_eq!(rebuilt.checkpoint_ref, original.checkpoint_ref);
+    // A non-retry with differing canonical content is refused, never silently
+    // deduplicated into the stored receipt.
+    let mut changed = commit_state(boundary, key, &loaded);
+    changed.config.provider_id = "changed-provider".into();
+    changed
+        .stamp_semantic_boundary()
+        .expect("semantic-boundary stamp");
+    let refused = store.commit_runtime_state(changed).await;
     assert!(
-        matches!(rebuilt, Err(StoreError::RuntimeTurnCommitConflict { .. })),
-        "plain boundary rebuilt at a later head must conflict: {rebuilt:?}"
+        matches!(
+            refused,
+            Err(StoreError::SemanticBoundaryIdentityConflict { ref operation_key, .. })
+                if operation_key == key
+        ),
+        "differing canonical encoding must be refused: {refused:?}"
     );
     assert_eq!(
         store
@@ -77,23 +104,104 @@ async fn plain_boundary_retry_after_head_advance(boundary: &str, key: &str) {
             .expect("session")
             .head_revision,
         advanced.head_revision,
-        "neither retry may advance or rewind the durable head"
+        "neither retry nor refusal may advance or rewind the durable head"
     );
 }
 
 #[tokio::test]
 async fn record_config_retry_after_head_advance() {
-    plain_boundary_retry_after_head_advance("protocol-materialization", "record-config").await;
+    semantic_boundary_retry_after_head_advance("protocol-materialization", "record-config").await;
 }
 
 #[tokio::test]
 async fn create_session_retry_after_head_advance() {
-    plain_boundary_retry_after_head_advance("root", "create-session").await;
+    semantic_boundary_retry_after_head_advance("root", "create-session").await;
 }
 
 #[tokio::test]
 async fn usage_ledger_retry_after_head_advance() {
-    plain_boundary_retry_after_head_advance("child-turn", "usage-ledger").await;
+    semantic_boundary_retry_after_head_advance("child-turn", "usage-ledger").await;
+}
+
+#[tokio::test]
+async fn usage_ledger_retry_with_staged_usage_after_head_advance() {
+    let directory = tempfile::tempdir().expect("database directory");
+    let path = directory.path().join("session.db");
+    let store = Store::open(&path).await.expect("SQLite store");
+    let entry = |source: &str| lash_core::TokenLedgerEntry {
+        source: source.into(),
+        model: "ledger-model".into(),
+        usage: lash_core::TokenUsage::default(),
+    };
+    let usage_commit = |state: &RuntimeSessionState, source: &str| {
+        let mut commit = commit_state("child-turn", "usage-ledger", state);
+        commit.usage_deltas = lash_core::store::RuntimeUsageDelta::for_operation(
+            &commit.turn_commit.operation,
+            &[entry(source)],
+        )
+        .expect("usage delta identities");
+        commit
+            .stamp_semantic_boundary()
+            .expect("semantic-boundary stamp");
+        commit
+    };
+    let state = RuntimeSessionState {
+        session_id: "root".into(),
+        ..RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded))
+    };
+    let first = usage_commit(&state, "child-turn-usage");
+    let original = store
+        .commit_runtime_state(first.clone())
+        .await
+        .expect("first usage flush");
+    let mut advanced_state = lash_core::store::load_persisted_session_state(&store)
+        .await
+        .expect("load initial state")
+        .expect("initial state");
+    advanced_state.turn_index += 1;
+    let advanced = store
+        .commit_runtime_state(commit_state("intervening", "advance", &advanced_state))
+        .await
+        .expect("advance head");
+    // FIG-2480: a rebuilt retry carrying the same staged usage is answered from
+    // durable receipt evidence and publishes no second ledger row.
+    let loaded = lash_core::store::load_persisted_session_state(&store)
+        .await
+        .expect("load advanced state")
+        .expect("advanced state");
+    let rebuilt = store
+        .commit_runtime_state(usage_commit(&loaded, "child-turn-usage"))
+        .await
+        .expect("rebuilt same-usage retry replays");
+    assert!(rebuilt.receipt_replayed);
+    assert_eq!(rebuilt.head_revision, original.head_revision);
+    assert_eq!(
+        rebuilt.committed_usage_delta_identities, original.committed_usage_delta_identities,
+        "replay must confirm the originally committed usage identities"
+    );
+    // Differing staged usage under the same boundary is a different request:
+    // refused, never deduplicated into the stored receipt.
+    let refused = store
+        .commit_runtime_state(usage_commit(&loaded, "child-turn-usage-changed"))
+        .await;
+    assert!(
+        matches!(
+            refused,
+            Err(StoreError::SemanticBoundaryIdentityConflict { ref operation_key, .. })
+                if operation_key == "usage-ledger"
+        ),
+        "differing staged usage must be refused: {refused:?}"
+    );
+    assert_eq!(
+        store
+            .load_session()
+            .await
+            .expect("read head")
+            .expect("session")
+            .head_revision,
+        advanced.head_revision,
+        "neither retry nor refusal may advance or rewind the durable head"
+    );
 }
 
 #[tokio::test]

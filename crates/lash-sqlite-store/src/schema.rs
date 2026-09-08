@@ -247,6 +247,9 @@ CREATE TABLE IF NOT EXISTS session_meta_fork_inheritance_processes (
     FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
 );
 
+-- Identity families: all-NULL is a plain commit; hash+version+count is an
+-- append identity; hash+version without a count is a semantic-boundary
+-- identity (FIG-2480). A count without a hash is representable nowhere.
 CREATE TABLE IF NOT EXISTS runtime_turn_commits (
     session_id                  TEXT NOT NULL,
     turn_id                     TEXT NOT NULL,
@@ -257,7 +260,7 @@ CREATE TABLE IF NOT EXISTS runtime_turn_commits (
     requested_node_count        INTEGER,
     identity_encoding_version   INTEGER,
     PRIMARY KEY (session_id, turn_id),
-    CHECK ((request_identity_hash IS NULL) = (requested_node_count IS NULL) AND (request_identity_hash IS NULL) = (identity_encoding_version IS NULL))
+    CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL) AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL))
 );
 
 CREATE TABLE IF NOT EXISTS turn_cancel_requests (
@@ -543,7 +546,11 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// Version 50 stores checked `FrameKey` values in every frame-open node. Existing
 /// catalogs contain raw initial-frame keys and are rejected rather than decoded
 /// through a legacy path.
-pub(crate) const SCHEMA_VERSION: i32 = 50;
+/// Version 51 admits semantic-boundary receipt identities (FIG-2480): the
+/// runtime-turn-commit identity CHECK now accepts a populated hash and version
+/// with a NULL requested-node count. Existing catalogs are rejected rather
+/// than migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 51;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

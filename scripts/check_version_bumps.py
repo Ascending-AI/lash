@@ -71,6 +71,23 @@ REGISTRATION_BASELINES = {
     "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
         "sha256:bcb22b869fe0b86eb9a507b5f1841b733360cfba1164a407d189648998cf1dc9"
     ),
+    # FIG-2480: reviewer-confirmed one-time baseline pinning the v1
+    # registration state of the semantic-boundary request-identity encodings.
+    # Two independent reviews cleared the encoding; domain discovery and schema
+    # congruence fixes left the identity bytes unchanged, so version 1 remains
+    # current. The three constants share one guarded shape (the shared request
+    # projection hashed under operation-owned domains) and one fingerprint.
+    # The baseline pins this STATE; any further guarded-shape drift re-fails
+    # the gate.
+    "crates/lash-core/src/store/semantic_boundary.rs:RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:0b06228ca33674b8cbfcb73a02c46a03f6629dcc7949f9da785a43c9082bcfdc"
+    ),
+    "crates/lash-core/src/store/semantic_boundary.rs:CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:0b06228ca33674b8cbfcb73a02c46a03f6629dcc7949f9da785a43c9082bcfdc"
+    ),
+    "crates/lash-core/src/store/semantic_boundary.rs:USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:0b06228ca33674b8cbfcb73a02c46a03f6629dcc7949f9da785a43c9082bcfdc"
+    ),
 }
 
 # Burned one-time proofs that a change moved Rust identifiers across a guarded

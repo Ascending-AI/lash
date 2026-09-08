@@ -67,6 +67,12 @@ macro_rules! runtime_persistence_tests {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn append_request_receipt_rejects_corrupt_node_count() { $runner($crate::RuntimePersistenceLaw::append_request_receipt_rejects_corrupt_node_count).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn semantic_boundary_receipt_replays_after_head_advance() { $runner($crate::RuntimePersistenceLaw::semantic_boundary_receipt_replays_after_head_advance).await; }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn semantic_boundary_receipt_rejects_changed_content() { $runner($crate::RuntimePersistenceLaw::semantic_boundary_receipt_rejects_changed_content).await; }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn semantic_boundary_receipt_rejects_mislabeled_identity() { $runner($crate::RuntimePersistenceLaw::semantic_boundary_receipt_rejects_mislabeled_identity).await; }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn concurrent_same_append_operation_applies_exactly_once() { $runner($crate::RuntimePersistenceLaw::concurrent_same_append_operation_applies_exactly_once).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn legacy_append_receipt_keeps_exact_hash_semantics() { $runner($crate::RuntimePersistenceLaw::legacy_append_receipt_keeps_exact_hash_semantics).await; }
@@ -262,6 +268,12 @@ macro_rules! runtime_persistence_reopenable_tests {
         async fn append_request_exact_hash_rejects_changed_ancestor() { $runner($crate::RuntimePersistenceLaw::append_request_exact_hash_rejects_changed_ancestor).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn append_request_receipt_rejects_corrupt_node_count() { $runner($crate::RuntimePersistenceLaw::append_request_receipt_rejects_corrupt_node_count).await; }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn semantic_boundary_receipt_replays_after_head_advance() { $runner($crate::RuntimePersistenceLaw::semantic_boundary_receipt_replays_after_head_advance).await; }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn semantic_boundary_receipt_rejects_changed_content() { $runner($crate::RuntimePersistenceLaw::semantic_boundary_receipt_rejects_changed_content).await; }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn semantic_boundary_receipt_rejects_mislabeled_identity() { $runner($crate::RuntimePersistenceLaw::semantic_boundary_receipt_rejects_mislabeled_identity).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn concurrent_same_append_operation_applies_exactly_once() { $runner($crate::RuntimePersistenceLaw::concurrent_same_append_operation_applies_exactly_once).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

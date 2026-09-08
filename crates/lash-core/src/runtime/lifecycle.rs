@@ -595,6 +595,11 @@ impl LashRuntime {
         if protocol_only_first_commit {
             commit.config = crate::PersistedSessionConfig::new(self.state.policy.turn_budget);
         }
+        // Stamp last: the semantic-boundary identity hashes the commit's
+        // canonical request content, so it must ride the final config.
+        commit
+            .stamp_semantic_boundary()
+            .map_err(|error| SessionError::Protocol(error.to_string()))?;
         let result = commit_runtime_state_with_fresh_session_execution_lease(
             store,
             commit,
