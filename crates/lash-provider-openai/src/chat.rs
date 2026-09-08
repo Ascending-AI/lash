@@ -71,17 +71,13 @@ impl OpenAiCompatibleProvider {
                 let bytes = req
                     .attachment_bytes(source)
                     .expect("validated attachment bytes");
-                let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-                format!("data:{media_type};base64,{b64}")
+                crate::request_work::attachment_data_url(media_type.as_str(), bytes)
             }
             AttachmentSource::ProviderFile { .. } => unreachable!(),
         };
-        json!({
-            "type": "image_url",
-            "image_url": {
-                "url": url,
-            },
-        })
+        let mut part = json!({"type": "image_url", "image_url": {}});
+        part["image_url"]["url"] = Value::String(url);
+        part
     }
 
     fn build_chat_messages(req: &LlmRequest) -> Vec<Value> {
@@ -394,9 +390,10 @@ impl OpenAiCompatibleProvider {
             Self::apply_chat_cache_control(req, policy.cache_retention, &mut messages, &mut tools);
         let mut body = json!({
             "model": req.model,
-            "messages": messages,
+            "messages": null,
             "stream": stream,
         });
+        body["messages"] = Value::Array(messages);
         if let Some(provider_routing) = compat.provider_routing {
             body["provider"] = json!(provider_routing);
         }
@@ -578,7 +575,7 @@ impl OpenAiCompatibleProvider {
         }
         let event: ChatSseEvent<'_> = serde_json::from_str(raw).map_err(|e| {
             LlmTransportError::new(format!("Invalid Chat Completions SSE payload: {e}"))
-                .with_raw(raw)
+                .with_raw(crate::request_work::body_excerpt(raw))
                 .with_retry_verdict(TransportRetryVerdict::NotRetryable)
         })?;
         if let Some(error) = event.error.as_ref() {
@@ -587,9 +584,11 @@ impl OpenAiCompatibleProvider {
                 .get("message")
                 .and_then(Value::as_str)
                 .unwrap_or("OpenAI-compatible chat stream error");
-            return Err(LlmTransportError::new(message)
-                .with_retry_verdict(retry_verdict)
-                .with_raw(raw));
+            return Err(
+                LlmTransportError::new(crate::request_work::diagnostic_message(message))
+                    .with_retry_verdict(retry_verdict)
+                    .with_raw(crate::request_work::body_excerpt(raw)),
+            );
         }
         let mut event_evidence = None;
         merge_execution_evidence(

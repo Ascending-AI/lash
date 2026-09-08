@@ -1,4 +1,5 @@
 pub(crate) use async_trait::async_trait;
+#[cfg(test)]
 pub(crate) use base64::Engine;
 pub(crate) use serde::Deserialize;
 pub(crate) use serde_json::{Value, json};

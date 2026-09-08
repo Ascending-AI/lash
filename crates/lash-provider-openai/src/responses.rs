@@ -41,10 +41,11 @@ impl OpenAiCompatibleProvider {
         let mut body = json!({
             "model": req.model,
             "instructions": instructions,
-            "input": input,
+            "input": null,
             "tools": tools,
             "stream": stream,
         });
+        body["input"] = Value::Array(input);
         apply_max_tokens_field(&mut body, compat.max_tokens_field, policy.max_output_tokens);
         // Responses accepts `temperature` but has no `seed` field, so a
         // requested seed is simply not expressible on this wire.

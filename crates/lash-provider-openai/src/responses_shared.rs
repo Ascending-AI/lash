@@ -21,7 +21,6 @@
 //! (system→`instructions` hoisting and tool-result image folding), its
 //! endpoint/headers, and its failure classification.
 
-use base64::Engine;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -96,12 +95,13 @@ pub fn input_attachment_part(req: &LlmRequest, source: &AttachmentSource) -> Val
                 let bytes = req
                     .attachment_bytes(source)
                     .expect("validated attachment bytes");
-                let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-                format!("data:{media_type};base64,{b64}")
+                crate::request_work::attachment_data_url(media_type.as_str(), bytes)
             }
             AttachmentSource::ProviderFile { .. } => unreachable!(),
         };
-        return json!({"type": "input_image", "image_url": image_url});
+        let mut part = json!({"type": "input_image"});
+        part["image_url"] = Value::String(image_url);
+        return part;
     }
     match source {
         AttachmentSource::ExternalUrl { url, .. } => {
@@ -111,11 +111,12 @@ pub fn input_attachment_part(req: &LlmRequest, source: &AttachmentSource) -> Val
             let bytes = req
                 .attachment_bytes(source)
                 .expect("validated attachment bytes");
-            let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-            json!({
-                "type": "input_file",
-                "file_data": format!("data:{media_type};base64,{b64}"),
-            })
+            let mut part = json!({"type": "input_file"});
+            part["file_data"] = Value::String(crate::request_work::attachment_data_url(
+                media_type.as_str(),
+                bytes,
+            ));
+            part
         }
         AttachmentSource::ProviderFile { .. } => unreachable!(),
     }
@@ -268,8 +269,8 @@ fn flush_pending_content(
             "role": "assistant",
             "id": meta.id.unwrap_or_else(|| format!("msg_lash_{message_index}_{part_index}")),
             "status": meta.status.unwrap_or_else(|| "completed".to_string()),
-            "content": content,
         });
+        item["content"] = Value::Array(content);
         if let Some(phase) = meta.phase.as_ref() {
             item["phase"] = json!(phase);
         }
@@ -283,10 +284,9 @@ fn flush_pending_content(
     {
         prev["content"].as_array_mut().unwrap().extend(content);
     } else {
-        input.push(json!({
-            "role": role,
-            "content": content,
-        }));
+        let mut item = json!({"role": role});
+        item["content"] = Value::Array(content);
+        input.push(item);
     }
 }
 

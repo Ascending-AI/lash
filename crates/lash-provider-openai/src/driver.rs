@@ -1,3 +1,4 @@
+use crate::request_work::{body_excerpt, needs_blocking, run, serialize_body};
 use crate::support::*;
 
 const CACHE_SESSION_ID_MAX_CHARS: usize = 256;
@@ -253,14 +254,45 @@ pub(crate) async fn complete(
         .model_capability
         .stream_termination
         .unwrap_or(compat.stream_termination);
-    let body = build_request_body(provider, &req, endpoint, stream, &origin_route)?;
-    let generation_disposition = Some(generation_disposition(&req, &body));
-    let body_bytes = serde_json::to_vec(&body)
-        .map_err(|e| LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error())))?;
-    let request_fingerprint = request_fingerprint(&body_bytes);
+    let request_id = req.scope.request_id.clone();
+    let blocking = needs_blocking(&req);
+    // Clone only request-building configuration, never a retained resume state
+    // or the request's resolved attachment buffers. Move the request to work.
+    let builder = OpenAiCompatibleProvider {
+        api_key: String::new(),
+        base_url: provider.base_url.clone(),
+        options: provider.options.clone(),
+        compat: provider.compat.clone(),
+        wire: provider.wire.clone(),
+        transport: provider.transport.clone(),
+        responses_resume: None,
+    };
+    let build_route = origin_route.clone();
+    let (body_bytes, generation_disposition, fingerprint, request_body_for_error) =
+        run(blocking, move || {
+            let mut req = req;
+            // Sanitize the owned request before the builders borrow it, avoiding
+            // replay_safe_for cloning the resolved-stored byte cache.
+            req.drop_foreign_replay(&build_route);
+            let body = build_request_body(&builder, &req, endpoint, stream, &build_route)?;
+            let disposition = Some(generation_disposition(&req, &body));
+            let bytes = serialize_body(&body).map_err(|e| {
+                LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error()))
+            })?;
+            let fingerprint = request_fingerprint(&bytes);
+            let diagnostic = body_excerpt(std::str::from_utf8(&bytes).expect("JSON is UTF-8"));
+            emit_provider_request_trace(
+                req.provider_trace.as_ref(),
+                "openai_compatible",
+                endpoint.request_trace_name(),
+                &bytes,
+            );
+            Ok::<_, LlmTransportError>((bytes, disposition, fingerprint, diagnostic))
+        })
+        .await??;
     let request_key = ResponsesRequestKey {
-        request_id: req.scope.request_id.clone(),
-        fingerprint: request_fingerprint,
+        request_id: request_id.clone(),
+        fingerprint,
     };
     let responses_resume = if endpoint == CompletionEndpoint::Responses && stream {
         let matches_request = provider
@@ -275,14 +307,7 @@ pub(crate) async fn complete(
         provider.responses_resume = None;
         None
     };
-    emit_provider_request_trace(
-        provider_trace.as_ref(),
-        "openai_compatible",
-        endpoint.request_trace_name(),
-        &body_bytes,
-    );
     let request_body = bytes::Bytes::from(body_bytes);
-    let request_body_for_error = String::from_utf8_lossy(&request_body).into_owned();
     let base_url = provider.base_url.trim_end_matches('/');
     let mut creation_url = match base_url.split_once('?') {
         Some((base_path, query)) => format!("{}/{}?{}", base_path, endpoint.path(), query),
@@ -331,10 +356,7 @@ pub(crate) async fn complete(
         ("Accept".to_string(), "text/event-stream".to_string()),
     ];
     if compat.cache_session_affinity {
-        headers.push((
-            "x-client-request-id".to_string(),
-            req.scope.request_id.clone(),
-        ));
+        headers.push(("x-client-request-id".to_string(), request_id.clone()));
     }
     let http_request = LlmHttpRequest {
         method: http_method,
@@ -386,19 +408,32 @@ pub(crate) async fn complete(
         )
         .await
         .unwrap_or_default();
-        let message = format!("{} with {}", endpoint.request_failed_prefix(), status);
-        // Preserve the provider's typed error code before the shared status
-        // classifier runs; exact overflow codes are authoritative.
-        let mut failure = http_error_envelope(
-            message,
-            status,
-            headers,
-            text.clone(),
-            Some(request_body_for_error),
-        );
-        if let Ok(value) = serde_json::from_str::<Value>(&text) {
-            failure = classify_openai_error(&value, failure);
-        }
+        let mut failure = run(
+            crate::request_work::bytes_need_blocking(text.len()),
+            move || {
+                let message = format!("{} with {}", endpoint.request_failed_prefix(), status);
+                let diagnostic = body_excerpt(&text);
+                let value = serde_json::from_str::<Value>(&text).ok();
+                let metadata = value.as_ref().and_then(crate::request_work::error_metadata);
+                // Classify the original response, even when its code lies beyond
+                // the diagnostic excerpt. Only bounded strings enter the envelope.
+                let mut failure = http_error_envelope(
+                    message,
+                    status,
+                    headers,
+                    metadata
+                        .as_deref()
+                        .unwrap_or_else(|| crate::request_work::body_prefix(&text)),
+                    Some(request_body_for_error),
+                );
+                if let Some(value) = value {
+                    failure = classify_openai_error(&value, failure);
+                }
+                failure.raw = Some(Box::new(diagnostic));
+                failure
+            },
+        )
+        .await?;
         if let Some(resume) = responses_resume {
             failure = responses_stream_failure(
                 provider,
@@ -423,7 +458,7 @@ pub(crate) async fn complete(
         && let Some(tx) = &stream_events
     {
         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
-            request_body: Some(request_body_for_error.clone()),
+            request_body: Some(request_body_text(request_body.clone(), blocking).await?),
             http_summary: Some(http_summary.clone()),
             execution_evidence: provider_request_id.clone().map(|provider_request_id| {
                 ExecutionEvidence {
@@ -543,7 +578,7 @@ pub(crate) async fn complete(
     // consume this public diagnostic through `LlmDebug`. This also means the
     // exact body is serialized in durable effect outcomes; that journal-size
     // cost is accepted deliberately for the existing cross-provider contract.
-    response.request_body = Some(request_body_for_error);
+    response.request_body = Some(request_body_text(request_body, blocking).await?);
     response.response_metadata = capture.into_metadata();
     response.generation_disposition = generation_disposition;
     response
@@ -554,6 +589,16 @@ pub(crate) async fn complete(
                 .with_code("provider_replay_origin_conflict")
         })?;
     Ok(response)
+}
+
+async fn request_body_text(
+    body: bytes::Bytes,
+    blocking: bool,
+) -> Result<String, LlmTransportError> {
+    run(blocking, move || {
+        String::from_utf8_lossy(&body).into_owned()
+    })
+    .await
 }
 
 async fn complete_buffered_response(
@@ -602,7 +647,8 @@ fn complete_buffered_responses(
         OpenAiCompatibleProvider::parse_sse_payload(&text, &mut state)?;
     } else {
         let value: Value = serde_json::from_str(&text).map_err(|e| {
-            LlmTransportError::new(format!("Invalid Responses JSON: {e}")).with_raw(text.clone())
+            LlmTransportError::new(format!("Invalid Responses JSON: {e}"))
+                .with_raw(body_excerpt(&text))
         })?;
         state.capture_execution_evidence(&value, true)?;
         state.provider_usage = value.get("usage").cloned();
@@ -698,7 +744,7 @@ fn complete_buffered_chat(
     } else {
         let value: Value = serde_json::from_str(&text).map_err(|e| {
             LlmTransportError::new(format!("Invalid Chat Completions JSON: {e}"))
-                .with_raw(text.clone())
+                .with_raw(body_excerpt(&text))
         })?;
         state.capture_response_value(&value)?;
         state.provider_usage = value.get("usage").cloned();
@@ -713,7 +759,6 @@ fn complete_buffered_chat(
             })
             .collect::<String>();
         parsed_parts = Some(parts);
-        state.final_response_raw = Some(text.clone());
         state.terminal_reason = terminal_reason;
     }
     let parts = parsed_parts.unwrap_or_else(|| state.parts());
@@ -724,6 +769,7 @@ fn complete_buffered_chat(
             .and_then(|evidence| evidence.provider_finish_reason.as_ref())
             .is_none()
     {
+        state.final_response_raw = Some(text);
         return Err(LlmTransportError::new("Stream ended without finish_reason")
             .with_kind(ProviderFailureKind::Stream)
             .with_code("stream_ended_before_finish_reason")
@@ -963,12 +1009,12 @@ async fn drive_streaming_responses(
                 | LlmTerminalReason::Cancelled
         )
     {
-        return Err(empty_response_error(
+        return Err(empty_response_diagnostic(
             state
                 .final_response
                 .as_ref()
-                .map(Value::to_string)
-                .unwrap_or_default(),
+                .map(crate::request_work::json_excerpt)
+                .unwrap_or_else(|| body_excerpt("")),
         ));
     }
     Ok(LlmResponse {
@@ -1049,7 +1095,7 @@ async fn drive_streaming_chat(
     .await;
 
     if let Err(error) = stream_result {
-        return Err(error.with_partial_response(chat_response_from_state(state.clone(), &url)));
+        return Err(error.with_partial_response(chat_response_from_state(state, &url)));
     }
 
     if stream_termination == StreamTermination::RequireTerminalEvidence
@@ -1075,7 +1121,7 @@ async fn drive_streaming_chat(
         )
     {
         return Err(empty_response_error(
-            state.final_response_raw.clone().unwrap_or_default(),
+            state.final_response_raw.take().unwrap_or_default(),
         ));
     }
     if let Some(tx) = &stream_events {
