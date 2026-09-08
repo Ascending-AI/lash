@@ -46,7 +46,7 @@ runs:
         else
           sudo_cmd=(sudo)
         fi
-        curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused \
+        curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --retry-all-errors \
           --location --silent --show-error --fail --output "${archive}" \
           "https://github.com/rui314/mold/releases/download/v${MOLD_VERSION}/mold-${MOLD_VERSION}-${architecture}-linux.tar.gz"
         printf '%s  %s\n' "${mold_sha256}" "${archive}" | sha256sum --check --status
