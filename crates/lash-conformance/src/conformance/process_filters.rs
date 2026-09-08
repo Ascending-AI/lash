@@ -236,7 +236,10 @@ pub(super) async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
     const KIND: &str = "recent-retired-filter-kind";
     for process_id in ["recent-filter-running", "recent-filter-old"] {
         registry
-            .register_process(registration(process_id).with_identity(ProcessIdentity::new(KIND)))
+            .register_process_with_observers(
+                registration(process_id).with_identity(ProcessIdentity::new(KIND)),
+                &["recent-filter-observer".to_string()],
+            )
             .await
             .expect("register recent-retired fixture");
     }
@@ -252,8 +255,9 @@ pub(super) async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
         .expect("complete old terminal process");
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     registry
-        .register_process(
+        .register_process_with_observers(
             registration("recent-filter-fresh").with_identity(ProcessIdentity::new(KIND)),
+            &["recent-filter-observer".to_string()],
         )
         .await
         .expect("register fresh terminal process");
@@ -269,6 +273,77 @@ pub(super) async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
         .expect("complete fresh terminal process")
         .stored()
         .clone();
+
+    for (status, expected) in [
+        (
+            ProcessStatusFilter::Any,
+            vec!["recent-filter-fresh", "recent-filter-running"],
+        ),
+        (
+            ProcessStatusFilter::any_of([crate::ProcessStatus::Completed]),
+            vec!["recent-filter-fresh"],
+        ),
+        (
+            ProcessStatusFilter::any_of([crate::ProcessStatus::Running]),
+            vec!["recent-filter-running"],
+        ),
+        (ProcessStatusFilter::any_of([]), vec![]),
+    ] {
+        let filter = ProcessListFilter {
+            status,
+            retired_since_ms: Some(fresh.updated_at_ms),
+            ..Default::default()
+        };
+        let observed = registry
+            .list_observed_by("recent-filter-observer", &filter)
+            .await
+            .expect("bounded observer list");
+        assert_eq!(
+            observed
+                .iter()
+                .map(|record| record.id.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert!(
+            registry
+                .list_observed_by("unrelated-observer", &filter)
+                .await
+                .expect("unrelated observer list")
+                .is_empty()
+        );
+    }
+    let all_observed = registry
+        .list_observed_by(
+            "recent-filter-observer",
+            &ProcessListFilter {
+                status: ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("unbounded observer list");
+    assert_eq!(
+        all_observed.len(),
+        3,
+        "unbounded observer list retains old retired rows"
+    );
+    let filtered = registry
+        .list_observed_by(
+            "recent-filter-observer",
+            &ProcessListFilter {
+                status: ProcessStatusFilter::Any,
+                identity_kind: Some("unrelated-kind".to_string()),
+                retired_since_ms: Some(fresh.updated_at_ms),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("observer identity filter");
+    assert!(
+        filtered.is_empty(),
+        "remaining filters still apply conjunctively"
+    );
 
     let recent = registry
         .list_processes(&ProcessListFilter {

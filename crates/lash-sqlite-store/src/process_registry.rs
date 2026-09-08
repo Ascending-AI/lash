@@ -81,6 +81,22 @@ const LIST_PROCESSES_RECENT_RETIRED_SQL: &str =
            AND (?9 IS NULL OR created_at_ms < ?9)
      ) ORDER BY process_id ASC";
 
+const LIST_OBSERVED_RECENT_RETIRED_SQL: &str = "SELECT record_json FROM (
+         SELECT p.process_id, p.record_json FROM processes p
+         WHERE p.status IN ('running', 'waiting')
+           AND (?2 IS NULL OR p.status IN (SELECT value FROM json_each(?2)))
+           AND EXISTS (SELECT 1 FROM process_observers o
+                       WHERE o.session_id = ?1 AND o.process_id = p.process_id
+                         AND o.process_incarnation = p.incarnation)
+         UNION ALL
+         SELECT p.process_id, p.record_json FROM processes p
+         WHERE p.status NOT IN ('running', 'waiting') AND p.updated_at_ms >= ?3
+           AND (?2 IS NULL OR p.status IN (SELECT value FROM json_each(?2)))
+           AND EXISTS (SELECT 1 FROM process_observers o
+                       WHERE o.session_id = ?1 AND o.process_id = p.process_id
+                         AND o.process_incarnation = p.incarnation)
+     ) ORDER BY process_id";
+
 #[async_trait::async_trait]
 impl lash_core::ProcessQuery for SqliteProcessRegistry {
     async fn get_process(
@@ -495,27 +511,50 @@ impl lash_core::ProcessObserverRegistry for SqliteProcessRegistry {
     async fn list_observed_by(
         &self,
         session_id: &str,
+        filter: &ProcessListFilter,
     ) -> Result<Vec<ProcessRecord>, lash_core::PluginError> {
         let session_id = session_id.to_string();
+        let filter = filter.clone();
+        let status = filter
+            .status
+            .labels()
+            .map(|labels| serde_json::to_string(&labels))
+            .transpose()
+            .map_err(process_decode_error)?;
+        let retired_since_ms = filter.retired_since_ms.map(crate::clamp_epoch_ms);
         self.conn
             .call(move |conn| {
-                let mut stmt = conn.prepare(
+                let sql = if retired_since_ms.is_some() {
+                    LIST_OBSERVED_RECENT_RETIRED_SQL
+                } else {
                     "SELECT p.record_json
                      FROM process_observers o
                      JOIN processes p ON p.process_id = o.process_id
                                      AND p.incarnation = o.process_incarnation
                      WHERE o.session_id = ?1
-                     ORDER BY p.process_id",
-                )?;
-                let rows = stmt.query_map(params![session_id], |row| row.get::<_, String>(0))?;
+                       AND (?2 IS NULL OR p.status IN (SELECT value FROM json_each(?2)))
+                       AND (?3 IS NULL OR p.status IN ('running', 'waiting')
+                            OR p.updated_at_ms >= ?3)
+                     ORDER BY p.process_id"
+                };
+                let mut stmt = conn.prepare(sql)?;
+                let rows = stmt
+                    .query_map(params![session_id, status, retired_since_ms], |row| {
+                        row.get::<_, String>(0)
+                    })?;
                 rows.map(|row| {
-                    serde_json::from_str(&row?).map_err(|err| {
+                    serde_json::from_str::<ProcessRecord>(&row?).map_err(|err| {
                         rusqlite::Error::FromSqlConversionFailure(
                             0,
                             rusqlite::types::Type::Text,
                             Box::new(err),
                         )
                     })
+                })
+                .filter(|result| {
+                    result
+                        .as_ref()
+                        .map_or(true, |record| filter.matches_record(record))
                 })
                 .collect()
             })

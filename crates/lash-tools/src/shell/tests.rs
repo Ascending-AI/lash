@@ -293,7 +293,17 @@ impl lash_core::ProcessService for TestProcessService {
             lash_core::ProcessListMode::Live => {
                 self.registry.list_live_observed_by(session_id).await
             }
-            lash_core::ProcessListMode::All => self.registry.list_observed_by(session_id).await,
+            lash_core::ProcessListMode::All => {
+                self.registry
+                    .list_observed_by(
+                        session_id,
+                        &lash_core::ProcessListFilter {
+                            status: lash_core::ProcessStatusFilter::Any,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+            }
         }
     }
 

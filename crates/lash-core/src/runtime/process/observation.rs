@@ -115,7 +115,16 @@ impl ProcessWorkObserver {
         session_id: impl Into<String>,
     ) -> Result<ProcessWorkSnapshot, PluginError> {
         let session_id = session_id.into();
-        let entries = self.registry.list_observed_by(&session_id).await?;
+        let entries = self
+            .registry
+            .list_observed_by(
+                &session_id,
+                &crate::ProcessListFilter {
+                    status: crate::ProcessStatusFilter::Any,
+                    ..Default::default()
+                },
+            )
+            .await?;
         let mut items = Vec::new();
         for record in entries {
             items.push(self.work_item_from_record(record).await?);
@@ -225,11 +234,10 @@ impl ProcessWorkObserver {
         scope: &SessionScope,
         filter: &ProcessListFilter,
     ) -> Result<Vec<ObservedProcess>, PluginError> {
-        let entries = self.registry.list_observed_by(&scope.session_id).await?;
-        let records = entries
-            .into_iter()
-            .filter(|record| filter.matches_record(record))
-            .collect::<Vec<_>>();
+        let records = self
+            .registry
+            .list_observed_by(&scope.session_id, filter)
+            .await?;
         self.observe_records(records).await
     }
 

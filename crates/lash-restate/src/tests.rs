@@ -11541,7 +11541,13 @@ async fn restate_controller_schedules_process_workflow_without_running_executor(
     );
     assert_eq!(
         registry
-            .list_observed_by("session")
+            .list_observed_by(
+                "session",
+                &lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::Any,
+                    ..Default::default()
+                }
+            )
             .await
             .expect("observed")
             .into_iter()
@@ -11950,14 +11956,26 @@ async fn restate_controller_lists_and_transfers_observers_through_process_effect
     ));
 
     let entries = registry
-        .list_observed_by(&s2.session_id)
+        .list_observed_by(
+            &s2.session_id,
+            &lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
         .await
         .expect("s2 observed");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].id, "task-list");
     assert!(
         registry
-            .list_observed_by(&s1.session_id)
+            .list_observed_by(
+                &s1.session_id,
+                &lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::Any,
+                    ..Default::default()
+                }
+            )
             .await
             .expect("s1")
             .is_empty()
@@ -13970,7 +13988,13 @@ async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
     );
 
     let observed = registry
-        .list_observed_by("session")
+        .list_observed_by(
+            "session",
+            &lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
         .await
         .expect("session observed");
     assert_eq!(observed.len(), 1);
@@ -15071,7 +15095,13 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
         .expect("reopen registry"),
     ) as Arc<dyn ProcessRegistry>;
     let observed = registry_b
-        .list_observed_by(&creator_scope.session_id)
+        .list_observed_by(
+            &creator_scope.session_id,
+            &lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
         .await
         .expect("list reopened observations");
     assert_eq!(observed.len(), 1);

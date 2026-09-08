@@ -515,14 +515,26 @@ impl LashCore {
         let inherited = match (&observer_inheritance, self.process_registry()) {
             (lash_core::ObserverInheritance::None, _) | (_, None) => Vec::new(),
             (lash_core::ObserverInheritance::All, Some(process_registry)) => process_registry
-                .list_observed_by(&point.source_session_id)
+                .list_observed_by(
+                    &point.source_session_id,
+                    &lash_core::ProcessListFilter {
+                        status: lash_core::ProcessStatusFilter::Any,
+                        ..Default::default()
+                    },
+                )
                 .await?
                 .into_iter()
                 .map(|record| record.id)
                 .collect(),
             (lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {
                 let observed = process_registry
-                    .list_observed_by(&point.source_session_id)
+                    .list_observed_by(
+                        &point.source_session_id,
+                        &lash_core::ProcessListFilter {
+                            status: lash_core::ProcessStatusFilter::Any,
+                            ..Default::default()
+                        },
+                    )
                     .await?
                     .into_iter()
                     .map(|record| record.id)

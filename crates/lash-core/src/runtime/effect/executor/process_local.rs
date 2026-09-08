@@ -64,7 +64,15 @@ impl ProcessLocalExecution {
                             .await?
                     }
                     crate::ProcessListMode::All => {
-                        registry.list_observed_by(&session_scope.session_id).await?
+                        registry
+                            .list_observed_by(
+                                &session_scope.session_id,
+                                &crate::ProcessListFilter {
+                                    status: crate::ProcessStatusFilter::Any,
+                                    ..Default::default()
+                                },
+                            )
+                            .await?
                     }
                 };
                 Ok(ProcessEffectOutcome::List { entries })

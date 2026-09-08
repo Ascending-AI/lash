@@ -112,7 +112,15 @@ pub(super) async fn run_once_process_list_stress(
         let phase_started = Instant::now();
         let phase_before_alloc = allocator_stats();
         let phase_before_memory = process_memory_sample();
-        let all_entries = registry.list_observed_by(&session_scope.session_id).await?;
+        let all_entries = registry
+            .list_observed_by(
+                &session_scope.session_id,
+                &lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::Any,
+                    ..Default::default()
+                },
+            )
+            .await?;
         phase_profile.insert(
             "process_list_stress.list_all".to_string(),
             RuntimePerfPhaseRunResult {
