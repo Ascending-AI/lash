@@ -244,7 +244,7 @@ fn execution_section_makes_paired_lashlang_tag_contract_explicit() {
     assert!(section.contains("tag lines must be standalone after trimming"));
     assert!(section.contains("terminates the cell even inside a multiline string"));
     assert!(
-        section.contains("When action is needed, place the Lashlang block after any visible prose")
+        section.contains("When action is needed, place the lashlang block after any visible prose")
     );
     assert!(!section.contains("exactly one Lashlang block"));
     assert!(!section.contains("NEVER have multiple `<lashlang>` blocks"));
@@ -323,6 +323,22 @@ fn execution_section_hides_sleep_and_signals_independently() {
     assert!(!section.contains("sleep for"));
     assert!(!section.contains("wait_signal"));
     assert!(!section.contains("signal_run"));
+}
+
+#[test]
+fn execution_section_distinguishes_foreground_finish_from_process_finish() {
+    let surface = prompt_host_environment(
+        tool_resources(),
+        lashlang::LashlangAbilities::default().with_processes(),
+    );
+    let section =
+        rlm_execution_section_for_host_environment(RlmPromptFeatures::default(), &surface);
+
+    assert!(section.contains("`finish <value>` at the top level of the foreground cell ends the turn with a computed value."));
+    assert!(section.contains(
+        "`finish value` completes the run and stores `value` as the process success value."
+    ));
+    assert!(!section.contains("cell-only"));
 }
 
 #[test]

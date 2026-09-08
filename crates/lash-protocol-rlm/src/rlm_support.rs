@@ -342,7 +342,6 @@ pub(crate) fn render_bound_variables(
 
     lines.push(String::new());
     lines.push("Schema:".to_string());
-    lines.push("```text".to_string());
     lines.extend(history_item_type_definition());
     if !registry.definitions.is_empty() {
         lines.push(String::new());
@@ -353,7 +352,6 @@ pub(crate) fn render_bound_variables(
         }
         lines.extend(render_type_definition(name, shape, &registry));
     }
-    lines.push("```".to_string());
 
     Arc::from(lines.join("\n"))
 }
@@ -362,14 +360,12 @@ fn append_schema_registry(lines: &mut Vec<String>, registry: &SchemaRegistry) {
     if !registry.definitions.is_empty() {
         lines.push(String::new());
         lines.push("Schema:".to_string());
-        lines.push("```text".to_string());
         for (idx, (name, shape)) in registry.definitions.iter().enumerate() {
             if idx > 0 {
                 lines.push(String::new());
             }
             lines.extend(render_type_definition(name, shape, registry));
         }
-        lines.push("```".to_string());
     }
 }
 

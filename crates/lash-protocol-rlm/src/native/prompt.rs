@@ -19,22 +19,31 @@ pub(super) fn execution_section(
             .unwrap_or(text.len());
         text.replace_range(start..end, "### Tool transport\n\nCall `execute_code` once with a JSON object containing only the string `code`. Put the complete program in `code`. Host operations and `finish` run inside that program.\n");
     }
-    text = text.replace("Write one script inside standalone `<typescript>` and `</typescript>` lines.", "Call `execute_code` once with the complete TypeScript script in the required string argument `code`.")
-        .replace("from inside a paired `<lashlang>` block", "from inside the `execute_code` program")
-        .replace("across `<lashlang>` blocks", "across programs");
-    // Fences in worked examples describe transport, not executable language.
     text = text
-        .lines()
+        .replace(
+            "from inside a paired `<lashlang>` block",
+            "from inside the `execute_code` program",
+        )
+        .replace("across `<lashlang>` blocks", "across programs");
+    if let Some(start) = text.find("### Example cell")
+        && let Some(close) = text[start..].find(dialect.cell_tags().close)
+    {
+        let end = start + close + dialect.cell_tags().close.len();
+        let example = transport_copy(&text[start..end], dialect)
+            .replace("### Example cell", "### Example execute_code call");
+        text.replace_range(start..end, &example);
+    }
+    // Other worked examples retain their existing language teaching.
+    text.lines()
         .filter(|line| {
             !["<lashlang>", "</lashlang>", "<typescript>", "</typescript>"].contains(&line.trim())
         })
         .collect::<Vec<_>>()
-        .join("\n");
-    text
+        .join("\n")
 }
 
 pub(super) fn finalization(dialect: &dyn RlmDialect, termination: &RlmTermination) -> String {
-    transport_copy(dialect.finalization_copy(termination), dialect)
+    transport_copy(&dialect.finalization_copy(termination), dialect)
 }
 
 /// Preserve the dialect's finish and workflow teaching while replacing the
@@ -122,13 +131,29 @@ mod drift_tests {
             let execution = dialect
                 .render_execution_section(features, &catalog)
                 .unwrap();
+            assert!(execution.contains(&crate::dialect::cell_response_shape(
+                dialect.cell_tags(),
+                dialect.prompt_vocabulary()
+            )));
             corpus.push_str(&execution);
             let mut native = execution_section(dialect, features, &catalog);
+            assert!(!native.contains("### Response shape"));
+            assert!(!native.contains("Example cell"));
+            if dialect.language_id() == "typescript" {
+                assert!(
+                    native.contains(
+                        r#"execute_code({"code":"const total = 1 + 2;\nfinish(total);"})"#
+                    )
+                );
+            }
+            assert!(!native.contains("Markdown code fences"));
+            assert!(!native.contains(dialect.cell_tags().open));
+            assert!(!native.contains(dialect.cell_tags().close));
             for termination in [
                 RlmTermination::Natural,
                 RlmTermination::FinishRequired { schema: None },
             ] {
-                corpus.push_str(dialect.finalization_copy(&termination));
+                corpus.push_str(&dialect.finalization_copy(&termination));
                 native.push_str(&finalization(dialect, &termination));
             }
             corpus.push_str(&dialect.turn_limit_final_copy(4));
@@ -139,7 +164,6 @@ mod drift_tests {
         }
         for needle in [
             "### Response shape",
-            "Write one script inside standalone `<typescript>` and `</typescript>` lines.",
             "from inside a paired `<lashlang>` block",
             "across `<lashlang>` blocks",
             "paired `<lashlang>...</lashlang>` block",

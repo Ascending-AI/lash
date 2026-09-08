@@ -4545,7 +4545,7 @@ fn rlm_protocol_execution_fact(
             require_rlm_bool(result, "/done", false, contract)?;
             require_rlm_u64(result, "/llm_call_count", 2, contract)?;
             require_rlm_checkpoint(result, "after_work", contract)?;
-            require_rlm_system_contains(result, "explicit final value", contract)?;
+            require_rlm_system_contains(result, "No code from that response executed.", contract)?;
             require_rlm_system_contains(result, "finish <value>", contract)?;
             require_rlm_system_omits(result, "required output schema", contract)?;
             require_rlm_diagnostic(result, "request_finish", "finish_required", contract)?;
@@ -4553,7 +4553,7 @@ fn rlm_protocol_execution_fact(
                 "mode": "finish_required",
                 "decision": "request_finish",
                 "done": false,
-                "repair_prompt_contains": ["explicit final value", "finish <value>"],
+                "repair_prompt_contains": ["No code from that response executed.", "finish <value>"],
                 "llm_call_count": 2,
             })
         }
@@ -4561,7 +4561,7 @@ fn rlm_protocol_execution_fact(
             require_rlm_bool(result, "/done", true, contract)?;
             require_rlm_u64(result, "/llm_call_count", 1, contract)?;
             require_rlm_stopped_max_turns(result, contract)?;
-            require_rlm_system_omits(result, "explicit final value", contract)?;
+            require_rlm_system_omits(result, "No code from that response executed.", contract)?;
             require_rlm_system_omits(result, "finish <value>", contract)?;
             json!({
                 "mode": "finish_required",

@@ -669,3 +669,53 @@ fn configured_prompt_is_instructions_on_both_channels() {
         }
     }
 }
+
+#[test]
+fn markdown_fenced_finish_requests_an_explicit_no_execution_repair() {
+    for dialect in [
+        Arc::new(crate::dialect::typescript_test_dialect()) as Arc<dyn crate::dialect::RlmDialect>,
+        Arc::new(crate::dialect::lashlang_test_dialect()),
+    ] {
+        for schema in [None, Some(serde_json::json!({"type": "number"}))] {
+            let mut config = config(
+                false,
+                RlmTermination::FinishRequired {
+                    schema: schema.clone(),
+                },
+            );
+            config.protocol_driver = Arc::new(crate::protocol::RlmDriver::with_dialect(
+                Arc::clone(&dialect),
+            ));
+            let mut machine = TurnMachine::new(config, Vec::new(), Arc::new(Vec::new()), 0);
+            let initial = drain(&mut machine);
+            let effects = reply(
+                &mut machine,
+                &initial,
+                vec![text("```typescript\nfinish(1)\n```")],
+            );
+            assert!(
+                !effects
+                    .iter()
+                    .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+            );
+            let events = serde_json::to_string(&machine.events()).unwrap();
+            assert!(events.contains("request_finish"), "{events}");
+            // The repair is durably appended before the continuation checkpoint.
+            let continuation = events;
+            assert!(
+                continuation.contains(
+                    "No code from that response executed. Markdown code fences do not execute here."
+                ),
+                "{continuation}"
+            );
+            let tags = dialect.cell_tags();
+            assert!(continuation.contains(&format!("Resend the needed program between `{}` and `{}` on their own lines, without backticks.", tags.open, tags.close)), "{continuation}");
+            if schema.is_some() {
+                assert!(
+                    continuation.contains("matching the required output schema"),
+                    "{continuation}"
+                );
+            }
+        }
+    }
+}

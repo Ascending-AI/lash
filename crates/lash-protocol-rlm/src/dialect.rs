@@ -70,6 +70,17 @@ pub(crate) struct CellTags {
     pub(crate) close: &'static str,
 }
 
+/// Shared cell transport teaching; native transport replaces this whole section.
+pub(crate) fn cell_response_shape(tags: CellTags, vocabulary: DialectPromptVocabulary) -> String {
+    format!(
+        "### Response shape\n\nExecutable code must be inside paired `{open}` and `{close}` tags. The start and close tag lines must be standalone after trimming. Markdown code fences are documentation and never execute here. A standalone `{close}` line terminates the cell even inside a multiline string, so construct such string content without that standalone delimiter line. When action is needed, place the {language} block after any visible prose or omit prose. Prose before the block is commentary only. `{finish}` at the top level of the foreground cell ends the turn with a computed value. Any turn-ending rules for prose-only responses versus `finish` are listed in the current **FINALIZATION** section.\n",
+        open = tags.open,
+        close = tags.close,
+        language = vocabulary.language_name,
+        finish = vocabulary.finish_statement,
+    )
+}
+
 pub(crate) struct BoundVariablesPromptRender {
     render: Box<dyn FnOnce() -> Arc<str> + Send>,
 }
@@ -349,6 +360,8 @@ pub(crate) struct DialectPromptVocabulary {
     pub(crate) print_statement_suffix: &'static str,
     /// The finish form as the prompt spells it in prose.
     pub(crate) finish_statement: &'static str,
+    /// The finish form for an intentional null result.
+    pub(crate) finish_null_statement: &'static str,
     /// The continue-as control call, as a model would write it.
     pub(crate) continue_as_call: &'static str,
     /// A complete continue-as example for the tool doc.
@@ -457,7 +470,26 @@ pub(crate) trait RlmDialect: Send + Sync {
         crate::cell_scan::render_cell_text(self.cell_tags(), prose, code)
     }
 
-    fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> &'static str;
+    fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> String;
+
+    fn finish_required_finalization(&self, requires_schema: bool) -> String {
+        let tags = self.cell_tags();
+        let finish = self.prompt_vocabulary().finish_statement;
+        let mut text = format!(
+            "This turn uses finish-required termination. Prose-only does not end the turn. Every non-terminal response must contain a paired `{open}...{close}` block that performs the next step; prose before the block is commentary/status only. Never say you will continue, inspect, patch, wait, monitor, validate, or retry unless the same response also contains the block that does it. The terminal response must be a paired `{open}...{close}` block that calls `{finish}`.",
+            open = tags.open,
+            close = tags.close,
+        );
+        if requires_schema {
+            text.push_str(" The value must match the REQUIRED OUTPUT contract.");
+        } else {
+            text.push_str(&format!(
+                " Use `{}` only when null is intentional.",
+                self.prompt_vocabulary().finish_null_statement
+            ));
+        }
+        text
+    }
 
     fn cell_error_message(&self, error: crate::protocol::CellExtractionError) -> String;
 

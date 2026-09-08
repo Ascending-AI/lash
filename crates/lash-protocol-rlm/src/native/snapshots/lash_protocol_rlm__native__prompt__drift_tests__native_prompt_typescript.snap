@@ -4,30 +4,36 @@ expression: native
 ---
 ## TypeScript execution
 
-Call `execute_code` once with the complete TypeScript script in the required string argument `code`. Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
+### Tool transport
+
+Call `execute_code` once with a JSON object containing only the string `code`. Put the complete program in `code`. Host operations and `finish` run inside that program.
+
+### Example execute_code call
+
+execute_code({"code":"const total = 1 + 2;\nfinish(total);"})
+
+Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
 
 ### Host API
 
-```typescript
-interface ProcessDefinition<Input, Output> { readonly name: string }
-interface ProcessHandle<Output> extends PromiseLike<Output> { readonly id: string }
-declare const console: {
-  log(...values: unknown[]): void;
-  warn(...values: unknown[]): void;
-  error(...values: unknown[]): void;
-  info(...values: unknown[]): void;
-  debug(...values: unknown[]): void;
-};
-declare function print(value: unknown): void;
-declare function finish(value: unknown): never;
-declare function sleep(milliseconds: number): Promise<void>;
-declare function waitSignal(name: string): Promise<unknown>; // inside a defineProcess run body only
-declare function defineProcess<Input, Output>(config: { name: string; signals: Record<string, null>; run: (input: Input) => Promise<Output> }): ProcessDefinition<Input, Output>;
-declare function start<Input, Output>(process: ProcessDefinition<Input, Output>, args?: Record<string, unknown>): ProcessHandle<Output>;
-declare function wake(progress: unknown): void;
-declare function wake(handle: ProcessHandle<unknown>, signal: string, payload: unknown): void;
-declare function registerTrigger(config: { source: unknown; target: ProcessDefinition<unknown, unknown>; inputs: Record<string, unknown>; name?: string }): Promise<unknown>;
-```
+    interface ProcessDefinition<Input, Output> { readonly name: string }
+    interface ProcessHandle<Output> extends PromiseLike<Output> { readonly id: string }
+    declare const console: {
+      log(...values: unknown[]): void;
+      warn(...values: unknown[]): void;
+      error(...values: unknown[]): void;
+      info(...values: unknown[]): void;
+      debug(...values: unknown[]): void;
+    };
+    declare function print(value: unknown): void;
+    declare function finish(value: unknown): never;
+    declare function sleep(milliseconds: number): Promise<void>;
+    declare function waitSignal(name: string): Promise<unknown>; // inside a defineProcess run body only
+    declare function defineProcess<Input, Output>(config: { name: string; signals: Record<string, null>; run: (input: Input) => Promise<Output> }): ProcessDefinition<Input, Output>;
+    declare function start<Input, Output>(process: ProcessDefinition<Input, Output>, args?: Record<string, unknown>): ProcessHandle<Output>;
+    declare function wake(progress: unknown): void;
+    declare function wake(handle: ProcessHandle<unknown>, signal: string, payload: unknown): void;
+    declare function registerTrigger(config: { source: unknown; target: ProcessDefinition<unknown, unknown>; inputs: Record<string, unknown>; name?: string }): Promise<unknown>;
 
 Declare durable work only as a top-level `const p = defineProcess({ name: "literal", signals: { signal: null }, run: async (...) => { ... } })`. The keys of `start`'s second argument are the `run` function's own parameter names, not a fixed `input` field — `run: async (request: unknown)` is started as `start(p, { request: value })`, and any other key rejects; `registerTrigger`'s `inputs` keys work the same way. `await start(...)` waits for its result; an un-awaited handle can be signalled. In `run`, `wake(value)` emits progress, `await waitSignal("literal")` and `await sleep(ms)` suspend durably, `return` succeeds after enclosing `finally` blocks, and an uncaught `throw` fails. `waitSignal` is the only primitive above that is scoped to a process body: outside one it is refused as "`waitSignal` can only be used inside a process body", while `await sleep(ms)` is also valid in a cell. `await registerTrigger(...)` requires a literal process target. `Promise.all`/`Promise.allSettled` accept top-level tool promises and resolved values; `Promise.all` reports the first-settled rejection (v1 waits for every leaf before reporting).
 
@@ -45,4 +51,4 @@ Static calls: `Object.keys`(value), `Object.values`(value), `Object.entries`(val
 
 Instance calls: `instance.at`([index]), `instance.concat`(...values), `instance.charAt`([index]), `instance.charCodeAt`([index]), `instance.codePointAt`([index]), `instance.append`(name, value), `instance.add`(value), `instance.clear`(), `instance.delete`(key[, value]), `instance.entries`(), `instance.exec`(input), `instance.endsWith`(search[, endPosition]), `instance.filter`(callback[, thisArg]), `instance.fill`([value[, start[, end]]]), `instance.find`(callback[, thisArg]), `instance.findIndex`(callback[, thisArg]), `instance.findLast`(callback[, thisArg]), `instance.findLastIndex`(callback[, thisArg]), `instance.flat`([depth]), `instance.flatMap`(callback[, thisArg]), `instance.forEach`(callback[, thisArg]), `instance.get`(key), `instance.getAll`(name), `instance.has`(key[, value]), `instance.includes`(value[, fromIndex]), `instance.indexOf`(value[, fromIndex]), `instance.join`([separator]), `instance.lastIndexOf`(value[, fromIndex]), `instance.map`(callback[, thisArg]), `instance.match`(regexp), `instance.matchAll`(globalRegExp), `instance.every`(callback[, thisArg]), `instance.padEnd`(length[, padString]), `instance.padStart`(length[, padString]), `instance.repeat`([count]), `instance.replace`([search[, replacement|callback(match, offset, string)]]), `instance.replaceAll`([searchString[, replacementString]]), `instance.reduce`(callback[, initialValue]), `instance.reduceRight`(callback[, initialValue]), `instance.reverse`(), `instance.slice`([start[, end]]), `instance.sort`([compareFn]), `instance.some`(callback[, thisArg]), `instance.splice`([start[, deleteCount[, ...items]]]), `instance.push`(...values), `instance.pop`(), `instance.shift`(), `instance.unshift`(...values), `instance.split`([separator[, limit]]), `instance.search`(regexp), `instance.startsWith`(search[, position]), `instance.substring`([start[, end]]), `instance.toExponential`([fractionDigits]), `instance.toFixed`([digits]), `instance.toPrecision`([precision]), `instance.toReversed`(), `instance.toSorted`([compareFn]), `instance.toSpliced`([start[, deleteCount[, ...items]]]), `instance.set`(key, value), `instance.keys`(), `instance.toLowerCase`(), `instance.toUpperCase`(), `instance.toString`(), `instance.trim`(), `instance.trimEnd`(), `instance.trimStart`(), `instance.test`(input), `instance.valueOf`(), `instance.values`(), `instance.with`(index, value), `instance.hasOwnProperty`(key), `instance.union`(set), `instance.intersection`(set), `instance.difference`(set), `instance.symmetricDifference`(set), `instance.isSubsetOf`(set), `instance.isSupersetOf`(set), `instance.isDisjointFrom`(set), `instance.toJSON`([key]), `instance.getTime`(), `instance.getUTCFullYear`(), `instance.getUTCMonth`(), `instance.getUTCDate`(), `instance.getUTCDay`(), `instance.getUTCHours`(), `instance.getUTCMinutes`(), `instance.getUTCSeconds`(), `instance.getUTCMilliseconds`(), `instance.toISOString`().
 
-No host tools are available in this turn.Continue with one `execute_code` call, or finish with prose and no code call. A call to `finish(value)` returns a computed final value.This turn requires a final value. Reply with one `execute_code` call that calls `finish(value)`.
+No host tools are available in this turn.Continue with one `execute_code` call, or finish with prose and no code call. A call to `finish(value)` returns a computed final value.This turn uses finish-required termination. Prose-only does not end the turn. Every non-terminal response must contain an `execute_code` call that performs the next step; prose before the code call is commentary/status only. Never say you will continue, inspect, patch, wait, monitor, validate, or retry unless the same response also contains the code call that does it. The terminal response must be an `execute_code` call that calls `finish(value)`. Use `finish(null)` only when null is intentional.
