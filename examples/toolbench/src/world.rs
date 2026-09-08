@@ -129,7 +129,7 @@ impl SharedWorld {
 
     pub(crate) fn standard_provider(&self) -> Arc<dyn ToolProvider> {
         let mut tools = definitions();
-        tools.push(ToolDefinition::raw("tool:toolbench_submit", "submit", "Submit the final JSON value and end the task. Preserve its JSON type: numbers and booleans must not be quoted.", json!({"type":"object", "properties":{"value":{"type":["number","string","boolean","null","array","object"]}}, "required":["value"], "additionalProperties":false}), json!({})));
+        tools.push(ToolDefinition::raw("tool:toolbench_submit", "submit", "Submit exactly the value the task asks for and end the task.", json!({"type":"object", "properties":{"value":{"type":["number","string","boolean","null","array","object"]}}, "required":["value"], "additionalProperties":false}), json!({})));
         Arc::new(StaticToolProvider::new(tools, self.clone()))
     }
 

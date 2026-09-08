@@ -8,7 +8,7 @@ use crate::world::{MailMessage, World};
 pub(crate) enum FinishMatcher {
     Exact(Value),
     Normalized(String),
-    NumericString(f64),
+    Numeric(f64),
 }
 
 impl FinishMatcher {
@@ -18,9 +18,12 @@ impl FinishMatcher {
             (Self::Normalized(expected), Some(Value::String(actual))) => {
                 normalize(expected) == normalize(actual)
             }
-            (Self::NumericString(expected), Some(Value::String(actual))) => actual
+            (Self::Numeric(expected), Some(Value::Number(actual))) => actual
+                .as_f64()
+                .is_some_and(|number| number.is_finite() && number == *expected),
+            (Self::Numeric(expected), Some(Value::String(actual))) => actual
                 .parse::<f64>()
-                .is_ok_and(|number| number == *expected),
+                .is_ok_and(|number| number.is_finite() && number == *expected),
             _ => false,
         }
     }
@@ -29,7 +32,7 @@ impl FinishMatcher {
         match self {
             Self::Exact(value) => format!("finish exactly {value}"),
             Self::Normalized(value) => format!("normalized finish equals {value:?}"),
-            Self::NumericString(value) => format!("numeric string equal to {value}"),
+            Self::Numeric(value) => format!("numeric value equal to {value}"),
         }
     }
 }
@@ -70,43 +73,43 @@ pub(crate) fn task_pack() -> Vec<Task> {
     vec![
         read_task(
             "weather-temperature",
-            "Call weather.lookup for Berlin and finish with only its temperature_c value converted to a decimal string, not a number.",
-            FinishMatcher::NumericString(12.0),
+            "Call weather.lookup for Berlin and finish with only its temperature_c value.",
+            FinishMatcher::Numeric(12.0),
             1,
         ),
         read_task(
             "weather-condition",
-            "Call weather.lookup for Berlin, then finish with only its condition as a plain string.",
+            "Call weather.lookup for Berlin, then finish with only its condition.",
             FinishMatcher::Normalized("rain".to_string()),
             1,
         ),
         read_task(
             "weather-compare",
-            "Call weather.lookup once for Berlin and once for Lisbon, then finish with only the warmer city's name as a string, preserving its spelling.",
+            "Call weather.lookup once for Berlin and once for Lisbon, then finish with only the warmer city's name, preserving its spelling.",
             FinishMatcher::Exact(json!("Lisbon")),
             2,
         ),
         read_task(
             "string-owner",
-            "Call notes.render for N-7 and extract the value after owner= up to the next comma, excluding the comma. Finish with only that value as a string, nothing else, preserving its spelling.",
+            "Call notes.render for N-7 and extract the value after owner= up to the next comma, excluding the comma. Finish with only that value, nothing else, preserving its spelling.",
             FinishMatcher::Exact(json!("Imani")),
             1,
         ),
         read_task(
             "string-token",
-            "Call notes.render for N-7 and extract the value after token= up to the closing parenthesis, excluding the parenthesis. Finish with only that value as a string, nothing else, preserving its spelling.",
+            "Call notes.render for N-7 and extract the value after token= up to the closing parenthesis, excluding the parenthesis. Finish with only that value, nothing else, preserving its spelling.",
             FinishMatcher::Exact(json!("ALPHA-17")),
             1,
         ),
         read_task(
             "kv-read",
-            "Call kv.get for project, then finish with its value as a string.",
+            "Call kv.get for project, then finish with its value.",
             FinishMatcher::Exact(json!("aurora")),
             1,
         ),
         write_task(
             "kv-write",
-            "Use code to call kv.put with key status and value ready, then finish with the string saved.",
+            "Use code to call kv.put with key status and value ready, then finish with saved.",
             FinishMatcher::Exact(json!("saved")),
             1,
             |world| {
@@ -115,7 +118,7 @@ pub(crate) fn task_pack() -> Vec<Task> {
         ),
         write_task(
             "kv-write-read",
-            "Use code to store violet under theme with kv.put and verify it with kv.get. Finish with the verified value as a string.",
+            "Use code to store violet under theme with kv.put and verify it with kv.get. Finish with the verified value.",
             FinishMatcher::Exact(json!("violet")),
             2,
             |world| {
@@ -124,33 +127,33 @@ pub(crate) fn task_pack() -> Vec<Task> {
         ),
         read_task(
             "mail-count",
-            "Use code to call mail.list and count the messages. Finish with only the count converted to a decimal string, not a number.",
-            FinishMatcher::NumericString(2.0),
+            "Use code to call mail.list and count the messages. Finish with only the count.",
+            FinishMatcher::Numeric(2.0),
             1,
         ),
         read_task(
             "mail-sender",
-            "Call mail.list and find the message whose subject is Build. Finish with only its sender field as a string, preserving its spelling.",
+            "Call mail.list and find the message whose subject is Build. Finish with only its sender field, preserving its spelling.",
             FinishMatcher::Exact(json!("Ada")),
             1,
         ),
         write_task(
             "mail-send",
-            "Call mail.send once with recipient \"ops@example.test\", subject \"Deploy\", and body \"Ship build 104\" (exactly the text inside the quotes). Finish with only the returned id field as a string.",
+            "Call mail.send once with recipient \"ops@example.test\", subject \"Deploy\", and body \"Ship build 104\" (exactly the text inside the quotes). Finish with only the returned id field.",
             FinishMatcher::Exact(json!("m3")),
             1,
             append_deploy_mail,
         ),
         write_task(
             "mail-send-read",
-            "Call mail.send once with recipient \"ops@example.test\", subject \"Deploy\", and body \"Ship build 104\" (exactly the text inside the quotes), then call mail.list once to verify it is present. Finish with only the new message's id field as a string.",
+            "Call mail.send once with recipient \"ops@example.test\", subject \"Deploy\", and body \"Ship build 104\" (exactly the text inside the quotes), then call mail.list once to verify it is present. Finish with only the new message's id field.",
             FinishMatcher::Exact(json!("m3")),
             2,
             append_deploy_mail,
         ),
         write_task(
             "weather-to-kv",
-            "Use code to call weather.lookup for Lisbon and store its condition under last_weather with kv.put. Finish with the condition as a string.",
+            "Use code to call weather.lookup for Lisbon and store its condition under last_weather with kv.put. Finish with the condition.",
             FinishMatcher::Exact(json!("sunny")),
             2,
             |world| {
@@ -161,13 +164,13 @@ pub(crate) fn task_pack() -> Vec<Task> {
         ),
         read_task(
             "missing-field",
-            "Use code to call contacts.get for C-17 and check whether the record contains a phone field. Finish with its phone value if present, or the string FIELD_UNAVAILABLE if absent.",
+            "Use code to call contacts.get for C-17 and check whether the record contains a phone field. Finish with its phone value if present, or FIELD_UNAVAILABLE if absent.",
             FinishMatcher::Exact(json!("FIELD_UNAVAILABLE")),
             1,
         ),
         write_task(
             "targeted-update",
-            "Call kv.put once to set project to nebula, then finish with the string nebula. Leave everything else unchanged.",
+            "Call kv.put once to set project to nebula, then finish with nebula. Leave everything else unchanged.",
             FinishMatcher::Exact(json!("nebula")),
             1,
             |world| {
@@ -176,7 +179,7 @@ pub(crate) fn task_pack() -> Vec<Task> {
         ),
         read_task(
             "string-to-kv-chain",
-            "Call notes.render for N-9, extract the key after key= through the end of the text, and retrieve that key with kv.get. Finish with only the retrieved value field as a string, preserving its spelling.",
+            "Call notes.render for N-9, extract the key after key= through the end of the text, and retrieve that key with kv.get. Finish with only the retrieved value field, preserving its spelling.",
             FinishMatcher::Exact(json!("L7")),
             2,
         ),
@@ -213,6 +216,7 @@ fn write_task(
 }
 
 fn build_prompt(prompt: &str, tool_calls: usize, standard: bool) -> String {
+    let prompt = standard_tool_names(prompt, standard);
     let constraint = if standard {
         format!(
             "Call exactly {tool_calls} host tool(s) total, then call submit exactly once with the final value; leave all other world state unchanged."
@@ -224,6 +228,26 @@ fn build_prompt(prompt: &str, tool_calls: usize, standard: bool) -> String {
         )
     };
     format!("{prompt} {constraint}")
+}
+
+fn standard_tool_names(prompt: &str, standard: bool) -> String {
+    if !standard {
+        return prompt.to_string();
+    }
+
+    [
+        ("weather.lookup", "weather_lookup"),
+        ("kv.get", "kv_get"),
+        ("kv.put", "kv_put"),
+        ("notes.render", "notes_render"),
+        ("mail.list", "mail_list"),
+        ("mail.send", "mail_send"),
+        ("contacts.get", "contacts_get"),
+    ]
+    .into_iter()
+    .fold(prompt.to_string(), |prompt, (display, registered)| {
+        prompt.replace(display, registered)
+    })
 }
 
 fn append_deploy_mail(world: &mut World) {
@@ -244,13 +268,34 @@ mod tests {
     fn standard_prompt_uses_shared_task_and_submit_constraint() {
         for task in task_pack() {
             let prompt = task.prompt_for(true);
-            assert!(prompt.starts_with(&task.prompt));
             assert!(prompt.contains(&format!(
                 "Call exactly {} host tool(s) total, then call submit exactly once",
                 task.tool_calls
             )));
             assert!(!prompt.contains("code"));
             assert!(!prompt.contains("executions"));
+        }
+    }
+
+    #[test]
+    fn standard_prompt_uses_registered_tool_names() {
+        let mappings = [
+            ("weather.lookup", "weather_lookup"),
+            ("kv.get", "kv_get"),
+            ("kv.put", "kv_put"),
+            ("notes.render", "notes_render"),
+            ("mail.list", "mail_list"),
+            ("mail.send", "mail_send"),
+            ("contacts.get", "contacts_get"),
+        ];
+        for task in task_pack() {
+            let prompt = task.prompt_for(true);
+            for (display, registered) in mappings {
+                if task.prompt.contains(display) {
+                    assert!(prompt.contains(registered), "{}", task.id);
+                    assert!(!prompt.contains(display), "{}", task.id);
+                }
+            }
         }
     }
 
@@ -298,7 +343,7 @@ mod tests {
             ) {
                 let answer = match &task.finish {
                     FinishMatcher::Exact(Value::String(answer)) => answer.clone(),
-                    FinishMatcher::NumericString(answer) => answer.to_string(),
+                    FinishMatcher::Numeric(answer) => answer.to_string(),
                     _ => panic!("lookup must finish with a string"),
                 };
                 assert!(
@@ -325,13 +370,15 @@ mod tests {
     }
 
     #[test]
-    fn decimal_string_requests_keep_their_type_contract() {
+    fn numeric_requests_accept_numbers_and_numeric_strings() {
         for (id, value) in [("weather-temperature", 12), ("mail-count", 2)] {
             let task = task_pack().into_iter().find(|task| task.id == id).unwrap();
-            assert!(task.prompt.contains("decimal string, not a number"));
+            assert!(!task.prompt.contains("decimal string"));
+            assert!(!task.prompt.contains("not a number"));
+            assert!(task.finish.matches(Some(&json!(value))));
             assert!(task.finish.matches(Some(&json!(value.to_string()))));
             assert!(task.finish.matches(Some(&json!(format!("{value}.0")))));
-            assert!(!task.finish.matches(Some(&json!(value))));
+            assert!(!task.finish.matches(Some(&json!(value + 1))));
             assert!(!task.finish.matches(Some(&json!((value + 1).to_string()))));
             assert!(!task.finish.matches(Some(&json!("NaN"))));
             assert!(
@@ -339,6 +386,31 @@ mod tests {
                     .finish
                     .matches(Some(&json!(format!("{value} degrees"))))
             );
+        }
+    }
+
+    #[test]
+    fn numeric_matcher_accepts_equivalent_forms_and_rejects_non_numbers() {
+        let matcher = FinishMatcher::Numeric(12.0);
+        for actual in [
+            json!(12),
+            json!(12.0),
+            json!("12"),
+            json!("12.0"),
+            json!("+12"),
+            json!("1.2e1"),
+        ] {
+            assert!(matcher.matches(Some(&actual)), "{actual}");
+        }
+        for actual in [
+            json!(13),
+            json!("13"),
+            json!("12 degrees"),
+            json!("NaN"),
+            Value::Null,
+            json!({"value": 12}),
+        ] {
+            assert!(!matcher.matches(Some(&actual)), "{actual}");
         }
     }
 
