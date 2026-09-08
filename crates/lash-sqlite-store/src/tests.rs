@@ -841,7 +841,13 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
     );
     assert_eq!(
         registry
-            .list_observed_by(&session_scope.session_id)
+            .list_observed_by(
+                &session_scope.session_id,
+                &lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::Any,
+                    ..Default::default()
+                }
+            )
             .await
             .expect("observed processes")
             .len(),

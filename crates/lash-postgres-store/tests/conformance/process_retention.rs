@@ -183,9 +183,9 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
         }
     }
     assert_eq!(
-        live_sites, 3,
-        "expected exactly three live-status list literal sites in the PostgreSQL backend \
-         (two registry queries plus the partial process index in schema.sql); \
+        live_sites, 4,
+        "expected exactly four live-status list literal sites in the PostgreSQL backend \
+         (three registry queries plus the partial process index in schema.sql); \
          update this count when adding one"
     );
     assert_eq!(

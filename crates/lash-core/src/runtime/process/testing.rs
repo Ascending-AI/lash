@@ -489,7 +489,11 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
         result
     }
 
-    async fn list_observed_by(&self, session_id: &str) -> Result<Vec<ProcessRecord>, PluginError> {
+    async fn list_observed_by(
+        &self,
+        session_id: &str,
+        filter: &ProcessListFilter,
+    ) -> Result<Vec<ProcessRecord>, PluginError> {
         let process_ids = self
             .observers
             .lock()
@@ -501,6 +505,7 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
         let mut records = process_ids
             .into_iter()
             .filter_map(|process_id| managed.get(&process_id).map(|row| row.record.clone()))
+            .filter(|record| filter.matches_record(record))
             .collect::<Vec<_>>();
         records.sort_by(|left, right| left.id.cmp(&right.id));
         Ok(records)

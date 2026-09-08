@@ -247,7 +247,13 @@ pub trait ProcessObserverRegistry: ProcessQuery {
         by: ProcessObserverBy,
     ) -> Result<(), PluginError>;
 
-    async fn list_observed_by(&self, session_id: &str) -> Result<Vec<ProcessRecord>, PluginError>;
+    /// List this session's observed processes matching every supplied filter.
+    /// Stores bound status and retired-row retention before decoding records.
+    async fn list_observed_by(
+        &self,
+        session_id: &str,
+        filter: &ProcessListFilter,
+    ) -> Result<Vec<ProcessRecord>, PluginError>;
 
     /// List the observed rows that are still live for the session.
     ///
@@ -262,7 +268,13 @@ pub trait ProcessObserverRegistry: ProcessQuery {
         session_id: &str,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
         Ok(self
-            .list_observed_by(session_id)
+            .list_observed_by(
+                session_id,
+                &crate::ProcessListFilter {
+                    status: crate::ProcessStatusFilter::Any,
+                    ..Default::default()
+                },
+            )
             .await?
             .into_iter()
             .filter(|record| !record.status.is_retired())
@@ -274,7 +286,13 @@ pub trait ProcessObserverRegistry: ProcessQuery {
             return Ok(false);
         }
         Ok(self
-            .list_observed_by(session_id)
+            .list_observed_by(
+                session_id,
+                &crate::ProcessListFilter {
+                    status: crate::ProcessStatusFilter::Any,
+                    ..Default::default()
+                },
+            )
             .await?
             .into_iter()
             .any(|record| record.id == process_id))
@@ -912,7 +930,7 @@ pub trait ProcessClockRebind: Send + Sync {
 ///     ) -> Result<(), PluginError> {
 ///         unimplemented!()
 ///     }
-///     async fn list_observed_by(&self, _: &str) -> Result<Vec<ProcessRecord>, PluginError> {
+///     async fn list_observed_by(&self, _: &str, filter: &ProcessListFilter) -> Result<Vec<ProcessRecord>, PluginError> {
 ///         unimplemented!()
 ///     }
 ///     async fn observers_for_process(&self, _: &str) -> Result<Vec<SessionId>, PluginError> {
@@ -1028,8 +1046,9 @@ mod concern_isolation_tests {
         async fn list_observed_by(
             &self,
             session_id: &str,
+            filter: &ProcessListFilter,
         ) -> Result<Vec<ProcessRecord>, PluginError> {
-            self.inner.list_observed_by(session_id).await
+            self.inner.list_observed_by(session_id, filter).await
         }
         async fn observers_for_process(
             &self,
@@ -1089,7 +1108,13 @@ mod concern_isolation_tests {
             "observer edge added through the wrapper must be visible through it"
         );
         let observed = wrapper
-            .list_observed_by("session-a")
+            .list_observed_by(
+                "session-a",
+                &crate::ProcessListFilter {
+                    status: crate::ProcessStatusFilter::Any,
+                    ..Default::default()
+                },
+            )
             .await
             .expect("list observed");
         assert_eq!(observed.len(), 1);

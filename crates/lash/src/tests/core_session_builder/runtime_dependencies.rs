@@ -863,7 +863,13 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     assert_eq!(branch_read.config.model.id, "fork-source-model");
 
     let inherited = registry
-        .list_observed_by("fork-observer-branch")
+        .list_observed_by(
+            "fork-observer-branch",
+            &lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
         .await
         .expect("list inherited observations");
     assert_eq!(inherited.len(), 1);
@@ -880,7 +886,13 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     registry.set_process_read_error(None).await;
     assert!(
         registry
-            .list_observed_by("fork-transient-branch")
+            .list_observed_by(
+                "fork-transient-branch",
+                &lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::Any,
+                    ..Default::default()
+                }
+            )
             .await
             .expect("list transient-failure branch observations")
             .is_empty(),
@@ -978,7 +990,13 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .await?;
     assert_eq!(
         registry
-            .list_observed_by("fork-observer-branch")
+            .list_observed_by(
+                "fork-observer-branch",
+                &lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::Any,
+                    ..Default::default()
+                }
+            )
             .await
             .expect("list recovered fork observations")
             .len(),
@@ -1005,7 +1023,13 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     core.session("fork-observer-branch").open().await?;
     assert!(
         registry
-            .list_observed_by("fork-observer-branch")
+            .list_observed_by(
+                "fork-observer-branch",
+                &lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::Any,
+                    ..Default::default()
+                }
+            )
             .await
             .expect("list observations after deliberate removal")
             .is_empty(),
@@ -1033,7 +1057,13 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     )
     .await?;
     let only = registry
-        .list_observed_by("fork-only-branch")
+        .list_observed_by(
+            "fork-only-branch",
+            &lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
         .await
         .expect("list Only selector result");
     assert_eq!(
@@ -1073,7 +1103,13 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     .await?;
     assert!(
         registry
-            .list_observed_by("fork-none-branch")
+            .list_observed_by(
+                "fork-none-branch",
+                &lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::Any,
+                    ..Default::default()
+                }
+            )
             .await
             .expect("list None selector result")
             .is_empty()
@@ -1180,7 +1216,16 @@ async fn duplicate_only_fork_intents_are_canonical(
     );
     assert_eq!(receipt.observed_processes[0].process_id, process_id);
     assert_eq!(
-        registry.list_observed_by(&branch_session_id).await?.len(),
+        registry
+            .list_observed_by(
+                &branch_session_id,
+                &lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::Any,
+                    ..Default::default()
+                }
+            )
+            .await?
+            .len(),
         1,
         "the fork must expose one observer edge"
     );

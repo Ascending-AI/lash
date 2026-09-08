@@ -2308,7 +2308,13 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
         "a caller-departed row must never appear in a live observation listing"
     );
     let all_observed = registry
-        .list_observed_by(observer_session)
+        .list_observed_by(
+            observer_session,
+            &lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
         .await
         .expect("list all observed rows");
     assert!(

@@ -59,7 +59,15 @@ where
                         .await?
                 }
                 lash_core::ProcessListMode::All => {
-                    registry.list_observed_by(&session_scope.session_id).await?
+                    registry
+                        .list_observed_by(
+                            &session_scope.session_id,
+                            &lash_core::ProcessListFilter {
+                                status: lash_core::ProcessStatusFilter::Any,
+                                ..Default::default()
+                            },
+                        )
+                        .await?
                 }
             };
             Ok(ProcessEffectOutcome::List { entries })

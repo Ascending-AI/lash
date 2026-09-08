@@ -451,7 +451,13 @@ async fn assert_session_process_admission_contract(
         return;
     }
     let observed = registry
-        .list_observed_by(session_id)
+        .list_observed_by(
+            session_id,
+            &lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
         .await
         .expect("list runtime processes through the session observer");
     let observed_identities = observed

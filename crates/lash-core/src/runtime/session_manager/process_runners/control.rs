@@ -707,7 +707,17 @@ impl ProcessCapability {
         })?;
         match mode {
             crate::ProcessListMode::Live => registry.list_live_observed_by(session_id).await,
-            crate::ProcessListMode::All => registry.list_observed_by(session_id).await,
+            crate::ProcessListMode::All => {
+                registry
+                    .list_observed_by(
+                        session_id,
+                        &crate::ProcessListFilter {
+                            status: crate::ProcessStatusFilter::Any,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+            }
         }
     }
 

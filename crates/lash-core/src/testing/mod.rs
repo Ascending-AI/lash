@@ -979,7 +979,17 @@ impl crate::ProcessService for EffectBackedProcessService {
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         match mode {
             crate::ProcessListMode::Live => self.registry.list_live_observed_by(session_id).await,
-            crate::ProcessListMode::All => self.registry.list_observed_by(session_id).await,
+            crate::ProcessListMode::All => {
+                self.registry
+                    .list_observed_by(
+                        session_id,
+                        &crate::ProcessListFilter {
+                            status: crate::ProcessStatusFilter::Any,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+            }
         }
     }
 
@@ -1566,7 +1576,17 @@ impl crate::ProcessService for MockSessionManager {
                     .list_live_observed_by(session_id)
                     .await
             }
-            crate::ProcessListMode::All => self.process_registry.list_observed_by(session_id).await,
+            crate::ProcessListMode::All => {
+                self.process_registry
+                    .list_observed_by(
+                        session_id,
+                        &crate::ProcessListFilter {
+                            status: crate::ProcessStatusFilter::Any,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+            }
         }
     }
 

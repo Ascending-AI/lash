@@ -1223,6 +1223,10 @@ impl SeedProbe {
         let observed_processes = lash_core::ProcessObserverRegistry::list_observed_by(
             self.process_registry.as_ref(),
             "root",
+            &lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
         )
         .await
         .expect("list processes through the parent session observer");

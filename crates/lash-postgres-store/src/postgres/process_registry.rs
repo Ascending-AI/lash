@@ -490,21 +490,38 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
         tx.commit().await.map_err(plugin_sqlx_error)
     }
 
-    async fn list_observed_by(&self, session_id: &str) -> Result<Vec<ProcessRecord>, PluginError> {
+    async fn list_observed_by(
+        &self,
+        session_id: &str,
+        filter: &lash_core::ProcessListFilter,
+    ) -> Result<Vec<ProcessRecord>, PluginError> {
         let rows = sqlx::query(
             "SELECT p.record_json
              FROM lash_process_observers o
              JOIN lash_processes p ON p.process_id = o.process_id
                                     AND p.incarnation = o.process_incarnation
              WHERE o.session_id = $1
+               AND ($2::TEXT[] IS NULL OR p.status = ANY($2))
+               AND ($3::BIGINT IS NULL OR p.status IN ('running', 'waiting')
+                    OR p.updated_at_ms >= $3)
              ORDER BY p.process_id",
         )
         .bind(session_id)
+        .bind(filter.status.labels())
+        .bind(filter.retired_since_ms.map(clamp_epoch_ms))
         .fetch_all(&self.pool)
         .await
         .map_err(plugin_sqlx_error)?;
         rows.into_iter()
-            .map(|row| serde_json::from_str(&row.get::<String, _>(0)).map_err(process_decode_error))
+            .map(|row| {
+                serde_json::from_str::<ProcessRecord>(&row.get::<String, _>(0))
+                    .map_err(process_decode_error)
+            })
+            .filter(|result| {
+                result
+                    .as_ref()
+                    .map_or(true, |record| filter.matches_record(record))
+            })
             .collect()
     }
 

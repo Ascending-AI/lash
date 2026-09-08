@@ -152,7 +152,13 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     assert_eq!(explicit_branch.session_id, EXPLICIT_BRANCH);
     assert_eq!(explicit_branch.source_session_id, SOURCE_SESSION);
     let inherited = processes
-        .list_observed_by(EXPLICIT_BRANCH)
+        .list_observed_by(
+            EXPLICIT_BRANCH,
+            &lash::process::ProcessListFilter {
+                status: lash::process::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
         .await
         .expect("read inherited branch observations");
     assert_eq!(inherited[0].id, "fork-contract-observed-process");

@@ -252,7 +252,17 @@ async fn list_scope_process_handles(
 ) -> Vec<ProcessRecord> {
     match mode {
         crate::ProcessListMode::Live => executor.list_live_observed_by(&scope.session_id).await,
-        crate::ProcessListMode::All => executor.list_observed_by(&scope.session_id).await,
+        crate::ProcessListMode::All => {
+            executor
+                .list_observed_by(
+                    &scope.session_id,
+                    &crate::ProcessListFilter {
+                        status: crate::ProcessStatusFilter::Any,
+                        ..Default::default()
+                    },
+                )
+                .await
+        }
     }
     .unwrap_or_default()
 }

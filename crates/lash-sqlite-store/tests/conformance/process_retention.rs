@@ -167,7 +167,8 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
                 // Caller-selected status sets are a bound query expression,
                 // not a hard-coded live-status or DDL vocabulary literal.
                 if delimiter == "status IN "
-                    && site.starts_with("(SELECT value FROM json_each(?1))")
+                    && (site.starts_with("(SELECT value FROM json_each(?1))")
+                        || site.starts_with("(SELECT value FROM json_each(?2))"))
                 {
                     parameterized_sites += 1;
                     continue;
@@ -198,12 +199,12 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
         }
     }
     assert_eq!(
-        parameterized_sites, 3,
-        "three bound status-set membership sites: initial, time cursor, and id cursor"
+        parameterized_sites, 6,
+        "six bound status-set membership sites: three global and three observer-scoped"
     );
     assert_eq!(
-        live_sites, 5,
-        "expected exactly five live-status list literal sites in the SQLite backend; \
+        live_sites, 8,
+        "expected exactly eight live-status list literal sites in the SQLite backend; \
          update this count (and the derivation check) when adding one"
     );
     assert_eq!(

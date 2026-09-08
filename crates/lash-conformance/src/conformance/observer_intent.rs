@@ -55,7 +55,13 @@ pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::Sess
 
     assert!(
         registry
-            .list_observed_by(SESSION_ID)
+            .list_observed_by(
+                SESSION_ID,
+                &lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::Any,
+                    ..Default::default()
+                }
+            )
             .await
             .expect("list observers after transient failure")
             .is_empty(),

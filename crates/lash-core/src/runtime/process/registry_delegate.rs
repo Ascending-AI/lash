@@ -144,8 +144,9 @@ macro_rules! delegate_process_observer_registry {
             async fn list_observed_by(
                 &self,
                 session_id: &str,
+                filter: &$crate::ProcessListFilter,
             ) -> Result<Vec<$crate::ProcessRecord>, $crate::PluginError> {
-                self.$inner.list_observed_by(session_id).await
+                self.$inner.list_observed_by(session_id, filter).await
             }
 
             async fn list_live_observed_by(

@@ -47,3 +47,36 @@ fn recently_retired_query_uses_bounded_live_and_retired_indexes() {
         "bounded poll must not scan the all-history primary-key index, plan: {plan:?}"
     );
 }
+
+#[test]
+fn observed_recently_retired_query_seeks_recency_before_observer_history() {
+    let conn = rusqlite::Connection::open_in_memory().expect("open query-plan database");
+    conn.execute_batch(crate::schema::PROCESS_SCHEMA)
+        .expect("install process schema");
+    let mut stmt = conn
+        .prepare(&format!(
+            "EXPLAIN QUERY PLAN {LIST_OBSERVED_RECENT_RETIRED_SQL}"
+        ))
+        .expect("prepare observed query plan");
+    let plan = stmt
+        .query_map(params!["session", Option::<String>::None, 100_i64], |row| {
+            row.get::<_, String>(3)
+        })
+        .expect("explain observed query")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect plan");
+    assert!(
+        plan.iter()
+            .any(|step| step.contains("idx_processes_recent_retired")),
+        "retired branch must seek recency: {plan:?}"
+    );
+    assert!(
+        plan.iter().any(|step| step.contains("idx_processes_status")
+            || step.contains("idx_processes_live_worklist")),
+        "live branch must use a live index: {plan:?}"
+    );
+    assert!(
+        !plan.iter().any(|step| step.contains("SCAN o")),
+        "observer history must use keyed probes: {plan:?}"
+    );
+}
