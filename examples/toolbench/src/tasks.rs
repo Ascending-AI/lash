@@ -85,7 +85,7 @@ pub(crate) fn task_pack() -> Vec<Task> {
         ),
         read_task(
             "string-token",
-            "Use code to call notes.render for N-7 and extract the token without its closing parenthesis. Finish with the exact token string ALPHA-17.",
+            "Use code to call notes.render for N-7 and extract the value after token= without the closing parenthesis. Finish with that token as a plain string.",
             FinishMatcher::Exact(json!("ALPHA-17")),
             1,
         ),
