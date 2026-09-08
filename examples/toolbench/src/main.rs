@@ -425,7 +425,7 @@ mod tests {
             tasks.len() * 2 * args.dialect.dialects().len() * 2
         );
         assert_eq!(coins, work.len() / 2);
-        for (index, pair) in work.chunks_exact(2).enumerate() {
+        for (index, pair) in work.as_chunks::<2>().0.iter().enumerate() {
             assert_eq!(key(&pair[0]).0, key(&pair[1]).0);
             assert_eq!(key(&pair[0]).1, key(&pair[1]).1);
             assert_eq!(pair[0].task_index, pair[1].task_index);

@@ -201,6 +201,7 @@ async fn run_turn(
         .stream_to(telemetry.as_ref())
         .await
         .context("run toolbench turn")?;
+    eprintln!("[FIG2164-DIAG] task={} model={} dialect={} result={:?}", task.id, model, dialect.language_id(), result);
     let decisions = session
         .read_view()
         .active_events()
@@ -251,6 +252,7 @@ pub(crate) async fn preflight(
         lash::rlm::RlmChannel::NativeTool,
     )
     .await;
+    eprintln!("[FIG2164-DIAG] probe model={} dialect={} evidence={:?}", model, dialect.language_id(), evidence);
     if evidence.completed && evidence.finish_value == Some(serde_json::json!(1)) {
         Ok(())
     } else {
