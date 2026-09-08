@@ -366,7 +366,8 @@ impl Drop for ExternalLaunchAudit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ProcessRegistry;
+    use crate::{ProcessLifecycle as _, ProcessObserverRegistry as _, ProcessRegistrar as _};
+
     use crate::runtime::RuntimeEffectControllerHandle;
 
     fn admin(processes: Arc<dyn crate::ProcessService>) -> InternalProcessAdmin<'static> {

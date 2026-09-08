@@ -16,6 +16,7 @@ use lash_core::facade_support::{
     AgentFrameReasonFacadeOps, RuntimeSessionStateFacadeOps, SessionGraphFacadeOps,
     SessionNodeProjection, ToolStateFacadeOps,
 };
+use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _};
 use lash_sansio::sync::MutexExt;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};

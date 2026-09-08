@@ -1,3 +1,4 @@
+use crate::{ProcessEventLog as _, ProcessQuery as _, ProcessRegistrar as _};
 use lash_sansio::sync::MutexExt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};

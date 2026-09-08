@@ -88,6 +88,7 @@ fn builder_with_external_capacity_signal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash::process::{ProcessQuery as _, ProcessRegistrar as _};
 
     #[tokio::test]
     async fn custom_supplier_follows_external_signal_and_releases_by_raii() {

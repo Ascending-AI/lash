@@ -90,22 +90,63 @@ pub fn watch_process_registry_with_sink(
 }
 
 #[async_trait::async_trait]
-impl ProcessRegistry for WatchedProcessRegistry {
-    fn wake_delivery_config(&self) -> super::WakeDeliveryConfig {
-        self.inner.wake_delivery_config()
+impl super::registry::ProcessQuery for WatchedProcessRegistry {
+    async fn get_process(&self, process_id: &str) -> Result<Option<ProcessRecord>, PluginError> {
+        self.inner.get_process(process_id).await
     }
 
-    fn with_runtime_clock(&self, clock: Arc<dyn crate::Clock>) -> Option<Arc<dyn ProcessRegistry>> {
-        self.inner.with_runtime_clock(clock).map(|inner| {
-            Arc::new(Self {
-                inner,
-                hub: self.hub.clone(),
-                sink: self.sink.clone(),
-                event_paths: Mutex::new(HashMap::new()),
-            }) as Arc<dyn ProcessRegistry>
-        })
+    async fn list_processes(
+        &self,
+        filter: &ProcessListFilter,
+    ) -> Result<Vec<ProcessRecord>, PluginError> {
+        self.inner.list_processes(filter).await
     }
 
+    async fn processes_changed_since(
+        &self,
+        cursor: ProcessChangeCursor,
+        limit: usize,
+    ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
+        self.inner.processes_changed_since(cursor, limit).await
+    }
+
+    async fn filter_unregistered_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<String>, PluginError> {
+        self.inner
+            .filter_unregistered_process_ids(process_ids)
+            .await
+    }
+
+    async fn filter_tombstoned_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<String>, PluginError> {
+        self.inner.filter_tombstoned_process_ids(process_ids).await
+    }
+
+    async fn list_non_terminal_page(
+        &self,
+        limit: std::num::NonZeroUsize,
+        continuation: Option<super::ProcessWorklistCursor>,
+    ) -> Result<super::ProcessWorklistPage, PluginError> {
+        self.inner.list_non_terminal_page(limit, continuation).await
+    }
+
+    async fn live_reference_summary(
+        &self,
+    ) -> Result<Vec<super::references::ProcessLiveReferenceView>, PluginError> {
+        self.inner.live_reference_summary().await
+    }
+
+    async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
+        self.inner.count_non_terminal_processes().await
+    }
+}
+
+#[async_trait::async_trait]
+impl super::registry::ProcessRegistrar for WatchedProcessRegistry {
     async fn register_process_with_observers(
         &self,
         registration: ProcessRegistration,
@@ -136,7 +177,10 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.emit_events_after(process_id, sink_cursor).await;
         Ok(record)
     }
+}
 
+#[async_trait::async_trait]
+impl super::registry::ProcessObserverRegistry for WatchedProcessRegistry {
     async fn add_observer(
         &self,
         session_id: &str,
@@ -189,7 +233,10 @@ impl ProcessRegistry for WatchedProcessRegistry {
     ) -> Result<ProcessSessionDeleteReport, PluginError> {
         self.inner.delete_session_process_state(session_id).await
     }
+}
 
+#[async_trait::async_trait]
+impl super::registry::ProcessEventLog for WatchedProcessRegistry {
     async fn append_event(
         &self,
         process_id: &str,
@@ -248,7 +295,10 @@ impl ProcessRegistry for WatchedProcessRegistry {
     ) -> Result<Vec<ProcessEvent>, PluginError> {
         self.inner.recent_events(process_id, limit).await
     }
+}
 
+#[async_trait::async_trait]
+impl super::registry::ProcessLifecycle for WatchedProcessRegistry {
     async fn complete_process(
         &self,
         process_id: &str,
@@ -320,6 +370,7 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.emit_events_after(&lease.process_id, sink_cursor).await;
         Ok(outcome)
     }
+
     async fn list_pending_parent_end_plans(
         &self,
         limit: std::num::NonZeroUsize,
@@ -333,39 +384,11 @@ impl ProcessRegistry for WatchedProcessRegistry {
     ) -> Result<Option<crate::ProcessParentEndPlan>, PluginError> {
         self.inner.get_pending_parent_end_plan(process_id).await
     }
+
     async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
         self.inner.complete_parent_end_plan(process_id).await
     }
-    async fn admit_tool_intent_submission(
-        &self,
-        submission: crate::ToolIntentSubmissionRecord,
-    ) -> Result<crate::ToolIntentSubmissionAdmission, PluginError> {
-        self.inner.admit_tool_intent_submission(submission).await
-    }
 
-    async fn complete_tool_intent_submission(
-        &self,
-        replay_key: &str,
-        outcome: crate::ToolIntentExecutionOutcome,
-    ) -> Result<crate::ToolIntentSubmissionRecord, PluginError> {
-        self.inner
-            .complete_tool_intent_submission(replay_key, outcome)
-            .await
-    }
-
-    async fn pending_tool_intent_parent_end(
-        &self,
-        session_id: &str,
-        execution_scope_id: &str,
-    ) -> Result<Vec<crate::ToolIntentSubmissionRecord>, PluginError> {
-        self.inner
-            .pending_tool_intent_parent_end(session_id, execution_scope_id)
-            .await
-    }
-
-    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError> {
-        self.inner.complete_tool_intent_parent_end(replay_key).await
-    }
     async fn record_first_started_with_authority(
         &self,
         process_id: &str,
@@ -448,51 +471,46 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.emit_events_after(process_id, sink_cursor).await;
         Ok(record)
     }
+}
 
-    async fn get_process(&self, process_id: &str) -> Result<Option<ProcessRecord>, PluginError> {
-        self.inner.get_process(process_id).await
+#[async_trait::async_trait]
+impl super::registry::ProcessToolIntents for WatchedProcessRegistry {
+    async fn admit_tool_intent_submission(
+        &self,
+        submission: crate::ToolIntentSubmissionRecord,
+    ) -> Result<crate::ToolIntentSubmissionAdmission, PluginError> {
+        self.inner.admit_tool_intent_submission(submission).await
     }
 
-    async fn list_processes(
+    async fn complete_tool_intent_submission(
         &self,
-        filter: &ProcessListFilter,
-    ) -> Result<Vec<ProcessRecord>, PluginError> {
-        self.inner.list_processes(filter).await
-    }
-
-    async fn processes_changed_since(
-        &self,
-        cursor: ProcessChangeCursor,
-        limit: usize,
-    ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
-        self.inner.processes_changed_since(cursor, limit).await
-    }
-
-    async fn filter_unregistered_process_ids(
-        &self,
-        process_ids: &[String],
-    ) -> Result<Vec<String>, PluginError> {
+        replay_key: &str,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<crate::ToolIntentSubmissionRecord, PluginError> {
         self.inner
-            .filter_unregistered_process_ids(process_ids)
+            .complete_tool_intent_submission(replay_key, outcome)
             .await
     }
 
-    async fn filter_tombstoned_process_ids(
+    async fn pending_tool_intent_parent_end(
         &self,
-        process_ids: &[String],
-    ) -> Result<Vec<String>, PluginError> {
-        self.inner.filter_tombstoned_process_ids(process_ids).await
+        session_id: &str,
+        execution_scope_id: &str,
+    ) -> Result<Vec<crate::ToolIntentSubmissionRecord>, PluginError> {
+        self.inner
+            .pending_tool_intent_parent_end(session_id, execution_scope_id)
+            .await
     }
 
-    async fn compact_process_tombstones(
-        &self,
-        cutoff_epoch_ms: u64,
-        watermark: ProjectionWatermark,
-        trigger_store: Option<&dyn crate::TriggerStore>,
-    ) -> Result<usize, PluginError> {
-        self.inner
-            .compact_process_tombstones(cutoff_epoch_ms, watermark, trigger_store)
-            .await
+    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError> {
+        self.inner.complete_tool_intent_parent_end(replay_key).await
+    }
+}
+
+#[async_trait::async_trait]
+impl super::registry::ProcessWakeOutbox for WatchedProcessRegistry {
+    fn wake_delivery_config(&self) -> super::WakeDeliveryConfig {
+        self.inner.wake_delivery_config()
     }
 
     async fn claim_pending_wake_deliveries(
@@ -548,25 +566,10 @@ impl ProcessRegistry for WatchedProcessRegistry {
             .defer_wake_delivery(delivery_id, claim_token, next_attempt_at_ms)
             .await
     }
+}
 
-    async fn list_non_terminal_page(
-        &self,
-        limit: std::num::NonZeroUsize,
-        continuation: Option<super::ProcessWorklistCursor>,
-    ) -> Result<super::ProcessWorklistPage, PluginError> {
-        self.inner.list_non_terminal_page(limit, continuation).await
-    }
-
-    async fn live_reference_summary(
-        &self,
-    ) -> Result<Vec<super::references::ProcessLiveReferenceView>, PluginError> {
-        self.inner.live_reference_summary().await
-    }
-
-    async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
-        self.inner.count_non_terminal_processes().await
-    }
-
+#[async_trait::async_trait]
+impl super::registry::ProcessLeases for WatchedProcessRegistry {
     async fn claim_process_lease(
         &self,
         process_id: &str,
@@ -618,6 +621,20 @@ impl ProcessRegistry for WatchedProcessRegistry {
     ) -> Result<(), PluginError> {
         self.inner.complete_process_lease(completion).await
     }
+}
+
+#[async_trait::async_trait]
+impl super::registry::ProcessRetention for WatchedProcessRegistry {
+    async fn compact_process_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+        watermark: ProjectionWatermark,
+        trigger_store: Option<&dyn crate::TriggerStore>,
+    ) -> Result<usize, PluginError> {
+        self.inner
+            .compact_process_tombstones(cutoff_epoch_ms, watermark, trigger_store)
+            .await
+    }
 
     async fn prune_terminal_processes(
         &self,
@@ -630,5 +647,18 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.inner
             .prune_terminal_processes(cutoff_epoch_ms, filter, watermark)
             .await
+    }
+}
+
+impl super::registry::ProcessClockRebind for WatchedProcessRegistry {
+    fn with_runtime_clock(&self, clock: Arc<dyn crate::Clock>) -> Option<Arc<dyn ProcessRegistry>> {
+        self.inner.with_runtime_clock(clock).map(|inner| {
+            Arc::new(Self {
+                inner,
+                hub: self.hub.clone(),
+                sink: self.sink.clone(),
+                event_paths: Mutex::new(HashMap::new()),
+            }) as Arc<dyn ProcessRegistry>
+        })
     }
 }

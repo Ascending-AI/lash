@@ -1,8 +1,8 @@
+use lash_core::ProcessRegistrar as _;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_core::ProcessRegistry as _;
 use lash_core::sansio::{self, ChatContextProjector, ProtocolDriverHandle, Response};
 use lash_core::testing::behavior_transcript::Transcript;
 use lash_core::testing::sansio_transcript::record_effects;

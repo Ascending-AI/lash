@@ -1,4 +1,8 @@
 use super::*;
+use lash_core::{
+    ProcessEventLog as _, ProcessObserverRegistry as _, ProcessRetention as _,
+    ProcessWakeOutbox as _,
+};
 
 // =============================================================================
 // Explicit runtime dependency wiring
@@ -745,7 +749,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
 
 #[tokio::test]
 async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent() -> Result<()> {
-    use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
+    use lash_core::SessionStoreFactory as _;
 
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let registry = Arc::new(TestLocalProcessRegistry::default());
@@ -1104,8 +1108,6 @@ async fn duplicate_only_fork_intents_are_canonical(
     case: &str,
     factory: Arc<dyn lash_core::SessionStoreFactory>,
 ) -> Result<()> {
-    use lash_core::ProcessRegistry as _;
-
     let source_session_id = format!("duplicate-only-source-{case}");
     let branch_session_id = format!("duplicate-only-branch-{case}");
     let process_id = format!("duplicate-only-process-{case}");
@@ -1203,7 +1205,7 @@ async fn duplicate_only_fork_intents_are_canonical_in_sqlite() -> Result<()> {
 
 #[tokio::test]
 async fn session_create_observer_intent_replays_idempotently_on_open() -> Result<()> {
-    use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
+    use lash_core::SessionStoreFactory as _;
 
     let session_id = "session-create-observer-recovery";
     let process_id = "session-create-observed-process";
@@ -1293,7 +1295,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
 #[tokio::test]
 async fn attributed_session_observer_intents_settle_in_one_pass_before_open_returns() -> Result<()>
 {
-    use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
+    use lash_core::SessionStoreFactory as _;
 
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let registry = Arc::new(TestLocalProcessRegistry::default());

@@ -84,6 +84,7 @@ impl EventSequenceStep {
 #[cfg(test)]
 mod floor_tests {
     use super::*;
+    use crate::ProcessQuery as _;
 
     #[tokio::test]
     async fn first_event_after_process_reuse_jumps_past_retained_sender_floor() {

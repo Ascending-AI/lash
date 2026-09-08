@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use lash::process::ProcessRegistry as _;
+use lash::process::{ProcessEventLog as _, ProcessRegistrar as _};
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolIntentExecutionOutcome,
     ToolOutcome, ToolProvider,

@@ -3,7 +3,10 @@ use crate::shell::output::{
     MAX_OUTPUT, ReaderSignals, SPILL_OUTPUT_THRESHOLD, ShellOutputBuffer, clean_terminal_output,
     render_buffer_output, spawn_async_reader, take_buffer_output,
 };
-use lash_core::ProcessRegistry as _;
+use lash_core::{
+    ProcessEventLog as _, ProcessLeases as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
+    ProcessQuery as _, ProcessRegistrar as _, ProcessRetention as _,
+};
 use lash_sansio::sync::MutexExt;
 use serde_json::json;
 use std::fs;

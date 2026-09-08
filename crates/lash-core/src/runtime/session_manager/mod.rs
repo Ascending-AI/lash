@@ -906,7 +906,8 @@ pub(super) async fn emit_session_events(
 #[cfg(test)]
 mod process_visibility_tests {
     use super::{ProcessVisibility, RuntimeSessionProcessService};
-    use crate::ProcessRegistry as _;
+    use crate::ProcessRegistrar as _;
+
     use crate::runtime::tests::helpers::{named_turn_scope, standard_test_policy};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};

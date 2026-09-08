@@ -1,5 +1,6 @@
 //! Live behavioral checks for the PostgreSQL/server-clock boundary.
 
+use lash_core::{ProcessLeases as _, ProcessLifecycle as _, ProcessRegistrar as _};
 use std::sync::Arc;
 
 use lash_core::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary};
@@ -8,9 +9,9 @@ use lash_core::{
     CheckpointKind, Clock, DeliveryPolicy, LeaseOwnerIdentity, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
     ProcessAwaitOutput, ProcessCompletionOutcome, ProcessInput, ProcessLeaseClaimOutcome,
-    ProcessProvenance, ProcessRegistration, ProcessRegistry, RecoveryContract, RuntimeCommit,
-    RuntimeSessionState, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory,
-    TurnInput, TurnInputCheckpointBoundary, TurnInputIngress, facade_support::SessionCommand,
+    ProcessProvenance, ProcessRegistration, RecoveryContract, RuntimeCommit, RuntimeSessionState,
+    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, TurnInput,
+    TurnInputCheckpointBoundary, TurnInputIngress, facade_support::SessionCommand,
 };
 use lash_postgres_store::PostgresStorage;
 use sqlx::Connection as _;
@@ -22,6 +23,8 @@ use crate::support::{SharedDatabaseLock, database_url};
 const CLOCK_SKEW_MS: u64 = 10 * 365 * 24 * 60 * 60 * 1_000;
 const RUNTIME_PERSISTENCE_SOURCE: &str = include_str!("../src/postgres/runtime_persistence.rs");
 const PROCESS_REGISTRY_SOURCE: &str = include_str!("../src/postgres/process_registry.rs");
+const PROCESS_REGISTRY_LEASES_SOURCE: &str =
+    include_str!("../src/postgres/process_registry/leases.rs");
 const PROCESS_HELPERS_SOURCE: &str = include_str!("../src/postgres/process_helpers.rs");
 const EFFECT_REPLAY_SOURCE: &str = include_str!("../src/postgres/effect_replay.rs");
 
@@ -185,18 +188,20 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "async fn complete_process_with_lease(",
             "async fn record_first_started_with_authority(",
         ),
+        // The `ProcessLeases` impl lives in its own submodule file, so the
+        // lease atoms are fenced through that source, not the registry root.
         (
-            PROCESS_REGISTRY_SOURCE,
+            PROCESS_REGISTRY_LEASES_SOURCE,
             "async fn claim_process_lease(",
             "async fn reclaim_process_lease(",
         ),
         (
-            PROCESS_REGISTRY_SOURCE,
+            PROCESS_REGISTRY_LEASES_SOURCE,
             "async fn reclaim_process_lease(",
             "async fn renew_process_lease(",
         ),
         (
-            PROCESS_REGISTRY_SOURCE,
+            PROCESS_REGISTRY_LEASES_SOURCE,
             "async fn renew_process_lease(",
             "async fn get_process_lease(",
         ),

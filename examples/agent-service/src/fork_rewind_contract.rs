@@ -8,8 +8,8 @@ use lash::persistence::{
     SessionStoreCreateRequest, SessionStoreFactory as _,
 };
 use lash::process::{
-    ProcessInput, ProcessObserverBy, ProcessProvenance, ProcessRegistration, ProcessRegistry as _,
-    RecoveryContract,
+    ProcessInput, ProcessObserverBy, ProcessObserverRegistry as _, ProcessProvenance,
+    ProcessRegistrar as _, ProcessRegistration, RecoveryContract,
 };
 use lash::provider::LlmResponse;
 use lash::runtime::SessionPolicy;

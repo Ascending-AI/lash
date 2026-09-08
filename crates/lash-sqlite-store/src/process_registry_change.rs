@@ -305,6 +305,9 @@ pub(crate) fn prunable_terminal_process_ids_conn(
 mod tests {
     use super::*;
     use crate::process_registry::tx_outcome;
+    use lash_core::{
+        ProcessEventLog as _, ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _,
+    };
 
     #[tokio::test]
     async fn candidate_tombstone_divergence_rolls_back_all_prune_mutations() {

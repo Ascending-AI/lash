@@ -355,8 +355,11 @@ mod tests {
     use crate::runtime::RuntimeEffectControllerHandle;
     use crate::tool_dispatch::ToolDispatchContext;
     use crate::{
-        PreparedToolCall, ProcessRegistry, ToolCall, ToolDefinition, ToolOutcome, ToolPrepareCall,
-        ToolProvider,
+        PreparedToolCall, ToolCall, ToolDefinition, ToolOutcome, ToolPrepareCall, ToolProvider,
+    };
+    use crate::{
+        ProcessEventLog as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
+        ProcessQuery as _, ProcessRegistrar as _, ProcessRetention as _,
     };
     use std::collections::BTreeMap;
     use std::sync::Arc;

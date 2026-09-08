@@ -13,6 +13,7 @@
 //! host, and both the attempt and its nested effect replay their recorded
 //! terminals byte-for-byte without re-executing either body.
 
+use lash_core::ProcessLifecycle as _;
 use std::sync::Arc;
 
 fn registry_local_executor(
@@ -27,9 +28,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::{
-    EffectHost, ExecutionScope, ProcessRegistry as _, RuntimeEffectCommand, RuntimeEffectEnvelope,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
-    RuntimeScope,
+    EffectHost, ExecutionScope, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimeScope,
 };
 use lash_postgres_store::{PostgresEffectHost, PostgresStorage};
 

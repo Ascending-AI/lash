@@ -418,15 +418,19 @@ mod attribution_tests {
 
 #[cfg(test)]
 mod tests {
+    use lash_core::{
+        ProcessEventLog as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
+        ProcessRegistrar as _, ProcessRetention as _, ProcessWakeOutbox as _,
+    };
     use std::sync::Arc;
 
     use lash_core::store::RuntimeCommit;
     use lash_core::{
         PluginSessionSnapshot, ProcessAwaitOutput, ProcessCompletionAuthority,
         ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType,
-        ProcessRegistry as _, ProcessValueSelector, ProcessWakeSpec, ProjectionWatermark,
-        RecoveryContract, RuntimeSessionState, SessionRelation, SessionStoreCreateRequest,
-        SessionStoreFactory as _, ToolState, facade_support::InMemorySessionStoreFactory,
+        ProcessValueSelector, ProcessWakeSpec, ProjectionWatermark, RecoveryContract,
+        RuntimeSessionState, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory as _,
+        ToolState, facade_support::InMemorySessionStoreFactory,
     };
 
     use super::*;

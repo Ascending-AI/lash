@@ -214,6 +214,7 @@ async fn apply_process_observer(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ProcessLifecycle as _, ProcessRegistrar as _, ProcessRetention as _};
 
     #[tokio::test]
     async fn noproc_receipts_preserve_both_attributions() {

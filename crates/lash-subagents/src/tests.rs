@@ -1220,10 +1220,12 @@ impl SeedProbe {
     }
 
     async fn assert_process_visibility(&self, kind: &str, label: &str) {
-        let observed_processes =
-            lash_core::ProcessRegistry::list_observed_by(self.process_registry.as_ref(), "root")
-                .await
-                .expect("list processes through the parent session observer");
+        let observed_processes = lash_core::ProcessObserverRegistry::list_observed_by(
+            self.process_registry.as_ref(),
+            "root",
+        )
+        .await
+        .expect("list processes through the parent session observer");
         let observed_identities = observed_processes
             .iter()
             .map(|process| (&process.id, &process.identity, &process.status))
@@ -1240,7 +1242,7 @@ impl SeedProbe {
             "the parent session observer must expose one {kind}/{label} process record; observed={observed_identities:?}"
         );
         let process = matching[0];
-        let observers = lash_core::ProcessRegistry::observers_for_process(
+        let observers = lash_core::ProcessObserverRegistry::observers_for_process(
             self.process_registry.as_ref(),
             &process.id,
         )
@@ -1252,7 +1254,7 @@ impl SeedProbe {
             process.id
         );
 
-        let events = lash_core::ProcessRegistry::events_after(
+        let events = lash_core::ProcessEventLog::events_after(
             self.process_registry.as_ref(),
             &process.id,
             0,

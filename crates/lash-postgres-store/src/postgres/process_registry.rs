@@ -1,7 +1,10 @@
 use crate::*;
+use lash_core::ProcessQuery as _;
 use lash_core::facade_support::{self, registry_transitions::ProcessLeaseReclaimDecision};
 #[path = "process_registry/continuation_store.rs"]
 mod continuation_store;
+#[path = "process_registry/leases.rs"]
+mod leases;
 #[path = "process_registry/parent_end.rs"]
 pub(crate) mod parent_end;
 mod prune;
@@ -20,17 +23,200 @@ use wake_delivery::{
     update_wake_delivery_state, wake_delivery_report,
 };
 #[async_trait::async_trait]
-impl ProcessRegistry for PostgresProcessRegistry {
-    fn wake_delivery_config(&self) -> lash_core::WakeDeliveryConfig {
-        self.wake_delivery_config
-    }
-    fn with_runtime_clock(
-        &self,
-        clock: Arc<dyn lash_core::Clock>,
-    ) -> Option<Arc<dyn ProcessRegistry>> {
-        Some(Arc::new(self.clone().with_clock(clock)))
+impl lash_core::ProcessQuery for PostgresProcessRegistry {
+    async fn get_process(&self, process_id: &str) -> Result<Option<ProcessRecord>, PluginError> {
+        if let Some(record) = load_process(&self.pool, process_id).await? {
+            return Ok(Some(record));
+        }
+        let row = sqlx::query(
+            "SELECT terminal_label, pruned_at_ms
+             FROM lash_process_tombstones WHERE process_id = $1
+             ORDER BY incarnation DESC LIMIT 1",
+        )
+        .bind(process_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        if let Some(row) = row {
+            return Err(registry_transitions::process_no_longer_retained(
+                registry_transitions::ProcessTombstoneStamp {
+                    terminal_label: row.get(0),
+                    pruned_at_ms: plugin_u64_from_sql(
+                        "ProcessTombstone",
+                        "pruned_at_ms",
+                        row.get(1),
+                    )?,
+                },
+            ));
+        }
+        Ok(None)
     }
 
+    async fn get_process_ref(
+        &self,
+        process_ref: &ProcessRef,
+    ) -> Result<Option<ProcessRecord>, PluginError> {
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let record = require_process_ref_tx(&mut tx, process_ref).await?;
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok(Some(record))
+    }
+
+    async fn list_processes(
+        &self,
+        filter: &lash_core::ProcessListFilter,
+    ) -> Result<Vec<ProcessRecord>, PluginError> {
+        if filter
+            .created_at_start_ms
+            .is_some_and(|value| value > i64::MAX as u64)
+        {
+            return Ok(Vec::new());
+        }
+        let definition = filter
+            .definition
+            .as_ref()
+            .map(serde_json::to_value)
+            .transpose()
+            .map_err(process_decode_error)?;
+        let rows = sqlx::query(
+            "SELECT record_json FROM lash_processes
+             WHERE ($1::TEXT[] IS NULL OR status = ANY($1))
+               AND ($2::TEXT IS NULL OR originator_id = $2)
+               AND ($3::TEXT IS NULL OR identity_kind = $3)
+               AND ($4::TEXT IS NULL OR identity_label = $4)
+               AND ($5::JSONB IS NULL OR
+                    (record_json::JSONB #> '{identity,definition}') = $5)
+               AND ($6::TEXT IS NULL OR
+                    (record_json::JSONB #>> '{provenance,caused_by,occurrence_id}') = $6)
+               AND ($7::TEXT IS NULL OR
+                    (record_json::JSONB #>> '{provenance,caused_by,subscription_id}') = $7)
+               AND ($8::BIGINT IS NULL OR created_at_ms >= $8)
+               AND ($9::BIGINT IS NULL OR created_at_ms < $9)
+               AND ($10::BIGINT IS NULL OR status IN ('running', 'waiting')
+                    OR updated_at_ms >= $10)
+             ORDER BY process_id ASC",
+        )
+        .bind(filter.status.labels())
+        .bind(filter.originator_id.as_deref())
+        .bind(filter.identity_kind.as_deref())
+        .bind(filter.identity_label.as_deref())
+        .bind(definition)
+        .bind(filter.caused_by_occurrence_id.as_deref())
+        .bind(filter.caused_by_subscription_id.as_deref())
+        .bind(filter.created_at_start_ms.map(clamp_epoch_ms))
+        .bind(filter.created_at_end_ms.map(clamp_epoch_ms))
+        .bind(filter.retired_since_ms.map(clamp_epoch_ms))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let mut records: Vec<ProcessRecord> = Vec::new();
+        for row in rows {
+            if let Some(record) = decode_matching_process(row, filter)? {
+                records.push(record);
+            }
+        }
+        Ok(records)
+    }
+
+    async fn processes_changed_since(
+        &self,
+        cursor: ProcessChangeCursor,
+        limit: usize,
+    ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let horizon = process_change_horizon_tx(&mut tx).await?;
+        if cursor.store_sequence() < horizon {
+            return Err(PluginError::ProcessChangeCursorPruned {
+                requested_cursor: cursor,
+                tombstone_compaction_horizon: ProcessChangeCursor::from_store_sequence(horizon),
+            });
+        }
+        if limit == 0 {
+            tx.commit().await.map_err(plugin_sqlx_error)?;
+            return Ok((Vec::new(), cursor));
+        }
+        let rows = sqlx::query(
+            "SELECT change_seq, kind, payload FROM (
+                 SELECT change_seq, 'upsert' AS kind, record_json AS payload
+                 FROM lash_processes WHERE change_seq > $1
+                 UNION ALL
+                 SELECT pruned_change_seq, 'deleted' AS kind,
+                        json_build_object(
+                            'process_id', process_id,
+                            'incarnation', incarnation,
+                            'terminal_label', terminal_label,
+                            'pruned_at_ms', pruned_at_ms,
+                            'pruned_change_seq', pruned_change_seq
+                        )::TEXT AS payload
+                 FROM lash_process_tombstones WHERE pruned_change_seq > $1
+             ) changes
+             ORDER BY change_seq ASC
+             LIMIT $2",
+        )
+        .bind(cursor.store_sequence() as i64)
+        .bind(limit as i64)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let mut records = Vec::new();
+        let mut next_cursor = cursor;
+        for row in rows {
+            let change_seq: i64 = row.get(0);
+            let kind: String = row.get(1);
+            let json: String = row.get(2);
+            records.push(if kind == "upsert" {
+                ProcessChange::Upsert {
+                    record: serde_json::from_str(&json).map_err(process_decode_error)?,
+                }
+            } else {
+                ProcessChange::Deleted {
+                    tombstone: serde_json::from_str(&json).map_err(process_decode_error)?,
+                }
+            });
+            next_cursor = ProcessChangeCursor::from_store_sequence(plugin_u64_from_sql(
+                "ProcessChange",
+                "change_seq",
+                change_seq,
+            )?);
+        }
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok((records, next_cursor))
+    }
+
+    async fn list_non_terminal_page(
+        &self,
+        limit: std::num::NonZeroUsize,
+        continuation: Option<lash_core::ProcessWorklistCursor>,
+    ) -> Result<lash_core::ProcessWorklistPage, PluginError> {
+        worklist::list_non_terminal_page(self, limit, continuation).await
+    }
+
+    async fn filter_unregistered_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<String>, PluginError> {
+        filter_unregistered_process_ids(&self.pool, process_ids).await
+    }
+
+    async fn filter_tombstoned_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<String>, PluginError> {
+        filter_tombstoned_process_ids(&self.pool, process_ids).await
+    }
+
+    async fn live_reference_summary(&self) -> Result<Vec<ProcessLiveReferenceView>, PluginError> {
+        let records = worklist::collect_non_terminal_records(self).await?;
+        Ok(ProcessLiveReferenceView::from_records(records.iter()))
+    }
+
+    async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
+        worklist::count_non_terminal_processes(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
     async fn register_process_with_observers(
         &self,
         registration: ProcessRegistration,
@@ -146,7 +332,10 @@ impl ProcessRegistry for PostgresProcessRegistry {
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }
+}
 
+#[async_trait::async_trait]
+impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
     async fn add_observer(
         &self,
         session_id: &str,
@@ -443,7 +632,10 @@ impl ProcessRegistry for PostgresProcessRegistry {
             cleared_subscription_count,
         })
     }
+}
 
+#[async_trait::async_trait]
+impl lash_core::ProcessEventLog for PostgresProcessRegistry {
     async fn append_event(
         &self,
         process_id: &str,
@@ -641,7 +833,10 @@ impl ProcessRegistry for PostgresProcessRegistry {
         events.reverse();
         Ok(events)
     }
+}
 
+#[async_trait::async_trait]
+impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
     async fn complete_process(
         &self,
         process_id: &str,
@@ -776,6 +971,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core::ProcessCompletionOutcome::Committed(record))
     }
+
     async fn list_pending_parent_end_plans(
         &self,
         limit: std::num::NonZeroUsize,
@@ -789,32 +985,11 @@ impl ProcessRegistry for PostgresProcessRegistry {
     ) -> Result<Option<lash_core::ProcessParentEndPlan>, PluginError> {
         parent_end::get(&self.pool, process_id).await
     }
+
     async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
         parent_end::complete(&self.pool, process_id).await
     }
-    async fn admit_tool_intent_submission(
-        &self,
-        submission: lash_core::ToolIntentSubmissionRecord,
-    ) -> Result<lash_core::ToolIntentSubmissionAdmission, PluginError> {
-        tool_intent_submission::admit(&self.pool, submission).await
-    }
-    async fn complete_tool_intent_submission(
-        &self,
-        replay_key: &str,
-        outcome: lash_core::ToolIntentExecutionOutcome,
-    ) -> Result<lash_core::ToolIntentSubmissionRecord, PluginError> {
-        tool_intent_submission::complete(&self.pool, replay_key, outcome).await
-    }
-    async fn pending_tool_intent_parent_end(
-        &self,
-        session_id: &str,
-        execution_scope_id: &str,
-    ) -> Result<Vec<lash_core::ToolIntentSubmissionRecord>, PluginError> {
-        tool_intent_submission::pending_parent_end(&self.pool, session_id, execution_scope_id).await
-    }
-    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError> {
-        tool_intent_submission::complete_parent_end(&self.pool, replay_key).await
-    }
+
     async fn record_first_started_with_authority(
         &self,
         process_id: &str,
@@ -1000,229 +1175,42 @@ impl ProcessRegistry for PostgresProcessRegistry {
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }
+}
 
-    async fn get_process(&self, process_id: &str) -> Result<Option<ProcessRecord>, PluginError> {
-        if let Some(record) = load_process(&self.pool, process_id).await? {
-            return Ok(Some(record));
-        }
-        let row = sqlx::query(
-            "SELECT terminal_label, pruned_at_ms
-             FROM lash_process_tombstones WHERE process_id = $1
-             ORDER BY incarnation DESC LIMIT 1",
-        )
-        .bind(process_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        if let Some(row) = row {
-            return Err(registry_transitions::process_no_longer_retained(
-                registry_transitions::ProcessTombstoneStamp {
-                    terminal_label: row.get(0),
-                    pruned_at_ms: plugin_u64_from_sql(
-                        "ProcessTombstone",
-                        "pruned_at_ms",
-                        row.get(1),
-                    )?,
-                },
-            ));
-        }
-        Ok(None)
+#[async_trait::async_trait]
+impl lash_core::ProcessToolIntents for PostgresProcessRegistry {
+    async fn admit_tool_intent_submission(
+        &self,
+        submission: lash_core::ToolIntentSubmissionRecord,
+    ) -> Result<lash_core::ToolIntentSubmissionAdmission, PluginError> {
+        tool_intent_submission::admit(&self.pool, submission).await
     }
 
-    async fn get_process_ref(
+    async fn complete_tool_intent_submission(
         &self,
-        process_ref: &ProcessRef,
-    ) -> Result<Option<ProcessRecord>, PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let record = require_process_ref_tx(&mut tx, process_ref).await?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(Some(record))
+        replay_key: &str,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<lash_core::ToolIntentSubmissionRecord, PluginError> {
+        tool_intent_submission::complete(&self.pool, replay_key, outcome).await
     }
 
-    async fn list_processes(
+    async fn pending_tool_intent_parent_end(
         &self,
-        filter: &lash_core::ProcessListFilter,
-    ) -> Result<Vec<ProcessRecord>, PluginError> {
-        if filter
-            .created_at_start_ms
-            .is_some_and(|value| value > i64::MAX as u64)
-        {
-            return Ok(Vec::new());
-        }
-        let definition = filter
-            .definition
-            .as_ref()
-            .map(serde_json::to_value)
-            .transpose()
-            .map_err(process_decode_error)?;
-        let rows = sqlx::query(
-            "SELECT record_json FROM lash_processes
-             WHERE ($1::TEXT[] IS NULL OR status = ANY($1))
-               AND ($2::TEXT IS NULL OR originator_id = $2)
-               AND ($3::TEXT IS NULL OR identity_kind = $3)
-               AND ($4::TEXT IS NULL OR identity_label = $4)
-               AND ($5::JSONB IS NULL OR
-                    (record_json::JSONB #> '{identity,definition}') = $5)
-               AND ($6::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,occurrence_id}') = $6)
-               AND ($7::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,subscription_id}') = $7)
-               AND ($8::BIGINT IS NULL OR created_at_ms >= $8)
-               AND ($9::BIGINT IS NULL OR created_at_ms < $9)
-               AND ($10::BIGINT IS NULL OR status IN ('running', 'waiting')
-                    OR updated_at_ms >= $10)
-             ORDER BY process_id ASC",
-        )
-        .bind(filter.status.labels())
-        .bind(filter.originator_id.as_deref())
-        .bind(filter.identity_kind.as_deref())
-        .bind(filter.identity_label.as_deref())
-        .bind(definition)
-        .bind(filter.caused_by_occurrence_id.as_deref())
-        .bind(filter.caused_by_subscription_id.as_deref())
-        .bind(filter.created_at_start_ms.map(clamp_epoch_ms))
-        .bind(filter.created_at_end_ms.map(clamp_epoch_ms))
-        .bind(filter.retired_since_ms.map(clamp_epoch_ms))
-        .fetch_all(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        let mut records: Vec<ProcessRecord> = Vec::new();
-        for row in rows {
-            if let Some(record) = decode_matching_process(row, filter)? {
-                records.push(record);
-            }
-        }
-        Ok(records)
+        session_id: &str,
+        execution_scope_id: &str,
+    ) -> Result<Vec<lash_core::ToolIntentSubmissionRecord>, PluginError> {
+        tool_intent_submission::pending_parent_end(&self.pool, session_id, execution_scope_id).await
     }
 
-    async fn processes_changed_since(
-        &self,
-        cursor: ProcessChangeCursor,
-        limit: usize,
-    ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let horizon = process_change_horizon_tx(&mut tx).await?;
-        if cursor.store_sequence() < horizon {
-            return Err(PluginError::ProcessChangeCursorPruned {
-                requested_cursor: cursor,
-                tombstone_compaction_horizon: ProcessChangeCursor::from_store_sequence(horizon),
-            });
-        }
-        if limit == 0 {
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok((Vec::new(), cursor));
-        }
-        let rows = sqlx::query(
-            "SELECT change_seq, kind, payload FROM (
-                 SELECT change_seq, 'upsert' AS kind, record_json AS payload
-                 FROM lash_processes WHERE change_seq > $1
-                 UNION ALL
-                 SELECT pruned_change_seq, 'deleted' AS kind,
-                        json_build_object(
-                            'process_id', process_id,
-                            'incarnation', incarnation,
-                            'terminal_label', terminal_label,
-                            'pruned_at_ms', pruned_at_ms,
-                            'pruned_change_seq', pruned_change_seq
-                        )::TEXT AS payload
-                 FROM lash_process_tombstones WHERE pruned_change_seq > $1
-             ) changes
-             ORDER BY change_seq ASC
-             LIMIT $2",
-        )
-        .bind(cursor.store_sequence() as i64)
-        .bind(limit as i64)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        let mut records = Vec::new();
-        let mut next_cursor = cursor;
-        for row in rows {
-            let change_seq: i64 = row.get(0);
-            let kind: String = row.get(1);
-            let json: String = row.get(2);
-            records.push(if kind == "upsert" {
-                ProcessChange::Upsert {
-                    record: serde_json::from_str(&json).map_err(process_decode_error)?,
-                }
-            } else {
-                ProcessChange::Deleted {
-                    tombstone: serde_json::from_str(&json).map_err(process_decode_error)?,
-                }
-            });
-            next_cursor = ProcessChangeCursor::from_store_sequence(plugin_u64_from_sql(
-                "ProcessChange",
-                "change_seq",
-                change_seq,
-            )?);
-        }
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok((records, next_cursor))
+    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError> {
+        tool_intent_submission::complete_parent_end(&self.pool, replay_key).await
     }
+}
 
-    async fn compact_process_tombstones(
-        &self,
-        cutoff_epoch_ms: u64,
-        watermark: lash_core::ProjectionWatermark,
-        trigger_store: Option<&dyn lash_core::TriggerStore>,
-    ) -> Result<usize, PluginError> {
-        let max_change_seq = match watermark {
-            lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
-            lash_core::ProjectionWatermark::NoProjector => None,
-        };
-        let outstanding_trigger_delivery_process_ids = match trigger_store {
-            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
-            None => Vec::new(),
-        };
-        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        sqlx::query(
-            "SELECT current_seq FROM lash_process_change_clock
-             WHERE singleton = TRUE FOR UPDATE",
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        let compacted_through: Option<i64> = sqlx::query_scalar(
-            "SELECT MAX(pruned_change_seq) FROM lash_process_tombstones
-             WHERE pruned_at_ms < $1
-               AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)
-               AND NOT (process_id = ANY($3::TEXT[]))",
-        )
-        .bind(cutoff_epoch_ms)
-        .bind(max_change_seq)
-        .bind(&outstanding_trigger_delivery_process_ids)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        let deleted = sqlx::query(
-            "DELETE FROM lash_process_tombstones
-                 WHERE pruned_at_ms < $1
-                   AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)
-                   AND NOT (process_id = ANY($3::TEXT[]))",
-        )
-        .bind(cutoff_epoch_ms)
-        .bind(max_change_seq)
-        .bind(&outstanding_trigger_delivery_process_ids)
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected() as usize;
-        if let Some(compacted_through) = compacted_through {
-            sqlx::query(
-                "UPDATE lash_process_change_clock
-                 SET tombstone_compaction_horizon = GREATEST(
-                     tombstone_compaction_horizon, $1
-                 )
-                 WHERE singleton = TRUE",
-            )
-            .bind(compacted_through)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
-        }
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(deleted)
+#[async_trait::async_trait]
+impl lash_core::ProcessWakeOutbox for PostgresProcessRegistry {
+    fn wake_delivery_config(&self) -> lash_core::WakeDeliveryConfig {
+        self.wake_delivery_config
     }
 
     async fn claim_pending_wake_deliveries(
@@ -1342,221 +1330,72 @@ impl ProcessRegistry for PostgresProcessRegistry {
         }
         Ok(lash_core::WakeDeliveryClaimOutcome::Applied)
     }
-
-    async fn list_non_terminal_page(
+}
+#[async_trait::async_trait]
+impl lash_core::ProcessRetention for PostgresProcessRegistry {
+    async fn compact_process_tombstones(
         &self,
-        limit: std::num::NonZeroUsize,
-        continuation: Option<lash_core::ProcessWorklistCursor>,
-    ) -> Result<lash_core::ProcessWorklistPage, PluginError> {
-        worklist::list_non_terminal_page(self, limit, continuation).await
-    }
-
-    async fn filter_unregistered_process_ids(
-        &self,
-        process_ids: &[String],
-    ) -> Result<Vec<String>, PluginError> {
-        filter_unregistered_process_ids(&self.pool, process_ids).await
-    }
-
-    async fn filter_tombstoned_process_ids(
-        &self,
-        process_ids: &[String],
-    ) -> Result<Vec<String>, PluginError> {
-        filter_tombstoned_process_ids(&self.pool, process_ids).await
-    }
-
-    async fn live_reference_summary(&self) -> Result<Vec<ProcessLiveReferenceView>, PluginError> {
-        let records = worklist::collect_non_terminal_records(self).await?;
-        Ok(ProcessLiveReferenceView::from_records(records.iter()))
-    }
-
-    async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
-        worklist::count_non_terminal_processes(self).await
-    }
-
-    async fn claim_process_lease(
-        &self,
-        process_id: &str,
-        owner: &LeaseOwnerIdentity,
-        lease_ttl_ms: u64,
-    ) -> Result<lash_core::ProcessLeaseClaimOutcome, PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        require_process_tx(&mut tx, process_id).await?;
-        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        let current = load_process_lease_tx(&mut tx, process_id).await?;
-        let fencing_token = match registry_transitions::decide_process_lease_claim(
-            current.as_ref(),
-            owner,
-            now,
-            lease_ttl_ms,
-        ) {
-            registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {
-                // Same incarnation re-enters its own live lease: extend the
-                // expiry, keep token and fencing token.
-                sqlx::query(
-                    "UPDATE lash_process_leases
-                     SET lease_expires_at_ms = $2
-                     WHERE process_id = $1",
-                )
-                .bind(process_id)
-                .bind(lease.expires_at_epoch_ms as i64)
-                .execute(&mut *tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(lease));
-            }
-            registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(lash_core::ProcessLeaseClaimOutcome::Busy { holder });
-            }
-            registry_transitions::ProcessLeaseClaimDecision::AcquireOnRetainedFence => {
-                registry_transitions::next_process_lease_fencing_token(
-                    retained_process_lease_fencing_token(&mut tx, process_id).await?,
-                )?
-            }
+        cutoff_epoch_ms: u64,
+        watermark: lash_core::ProjectionWatermark,
+        trigger_store: Option<&dyn lash_core::TriggerStore>,
+    ) -> Result<usize, PluginError> {
+        let max_change_seq = match watermark {
+            lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
+            lash_core::ProjectionWatermark::NoProjector => None,
         };
-        let lease =
-            acquire_process_lease_tx(&mut tx, process_id, owner, fencing_token, now, lease_ttl_ms)
-                .await?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(lease))
-    }
-
-    async fn reclaim_process_lease(
-        &self,
-        process_id: &str,
-        owner: &LeaseOwnerIdentity,
-        _observed_holder: &ProcessLease,
-        lease_ttl_ms: u64,
-    ) -> Result<lash_core::ProcessLeaseClaimOutcome, PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        require_process_tx(&mut tx, process_id).await?;
-        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        let current = load_process_lease_tx(&mut tx, process_id).await?;
-        let fencing_token =
-            match registry_transitions::decide_process_lease_reclaim(current.as_ref(), now)? {
-                registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {
-                    // Free (or released) lease: acquire on the retained fencing
-                    // token like a plain claim would.
-                    registry_transitions::next_process_lease_fencing_token(
-                        retained_process_lease_fencing_token(&mut tx, process_id).await?,
-                    )?
-                }
-                ProcessLeaseReclaimDecision::AcquireOnObservedFence { fencing_token } => {
-                    fencing_token
-                }
-                registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {
-                    tx.commit().await.map_err(plugin_sqlx_error)?;
-                    return Ok(lash_core::ProcessLeaseClaimOutcome::Busy { holder });
-                }
-            };
-        let lease =
-            acquire_process_lease_tx(&mut tx, process_id, owner, fencing_token, now, lease_ttl_ms)
-                .await?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(lease))
-    }
-
-    async fn renew_process_lease(
-        &self,
-        lease: &ProcessLease,
-        lease_ttl_ms: u64,
-    ) -> Result<ProcessLease, PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        let current = load_process_lease_tx(&mut tx, &lease.process_id).await?;
-        registry_transitions::authorize_process_lease_write(
-            &lease.process_id,
-            lease,
-            current.as_ref(),
-            now,
-        )?;
-        let renewed = ProcessLease {
-            expires_at_epoch_ms: now.saturating_add(lease_ttl_ms),
-            ..lease.clone()
+        let outstanding_trigger_delivery_process_ids = match trigger_store {
+            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
+            None => Vec::new(),
         };
+        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         sqlx::query(
-            "UPDATE lash_process_leases
-             SET lease_expires_at_ms = $2
-             WHERE process_id = $1 AND lease_token = $3",
+            "SELECT current_seq FROM lash_process_change_clock
+             WHERE singleton = TRUE FOR UPDATE",
         )
-        .bind(&renewed.process_id)
-        .bind(renewed.expires_at_epoch_ms as i64)
-        .bind(&renewed.lease_token)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let compacted_through: Option<i64> = sqlx::query_scalar(
+            "SELECT MAX(pruned_change_seq) FROM lash_process_tombstones
+             WHERE pruned_at_ms < $1
+               AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)
+               AND NOT (process_id = ANY($3::TEXT[]))",
+        )
+        .bind(cutoff_epoch_ms)
+        .bind(max_change_seq)
+        .bind(&outstanding_trigger_delivery_process_ids)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let deleted = sqlx::query(
+            "DELETE FROM lash_process_tombstones
+                 WHERE pruned_at_ms < $1
+                   AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)
+                   AND NOT (process_id = ANY($3::TEXT[]))",
+        )
+        .bind(cutoff_epoch_ms)
+        .bind(max_change_seq)
+        .bind(&outstanding_trigger_delivery_process_ids)
         .execute(&mut *tx)
         .await
-        .map_err(plugin_sqlx_error)?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(renewed)
-    }
-
-    async fn get_process_lease(
-        &self,
-        process_id: &str,
-    ) -> Result<Option<ProcessLease>, PluginError> {
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let lease = load_process_lease_tx(&mut tx, process_id).await?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lease)
-    }
-
-    async fn get_process_leases(
-        &self,
-        process_ids: &[String],
-    ) -> Result<Vec<Option<ProcessLease>>, PluginError> {
-        if process_ids.is_empty() {
-            return Ok(Vec::new());
+        .map_err(plugin_sqlx_error)?
+        .rows_affected() as usize;
+        if let Some(compacted_through) = compacted_through {
+            sqlx::query(
+                "UPDATE lash_process_change_clock
+                 SET tombstone_compaction_horizon = GREATEST(
+                     tombstone_compaction_horizon, $1
+                 )
+                 WHERE singleton = TRUE",
+            )
+            .bind(compacted_through)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
         }
-        let rows = sqlx::query(
-            "SELECT process_id, lease_owner_id, lease_token,
-                    lease_fencing_token, lease_claimed_at_ms,
-                    lease_expires_at_ms, lease_owner_incarnation_id
-             FROM lash_process_leases
-             WHERE process_id = ANY($1)",
-        )
-        .bind(process_ids)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        let mut leases_by_id = std::collections::HashMap::with_capacity(rows.len());
-        for row in rows {
-            let process_id: String = row.get(0);
-            let lease = facade_support::registry_transitions::ProcessLeaseRow {
-                owner_id: row.get(1),
-                incarnation_id: row.get(6),
-                lease_token: row.get(2),
-                fencing_token: row.get(3),
-                claimed_at_ms: row.get(4),
-                expires_at_ms: row.get(5),
-            }
-            .project(&process_id);
-            leases_by_id.insert(process_id, lease);
-        }
-        Ok(process_ids
-            .iter()
-            .map(|process_id| leases_by_id.get(process_id).cloned().flatten())
-            .collect())
-    }
-
-    async fn complete_process_lease(
-        &self,
-        completion: &ProcessLeaseCompletion,
-    ) -> Result<(), PluginError> {
-        sqlx::query(
-            "UPDATE lash_process_leases
-             SET lease_owner_id = NULL,
-                 lease_token = NULL,
-                 lease_claimed_at_ms = 0,
-                 lease_expires_at_ms = 0
-             WHERE process_id = $1 AND lease_token = $2",
-        )
-        .bind(&completion.process_id)
-        .bind(&completion.lease_token)
-        .execute(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        Ok(())
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok(deleted)
     }
 
     async fn prune_terminal_processes(
@@ -1566,6 +1405,15 @@ impl ProcessRegistry for PostgresProcessRegistry {
         watermark: lash_core::ProjectionWatermark,
     ) -> Result<ProcessPruneReport, PluginError> {
         prune_api::prune_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
+    }
+}
+
+impl lash_core::ProcessClockRebind for PostgresProcessRegistry {
+    fn with_runtime_clock(
+        &self,
+        clock: Arc<dyn lash_core::Clock>,
+    ) -> Option<Arc<dyn ProcessRegistry>> {
+        Some(Arc::new(self.clone().with_clock(clock)))
     }
 }
 

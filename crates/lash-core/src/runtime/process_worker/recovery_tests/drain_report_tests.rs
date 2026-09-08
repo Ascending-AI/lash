@@ -2,6 +2,7 @@
 //! could not terminalize, split out of `recovery_tests.rs` for file size.
 
 use super::*;
+use crate::ProcessLeases as _;
 
 #[tokio::test]
 async fn drain_reports_claim_backend_error_and_retries() {

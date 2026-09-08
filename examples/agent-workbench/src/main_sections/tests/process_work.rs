@@ -3,6 +3,10 @@ use super::tests::{
     spawn_restate_ingress_capture,
 };
 use super::*;
+use lash::process::{
+    ProcessEventLog as _, ProcessLeases as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
+    ProcessQuery as _, ProcessRegistrar as _, ProcessRetention as _,
+};
 
 #[test]
 fn workbench_work_rail_exposes_process_cancellation() {
@@ -374,7 +378,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleView, ProcessIdentity,
         ProcessInput, ProcessLeaseClaimOutcome, ProcessListFilter, ProcessListMode,
         ProcessObserverBy, ProcessOriginator, ProcessProvenance, ProcessRegistration,
-        ProcessRegistry, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessWorklistCursor,
+        ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessWorklistCursor,
         ProjectionWatermark, RecoveryContract, SessionScope,
     };
     let registry = lash::testing::TestLocalProcessRegistry::default();

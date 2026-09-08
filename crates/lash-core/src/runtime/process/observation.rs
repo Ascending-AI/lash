@@ -381,6 +381,7 @@ fn originator_matches(originator: &ProcessOriginator, scope: &SessionScope) -> b
 
 #[cfg(test)]
 mod tests {
+    use crate::{ProcessLeases as _, ProcessLifecycle as _, ProcessRegistrar as _};
     use std::sync::Arc;
     use std::time::Duration;
 

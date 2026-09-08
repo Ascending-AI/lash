@@ -167,3 +167,65 @@ pub(super) async fn complete_process_lease(
     }
     Ok(())
 }
+
+#[async_trait::async_trait]
+impl crate::runtime::process::registry::ProcessLeases for TestLocalProcessRegistry {
+    async fn claim_process_lease(
+        &self,
+        process_id: &str,
+        owner: &crate::LeaseOwnerIdentity,
+        lease_ttl_ms: u64,
+    ) -> Result<ProcessLeaseClaimOutcome, PluginError> {
+        leases::claim_process_lease(self, process_id, owner, lease_ttl_ms).await
+    }
+
+    async fn reclaim_process_lease(
+        &self,
+        process_id: &str,
+        owner: &crate::LeaseOwnerIdentity,
+        observed_holder: &ProcessLease,
+        lease_ttl_ms: u64,
+    ) -> Result<ProcessLeaseClaimOutcome, PluginError> {
+        leases::reclaim_process_lease(self, process_id, owner, observed_holder, lease_ttl_ms).await
+    }
+
+    async fn renew_process_lease(
+        &self,
+        lease: &ProcessLease,
+        lease_ttl_ms: u64,
+    ) -> Result<ProcessLease, PluginError> {
+        leases::renew_process_lease(self, lease, lease_ttl_ms).await
+    }
+
+    async fn get_process_lease(
+        &self,
+        process_id: &str,
+    ) -> Result<Option<ProcessLease>, PluginError> {
+        *self.process_lease_point_reads.lock().await += 1;
+        leases::get_process_lease(self, process_id).await
+    }
+
+    async fn get_process_leases(
+        &self,
+        process_ids: &[ProcessId],
+    ) -> Result<Vec<Option<ProcessLease>>, PluginError> {
+        *self.process_lease_batch_reads.lock().await += 1;
+        let leases = self.leases.lock().await;
+        Ok(process_ids
+            .iter()
+            .map(|process_id| {
+                leases
+                    .get(process_id)
+                    .filter(|lease| !lease.lease_token.is_empty())
+                    .cloned()
+            })
+            .collect())
+    }
+
+    async fn complete_process_lease(
+        &self,
+        completion: &ProcessLeaseCompletion,
+    ) -> Result<(), PluginError> {
+        leases::complete_process_lease(self, completion).await
+    }
+}

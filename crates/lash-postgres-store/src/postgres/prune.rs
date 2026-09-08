@@ -84,6 +84,9 @@ pub(super) async fn prune_process_rows_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_core::{
+        ProcessEventLog as _, ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _,
+    };
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn candidate_tombstone_divergence_rolls_back_all_prune_mutations() {

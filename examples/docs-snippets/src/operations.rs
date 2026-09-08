@@ -233,6 +233,7 @@ fn record_turn_metrics(output: &TurnOutput, session: &LashSession) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash::process::{ProcessLifecycle as _, ProcessRegistrar as _};
 
     #[test]
     fn documented_lease_timing_builder_resolves() {
