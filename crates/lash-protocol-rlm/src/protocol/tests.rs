@@ -326,6 +326,22 @@ fn execution_section_hides_sleep_and_signals_independently() {
 }
 
 #[test]
+fn execution_section_distinguishes_foreground_finish_from_process_finish() {
+    let surface = prompt_host_environment(
+        tool_resources(),
+        lashlang::LashlangAbilities::default().with_processes(),
+    );
+    let section =
+        rlm_execution_section_for_host_environment(RlmPromptFeatures::default(), &surface);
+
+    assert!(section.contains("`finish <value>` at the top level of the foreground cell ends the turn with a computed value."));
+    assert!(section.contains(
+        "`finish value` completes the run and stores `value` as the process success value."
+    ));
+    assert!(!section.contains("cell-only"));
+}
+
+#[test]
 fn execution_section_documents_foreground_signal_run_when_enabled() {
     let surface = prompt_host_environment(
         tool_resources(),

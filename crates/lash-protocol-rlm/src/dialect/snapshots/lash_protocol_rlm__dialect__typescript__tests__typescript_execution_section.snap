@@ -2,9 +2,11 @@
 source: crates/lash-protocol-rlm/src/dialect/typescript.rs
 expression: section
 ---
+## TypeScript execution
+
 ### Response shape
 
-Executable code must be inside paired `<typescript>` and `</typescript>` tags. The start and close tag lines must be standalone after trimming. Markdown code fences are documentation and never execute here. A standalone `</typescript>` line terminates the cell even inside a multiline string, so construct such string content without that standalone delimiter line. When action is needed, place the TypeScript block after any visible prose or omit prose. Prose before the block is commentary only. `finish(value)` is cell-only and ends the turn with a computed value. Any turn-ending rules for prose-only responses versus `finish` are listed in the current **FINALIZATION** section.
+Executable code must be inside paired `<typescript>` and `</typescript>` tags. The start and close tag lines must be standalone after trimming. Markdown code fences are documentation and never execute here. A standalone `</typescript>` line terminates the cell even inside a multiline string, so construct such string content without that standalone delimiter line. When action is needed, place the TypeScript block after any visible prose or omit prose. Prose before the block is commentary only. `finish(value)` at the top level of the foreground cell ends the turn with a computed value. Any turn-ending rules for prose-only responses versus `finish` are listed in the current **FINALIZATION** section.
 
 ### Example cell
 
@@ -12,8 +14,6 @@ Executable code must be inside paired `<typescript>` and `</typescript>` tags. T
 const total = 1 + 2;
 finish(total);
 </typescript>
-
-## TypeScript execution
 
 Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
 

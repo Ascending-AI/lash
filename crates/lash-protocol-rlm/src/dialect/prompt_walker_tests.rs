@@ -145,6 +145,13 @@ fn strip_carve_outs(text: &str) -> String {
 }
 
 fn assembled_prompt_fragments(dialect: &dyn RlmDialect) -> Vec<(&'static str, String)> {
+    assembled_prompt_fragments_with_projection(dialect, serde_json::json!("src/lib.rs"))
+}
+
+fn assembled_prompt_fragments_with_projection(
+    dialect: &dyn RlmDialect,
+    projected_value: serde_json::Value,
+) -> Vec<(&'static str, String)> {
     let vocabulary = dialect.prompt_vocabulary();
     let tool = lash_core::ToolDefinition::raw(
         "tool:test/web_fetch",
@@ -283,7 +290,7 @@ fn assembled_prompt_fragments(dialect: &dyn RlmDialect) -> Vec<(&'static str, St
     // session "Access them directly in `<lashlang>` blocks" — which is the
     // sentence ADR 0063's Context quotes as the defect it exists to remove.
     let projected = crate::projection::RlmProjectedBindings::new()
-        .bind_json("current_file", serde_json::json!("src/lib.rs"))
+        .bind_json("current_file", projected_value)
         .expect("seed one projected binding");
     fragments.push((
         "read-only variables (protocol hook)",
@@ -602,10 +609,48 @@ fn every_accepted_construct_family_is_named_in_the_assembled_prompt() {
 
 #[test]
 fn composed_typescript_prompt_has_no_markdown_fences() {
-    let dialect = crate::dialect::typescript_test_dialect();
+    let mut resources = ::lashlang::LashlangHostCatalog::new();
+    resources
+        .add_trigger_source_constructor(
+            ["cron", "Schedule"],
+            ::lashlang::TypeExpr::Object(vec![::lashlang::TypeField {
+                name: "expr".into(),
+                ty: ::lashlang::TypeExpr::Str,
+                optional: false,
+            }]),
+            ::lashlang::NamedDataType::object(
+                "cron.Tick",
+                vec![::lashlang::TypeField {
+                    name: "fired_at".into(),
+                    ty: ::lashlang::TypeExpr::Str,
+                    optional: false,
+                }],
+            )
+            .expect("tick type"),
+        )
+        .expect("trigger constructor");
+    let dialect = super::TypescriptDialect::new(
+        lash_lashlang_runtime::LashlangSurface {
+            abilities: ::lashlang::LashlangAbilities::all(),
+            language_features: Default::default(),
+            resources,
+        },
+        super::test_dialect_services(),
+    );
     // The full-assembly fixture includes tool signatures, contracts, examples,
     // host operations, and both natural and finish-required finalization.
-    for (name, fragment) in assembled_prompt_fragments(&dialect) {
+    for (name, fragment) in assembled_prompt_fragments_with_projection(
+        &dialect,
+        serde_json::json!({"path": "src/lib.rs", "lines": [1, 2]}),
+    ) {
+        if name == "execution section" {
+            assert!(fragment.contains("type cron_Tick ="));
+            assert!(fragment.contains("cron.Schedule(input:"));
+            assert!(
+                fragment.find("## TypeScript execution").unwrap()
+                    < fragment.find("### Response shape").unwrap()
+            );
+        }
         assert!(
             !fragment.contains("```"),
             "TypeScript prompt fragment `{name}` contains a Markdown fence"

@@ -73,7 +73,7 @@ pub(crate) struct CellTags {
 /// Shared cell transport teaching; native transport replaces this whole section.
 pub(crate) fn cell_response_shape(tags: CellTags, vocabulary: DialectPromptVocabulary) -> String {
     format!(
-        "### Response shape\n\nExecutable code must be inside paired `{open}` and `{close}` tags. The start and close tag lines must be standalone after trimming. Markdown code fences are documentation and never execute here. A standalone `{close}` line terminates the cell even inside a multiline string, so construct such string content without that standalone delimiter line. When action is needed, place the {language} block after any visible prose or omit prose. Prose before the block is commentary only. `{finish}` is cell-only and ends the turn with a computed value. Any turn-ending rules for prose-only responses versus `finish` are listed in the current **FINALIZATION** section.\n",
+        "### Response shape\n\nExecutable code must be inside paired `{open}` and `{close}` tags. The start and close tag lines must be standalone after trimming. Markdown code fences are documentation and never execute here. A standalone `{close}` line terminates the cell even inside a multiline string, so construct such string content without that standalone delimiter line. When action is needed, place the {language} block after any visible prose or omit prose. Prose before the block is commentary only. `{finish}` at the top level of the foreground cell ends the turn with a computed value. Any turn-ending rules for prose-only responses versus `finish` are listed in the current **FINALIZATION** section.\n",
         open = tags.open,
         close = tags.close,
         language = vocabulary.language_name,
@@ -360,6 +360,8 @@ pub(crate) struct DialectPromptVocabulary {
     pub(crate) print_statement_suffix: &'static str,
     /// The finish form as the prompt spells it in prose.
     pub(crate) finish_statement: &'static str,
+    /// The finish form for an intentional null result.
+    pub(crate) finish_null_statement: &'static str,
     /// The continue-as control call, as a model would write it.
     pub(crate) continue_as_call: &'static str,
     /// A complete continue-as example for the tool doc.
@@ -483,9 +485,7 @@ pub(crate) trait RlmDialect: Send + Sync {
         } else {
             text.push_str(&format!(
                 " Use `{}` only when null is intentional.",
-                finish
-                    .replace("<value>", "null")
-                    .replace("(value)", "(null)")
+                self.prompt_vocabulary().finish_null_statement
             ));
         }
         text

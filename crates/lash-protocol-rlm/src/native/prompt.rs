@@ -25,15 +25,21 @@ pub(super) fn execution_section(
             "from inside the `execute_code` program",
         )
         .replace("across `<lashlang>` blocks", "across programs");
-    // Fences in worked examples describe transport, not executable language.
-    text = text
-        .lines()
+    if let Some(start) = text.find("### Example cell")
+        && let Some(close) = text[start..].find(dialect.cell_tags().close)
+    {
+        let end = start + close + dialect.cell_tags().close.len();
+        let example = transport_copy(&text[start..end], dialect)
+            .replace("### Example cell", "### Example execute_code call");
+        text.replace_range(start..end, &example);
+    }
+    // Other worked examples retain their existing language teaching.
+    text.lines()
         .filter(|line| {
             !["<lashlang>", "</lashlang>", "<typescript>", "</typescript>"].contains(&line.trim())
         })
         .collect::<Vec<_>>()
-        .join("\n");
-    text
+        .join("\n")
 }
 
 pub(super) fn finalization(dialect: &dyn RlmDialect, termination: &RlmTermination) -> String {
@@ -132,6 +138,14 @@ mod drift_tests {
             corpus.push_str(&execution);
             let mut native = execution_section(dialect, features, &catalog);
             assert!(!native.contains("### Response shape"));
+            assert!(!native.contains("Example cell"));
+            if dialect.language_id() == "typescript" {
+                assert!(
+                    native.contains(
+                        r#"execute_code({"code":"const total = 1 + 2;\nfinish(total);"})"#
+                    )
+                );
+            }
             assert!(!native.contains("Markdown code fences"));
             assert!(!native.contains(dialect.cell_tags().open));
             assert!(!native.contains(dialect.cell_tags().close));

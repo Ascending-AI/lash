@@ -2,16 +2,15 @@
 source: crates/lash-protocol-rlm/src/native/prompt.rs
 expression: native
 ---
+## TypeScript execution
+
 ### Tool transport
 
 Call `execute_code` once with a JSON object containing only the string `code`. Put the complete program in `code`. Host operations and `finish` run inside that program.
 
-### Example cell
+### Example execute_code call
 
-const total = 1 + 2;
-finish(total);
-
-## TypeScript execution
+execute_code({"code":"const total = 1 + 2;\nfinish(total);"})
 
 Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
 

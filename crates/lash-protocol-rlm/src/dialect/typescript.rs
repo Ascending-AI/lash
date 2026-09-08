@@ -54,6 +54,7 @@ pub(crate) const TYPESCRIPT_PROMPT_VOCABULARY: crate::dialect::DialectPromptVoca
         print_statement_prefix: "console.log(",
         print_statement_suffix: ")",
         finish_statement: "finish(value)",
+        finish_null_statement: "finish(null)",
         continue_as_call: "control.continue_as(...)",
         continue_as_example: "await control.continue_as({ task: \"continue the audit from the summarized findings\", seed: { problem: input.prompt, findings: findings } });",
         // A TypeScript session has no type-literal form: the lowerer never
@@ -369,9 +370,7 @@ impl RlmDialect for TypescriptDialect {
         };
         let host_surface = self.render_host_surface_section(tool_catalog)?;
         let response_shape = super::cell_response_shape(self.cell_tags(), self.prompt_vocabulary());
-        let host_api = r#"## TypeScript execution
-
-Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
+        let host_api = r#"Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
 
 ### Host API
 
@@ -409,7 +408,7 @@ Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), names
         let example =
             "### Example cell\n\n<typescript>\nconst total = 1 + 2;\nfinish(total);\n</typescript>";
         Ok(format!(
-            "{response_shape}\n{example}\n\n{host_api}\n\n{stdlib}{tools}{host_surface}"
+            "## TypeScript execution\n\n{response_shape}\n{example}\n\n{host_api}\n\n{stdlib}{tools}{host_surface}"
         ))
     }
 
