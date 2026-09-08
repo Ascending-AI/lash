@@ -1309,6 +1309,11 @@ pub(crate) fn adopt_durable_head(
     state.current_frame_node_id = head.current_frame_node_id.clone();
     state.checkpoint_ref = head.checkpoint_ref.clone();
     state.token_ledger = head.token_ledger.clone();
+    state.checkpoint_components = if head.checkpoint_ref.is_some() {
+        RuntimeCheckpointComponents::unproven()
+    } else {
+        RuntimeCheckpointComponents::complete_empty()
+    };
     state.head_revision = head.head_revision;
     state.persisted_node_ids = head
         .graph
