@@ -87,7 +87,8 @@ and `observation`. Standard attempt rows use `tool_calls: [{name, arguments}]`
 instead of `code`. Observations are capped at 2,000 Unicode characters and
 `observation_truncated` reports whether anything was cut. Transport retries
 have no execution source or observation; failed/timed-out tasks retain partial
-evidence. Summary rows have `kind: "summary"` for each model/cohort. The Markdown tables print to
+evidence. A provider call interrupted before its ledger is sealed gets an
+`interrupted` attempt row with unknown tokens/cost and attempt ordinal. Summary rows have `kind: "summary"` for each model/cohort. The Markdown tables print to
 stdout and are saved at `<results-file>.summary.md`.
 
 Tables include pass/rows, uncached input tokens, output tokens, cache reads and
