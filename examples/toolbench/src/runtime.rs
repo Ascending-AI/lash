@@ -227,6 +227,11 @@ async fn run_turn(
     ))
 }
 
+/// Native capability probes are sampled model behaviour, so one stochastic
+/// miss must not exclude a whole cohort; the route is excluded only when
+/// every probe attempt fails.
+const PREFLIGHT_ATTEMPTS: usize = 3;
+
 pub(crate) async fn preflight(
     task: &Task,
     dialect: lash::rlm::RlmDialect,
@@ -236,22 +241,31 @@ pub(crate) async fn preflight(
     let mut probe = task.clone();
     probe.id = "__native_probe";
     probe.prompt = "Call execute_code exactly once with code that finishes with the number 1. Do not call any host operations.";
-    let (_, evidence) = run_task(
-        &probe,
-        dialect,
-        model,
-        api_key,
-        0,
-        lash::rlm::RlmChannel::NativeTool,
-    )
-    .await;
-    if evidence.completed && evidence.finish_value == Some(serde_json::json!(1)) {
-        Ok(())
-    } else {
-        Err(evidence
-            .completion_error
-            .unwrap_or_else(|| "native one-call probe did not finish with 1".to_string()))
+    let mut failures = Vec::with_capacity(PREFLIGHT_ATTEMPTS);
+    for attempt in 0..PREFLIGHT_ATTEMPTS {
+        let (_, evidence) = run_task(
+            &probe,
+            dialect,
+            model,
+            api_key,
+            attempt,
+            lash::rlm::RlmChannel::NativeTool,
+        )
+        .await;
+        if evidence.completed && evidence.finish_value == Some(serde_json::json!(1)) {
+            return Ok(());
+        }
+        failures.push(evidence.completion_error.unwrap_or_else(|| {
+            format!(
+                "native one-call probe finished with {:?} instead of 1",
+                evidence.finish_value
+            )
+        }));
     }
+    Err(format!(
+        "{PREFLIGHT_ATTEMPTS} probe attempts failed: {}",
+        failures.join(" | ")
+    ))
 }
 
 fn session_options(dialect: lash::rlm::RlmDialect) -> lash::rlm::RlmCreateExtras {
