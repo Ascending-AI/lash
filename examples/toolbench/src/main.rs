@@ -111,6 +111,23 @@ struct Args {
     /// Exit successfully even when one or more task rows fail.
     #[arg(long)]
     allow_partial: bool,
+    /// Maximum provider-reported cost per task in USD.
+    #[arg(long, default_value_t = 0.10, value_parser = parse_cost)]
+    max_task_cost_usd: f64,
+    /// Outer harness deadline for each turn.
+    #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..))]
+    turn_wall_limit_secs: u64,
+}
+
+fn parse_cost(value: &str) -> Result<f64, String> {
+    let cost: f64 = value
+        .parse()
+        .map_err(|_| "expected a finite nonnegative USD amount")?;
+    if cost.is_finite() && cost >= 0.0 {
+        Ok(cost)
+    } else {
+        Err("expected a finite nonnegative USD amount".into())
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -126,6 +143,11 @@ struct TaskResult {
     failure_reason: Option<String>,
     rounds: usize,
     iterations: usize,
+    executions: usize,
+    expected_tool_call_count: usize,
+    cost_unknown: bool,
+    max_task_cost_usd: f64,
+    turn_wall_limit_secs: u64,
     tool_call_count: usize,
     submit_count: usize,
     failed_exec_iterations: usize,
@@ -196,7 +218,7 @@ async fn main() -> Result<()> {
         let writer = &writer;
         async move {
             let model = &args.model[item.model_index];
-            match runtime::preflight(&tasks[0], item.dialect, model, api_key, item.channel, args.reasoning_effort).await {
+            match runtime::preflight(&tasks[0], item.dialect, model, api_key, item.channel, args.reasoning_effort, args.turn_wall_limit_secs).await {
                 Ok(()) => Ok(None),
                 Err(reason) => {
                     write_row(&mut *writer.lock().await, &serde_json::json!({"kind":"excluded_route","route":"openrouter","model":model,"channel":item.channel.name(),"dialect":item.dialect_name(),"reasoning_effort":args.reasoning_effort,"rounds":0,"reason":reason}))?;
@@ -224,23 +246,24 @@ async fn main() -> Result<()> {
         async move {
             let task = &tasks[item.task_index];
             let model = &args.model[item.model_index];
-            let (final_world, evidence) = runtime::run_task(task, item.dialect, model, api_key, item.run, item.channel, args.reasoning_effort).await;
-            let grade = grade(task, &final_world, &evidence);
+            let (final_world, evidence) = runtime::run_task(task, item.dialect, model, api_key, item.run, item.channel, args.reasoning_effort, args.turn_wall_limit_secs).await;
+            let grade = grade(task, &final_world, &evidence, args.max_task_cost_usd);
             let usage = summary::Usage::from_attempts(&evidence.attempts);
             let mut file = writer.lock().await;
             for attempt in &evidence.attempts {
                 let mut row = attempt.clone();
-                row.as_object_mut().expect("attempt object").extend(serde_json::json!({"kind":"attempt","task":task.id,"model":model,"route":"openrouter","dialect":item.dialect_name(),"channel":item.channel.name(),"reasoning_effort":args.reasoning_effort,"rounds":evidence.rounds,"repetition":item.run,"success":grade.passed,"grade":grade,"task_wall_ms":evidence.wall_ms}).as_object().expect("metadata object").clone());
+                row.as_object_mut().expect("attempt object").extend(serde_json::json!({"kind":"attempt","task":task.id,"model":model,"route":"openrouter","dialect":item.dialect_name(),"channel":item.channel.name(),"reasoning_effort":args.reasoning_effort,"rounds":evidence.rounds,"repetition":item.run,"success":grade.passed,"grade":grade,"task_wall_ms":evidence.wall_ms,"executions":evidence.executions,"failed_exec_iterations":evidence.failed_execution_errors.len(),"tool_call_count":evidence.tool_call_count,"expected_tool_call_count":task.tool_calls}).as_object().expect("metadata object").clone());
                 write_row(&mut file, &row)?;
             }
             let result = TaskResult {
                 model: model.clone(), reasoning_effort: args.reasoning_effort,
                 run: item.run, id: task.id.into(), dialect: item.dialect_name().into(), channel: item.channel.name().into(),
                 wall_ms: evidence.wall_ms, passed: grade.passed, failure_reason: grade.failure_reason,
+                executions: evidence.executions, expected_tool_call_count: task.tool_calls, cost_unknown: usage.cost.is_none(), max_task_cost_usd: args.max_task_cost_usd, turn_wall_limit_secs: args.turn_wall_limit_secs,
                 rounds: evidence.rounds, iterations: evidence.iterations, tool_call_count: evidence.tool_call_count,
                 submit_count: evidence.submit_count, failed_exec_iterations: evidence.failed_execution_errors.len(),
                 finish_value: evidence.finish_value, seed: task.seed.clone(),
-                checker: if item.channel == ChannelSelection::Standard { format!("{}; exact world; exactly {} host calls; submit once; at most 3 model responses; 120 s", task.finish.describe(), task.tool_calls) } else { task.checker_description() }, usage,
+                checker: format!("{}; cost <= ${:.6} (n/a if unknown); {} s harness deadline{}", task.checker_description(), args.max_task_cost_usd, args.turn_wall_limit_secs, if item.channel == ChannelSelection::Standard { "; submit once" } else { "" }), usage,
             };
             let mut row = serde_json::to_value(&result)?;
             row.as_object_mut().expect("result object").extend(serde_json::json!({"kind":"task_result","task":task.id,"route":"openrouter","repetition":item.run,"success":result.passed,"grade":{"passed":result.passed,"failure_reason":result.failure_reason}}).as_object().expect("metadata object").clone());
@@ -406,6 +429,26 @@ mod tests {
             item.task_index,
             item.channel.name(),
         )
+    }
+
+    #[test]
+    fn cost_and_wall_flags_validate_defaults_and_overrides() {
+        let args = Args::parse_from(["toolbench"]);
+        assert_eq!(args.max_task_cost_usd, 0.10);
+        assert_eq!(args.turn_wall_limit_secs, 120);
+        let args = Args::parse_from([
+            "toolbench",
+            "--max-task-cost-usd",
+            "0.025",
+            "--turn-wall-limit-secs",
+            "9",
+        ]);
+        assert_eq!(args.max_task_cost_usd, 0.025);
+        assert_eq!(args.turn_wall_limit_secs, 9);
+        for cost in ["NaN", "inf", "-1"] {
+            assert!(Args::try_parse_from(["toolbench", "--max-task-cost-usd", cost]).is_err());
+        }
+        assert!(Args::try_parse_from(["toolbench", "--turn-wall-limit-secs", "0"]).is_err());
     }
 
     #[test]

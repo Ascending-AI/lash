@@ -57,14 +57,13 @@ pub(crate) struct Task {
 
 impl Task {
     pub(crate) fn prompt_for(&self, standard: bool) -> String {
-        build_prompt(&self.prompt, self.tool_calls, standard)
+        build_prompt(&self.prompt, standard)
     }
 
     pub(crate) fn checker_description(&self) -> String {
         format!(
-            "{}; exact seeded-world equality; exactly {} tool call(s); turn completes; at most 2 code executions; at most 2 failed executions; no repeated identical execution error",
-            self.finish.describe(),
-            self.tool_calls
+            "{}; exact seeded-world equality; turn completes with finish/submit",
+            self.finish.describe()
         )
     }
 }
@@ -215,17 +214,12 @@ fn write_task(
     }
 }
 
-fn build_prompt(prompt: &str, tool_calls: usize, standard: bool) -> String {
+fn build_prompt(prompt: &str, standard: bool) -> String {
     let prompt = standard_tool_names(prompt, standard);
     let constraint = if standard {
-        format!(
-            "Call exactly {tool_calls} host tool(s) total, then call submit exactly once with the final value; leave all other world state unchanged."
-        )
+        "Call submit exactly once with the final value; leave all other world state unchanged."
     } else {
-        format!(
-            "Use at most two code executions and exactly {tool_calls} host tool call(s) total; allow at most {} failed executions and never repeat an identical execution error; leave all other world state unchanged.",
-            crate::grading::MAX_FAILED_EXECUTIONS
-        )
+        "Leave all other world state unchanged."
     };
     format!("{prompt} {constraint}")
 }
@@ -268,12 +262,7 @@ mod tests {
     fn standard_prompt_uses_shared_task_and_submit_constraint() {
         for task in task_pack() {
             let prompt = task.prompt_for(true);
-            assert!(prompt.contains(&format!(
-                "Call exactly {} host tool(s) total, then call submit exactly once",
-                task.tool_calls
-            )));
-            assert!(!prompt.contains("code"));
-            assert!(!prompt.contains("executions"));
+            assert!(prompt.contains("Call submit exactly once with the final value"));
         }
     }
 
@@ -300,35 +289,20 @@ mod tests {
     }
 
     #[test]
-    fn every_task_discloses_the_grading_budget() {
+    fn shared_prompts_only_append_completion_and_world_constraints() {
         let tasks = task_pack();
         assert_eq!(tasks.len(), 16);
         for task in tasks {
-            assert!(
-                task.prompt_for(false)
-                    .contains("at most two code executions"),
-                "{}",
-                task.id
+            assert_eq!(
+                task.prompt_for(false),
+                format!("{} Leave all other world state unchanged.", task.prompt)
             );
-            assert!(
-                task.prompt_for(false).contains(&format!(
-                    "exactly {} host tool call(s) total",
-                    task.tool_calls
-                )),
-                "{}",
-                task.id
-            );
-            assert!(
-                task.prompt_for(false)
-                    .contains("at most 2 failed executions"),
-                "{}",
-                task.id
-            );
-            assert!(
-                task.prompt_for(false)
-                    .contains("never repeat an identical execution error"),
-                "{}",
-                task.id
+            assert_eq!(
+                task.prompt_for(true),
+                format!(
+                    "{} Call submit exactly once with the final value; leave all other world state unchanged.",
+                    standard_tool_names(&task.prompt, true)
+                )
             );
             assert!((1..=3).contains(&task.tool_calls));
         }
@@ -347,7 +321,9 @@ mod tests {
                     _ => panic!("lookup must finish with a string"),
                 };
                 assert!(
-                    !task.prompt.contains(&answer),
+                    ![false, true]
+                        .iter()
+                        .any(|standard| task.prompt_for(*standard).contains(&answer)),
                     "{} leaks its answer",
                     task.id
                 );
@@ -427,12 +403,12 @@ mod tests {
                 tool_call_count: task.tool_calls,
                 ..Default::default()
             };
-            assert!(crate::grading::grade(&task, &task.expected_world, &evidence).passed);
+            assert!(crate::grading::grade(&task, &task.expected_world, &evidence, 0.10).passed);
             let mut wrong = task.expected_world.clone();
             wrong.mail.last_mut().unwrap().body.push('.');
-            assert!(!crate::grading::grade(&task, &wrong, &evidence).passed);
+            assert!(!crate::grading::grade(&task, &wrong, &evidence, 0.10).passed);
             evidence.finish_value = Some(json!(task.expected_world.mail.last().unwrap()));
-            assert!(!crate::grading::grade(&task, &task.expected_world, &evidence).passed);
+            assert!(!crate::grading::grade(&task, &task.expected_world, &evidence, 0.10).passed);
         }
     }
 }
