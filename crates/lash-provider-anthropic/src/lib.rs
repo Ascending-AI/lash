@@ -723,7 +723,7 @@ mod tests {
         );
         assert_eq!(
             err.message,
-            "Anthropic Messages requires the media type for provider file ids in order to choose the image/document modality; supply `media_type` on `ProviderFile`"
+            "message index 0: Anthropic Messages requires the media type for provider file ids in order to choose the image/document modality; supply `media_type` on `ProviderFile`"
         );
     }
 

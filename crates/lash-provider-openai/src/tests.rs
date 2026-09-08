@@ -608,7 +608,7 @@ fn chat_unsupported_image_mime_is_rejected_at_request_boundary() {
     );
     assert_eq!(
         err.message,
-        "OpenAI Chat Completions cannot materialize attachment MIME `image/bmp` from source `inline`; providers accepting this MIME/source: none"
+        "message index 0: OpenAI Chat Completions cannot materialize attachment MIME `image/bmp` from source `inline`; providers accepting this MIME/source: none"
     );
 }
 
