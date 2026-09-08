@@ -2492,3 +2492,10 @@ mod process_retention;
 mod sleep_replay;
 
 include!("conformance/append_identity.rs");
+
+#[tokio::test]
+async fn sqlite_terminal_evidence_retention_conformance() {
+    let dir = tempfile::tempdir().unwrap();
+    lash_conformance::retention_conformance(Arc::new(SqliteSessionStoreFactory::new(dir.path())))
+        .await;
+}

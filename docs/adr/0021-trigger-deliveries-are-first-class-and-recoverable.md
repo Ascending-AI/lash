@@ -79,3 +79,8 @@ the receiver. A wake with no live receiver row at or below the retained floor re
 `sequence_rewound` discard with sequence and floor evidence, then continues the ordering group.
 Receiver retries with a surviving live source row settle idempotently. See
 `docs/architecture/durable-background-processes.md`.
+
+FIG-2502 implements `RetentionBound` for runtime commit receipts and usage
+evidence, with terminal-session gating and atomic dependent-root reconciliation
+(ADR 0023). It does not authorize age-only reclamation of host/platform trigger
+mutation receipts or change trigger-delivery lifecycle ownership.

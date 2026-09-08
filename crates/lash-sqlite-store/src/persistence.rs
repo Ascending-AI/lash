@@ -3107,7 +3107,7 @@ fn abandon_turn_input_claims_statement(
 impl StoreMaintenance for Store {
     async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {
         // `deleted_sessions` is deliberately exempt: it is permanent identity
-        // evidence and must survive every retention-pruning pass.
+        // evidence and must survive every retention-pruning pass (FIG-754 / FIG-748).
         let session_id = self.session_id.get().cloned().ok_or_else(|| {
             lash_core::MaintenanceFailure::failed_before_any_work(StoreError::SessionNotBound)
         })?;

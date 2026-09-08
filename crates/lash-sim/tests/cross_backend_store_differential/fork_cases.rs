@@ -78,6 +78,36 @@ pub(super) fn rewind_case() -> GeneratedCase {
 }
 
 impl BackendRunner {
+    pub(super) async fn reclaim_terminal_evidence(
+        &self,
+    ) -> Result<Option<ComparableRuntimeCommitResult>, StoreError> {
+        let bound = lash_core::RetentionBound {
+            committed_before_epoch_ms: u64::MAX,
+        };
+        let report = self
+            .factory()
+            .reclaim_retained_evidence(bound)
+            .await
+            .map_err(|failure| StoreError::Backend(failure.to_string()))?;
+        assert_eq!(report.removed_receipt_count, 1);
+        assert_eq!(report.removed_usage_delta_count, 1);
+        assert_eq!(report.removed_attachment_root_count, 0);
+        assert_eq!(
+            self.factory()
+                .reclaim_retained_evidence(bound)
+                .await
+                .unwrap(),
+            lash_core::RetentionReport::default()
+        );
+        assert!(
+            self.factory()
+                .live_attachment_refs(0)
+                .await?
+                .contains(&differential_attachment_id())
+        );
+        Ok(None)
+    }
+
     pub(super) async fn apply_fork_operation(
         &mut self,
         operation: &StoreOperation,
@@ -193,6 +223,22 @@ impl BackendRunner {
                 Ok(None)
             }
             _ => unreachable!("fork helper received non-fork operation"),
+        }
+    }
+}
+
+/// PG reuses its catalog across cases and runs; remove earlier terminal evidence
+/// before this case commits so the literal count oracle covers this case alone.
+pub(super) async fn prepare_retention_case(case: CaseName, runners: &[BackendRunner]) {
+    if case == CaseName::AttachmentAdoption {
+        for runner in runners {
+            runner
+                .factory()
+                .reclaim_retained_evidence(lash_core::RetentionBound {
+                    committed_before_epoch_ms: u64::MAX,
+                })
+                .await
+                .expect("clear prior terminal evidence before the retention fixture");
         }
     }
 }

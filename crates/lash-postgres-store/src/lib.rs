@@ -861,6 +861,8 @@ mod artifact_store;
 mod attachments;
 #[path = "postgres/effect_replay.rs"]
 mod effect_replay;
+#[path = "postgres/evidence_retention.rs"]
+mod evidence_retention;
 mod preflight;
 #[path = "postgres/process_helpers.rs"]
 mod process_helpers;

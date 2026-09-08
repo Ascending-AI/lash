@@ -437,6 +437,8 @@ fn live_ref_exists_sql(process_registry_attached: bool) -> String {
                 AND manifest.intent_at_ms <= ?2
                 AND (
                     manifest.owner_kind IS NULL
+                    OR EXISTS (SELECT 1 FROM deleted_sessions AS deleted
+                               WHERE deleted.session_id = manifest.session_id)
                     OR (
                         manifest.owner_kind = '{turn_owner_kind}'
                         AND EXISTS (
@@ -812,6 +814,8 @@ impl AttachmentManifest for Store {
                            AND manifest.intent_at_ms <= ?1
                            AND (
                                 manifest.owner_kind IS NULL
+                    OR EXISTS (SELECT 1 FROM deleted_sessions AS deleted
+                               WHERE deleted.session_id = manifest.session_id)
                                 OR (
                                     manifest.owner_kind = '{turn_owner_kind}'
                                     AND EXISTS (

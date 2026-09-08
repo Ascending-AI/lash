@@ -2278,6 +2278,12 @@ lash::persistence::QueuedWorkStore::queued_work_batch_completed
 lash::persistence::RealizedNodeTimestamp
 lash::persistence::RealizedNodeTimestamp::node_id
 lash::persistence::RealizedNodeTimestamp::timestamp
+lash::persistence::RetentionBound
+lash::persistence::RetentionBound::committed_before_epoch_ms
+lash::persistence::RetentionReport
+lash::persistence::RetentionReport::removed_attachment_root_count
+lash::persistence::RetentionReport::removed_receipt_count
+lash::persistence::RetentionReport::removed_usage_delta_count
 lash::persistence::RuntimeCheckpointComponents
 lash::persistence::RuntimeCheckpointComponents::complete_refs_for_testing
 lash::persistence::RuntimeCommit
@@ -2713,6 +2719,7 @@ lash::persistence::SessionStoreFactory::open_existing_store
 lash::persistence::SessionStoreFactory::open_existing_store_by_id
 lash::persistence::SessionStoreFactory::pin
 lash::persistence::SessionStoreFactory::read_session
+lash::persistence::SessionStoreFactory::reclaim_retained_evidence
 lash::persistence::SessionStoreFactory::session_was_deleted
 lash::persistence::SessionStoreFactory::unpin
 lash::persistence::StoreBackend

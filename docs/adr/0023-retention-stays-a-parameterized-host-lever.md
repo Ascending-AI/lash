@@ -26,20 +26,49 @@ watermark bound is what makes host projection safe: without it, a host that proj
 history can silently destroy unprojected evidence, and the failure only surfaces as
 "unknown process" much later.
 
-## Durable-core ruling (partially implemented)
+## Durable-core evidence retention (FIG-2502 / FIG-653)
 
-ADR 0047 extends the same rule from terminal processes to every reclaim
-primitive. The delayed failure above generalizes: reclaiming retry, idempotency,
-or projection evidence without the host's watermark can silently destroy
-unconsumed proof and surface much later as a different error.
+`SessionStoreFactory::reclaim_retained_evidence(RetentionBound)` is the explicit,
+factory-wide host lever. The bound is an exclusive commit timestamp horizon;
+the operation consults neither a clock nor live configuration. No internal
+schedule runs it. A runtime receipt is eligible only if its owner is durably in
+`deleted_sessions` and its stored commit timestamp is before that horizon.
+Session deletion now retains these receipts for this lever instead of erasing
+them implicitly. `deleted_sessions` is permanently exempt: FIG-754 / FIG-748
+require identity evidence after every other row disappears.
 
-The remaining ruling is that `vacuum`, receipt pruning, and attachment/blob
-reclamation will all take an explicit host-supplied `RetentionBound`; none will
-infer a horizon or run as an internal background policy. This is not fully
-shipped behavior: `vacuum()` currently takes no bound, runtime commit receipts
-have no pruning surface, and attachment liveness still depends on manifest
-rows and receipt predicates rather than explicit stored edges. The FIG-653 L7
-retention work owns that implementation.
+Usage deltas use the same terminal-session gate. They remain while their
+matching operation receipt remains. Live deltas reconstruct the token ledger
+on resume, so a host bound alone must not silently change live accounting.
+The gate is intentionally stricter than an age-only audit-row policy.
+
+The sweep has two phases in one fenced transaction: first delete eligible
+receipt roots; then reconcile terminal usage by a correlated `NOT EXISTS`
+against remaining receipts, and reconcile deleted-owner attachment manifests.
+SQLite holds `BEGIN IMMEDIATE`; PostgreSQL holds one cross-worker advisory
+transaction lock; the memory factory holds its shared write transaction.
+Counts describe committed work. An error rolls the complete operation back;
+repetition returns zero after the eligible set has been exhausted. There are
+no partial batches or uncommitted watermarks.
+
+Attachment GC still uses later-turn receipts for live-session supersession,
+but those receipts are never pruned. All four SQL oracle sites also recognize
+the permanent deleted-session marker, so a terminal intent cannot become live
+again when its positive receipt witness disappears. Committed attachment rows
+are instead protected by the graph-retention precondition from FIG-2501:
+a surviving fork or pin keeps bytes independently of receipt retention.
+Receipt deletion therefore cannot cause even a conservative orphan leak.
+
+The retry outcome is `StoreError::SessionDeleted`, both before and after a
+terminal receipt is pruned. A live receipt always survives, so a legitimate
+live retry still replays its original result and can never become the FIG-853
+"someone else committed" conflict because of this lever.
+
+`vacuum()` remains a bound-free cleanup of already-tombstoned graph and terminal
+input rows. Attachment byte GC retains its existing explicit reclamation policy.
+Neither uses the new receipt horizon. Exact node-to-attachment edges remain a
+possible granularity improvement, not a correctness prerequisite or an unbuilt
+part of this shipped lever. See ADR 0028 and ADR 0047.
 
 Effect-journal retention is implemented in the lifecycle form recorded by ADR
 0025. It does not take a second horizon: deleting a session retires that exact
@@ -57,5 +86,6 @@ operation id can never be retried. Lash therefore deliberately exposes no public
 facade and has no production caller or maintenance schedule for the low-level
 `TriggerStore::prune_mutation_receipts` primitive. The low-rate receipt table remains unbounded in
 the safe interim: retaining idempotency evidence is preferable to re-evaluating a live retry with a
-changed disposition. FIG-653 owns terminal-gated `RetentionBound` eligibility and the future public
-lever; the unbounded growth is that work's explicit premise.
+changed disposition. This trigger-receipt primitive is outside the FIG-2502 runtime-receipt/usage
+lever; its host/platform terminal-scope design remains unshipped. The new
+retention census records that deliberate permanent retention explicitly.

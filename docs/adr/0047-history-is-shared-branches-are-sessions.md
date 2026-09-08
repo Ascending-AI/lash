@@ -96,8 +96,8 @@ stored history-node reachability.
 
 Effect-journal identity and lifecycle retirement are implemented as recorded by
 ADR 0025. FIG-2501 removes the attachment membership read probe and protects
-manifest roots with graph retention (see below). Bounded receipt reclamation
-remains the next FIG-653 layer; live turn intents still use receipt supersession.
+manifest roots with graph retention (see below). FIG-2502 supplies terminal-gated `RetentionBound` receipt reclamation; live
+turn intents still use unprunable live-session receipts for supersession.
 
 ## Store leaf validation versus caller branch liveness
 
@@ -164,9 +164,9 @@ id directly. The shared-history and branch-as-session rulings are unchanged.
   compare-and-swaps. A plugin needing exclusivity against concurrent appends
   does not get it from `requires_ancestor_node_id`.
 - Reclamation remains host-scheduled. Effect-journal retirement is shipped and
-  lifecycle-gated. The remaining L7 ruling gives `vacuum`, receipt pruning, and
-  attachment reclamation explicit bounds and replaces inferred attachment
-  liveness with stored edges; FIG-653 owns that implementation.
+  lifecycle-gated. FIG-2502 adds the explicit terminal-session receipt/usage
+  horizon with atomic dependent-root reconciliation (ADR 0023). Existing vacuum
+  and attachment-GC policies retain their separate lifecycle contracts.
 - Lash owns the effect-journal contract while the configured substrate owns the
   journal. The session commit and effect journal remain separate transactions
   joined by stable operation identity.

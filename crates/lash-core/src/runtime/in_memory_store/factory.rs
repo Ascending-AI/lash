@@ -9,6 +9,7 @@ use lash_sansio::sync::MutexExt;
 pub struct InMemorySessionStoreFactory {
     pub(super) clock: Arc<dyn crate::Clock>,
     pub(super) stores: Arc<Mutex<HashMap<String, Arc<InMemorySessionStore>>>>,
+    pub(super) retired_stores: Arc<Mutex<HashMap<String, Arc<InMemorySessionStore>>>>,
     pub(super) write_transaction: Arc<Mutex<()>>,
     pub(super) global_session_graph: Arc<Mutex<crate::SessionGraph>>,
     pub(super) global_node_owners: Arc<Mutex<HashMap<String, String>>>,
@@ -42,6 +43,7 @@ impl InMemorySessionStoreFactory {
         Self {
             clock,
             stores: Arc::new(Mutex::new(HashMap::new())),
+            retired_stores: Arc::new(Mutex::new(HashMap::new())),
             write_transaction: Arc::new(Mutex::new(())),
             global_session_graph: Arc::new(Mutex::new(crate::SessionGraph::default())),
             global_node_owners: Arc::new(Mutex::new(HashMap::new())),
@@ -180,6 +182,13 @@ impl InMemorySessionStoreFactory {
 
 #[async_trait::async_trait]
 impl SessionStoreFactory for InMemorySessionStoreFactory {
+    async fn reclaim_retained_evidence(
+        &self,
+        bound: crate::store::RetentionBound,
+    ) -> crate::store::MaintenanceResult<crate::store::RetentionReport> {
+        Ok(self.reclaim_retained_evidence_in_memory(bound))
+    }
+
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
@@ -352,6 +361,9 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 });
             self.reclaim_deleted_attachment_roots();
             self.stores.lock_recover().remove(session_id);
+            self.retired_stores
+                .lock_recover()
+                .insert(session_id.to_string(), store);
             self.fork_plans.lock_recover().remove(session_id);
             return Ok(report);
         }
@@ -954,7 +966,7 @@ pub(crate) mod lineage_conformance_support {
 impl InMemorySessionStoreFactory {
     /// FIG-653: caller holds the write transaction. Graph retention, including
     /// pins without an active store, is a prune precondition for committed roots.
-    fn reclaim_deleted_attachment_roots(&self) {
+    pub(super) fn reclaim_deleted_attachment_roots(&self) {
         let deleted = self.deleted_session_ids.lock_recover();
         let owners = self.global_node_owners.lock_recover();
         let tombstoned = self.tombstoned_node_ids.lock_recover();

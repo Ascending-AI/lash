@@ -2399,3 +2399,11 @@ async fn postgres_attachment_owner_degraded_proof_conformance() {
     lash_conformance::attachment_owner_degraded_proof(Arc::new(storage.session_store_factory()))
         .await;
 }
+
+#[tokio::test]
+async fn postgres_terminal_evidence_retention_conformance_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        return;
+    };
+    lash_conformance::retention_conformance(Arc::new(storage.session_store_factory())).await;
+}

@@ -128,6 +128,7 @@ enum StoreOperation {
         adopt_attachment: bool,
     },
     RecordAttachmentIntent,
+    ReclaimRetainedEvidence,
     PinLeaf,
     ForkAtLeaf,
     ForkAtExistingTarget,
@@ -186,6 +187,7 @@ impl StoreOperation {
         match self {
             Self::Commit { label, .. } => label,
             Self::RecordAttachmentIntent => "record_attachment_intent",
+            Self::ReclaimRetainedEvidence => "reclaim_terminal_evidence_with_retained_fork",
             Self::PinLeaf => "pin_leaf",
             Self::ForkAtLeaf => "fork_at_leaf",
             Self::ForkAtExistingTarget => "fork_existing_target_precedes_point_fences",
@@ -561,11 +563,12 @@ fn generated_cases() -> Vec<GeneratedCase> {
                         turn_id: "attachment-adoption",
                     }),
                     checkpoint: CheckpointSpec::Empty,
-                    usage: false,
+                    usage: true,
                     adopt_attachment: true,
                 },
                 StoreOperation::PinLeaf,
                 StoreOperation::Rewind,
+                StoreOperation::ReclaimRetainedEvidence,
                 StoreOperation::UnpinLeaf,
             ],
         },
@@ -1854,6 +1857,7 @@ impl BackendRunner {
                 );
                 Ok(None)
             }
+            StoreOperation::ReclaimRetainedEvidence => self.reclaim_terminal_evidence().await,
             StoreOperation::DeleteSession => {
                 let core = self.build_lifecycle_core();
                 let scope = core
@@ -2465,6 +2469,7 @@ async fn cross_backend_store_differential_agrees() {
             &run_nonce,
         )
         .await;
+        fork_cases::prepare_retention_case(case.name, &runners).await;
         for (step_index, operation) in case.operations.iter().enumerate() {
             let mut observations = Vec::with_capacity(runners.len());
             for runner in &mut runners {

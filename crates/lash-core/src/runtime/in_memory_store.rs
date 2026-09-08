@@ -23,6 +23,7 @@ mod queued_work;
 mod reachability;
 mod reads;
 mod receipts;
+mod retention;
 mod session_binding;
 mod session_execution_lease;
 use session_execution_lease::{InMemorySessionExecutionLease, Lease};

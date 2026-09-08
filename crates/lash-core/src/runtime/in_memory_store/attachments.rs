@@ -188,6 +188,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<(), crate::store::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
+        let deleted = self.deleted_session_ids.lock_recover().clone();
         let committed_turns = self
             .runtime_turn_commits
             .lock_recover()
@@ -200,18 +201,19 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         // boundary. Process owners are conservatively live in the in-memory store;
         // durable factories evaluate process-row existence in their database.
         self.attachment_manifest.lock_recover().retain(|_, entry| {
-            let owner_is_dead = match (entry.owner_kind, entry.owner_id.as_deref()) {
-                (None, None) => true,
-                (Some(crate::AttachmentOwnerKind::Turn), Some(owner_id)) => committed_turns
-                    .iter()
-                    .any(|(session_id, turn_id, committed_at_ms)| {
-                        session_id == &entry.session_id
-                            && turn_id != owner_id
-                            && *committed_at_ms > entry.intent_at_epoch_ms
-                    }),
-                (Some(crate::AttachmentOwnerKind::Process), Some(_)) => false,
-                _ => false,
-            };
+            let owner_is_dead = deleted.contains(&entry.session_id)
+                || match (entry.owner_kind, entry.owner_id.as_deref()) {
+                    (None, None) => true,
+                    (Some(crate::AttachmentOwnerKind::Turn), Some(owner_id)) => committed_turns
+                        .iter()
+                        .any(|(session_id, turn_id, committed_at_ms)| {
+                            session_id == &entry.session_id
+                                && turn_id != owner_id
+                                && *committed_at_ms > entry.intent_at_epoch_ms
+                        }),
+                    (Some(crate::AttachmentOwnerKind::Process), Some(_)) => false,
+                    _ => false,
+                };
             !(entry.committed_at_epoch_ms.is_none()
                 && entry.intent_at_epoch_ms <= intent_grace_cutoff_epoch_ms
                 && owner_is_dead)
@@ -245,6 +247,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         attachment_id: &crate::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, crate::store::StoreError> {
+        let deleted = self.deleted_session_ids.lock_recover().clone();
         let committed_turns = self
             .runtime_turn_commits
             .lock_recover()
@@ -263,6 +266,9 @@ impl crate::AttachmentManifest for InMemorySessionStore {
                     || entry.intent_at_epoch_ms > intent_grace_cutoff_epoch_ms
                 {
                     return true;
+                }
+                if deleted.contains(&entry.session_id) {
+                    return false;
                 }
                 match (entry.owner_kind, entry.owner_id.as_deref()) {
                     (None, None) => false,

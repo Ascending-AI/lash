@@ -21,3 +21,11 @@ async fn in_memory_store_satisfies_the_maintenance_outcome_contract() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn in_memory_terminal_evidence_retention_conformance() {
+    crate::retention_conformance(std::sync::Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .await;
+}

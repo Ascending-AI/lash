@@ -490,6 +490,28 @@ async fn attachment_prefix_retention(
         )
         .await
         .expect("put shared-prefix attachment");
+    // A crashed, superseded turn left bytes plus an uncommitted intent.
+    let orphan = bytes
+        .put(
+            vec![4, 5, 6],
+            crate::AttachmentCreateMeta::new(
+                crate::MediaType::parse("image/png").unwrap(),
+                None,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+    store
+        .record_intent(crate::AttachmentIntent {
+            attachment_id: orphan.id.clone(),
+            session_id: request.session_id.clone(),
+            canonical_uri: format!("lash-attachment://blake3/{}", orphan.id),
+            intent_at_epoch_ms: 0,
+            owner_kind: Some(crate::AttachmentOwnerKind::Turn),
+            owner_id: Some("orphan-turn".into()),
+        })
+        .unwrap();
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::new(request.policy.clone())
@@ -570,13 +592,33 @@ async fn attachment_prefix_retention(
             .await
             .unwrap();
     }
+    let retained = handles
+        .factory
+        .reclaim_retained_evidence(crate::RetentionBound {
+            committed_before_epoch_ms: u64::MAX,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        retained.removed_receipt_count, 1,
+        "terminal parent receipt is pruned while fork/pin retains its image"
+    );
     let policy = crate::AttachmentReclamationPolicy {
         grace_period_ms: 0,
         empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
     };
-    crate::reclaim_unreferenced_attachments(handles.factory.as_ref(), bytes.as_ref(), policy)
-        .await
-        .unwrap();
+    let reconciled =
+        crate::reclaim_unreferenced_attachments(handles.factory.as_ref(), bytes.as_ref(), policy)
+            .await
+            .unwrap();
+    assert_eq!(
+        reconciled.reclaimed_count, 1,
+        "receipt pruning cannot leak the orphan intent's bytes"
+    );
+    assert!(matches!(
+        bytes.get(&orphan.id).await,
+        Err(crate::AttachmentStoreError::NotFound(_))
+    ));
     assert_eq!(
         child
             .get(&reference.id)

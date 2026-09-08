@@ -12,7 +12,8 @@ use lash_sansio::sync::MutexExt;
 impl crate::store::StoreMaintenance for InMemorySessionStore {
     async fn vacuum(&self) -> crate::store::MaintenanceResult<crate::store::VacuumReport> {
         // `deleted_session_ids` is deliberately exempt: it is permanent
-        // identity evidence that prevents reuse after all other state is gone.
+        // identity evidence that prevents reuse after all other state is gone
+        // (FIG-754 / FIG-748); RetentionBound never selects it.
         // The binding is the only admissible scope source, matching the SQLite
         // backend: metadata a handle merely happened to read is not a binding,
         // and inferring scope from it would let an unbound handle vacuum.

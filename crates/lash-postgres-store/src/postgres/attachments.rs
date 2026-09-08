@@ -39,6 +39,8 @@ pub(crate) fn live_attachment_ref_sql(process_registry_shared: bool) -> String {
                 AND manifest.intent_at_ms <= $2
                 AND (
                     manifest.owner_kind IS NULL
+                    OR EXISTS (SELECT 1 FROM lash_deleted_sessions AS deleted
+                               WHERE deleted.session_id = manifest.session_id)
                     OR (
                         manifest.owner_kind = '{}'
                         AND EXISTS (
@@ -66,6 +68,8 @@ pub(crate) fn forget_aged_uncommitted_attachment_intents_sql(
            AND manifest.intent_at_ms <= $1
            AND (
                 manifest.owner_kind IS NULL
+                    OR EXISTS (SELECT 1 FROM lash_deleted_sessions AS deleted
+                               WHERE deleted.session_id = manifest.session_id)
                 OR (
                     manifest.owner_kind = '{}'
                     AND EXISTS (
