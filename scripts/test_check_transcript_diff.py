@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -105,6 +106,95 @@ diff --git a/crates/demo/tests/transcript.rs b/crates/demo/tests/transcript.rs
 
 
 class TranscriptDiffTests(IsolatedEnvironmentTestCase):
+    @staticmethod
+    def git(repository: Path, *arguments: str) -> str:
+        result = subprocess.run(
+            ["git", *arguments],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+
+    def test_merge_group_checks_only_the_queued_pr_contribution(self) -> None:
+        # The first fixture models an earlier queue entry changing a durable
+        # line, followed by this PR changing an unrelated file. The old
+        # origin/main...HEAD default saw both queue entries and failed here.
+        # The second fixture proves that the narrower range still rejects this
+        # PR's own durable change when its body has no justification.
+        cases = (
+            ("unrelated-upstream-change", True, False, 0),
+            ("own-change", False, True, 1),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            for name, upstream_change, own_change, expected_exit_code in cases:
+                with self.subTest(name=name):
+                    repository = Path(directory) / name
+                    repository.mkdir()
+                    self.git(repository, "init", "--quiet")
+                    self.git(repository, "config", "user.name", "Fixture")
+                    self.git(repository, "config", "user.email", "fixture@example.com")
+                    transcript = repository / "transcript.rs"
+                    transcript.write_text(
+                        'insta::assert_snapshot!(render(), @r"\n'
+                        "  Checkpoint checkpoint.commit rev=0->1\n"
+                        '");\n',
+                        encoding="utf-8",
+                    )
+                    self.git(repository, "add", ".")
+                    self.git(repository, "commit", "--quiet", "-m", "base")
+                    initial_sha = self.git(repository, "rev-parse", "HEAD")
+                    self.git(
+                        repository,
+                        "update-ref",
+                        "refs/remotes/origin/main",
+                        initial_sha,
+                    )
+
+                    if upstream_change:
+                        transcript.write_text(
+                            'insta::assert_snapshot!(render(), @r"\n'
+                            "  Checkpoint checkpoint.commit rev=1->2\n"
+                            '");\n',
+                            encoding="utf-8",
+                        )
+                        self.git(repository, "add", ".")
+                        self.git(repository, "commit", "--quiet", "-m", "queued entry")
+
+                    queue_base_sha = self.git(repository, "rev-parse", "HEAD")
+                    if own_change:
+                        transcript.write_text(
+                            'insta::assert_snapshot!(render(), @r"\n'
+                            "  Checkpoint checkpoint.commit rev=2->3\n"
+                            '");\n',
+                            encoding="utf-8",
+                        )
+                    else:
+                        (repository / "unrelated.txt").write_text(
+                            "this is the queued PR's own change\n", encoding="utf-8"
+                        )
+                    self.git(repository, "add", ".")
+                    self.git(repository, "commit", "--quiet", "-m", "queued PR")
+
+                    with (
+                        contextlib.chdir(repository),
+                        mock.patch.dict(
+                            MODULE.os.environ,
+                            {
+                                "GITHUB_EVENT_NAME": "merge_group",
+                                "GITHUB_REF_NAME": (
+                                    "gh-readonly-queue/main/"
+                                    f"pr-417-{queue_base_sha}"
+                                ),
+                                "GITHUB_HEAD_REF": "",
+                            },
+                        ),
+                    ):
+                        exit_code = MODULE.main(["--enforce"])
+
+                    self.assertEqual(exit_code, expected_exit_code)
+
     def test_the_isolation_covers_every_variable_the_script_reads(self) -> None:
         # The fixture is the thing under test here: whatever the script
         # consults must be absent by the time a test body runs, and the

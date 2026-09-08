@@ -192,7 +192,14 @@ def requested_options(argv: list[str]) -> Options:
     if args and args[0] in {"--enforce", "--advisory"}:
         enforce = args.pop(0) == "--enforce"
     if not args:
-        return Options(enforce, DEFAULT_RANGE)
+        # The queue tip's first parent is the immediately preceding queue
+        # state. This also covers the observed one-parent queue commits.
+        revision_range = (
+            "HEAD^1...HEAD"
+            if os.environ.get("GITHUB_EVENT_NAME") == "merge_group"
+            else DEFAULT_RANGE
+        )
+        return Options(enforce, revision_range)
     if len(args) == 1:
         return Options(enforce, args[0])
     if len(args) == 2 and args[0] == "--range":
