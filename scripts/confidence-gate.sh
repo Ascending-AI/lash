@@ -937,6 +937,10 @@ run_state_machine_and_fault_matrix() {
 
   if area_selected store; then
     step "SQLite backend fault-matrix conformance"
+    # The cold-process conformance tests spawn this example beside the test
+    # profile; `cargo test --test conformance` alone does not build it.
+    cargo build -p lash-internal-sqlite-store --locked --features testing \
+      --example sqlite-await-event-helper
     cargo test -p lash-internal-sqlite-store --locked --test conformance conformance
   fi
 }
