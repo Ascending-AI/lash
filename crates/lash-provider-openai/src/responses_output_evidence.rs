@@ -14,13 +14,13 @@ pub(super) fn response_failed_error(provider: &str, event: &Value) -> LlmTranspo
     let message = error
         .and_then(|error| error.get("message"))
         .and_then(Value::as_str)
-        .map(str::to_string)
+        .map(crate::request_work::diagnostic_message)
         .unwrap_or_else(|| format!("{provider} response failed"));
     let retry_verdict = error.map(responses_error_retry_verdict).unwrap_or_default();
     let failure = LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Stream)
         .with_retry_verdict(retry_verdict)
-        .with_raw(event.to_string());
+        .with_raw(crate::request_work::json_excerpt(event));
     classify_openai_error(event, failure)
 }
 

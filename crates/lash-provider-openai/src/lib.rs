@@ -7,6 +7,7 @@ mod provider;
 #[cfg(test)]
 mod provider_trace_tests;
 mod reasoning;
+mod request_work;
 mod responses;
 mod responses_output_evidence;
 mod responses_shared;

@@ -19,6 +19,7 @@ mod generation_tests;
 mod openrouter_execution_evidence_tests;
 mod output_started_tests;
 mod replay_provenance_tests;
+mod request_work_tests;
 mod responses_text_slot_tests;
 
 /// The cross-provider conformance law is feature-gated. This crate's self

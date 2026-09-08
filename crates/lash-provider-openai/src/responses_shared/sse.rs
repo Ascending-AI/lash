@@ -16,7 +16,7 @@ pub fn process_sse_event(
     }
     let event: Value = serde_json::from_str(raw).map_err(|e| {
         LlmTransportError::new(format!("Invalid {provider} SSE payload: {e}"))
-            .with_raw(raw)
+            .with_raw(crate::request_work::body_excerpt(raw))
             .with_retry_verdict(TransportRetryVerdict::NotRetryable)
     })?;
     let event_name = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -35,9 +35,9 @@ pub fn process_sse_event(
                     .and_then(|v| v.as_str())
             })
             .unwrap_or("OpenAI-compatible stream error");
-        let failure = LlmTransportError::new(message)
+        let failure = LlmTransportError::new(crate::request_work::diagnostic_message(message))
             .with_retry_verdict(retry_verdict)
-            .with_raw(event.to_string());
+            .with_raw(crate::request_work::body_excerpt(raw));
         return Err(classify_openai_error(&event, failure));
     }
     let event_type = ResponsesStreamEvent::parse(event_name);
