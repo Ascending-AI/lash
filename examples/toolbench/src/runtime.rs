@@ -79,6 +79,14 @@ pub(crate) async fn run_task(
                         .then(|| format!("turn outcome: {:?}", output.result.outcome)),
                     finish_value: output.final_value().cloned(),
                     iterations,
+                    code_blocks: output
+                        .activities
+                        .iter()
+                        .filter_map(|activity| match &activity.event {
+                            TurnEvent::CodeBlockStarted { code, .. } => Some(code.clone()),
+                            _ => None,
+                        })
+                        .collect(),
                     tool_call_count: output.result.tool_calls.len(),
                     failed_execution_errors,
                 },
