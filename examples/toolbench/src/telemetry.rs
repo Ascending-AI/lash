@@ -30,7 +30,6 @@ impl Telemetry {
             lash::plugins::PluginSpec::new().with_assistant_response(Arc::new(move |ctx| {
                 let telemetry = Arc::clone(&telemetry);
                 Box::pin(async move {
-                    eprintln!("[FIG2164-DIAG] response={:?}", ctx.response);
                     let cost = ctx
                         .response
                         .provider_usage

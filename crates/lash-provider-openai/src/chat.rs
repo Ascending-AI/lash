@@ -573,7 +573,6 @@ impl OpenAiCompatibleProvider {
         if raw.is_empty() || raw == "[DONE]" {
             return Ok(());
         }
-        eprintln!("[FIG2164-WIRE] {}", raw);
         let event: ChatSseEvent<'_> = serde_json::from_str(raw).map_err(|e| {
             LlmTransportError::new(format!("Invalid Chat Completions SSE payload: {e}"))
                 .with_raw(crate::request_work::body_excerpt(raw))
