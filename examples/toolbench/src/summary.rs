@@ -12,7 +12,7 @@ pub(crate) struct Usage {
     output: u64,
     cache_read: u64,
     cache_write: u64,
-    cost: Option<f64>,
+    pub(crate) cost: Option<f64>,
 }
 impl Usage {
     pub(crate) fn from_attempts(attempts: &[Value]) -> Self {
@@ -47,6 +47,12 @@ pub(crate) struct Summary {
     passed: usize,
     rows: usize,
     rounds: usize,
+    executions: usize,
+    failed_exec_iterations: usize,
+    tool_call_count: usize,
+    expected_tool_call_count: usize,
+    matched_tool_call_percent: f64,
+    cost_unknown: usize,
     #[serde(flatten)]
     usage: Usage,
     wall_total_s: f64,
@@ -92,6 +98,17 @@ pub(crate) fn aggregate(results: &[TaskResult]) -> Vec<Summary> {
                 passed: rows.iter().filter(|row| row.passed).count(),
                 rows: rows.len(),
                 rounds: rows.iter().map(|row| row.rounds).sum(),
+                executions: rows.iter().map(|row| row.executions).sum(),
+                failed_exec_iterations: rows.iter().map(|row| row.failed_exec_iterations).sum(),
+                tool_call_count: rows.iter().map(|row| row.tool_call_count).sum(),
+                expected_tool_call_count: rows.iter().map(|row| row.expected_tool_call_count).sum(),
+                matched_tool_call_percent: 100.0
+                    * rows
+                        .iter()
+                        .filter(|row| row.tool_call_count == row.expected_tool_call_count)
+                        .count() as f64
+                    / rows.len() as f64,
+                cost_unknown: rows.iter().filter(|row| row.cost_unknown).count(),
                 wall_total_s: walls.iter().sum(),
                 wall_median_s: median,
                 tokens_per_task: usage.tokens() as f64 / rows.len() as f64,
@@ -133,16 +150,16 @@ pub(crate) fn markdown(summaries: &[Summary]) -> String {
             rows[0].reasoning_effort.name()
         )
         .unwrap();
-        writeln!(out, "| Cohort | Pass/rows | Input | Output | Cache read | Cache write | Cost USD | Wall total s | Wall median s | Tokens/task | Cost/task USD |").unwrap();
+        writeln!(out, "| Cohort | Pass/rows | Input | Output | Cache read | Cache write | Cost USD | Wall total s | Wall median s | Tokens/task | Cost/task USD | Executions | Failed exec | Host calls | Expected N | Matched N | Rounds | Cost unknown |").unwrap();
         writeln!(
             out,
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
         )
         .unwrap();
         for row in &rows {
             writeln!(
                 out,
-                "| {}/{} | {}/{} | {} | {} | {} | {} | {} | {:.3} | {:.3} | {:.1} | {} |",
+                "| {}/{} | {}/{} | {} | {} | {} | {} | {} | {:.3} | {:.3} | {:.1} | {} | {} | {} | {} | {} | {:.1}% | {} | {} |",
                 row.channel,
                 row.dialect,
                 row.passed,
@@ -155,7 +172,8 @@ pub(crate) fn markdown(summaries: &[Summary]) -> String {
                 row.wall_total_s,
                 row.wall_median_s,
                 row.tokens_per_task,
-                money(row.cost_per_task)
+                money(row.cost_per_task),
+                row.executions, row.failed_exec_iterations, row.tool_call_count, row.expected_tool_call_count, row.matched_tool_call_percent, row.rounds, row.cost_unknown
             )
             .unwrap();
         }
@@ -223,6 +241,11 @@ mod tests {
             failure_reason: None,
             rounds: 2,
             iterations: 2,
+            executions: 0,
+            expected_tool_call_count: 1,
+            cost_unknown: false,
+            max_task_cost_usd: 0.10,
+            turn_wall_limit_secs: 120,
             tool_call_count: 1,
             submit_count: 1,
             failed_exec_iterations: 0,
@@ -251,7 +274,12 @@ mod tests {
             ),
             (4.0, 2.0, 215.0)
         );
+        assert_eq!(summary.matched_tool_call_percent, 100.0);
         rows[1].usage.cost = None;
+        rows[1].cost_unknown = true;
+        rows[1].tool_call_count = 2;
+        assert_eq!(aggregate(&rows)[0].cost_unknown, 1);
+        assert_eq!(aggregate(&rows)[0].matched_tool_call_percent, 50.0);
         assert_eq!(aggregate(&rows)[0].usage.cost, None);
         assert!(markdown(&aggregate(&rows)).contains("n/a"));
         assert_eq!(Usage::from_attempts(&[]).cost, None);

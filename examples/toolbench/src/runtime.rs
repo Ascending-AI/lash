@@ -11,10 +11,6 @@ use crate::grading::RunEvidence;
 use crate::tasks::Task;
 use crate::world::{SharedWorld, World};
 
-const TURN_BUDGET: usize = 8;
-const NO_PROGRESS_BUDGET: usize = 3;
-const TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_task(
     task: &Task,
@@ -24,6 +20,7 @@ pub(crate) async fn run_task(
     run: usize,
     channel: crate::ChannelSelection,
     effort: crate::ReasoningEffort,
+    turn_wall_limit_secs: u64,
 ) -> (World, RunEvidence) {
     let started = std::time::Instant::now();
     // Every run owns its world, telemetry, provider and in-memory stores. No
@@ -31,113 +28,88 @@ pub(crate) async fn run_task(
     let telemetry = Arc::new(crate::telemetry::Telemetry::default());
     let world = SharedWorld::new(task.seed.clone());
     let result = tokio::time::timeout(
-        TURN_TIMEOUT,
+        std::time::Duration::from_secs(turn_wall_limit_secs),
         run_turn(
             task, dialect, model, api_key, run, channel, effort, &world, &telemetry,
         ),
     )
     .await;
-    let final_world = world.snapshot();
-    match result {
-        Ok(Ok((output, decisions))) => {
-            let attempts = telemetry.rows(&decisions);
-            let iterations = output
-                .activities
-                .iter()
-                .filter_map(|activity| match &activity.event {
-                    TurnEvent::ModelRequestStarted { protocol_iteration } => {
-                        Some(*protocol_iteration)
-                    }
-                    _ => None,
-                })
-                .collect::<BTreeSet<_>>()
-                .len();
-            let failed_execution_errors = output
-                .activities
-                .iter()
-                .filter_map(|activity| match &activity.event {
-                    TurnEvent::CodeBlockCompleted {
-                        success: false,
-                        error,
-                        output,
-                        ..
-                    } => Some(
-                        error
-                            .as_ref()
-                            .map(|failure| failure.message.as_str())
-                            .filter(|message| !message.trim().is_empty())
-                            .unwrap_or(output)
-                            .trim()
-                            .to_string(),
-                    ),
-                    _ => None,
-                })
-                .collect();
-            (
-                final_world,
-                RunEvidence {
-                    standard: channel == crate::ChannelSelection::Standard,
-                    rounds: attempts.len(),
-                    submit_count: telemetry.submit_count(),
-                    attempts,
-                    wall_ms: started.elapsed().as_millis(),
-                    completed: output.is_success(),
-                    completion_error: (!output.is_success())
-                        .then(|| format!("turn outcome: {:?}", output.result.outcome)),
-                    finish_value: if channel == crate::ChannelSelection::Standard {
-                        world.submissions().first().cloned()
-                    } else {
-                        output.final_value().cloned()
-                    },
-                    iterations,
-                    code_blocks: output
-                        .activities
-                        .iter()
-                        .filter_map(|activity| match &activity.event {
-                            TurnEvent::CodeBlockStarted { code, .. } => Some(code.clone()),
-                            _ => None,
-                        })
-                        .collect(),
-                    tool_call_count: output
-                        .result
-                        .tool_calls
-                        .iter()
-                        .filter(|call| call.tool != "submit")
-                        .count(),
-                    failed_execution_errors,
-                },
-            )
-        }
-        Ok(Err(error)) => (
-            final_world,
-            RunEvidence {
-                standard: channel == crate::ChannelSelection::Standard,
-                rounds: telemetry.rows(&[]).len(),
-                submit_count: telemetry.submit_count(),
-                finish_value: world.submissions().first().cloned(),
-                attempts: telemetry.rows(&[]),
-                wall_ms: started.elapsed().as_millis(),
-                completion_error: Some(format!("{error:#}")),
-                ..RunEvidence::default()
+    let (completed, completion_error, finish_value, decisions) = match result {
+        Ok(Ok((output, decisions))) => (
+            output.is_success(),
+            (!output.is_success()).then(|| format!("turn outcome: {:?}", output.result.outcome)),
+            if channel == crate::ChannelSelection::Standard {
+                world.submissions().first().cloned()
+            } else {
+                output.final_value().cloned()
             },
+            decisions,
+        ),
+        Ok(Err(error)) => (
+            false,
+            Some(format!("{error:#}")),
+            world.submissions().first().cloned(),
+            Vec::new(),
         ),
         Err(_) => (
-            final_world,
-            RunEvidence {
-                standard: channel == crate::ChannelSelection::Standard,
-                rounds: telemetry.rows(&[]).len(),
-                submit_count: telemetry.submit_count(),
-                finish_value: world.submissions().first().cloned(),
-                attempts: telemetry.rows(&[]),
-                wall_ms: started.elapsed().as_millis(),
-                completion_error: Some(format!(
-                    "turn exceeded the {} second wall-clock limit",
-                    TURN_TIMEOUT.as_secs()
-                )),
-                ..RunEvidence::default()
-            },
+            false,
+            Some("wall_limit".into()),
+            world.submissions().first().cloned(),
+            Vec::new(),
         ),
-    }
+    };
+    let activities = telemetry.activities();
+    let attempts = telemetry.rows(&decisions, channel == crate::ChannelSelection::Standard);
+    let iterations = activities
+        .iter()
+        .filter_map(|activity| match activity.event {
+            TurnEvent::ModelRequestStarted { protocol_iteration } => Some(protocol_iteration),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>()
+        .len();
+    let executions = activities
+        .iter()
+        .filter(|activity| matches!(activity.event, TurnEvent::CodeBlockStarted { .. }))
+        .count();
+    let tool_call_count = activities.iter().filter(|activity| matches!(&activity.event, TurnEvent::ToolCallStarted { name, .. } if name != "submit")).count();
+    let failed_execution_errors = activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::CodeBlockCompleted {
+                success: false,
+                error,
+                output,
+                ..
+            } => Some(
+                error
+                    .as_ref()
+                    .map(|failure| failure.message.as_str())
+                    .filter(|message| !message.trim().is_empty())
+                    .unwrap_or(output)
+                    .trim()
+                    .to_string(),
+            ),
+            _ => None,
+        })
+        .collect();
+    (
+        world.snapshot(),
+        RunEvidence {
+            standard: channel == crate::ChannelSelection::Standard,
+            rounds: attempts.len(),
+            submit_count: telemetry.submit_count(),
+            attempts,
+            wall_ms: started.elapsed().as_millis(),
+            completed,
+            completion_error,
+            finish_value,
+            iterations,
+            executions,
+            tool_call_count,
+            failed_execution_errors,
+        },
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -161,13 +133,11 @@ async fn run_turn(
             })
             .into_components(),
     );
-    let budget = lash::TurnBudget::bounded(if task.id.starts_with("__") {
-        1
-    } else if channel == crate::ChannelSelection::Standard {
-        3
+    let budget = if task.id.starts_with("__") {
+        lash::TurnBudget::bounded(1)
     } else {
-        TURN_BUDGET
-    });
+        lash::TurnBudget::Unbounded
+    };
     let builder = match channel {
         crate::ChannelSelection::Standard => LashCore::standard_builder(budget),
         crate::ChannelSelection::Cell | crate::ChannelSelection::Native => {
@@ -188,7 +158,7 @@ async fn run_turn(
         }
     };
     let core = builder
-        .no_progress_budget(lash::NoProgressBudget::bounded(NO_PROGRESS_BUDGET))
+        .no_progress_budget(lash::NoProgressBudget::Unbounded)
         .without_queued_work()
         .plugins(lash::plugins::runtime_plugin_stack().configure(|stack| {
             stack.push(telemetry.plugin());
@@ -274,6 +244,7 @@ async fn run_turn(
 /// every probe attempt fails.
 const PREFLIGHT_ATTEMPTS: usize = 2;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn preflight(
     task: &Task,
     dialect: lash::rlm::RlmDialect,
@@ -281,6 +252,7 @@ pub(crate) async fn preflight(
     api_key: &str,
     channel: crate::ChannelSelection,
     effort: crate::ReasoningEffort,
+    turn_wall_limit_secs: u64,
 ) -> Result<(), String> {
     let mut probe = task.clone();
     probe.id = "__native_probe";
@@ -293,9 +265,21 @@ pub(crate) async fn preflight(
     probe.finish = crate::tasks::FinishMatcher::Exact(serde_json::json!(1));
     let mut failures = Vec::with_capacity(PREFLIGHT_ATTEMPTS);
     for attempt in 0..PREFLIGHT_ATTEMPTS {
-        let (_, evidence) =
-            run_task(&probe, dialect, model, api_key, attempt, channel, effort).await;
-        if crate::grading::grade(&probe, &probe.seed, &evidence).passed {
+        let (_, evidence) = run_task(
+            &probe,
+            dialect,
+            model,
+            api_key,
+            attempt,
+            channel,
+            effort,
+            turn_wall_limit_secs,
+        )
+        .await;
+        if crate::grading::grade(&probe, &probe.seed, &evidence, f64::INFINITY).passed
+            && evidence.tool_call_count == 0
+            && (channel == crate::ChannelSelection::Standard || evidence.executions == 1)
+        {
             return Ok(());
         }
         failures.push(evidence.completion_error.unwrap_or_else(|| {

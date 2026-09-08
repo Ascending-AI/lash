@@ -1,13 +1,8 @@
-use std::collections::BTreeMap;
-
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::tasks::Task;
 use crate::world::World;
-
-pub(crate) const MAX_FAILED_EXECUTIONS: usize = 2;
-pub(crate) const IDENTICAL_ERROR_LIMIT: usize = 2;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RunEvidence {
@@ -20,7 +15,7 @@ pub(crate) struct RunEvidence {
     pub(crate) completion_error: Option<String>,
     pub(crate) finish_value: Option<Value>,
     pub(crate) iterations: usize,
-    pub(crate) code_blocks: Vec<String>,
+    pub(crate) executions: usize,
     pub(crate) tool_call_count: usize,
     pub(crate) failed_execution_errors: Vec<String>,
 }
@@ -32,9 +27,20 @@ pub(crate) struct Grade {
     pub(crate) failure_reason: Option<String>,
 }
 
-pub(crate) fn grade(task: &Task, final_world: &World, evidence: &RunEvidence) -> Grade {
+pub(crate) fn grade(
+    task: &Task,
+    final_world: &World,
+    evidence: &RunEvidence,
+    max_task_cost_usd: f64,
+) -> Grade {
     let mut failures = Vec::new();
 
+    if evidence.completion_error.as_deref() == Some("wall_limit") {
+        return Grade {
+            passed: false,
+            failure_reason: Some("wall_limit".into()),
+        };
+    }
     if !evidence.completed {
         failures.push(format!(
             "turn did not complete{}",
@@ -43,18 +49,6 @@ pub(crate) fn grade(task: &Task, final_world: &World, evidence: &RunEvidence) ->
                 .as_deref()
                 .map(|error| format!(": {error}"))
                 .unwrap_or_default()
-        ));
-    }
-    if evidence.failed_execution_errors.len() > MAX_FAILED_EXECUTIONS {
-        failures.push(format!(
-            "{} failed execution iterations exceeds allowance {}",
-            evidence.failed_execution_errors.len(),
-            MAX_FAILED_EXECUTIONS
-        ));
-    }
-    if let Some((error, count)) = repeated_error(&evidence.failed_execution_errors) {
-        failures.push(format!(
-            "identical execution error repeated {count} times: {error}"
         ));
     }
     if final_world != &task.expected_world {
@@ -71,15 +65,11 @@ pub(crate) fn grade(task: &Task, final_world: &World, evidence: &RunEvidence) ->
                 .unwrap_or_else(|| "<none>".to_string())
         ));
     }
-    if evidence.tool_call_count != task.tool_calls {
-        failures.push(format!(
-            "tool-call count mismatch: expected {}, got {}",
-            task.tool_calls, evidence.tool_call_count
-        ));
-    }
-
-    if evidence.wall_ms > 120_000 {
-        failures.push("task exceeded the 120 second wall-clock limit".to_string());
+    if crate::summary::Usage::from_attempts(&evidence.attempts)
+        .cost
+        .is_some_and(|cost| cost > max_task_cost_usd)
+    {
+        failures.push("cost_limit".to_string());
     }
     if evidence.standard {
         if evidence.submit_count > 1 {
@@ -87,30 +77,12 @@ pub(crate) fn grade(task: &Task, final_world: &World, evidence: &RunEvidence) ->
         } else if evidence.submit_count == 0 {
             failures.push("missing submit".to_string());
         }
-        if evidence.rounds > 3 {
-            failures.push("task requires at most three model responses".to_string());
-        }
-    }
-    if evidence.code_blocks.len() > 2 {
-        failures.push("task requires at most two code executions".to_string());
     }
 
     Grade {
         passed: failures.is_empty(),
         failure_reason: (!failures.is_empty()).then(|| failures.join("; ")),
     }
-}
-
-fn repeated_error(errors: &[String]) -> Option<(&str, usize)> {
-    let mut counts = BTreeMap::<&str, usize>::new();
-    for error in errors {
-        let count = counts.entry(error.as_str()).or_default();
-        *count += 1;
-        if *count >= IDENTICAL_ERROR_LIMIT {
-            return Some((error, *count));
-        }
-    }
-    None
 }
 
 #[cfg(test)]
@@ -147,130 +119,72 @@ mod tests {
     }
 
     #[test]
-    fn standard_repeated_submit_and_rounds_cap_are_rejected() {
+    fn correctness_accepts_extra_work_and_recovery() {
+        let task = fixture();
+        let mut evidence = passing_evidence();
+        evidence.executions = 7;
+        evidence.failed_execution_errors = vec!["same error".into(); 4];
+        evidence.tool_call_count = 9;
+        evidence.rounds = 12;
+        for standard in [false, true] {
+            evidence.standard = standard;
+            evidence.submit_count = 1;
+            assert!(grade(&task, &task.expected_world, &evidence, 0.10).passed);
+        }
+    }
+
+    #[test]
+    fn cost_ceiling_sums_calls_accepts_boundary_and_exposes_missing_cost() {
+        let task = fixture();
+        let mut evidence = passing_evidence();
+        evidence.attempts = vec![json!({"cost":0.04}), json!({"cost":0.06})];
+        assert!(grade(&task, &task.expected_world, &evidence, 0.10).passed);
+        assert_eq!(
+            grade(&task, &task.expected_world, &evidence, 0.09)
+                .failure_reason
+                .as_deref(),
+            Some("cost_limit")
+        );
+        evidence.attempts.push(json!({"cost":null}));
+        assert!(grade(&task, &task.expected_world, &evidence, 0.09).passed);
+        assert_eq!(
+            crate::summary::Usage::from_attempts(&evidence.attempts).cost,
+            None
+        );
+    }
+
+    #[test]
+    fn correctness_and_completion_remain_required() {
+        let task = fixture();
+        let mut evidence = passing_evidence();
+        assert!(grade(&task, &task.expected_world, &evidence, 0.10).passed);
+        assert!(!grade(&task, &task.seed, &evidence, 0.10).passed);
+        evidence.finish_value = Some(json!("wrong"));
+        assert!(!grade(&task, &task.expected_world, &evidence, 0.10).passed);
+        evidence.finish_value = None;
+        assert!(!grade(&task, &task.expected_world, &evidence, 0.10).passed);
+        evidence = passing_evidence();
+        evidence.completed = false;
+        assert!(!grade(&task, &task.expected_world, &evidence, 0.10).passed);
+        evidence.completion_error = Some("wall_limit".into());
+        assert_eq!(
+            grade(&task, &task.expected_world, &evidence, 0.10)
+                .failure_reason
+                .as_deref(),
+            Some("wall_limit")
+        );
+    }
+
+    #[test]
+    fn standard_requires_exactly_one_submit() {
         let task = fixture();
         let mut evidence = passing_evidence();
         evidence.standard = true;
+        for count in [0, 2] {
+            evidence.submit_count = count;
+            assert!(!grade(&task, &task.expected_world, &evidence, 0.10).passed);
+        }
         evidence.submit_count = 1;
-        evidence.rounds = 3;
-        assert!(grade(&task, &task.expected_world, &evidence).passed);
-        evidence.submit_count = 2;
-        assert!(
-            grade(&task, &task.expected_world, &evidence)
-                .failure_reason
-                .unwrap()
-                .contains("repeated submit")
-        );
-        evidence.submit_count = 1;
-        evidence.rounds = 4;
-        assert!(
-            grade(&task, &task.expected_world, &evidence)
-                .failure_reason
-                .unwrap()
-                .contains("at most three model responses")
-        );
-    }
-
-    #[test]
-    fn passing_run_is_accepted() {
-        let task = fixture();
-        assert!(grade(&task, &task.expected_world, &passing_evidence()).passed);
-    }
-
-    #[test]
-    fn wrong_answer_is_rejected() {
-        let task = fixture();
-        let mut evidence = passing_evidence();
-        evidence.finish_value = Some(json!("not-saved"));
-        let result = grade(&task, &task.expected_world, &evidence);
-        assert!(!result.passed);
-        assert!(result.failure_reason.unwrap().contains("finish mismatch"));
-    }
-
-    #[test]
-    fn collateral_damage_is_rejected() {
-        let task = fixture();
-        let mut damaged = task.expected_world.clone();
-        damaged.kv.remove("project");
-        let result = grade(&task, &damaged, &passing_evidence());
-        assert!(!result.passed);
-        assert!(result.failure_reason.unwrap().contains("end state"));
-    }
-
-    #[test]
-    fn wrong_tool_call_count_is_rejected() {
-        let task = fixture();
-        let mut evidence = passing_evidence();
-        evidence.tool_call_count = 2;
-        let result = grade(&task, &task.expected_world, &evidence);
-        assert!(!result.passed);
-        assert!(
-            result
-                .failure_reason
-                .unwrap()
-                .contains("tool-call count mismatch: expected 1, got 2")
-        );
-    }
-
-    #[test]
-    fn timed_out_turn_is_rejected() {
-        let task = fixture();
-        let mut evidence = passing_evidence();
-        evidence.completed = false;
-        evidence.completion_error =
-            Some("turn exceeded the 120 second wall-clock limit".to_string());
-        let result = grade(&task, &task.expected_world, &evidence);
-        assert!(!result.passed);
-        assert_eq!(
-            result.failure_reason.as_deref(),
-            Some("turn did not complete: turn exceeded the 120 second wall-clock limit")
-        );
-    }
-
-    #[test]
-    fn failed_execution_allowance_is_enforced() {
-        let task = fixture();
-        let mut evidence = passing_evidence();
-        evidence.failed_execution_errors = vec![
-            "first execution failed".to_string(),
-            "second execution failed".to_string(),
-            "third execution failed".to_string(),
-        ];
-        let result = grade(&task, &task.expected_world, &evidence);
-        assert!(!result.passed);
-        assert_eq!(
-            result.failure_reason.as_deref(),
-            Some("3 failed execution iterations exceeds allowance 2")
-        );
-    }
-
-    #[test]
-    fn stuck_identical_error_loop_is_rejected() {
-        let task = fixture();
-        let mut evidence = passing_evidence();
-        evidence.failed_execution_errors = vec![
-            "cannot read field owner from string".to_string(),
-            "cannot read field owner from string".to_string(),
-        ];
-        let result = grade(&task, &task.expected_world, &evidence);
-        assert!(!result.passed);
-        assert!(
-            result
-                .failure_reason
-                .unwrap()
-                .contains("identical execution error repeated")
-        );
-    }
-    #[test]
-    fn excessive_code_executions_are_rejected() {
-        let task = fixture();
-        let mut evidence = passing_evidence();
-        evidence.code_blocks = vec!["one".into(), "two".into(), "three".into()];
-        let result = grade(&task, &task.expected_world, &evidence);
-        assert!(!result.passed);
-        assert_eq!(
-            result.failure_reason.as_deref(),
-            Some("task requires at most two code executions")
-        );
+        assert!(grade(&task, &task.expected_world, &evidence, 0.10).passed);
     }
 }
