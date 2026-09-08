@@ -229,9 +229,8 @@ const CENSUS: &[(&str, RetentionClass)] = &[
     ),
     (
         "trigger_mutation_receipts",
-        LifecycleOwned {
-            scope: "deleted-session reconciliation; host receipts retained permanently until a safe terminal gate exists",
-        },
+        // Host receipts lack a safe terminal gate (FIG-1956 / FIG-653).
+        KnownGap { issue: "FIG-1956" },
     ),
     // Session/process journals retire; RuntimeOperation scopes are FIG-2500.
     ("runtime_effect_replay", KnownGap { issue: "FIG-2500" }),
@@ -308,7 +307,7 @@ fn assert_classified(source: &str, postgres: bool) {
             PermanentlyExempt { reason } => reason,
             KnownGap { issue } => {
                 assert!(
-                    ["FIG-1509", "FIG-2499", "FIG-2500"].contains(issue),
+                    ["FIG-1509", "FIG-1956", "FIG-2499", "FIG-2500"].contains(issue),
                     "new gaps need explicit review"
                 );
                 issue
