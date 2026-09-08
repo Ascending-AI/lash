@@ -7486,7 +7486,6 @@ lash::rlm::RLM_PROTOCOL_PLUGIN_ID
 lash::rlm::RlmChannel
 lash::rlm::RlmChannel::Cell
 lash::rlm::RlmChannel::NativeTool
-lash::rlm::RlmChannel::from_env
 lash::rlm::RlmCreateExtras
 lash::rlm::RlmCreateExtras::dialect
 lash::rlm::RlmCreateExtras::final_answer_format

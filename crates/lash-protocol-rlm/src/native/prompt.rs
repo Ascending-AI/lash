@@ -105,3 +105,65 @@ mod tests {
         assert!(native.contains(teaching));
     }
 }
+
+#[cfg(test)]
+mod drift_tests {
+    use super::*;
+    #[test]
+    fn native_prompts_pin_both_dialects_and_replacement_needles() {
+        let lashlang = crate::dialect::LashlangDialect::prompt_only(
+            lash_lashlang_runtime::LashlangSurface::default(),
+        );
+        let typescript = crate::dialect::typescript_test_dialect();
+        let mut corpus = String::new();
+        for dialect in [&lashlang as &dyn RlmDialect, &typescript] {
+            let catalog = lash_core::ToolCatalog::default();
+            let features = crate::protocol::RlmPromptFeatures::default();
+            let execution = dialect
+                .render_execution_section(features, &catalog)
+                .unwrap();
+            corpus.push_str(&execution);
+            let mut native = execution_section(dialect, features, &catalog);
+            for termination in [
+                RlmTermination::Natural,
+                RlmTermination::FinishRequired { schema: None },
+            ] {
+                corpus.push_str(dialect.finalization_copy(&termination));
+                native.push_str(&finalization(dialect, &termination));
+            }
+            corpus.push_str(&dialect.turn_limit_final_copy(4));
+            corpus.push_str(&dialect.output_limit_cell_copy(None));
+            corpus.push_str(&dialect.finish_required_copy(false));
+            corpus.push_str(&dialect.finish_required_copy(true));
+            insta::assert_snapshot!(format!("native_prompt_{}", dialect.language_id()), native);
+        }
+        for needle in [
+            "### Response shape",
+            "Write one script inside standalone `<typescript>` and `</typescript>` lines.",
+            "from inside a paired `<lashlang>` block",
+            "across `<lashlang>` blocks",
+            "paired `<lashlang>...</lashlang>` block",
+            "paired `<typescript>...</typescript>` block",
+            "`<lashlang>` block",
+            "`<typescript>` block",
+            "Lashlang block",
+            "TypeScript block",
+            "a <lashlang> block",
+            "the block",
+            "no block",
+            "A block without",
+        ] {
+            assert!(
+                corpus.contains(needle),
+                "native prompt rewrite needle disappeared: {needle}"
+            );
+        }
+        // These two needles are introduced by the preceding replacements.
+        let intermediate = "inside a paired `<lashlang>...</lashlang>` block".replace(
+            "paired `<lashlang>...</lashlang>` block",
+            "`execute_code` call",
+        );
+        assert!(intermediate.contains("inside a `execute_code` call"));
+        assert!(intermediate.contains("a `execute_code`"));
+    }
+}

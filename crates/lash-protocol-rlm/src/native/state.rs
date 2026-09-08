@@ -13,7 +13,6 @@ pub(super) struct RlmReasoningPart {
 pub(super) struct RlmDriverState {
     #[serde(default)]
     pub(super) reasoning: Vec<RlmReasoningPart>,
-    pub(super) prose: String,
     pub(super) assistant_parts: Vec<lash_core::Part>,
     pub(super) images: Vec<AttachmentRef>,
     #[serde(default)]
@@ -31,7 +30,7 @@ pub(super) struct RlmDriverState {
     pub(super) terminal_finish: Option<Value>,
 }
 
-const NATIVE_DRIVER_STATE_VERSION: u32 = 1;
+const NATIVE_DRIVER_STATE_VERSION: u32 = 2;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Envelope {
@@ -77,8 +76,8 @@ mod tests {
     #[test]
     fn native_state_version_is_pinned_and_predecessors_are_refused() {
         let mut encoded = rlm_driver_state(RlmDriverState::default());
-        assert_eq!(encoded.payload["schema_version"], 1);
-        encoded.payload["schema_version"] = serde_json::json!(0);
+        assert_eq!(encoded.payload["schema_version"], 2);
+        encoded.payload["schema_version"] = serde_json::json!(1);
         assert!(decode_rlm_driver_state(encoded).is_err());
         let unversioned = lash_core::ProtocolDriverState::new(
             crate::plugin::RLM_PROTOCOL_PLUGIN_ID,

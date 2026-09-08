@@ -36,6 +36,7 @@ impl DialectSelection {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum ChannelSelection {
     Cell,
+    #[value(alias = "native_tool")]
     Native,
 }
 impl ChannelSelection {
@@ -56,7 +57,7 @@ impl ChannelSelection {
 #[derive(Debug, Parser)]
 #[command(about = "Deterministic Lash RLM tool-calling bench")]
 struct Args {
-    #[arg(long, value_enum, default_value_t = ChannelSelection::Cell)]
+    #[arg(long, env = "LASH_RLM_CHANNEL", value_enum, default_value_t = ChannelSelection::Cell)]
     channel: ChannelSelection,
     /// Pair the same task/model/dialect in randomized channel order.
     #[arg(long)]

@@ -4,11 +4,13 @@ use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
 use lash_core::{Part, PartKind, SessionHistoryRecord};
 use lash_rlm_types::{RlmDiagnosticEvent, RlmProtocolEvent};
 
+const NATIVE_TRANSPORT_VERSION: u32 = 1;
+
 const PHASE: &str = "native_transport";
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum Envelope {
+enum Transport {
     Execution {
         step_id: String,
         parts: Vec<Part>,
@@ -21,17 +23,37 @@ enum Envelope {
     },
 }
 
-fn event(envelope: Envelope) -> SessionHistoryRecord {
+#[derive(Debug, thiserror::Error)]
+pub(super) enum DecodeError {
+    #[error("native transport version {found} is newer than supported version {supported}")]
+    NewerVersion { found: u32, supported: u32 },
+    #[error("malformed native transport envelope: {0}")]
+    Malformed(#[from] serde_json::Error),
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Envelope {
+    #[serde(default)]
+    schema_version: u32,
+    #[serde(flatten)]
+    transport: Transport,
+}
+
+fn event(transport: Transport) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
         RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {
             phase: PHASE.to_string(),
-            payload: serde_json::to_value(envelope).expect("native envelope serializes"),
+            payload: serde_json::to_value(Envelope {
+                schema_version: NATIVE_TRANSPORT_VERSION,
+                transport,
+            })
+            .expect("native envelope serializes"),
         }),
     ))
 }
 
 pub(super) fn execution_event(step_id: String, parts: Vec<Part>) -> SessionHistoryRecord {
-    event(Envelope::Execution { step_id, parts })
+    event(Transport::Execution { step_id, parts })
 }
 pub(super) fn repair_event(
     turn_id: &str,
@@ -39,37 +61,82 @@ pub(super) fn repair_event(
     parts: Vec<Part>,
     text: String,
 ) -> SessionHistoryRecord {
-    event(Envelope::Repair {
+    event(Transport::Repair {
         turn_id: turn_id.to_string(),
         protocol_iteration,
         parts,
         text,
     })
 }
-fn decode(event: &lash_core::ProtocolEvent) -> Option<Envelope> {
-    match crate::projection::decode_rlm_protocol_event(event)? {
-        RlmProtocolEvent::RlmDiagnostic(diagnostic) if diagnostic.phase == PHASE => Some(
-            serde_json::from_value(diagnostic.payload)
-                .expect("recorded native transport envelope must decode"),
-        ),
-        _ => None,
+fn decode(event: &lash_core::ProtocolEvent) -> Result<Option<Transport>, DecodeError> {
+    let Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
+        crate::projection::decode_rlm_protocol_event(event)
+    else {
+        return Ok(None);
+    };
+    if diagnostic.phase != PHASE {
+        return Ok(None);
     }
+    #[derive(serde::Deserialize)]
+    struct Version {
+        #[serde(default)]
+        schema_version: u32,
+    }
+    let version: Version = serde_json::from_value(diagnostic.payload.clone())?;
+    if version.schema_version > NATIVE_TRANSPORT_VERSION {
+        return Err(DecodeError::NewerVersion {
+            found: version.schema_version,
+            supported: NATIVE_TRANSPORT_VERSION,
+        });
+    }
+    let envelope: Envelope = serde_json::from_value(diagnostic.payload)?;
+    Ok(Some(envelope.transport))
 }
-pub(super) fn execution_parts(events: &[SessionHistoryRecord], id: &str) -> Option<Vec<Part>> {
-    events.iter().find_map(|event| {
+pub(super) fn execution_parts(
+    events: &[SessionHistoryRecord],
+    id: &str,
+) -> Result<Option<Vec<Part>>, DecodeError> {
+    for event in events {
         let SessionHistoryRecord::Protocol(event) = event else {
-            return None;
+            continue;
         };
-        match decode(event)? {
-            Envelope::Execution { step_id, parts } if step_id == id => Some(parts),
-            _ => None,
+        // Unrelated corrupt bindings are reported at their chronological entry;
+        // they must not suppress a healthy step's complete provider exchange.
+        let Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
+            crate::projection::decode_rlm_protocol_event(event)
+        else {
+            continue;
+        };
+        if diagnostic.phase != PHASE
+            || diagnostic
+                .payload
+                .get("step_id")
+                .and_then(serde_json::Value::as_str)
+                != Some(id)
+        {
+            continue;
         }
+        if let Some(Transport::Execution { step_id, parts }) = decode(event)?
+            && step_id == id
+        {
+            return Ok(Some(parts));
+        }
+    }
+    Ok(None)
+}
+pub(super) fn repair_parts(
+    event: &lash_core::ProtocolEvent,
+) -> Result<Option<(Vec<Part>, String)>, DecodeError> {
+    Ok(match decode(event)? {
+        Some(Transport::Repair { parts, text, .. }) => Some((parts, text)),
+        _ => None,
     })
 }
-pub(super) fn repair_parts(event: &lash_core::ProtocolEvent) -> Option<(Vec<Part>, String)> {
-    match decode(event)? {
-        Envelope::Repair { parts, text, .. } => Some((parts, text)),
-        _ => None,
+
+pub(super) fn degraded_binding(error: DecodeError) -> lash_core::DegradedBinding {
+    lash_core::DegradedBinding {
+        name: PHASE.to_string(),
+        reason: error.to_string(),
     }
 }
 
@@ -116,5 +183,49 @@ pub(super) fn append_pair(messages: &mut Vec<LlmMessage>, parts: &[Part], output
     if !results.is_empty() {
         messages.push(LlmMessage::new(LlmRole::Assistant, assistant));
         messages.push(LlmMessage::new(LlmRole::User, results));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn recorded(payload: serde_json::Value) -> lash_core::ProtocolEvent {
+        crate::projection::rlm_protocol_event(RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {
+            phase: "native_transport".into(),
+            payload,
+        }))
+    }
+    #[test]
+    fn envelope_version_pin_and_refusal_witness() {
+        let SessionHistoryRecord::Protocol(event) = execution_event("step".into(), Vec::new())
+        else {
+            panic!()
+        };
+        let Some(RlmProtocolEvent::RlmDiagnostic(d)) =
+            crate::projection::decode_rlm_protocol_event(&event)
+        else {
+            panic!()
+        };
+        assert_eq!(d.payload["schema_version"], 1);
+        assert_eq!(d.payload["kind"], "execution");
+        assert!(decode(&event).unwrap().is_some());
+        assert!(matches!(
+            decode(&recorded(serde_json::json!({"schema_version":2}))),
+            Err(DecodeError::NewerVersion {
+                found: 2,
+                supported: 1
+            })
+        ));
+        assert!(matches!(
+            decode(&recorded(serde_json::json!("malformed bytes"))),
+            Err(DecodeError::Malformed(_))
+        ));
+        assert!(
+            decode(&recorded(
+                serde_json::json!({"kind":"execution","step_id":"legacy","parts":[]})
+            ))
+            .unwrap()
+            .is_some()
+        );
     }
 }

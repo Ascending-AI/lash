@@ -125,7 +125,15 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
                 });
             }
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
-                if let Some((parts, repair)) = super::transport::repair_parts(event) {
+                let repair = match super::transport::repair_parts(event) {
+                    Ok(repair) => repair,
+                    Err(error) => {
+                        flush_pending_prose(&mut messages, &mut pending);
+                        append_decode_failure(&mut messages, error);
+                        return;
+                    }
+                };
+                if let Some((parts, repair)) = repair {
                     flush_pending_prose(&mut messages, &mut pending);
                     super::transport::append_pair(&mut messages, &parts, &repair);
                     return;
@@ -154,7 +162,14 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
                         .unwrap_or(entry.index),
                     &step,
                 );
-                if let Some(parts) = super::transport::execution_parts(input.events, &step.id) {
+                let parts = match super::transport::execution_parts(input.events, &step.id) {
+                    Ok(parts) => parts,
+                    Err(error) => {
+                        append_decode_failure(&mut messages, error);
+                        return;
+                    }
+                };
+                if let Some(parts) = parts {
                     super::transport::append_pair(&mut messages, &parts, &observation);
                 } else {
                     // Frame seeds carry semantic history, not authority to mint
@@ -235,7 +250,7 @@ fn superseded_failure_indices(
                 }
             },
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
-                if super::transport::repair_parts(event).is_some() {
+                if matches!(super::transport::repair_parts(event), Ok(Some(_))) {
                     pending_failure_entries.push(entry.index);
                     any_failure_pending = true;
                 }
@@ -550,3 +565,14 @@ pub(crate) fn preview_retained_copy(
 #[cfg(test)]
 #[path = "history_tests.rs"]
 mod tests;
+
+fn append_decode_failure(messages: &mut Vec<LlmMessage>, error: super::transport::DecodeError) {
+    let binding = super::transport::degraded_binding(error);
+    messages.push(LlmMessage::text(
+        LlmRole::User,
+        format!(
+            "Projection rehydration degraded binding `{}`: {}",
+            binding.name, binding.reason
+        ),
+    ));
+}

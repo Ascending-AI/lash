@@ -140,3 +140,30 @@ fn frame_switch_does_not_reconstruct_old_provider_calls() {
     assert!(ids(&seed).0.is_empty());
     assert!(serde_json::to_string(&seed).unwrap().contains("observed"));
 }
+
+#[test]
+fn corrupt_envelopes_degrade_individually_after_reload() {
+    for payload in [
+        serde_json::json!("malformed"),
+        serde_json::json!({"schema_version":2}),
+    ] {
+        let mut events = vec![SessionHistoryRecord::Protocol(
+            crate::projection::rlm_protocol_event(RlmProtocolEvent::RlmDiagnostic(
+                lash_rlm_types::RlmDiagnosticEvent {
+                    phase: "native_transport".into(),
+                    payload,
+                },
+            )),
+        )];
+        events.extend(pair(step("healthy", None, false)));
+        let restored = serde_json::from_str::<Vec<SessionHistoryRecord>>(
+            &serde_json::to_string(&events).unwrap(),
+        )
+        .unwrap();
+        let messages = render(&restored);
+        assert_eq!(ids(&messages).0, ["healthy"]);
+        let rendered = serde_json::to_string(&messages).unwrap();
+        assert!(rendered.contains("degraded binding"));
+        assert!(rendered.contains("native_transport"));
+    }
+}

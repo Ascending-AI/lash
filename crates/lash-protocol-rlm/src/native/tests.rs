@@ -1,21 +1,36 @@
-use lash_core::sansio::{ChatContextProjector, ProtocolDriverHandle, Response};
+use lash_core::sansio::Response;
 use lash_core::{Effect, LlmOutputPart, LlmResponse, TurnMachine, TurnMachineConfig};
 use lash_rlm_types::{RlmProtocolEvent, RlmTermination, RlmTurnOptions};
 use std::sync::Arc;
 
 fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
-    let dialect: Arc<dyn crate::dialect::RlmDialect> =
-        Arc::new(crate::dialect::LashlangDialect::prompt_only(
-            lash_lashlang_runtime::LashlangSurface::default(),
-        ));
-    let driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> = if native {
-        Arc::new(super::driver::NativeDriver::with_dialect(dialect))
-    } else {
-        Arc::new(crate::protocol::RlmDriver::with_dialect(dialect))
-    };
+    let factory = crate::RlmProtocolPluginFactory::new(
+        crate::RlmProtocolPluginConfig::builder()
+            .instruction_limit(crate::InstructionBound::instructions(1000))
+            .wall_clock(crate::WallClockBound::secs(1))
+            .memory_limit(crate::MemoryBound::mebibytes(1))
+            .build()
+            .with_channel(if native {
+                crate::RlmChannel::NativeTool
+            } else {
+                crate::RlmChannel::Cell
+            }),
+        lashlang::global_in_memory_lashlang_artifact_store(),
+    )
+    .with_process_lifecycle(false);
+    let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)]);
+    let session = host.build_session("parity").unwrap();
+    let preamble = session
+        .protocol_driver()
+        .build_preamble(lash_core::ProtocolBuildInput {
+            tool_catalog: session.resolved_tool_catalog("parity").unwrap(),
+            plugin_extensions: Default::default(),
+            trigger_events: Default::default(),
+            extra_prompt_contributions: Vec::new(),
+        });
     TurnMachineConfig {
-        protocol_driver: driver,
-        projector: Arc::new(ChatContextProjector),
+        protocol_driver: preamble.config.protocol,
+        projector: preamble.config.projector,
         sync_execution_environment: false,
         model: "scripted".to_string(),
         max_context_tokens: None,
@@ -69,6 +84,14 @@ fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
     effects
 }
 fn reply(machine: &mut TurnMachine, effects: &[Effect], parts: Vec<LlmOutputPart>) -> Vec<Effect> {
+    reply_with_reason(machine, effects, parts, Default::default())
+}
+fn reply_with_reason(
+    machine: &mut TurnMachine,
+    effects: &[Effect],
+    parts: Vec<LlmOutputPart>,
+    terminal_reason: lash_core::LlmTerminalReason,
+) -> Vec<Effect> {
     let id = effects
         .iter()
         .find_map(|effect| match effect {
@@ -81,6 +104,7 @@ fn reply(machine: &mut TurnMachine, effects: &[Effect], parts: Vec<LlmOutputPart
         text_streamed: false,
         result: Ok(LlmResponse {
             parts,
+            terminal_reason,
             ..Default::default()
         }),
     });
@@ -146,13 +170,17 @@ fn run(
             break;
         };
         checkpoints.push(serde_json::to_value(checkpoint).unwrap());
+        let saved =
+            serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap()).unwrap();
+        machine = TurnMachine::restore_from_checkpoint(config(native, termination.clone()), saved);
+        drain(&mut machine);
         machine.handle_response(Response::Checkpoint {
             id,
             delivery: lash_sansio::CheckpointDelivery::default(),
         });
         effects = drain(&mut machine);
     }
-    let trajectory = machine
+    let trajectory: Vec<lash_rlm_types::RlmTrajectoryEntry> = machine
         .events()
         .iter()
         .filter_map(|record| {
@@ -171,7 +199,33 @@ fn run(
                 checkpoints.push(serde_json::to_value(outcome).unwrap())
             }
             Effect::Done { .. } => checkpoints.push(serde_json::json!("done")),
-            Effect::LlmCall { .. } => checkpoints.push(serde_json::json!("request_next")),
+            Effect::LlmCall { request, .. } => {
+                // Channel transport and repair wording deliberately differ. Pin
+                // each real projector's rendered continuation independently.
+                let scenario = format!(
+                    "{}_{}_{}",
+                    if native { "native" } else { "cell" },
+                    match termination {
+                        RlmTermination::Natural => "natural",
+                        RlmTermination::FinishRequired { schema: None } => "finish",
+                        _ => "schema",
+                    },
+                    if prose.is_some() {
+                        "prose"
+                    } else if trajectory
+                        .iter()
+                        .any(|step: &lash_rlm_types::RlmTrajectoryEntry| step.error.is_some())
+                    {
+                        "error"
+                    } else {
+                        "execution"
+                    }
+                );
+                insta::assert_snapshot!(
+                    scenario,
+                    serde_json::to_string_pretty(&request.messages).unwrap()
+                );
+            }
             _ => {}
         }
     }
@@ -405,7 +459,7 @@ fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
     let mut pairs = Vec::new();
     for event in machine.events().iter() {
         if let lash_core::SessionHistoryRecord::Protocol(event) = event
-            && let Some((parts, text)) = super::transport::repair_parts(event)
+            && let Some((parts, text)) = super::transport::repair_parts(event).unwrap()
         {
             let mut messages = Vec::new();
             super::transport::append_pair(&mut messages, &parts, &text);
@@ -425,4 +479,156 @@ fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
         }
     }
     assert_eq!(pairs.len(), 6);
+}
+
+#[test]
+fn output_limit_prose_repairs_on_both_plugins() {
+    for native in [false, true] {
+        let mut machine = TurnMachine::new(
+            config(native, RlmTermination::Natural),
+            Vec::new(),
+            Arc::new(Vec::new()),
+            0,
+        );
+        let initial = drain(&mut machine);
+        let effects = reply_with_reason(
+            &mut machine,
+            &initial,
+            vec![text("partial answer")],
+            lash_core::LlmTerminalReason::OutputLimit,
+        );
+        assert!(
+            effects.iter().any(|effect| matches!(
+                effect,
+                Effect::Checkpoint {
+                    checkpoint: lash_core::CheckpointKind::AfterWork,
+                    ..
+                }
+            )),
+            "native={native}: truncated prose must repair, not finish"
+        );
+        let id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Checkpoint { id, .. } => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let saved =
+            serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap()).unwrap();
+        machine =
+            TurnMachine::restore_from_checkpoint(config(native, RlmTermination::Natural), saved);
+        drain(&mut machine);
+        machine.handle_response(Response::Checkpoint {
+            id,
+            delivery: Default::default(),
+        });
+        let effects = drain(&mut machine);
+        let request = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::LlmCall { request, .. } => Some(request),
+                _ => None,
+            })
+            .expect("repair requests another model response");
+        let rendered = serde_json::to_string(&request.messages).unwrap();
+        assert!(rendered.contains("partial answer"));
+        assert!(rendered.contains("output limit"));
+        insta::assert_snapshot!(
+            if native {
+                "native_output_limit_prose"
+            } else {
+                "cell_output_limit_prose"
+            },
+            serde_json::to_string_pretty(&request.messages).unwrap()
+        );
+    }
+}
+
+#[test]
+fn output_limit_calls_repair_without_execution_until_stall_budget() {
+    for arguments in [r#"{"code":"finish 1"}"#, r#"{"code":"finish"#] {
+        let mut machine = TurnMachine::new(
+            config(true, RlmTermination::Natural),
+            Vec::new(),
+            Arc::new(Vec::new()),
+            0,
+        );
+        let mut effects = drain(&mut machine);
+        for attempt in 1..=3 {
+            effects = reply_with_reason(
+                &mut machine,
+                &effects,
+                vec![call("truncated", "execute_code", arguments)],
+                lash_core::LlmTerminalReason::OutputLimit,
+            );
+            assert!(
+                !effects
+                    .iter()
+                    .any(|effect| matches!(effect, Effect::ExecCode { .. })),
+                "truncated code must never execute"
+            );
+            if attempt == 3 {
+                assert!(
+                    effects
+                        .iter()
+                        .any(|effect| matches!(effect, Effect::Done { .. }))
+                );
+                break;
+            }
+            let id = effects
+                .iter()
+                .find_map(|effect| match effect {
+                    Effect::Checkpoint { id, .. } => Some(*id),
+                    _ => None,
+                })
+                .unwrap();
+            let saved =
+                serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap())
+                    .unwrap();
+            machine =
+                TurnMachine::restore_from_checkpoint(config(true, RlmTermination::Natural), saved);
+            drain(&mut machine);
+            machine.handle_response(Response::Checkpoint {
+                id,
+                delivery: Default::default(),
+            });
+            effects = drain(&mut machine);
+            let request = effects
+                .iter()
+                .find_map(|effect| match effect {
+                    Effect::LlmCall { request, .. } => Some(request),
+                    _ => None,
+                })
+                .unwrap();
+            let blocks = request
+                .messages
+                .iter()
+                .flat_map(|message| message.blocks.iter())
+                .collect::<Vec<_>>();
+            assert!(blocks.iter().any(|block| matches!(block, lash_core::llm::types::LlmContentBlock::ToolCall { call_id, input_json, .. } if call_id == "truncated" && input_json == arguments)));
+            assert!(blocks.iter().any(|block| matches!(block, lash_core::llm::types::LlmContentBlock::ToolResult { call_id, content, .. } if call_id == "truncated" && content.contains("output limit"))));
+        }
+        let decisions = machine
+            .events()
+            .iter()
+            .filter_map(|record| match record {
+                lash_core::SessionHistoryRecord::Protocol(event) => {
+                    match crate::projection::decode_rlm_protocol_event(event) {
+                        Some(RlmProtocolEvent::RlmDiagnostic(d))
+                            if d.phase == "native_extraction" =>
+                        {
+                            Some(d.payload["decision"].clone())
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            decisions,
+            vec![serde_json::json!("retry_output_limit_call"); 3]
+        );
+    }
 }

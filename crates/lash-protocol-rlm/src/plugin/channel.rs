@@ -11,19 +11,14 @@ pub enum RlmChannel {
     /// Programs appear in the provider's execute_code tool call.
     NativeTool,
 }
-impl RlmChannel {
-    /// Read the host selector next to LASH_RLM_DIALECT.
-    pub fn from_env() -> Result<Self, String> {
-        match std::env::var("LASH_RLM_CHANNEL") {
-            Ok(value) => match value.as_str() {
-                "cell" => Ok(Self::Cell),
-                "native" | "native_tool" => Ok(Self::NativeTool),
-                _ => Err(format!(
-                    "LASH_RLM_CHANNEL must be cell or native, got `{value}`"
-                )),
-            },
-            Err(std::env::VarError::NotPresent) => Ok(Self::Cell),
-            Err(error) => Err(error.to_string()),
+impl std::str::FromStr for RlmChannel {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "cell" => Ok(Self::Cell),
+            "native" | "native_tool" => Ok(Self::NativeTool),
+            _ => Err(format!("RLM channel must be cell or native, got `{value}`")),
         }
     }
 }
