@@ -143,8 +143,9 @@ pub trait RlmSessionExt {
     /// recorded `Option` — writing a dialect here would leave the recorded fact
     /// disagreeing with the running plugin.
     ///
-    /// The write follows the durability the pin has always had: it lands with
-    /// the session's next commit.
+    /// The write settles through the commanded durable session-config path
+    /// (FIG-2479): a successful return means the head accepted the stated
+    /// facts, and only then does resident state publish them.
     async fn set_rlm_config_if_unset(
         &self,
         requested: lash_rlm_types::RlmSessionConfig,
@@ -177,7 +178,10 @@ impl RlmSessionExt for crate::LashSession {
         if resolved != recorded {
             let options = lash_protocol_rlm::rlm_session_config_options(&resolved)
                 .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))?;
-            runtime.set_protocol_turn_options(options);
+            runtime
+                .set_protocol_turn_options(options)
+                .await
+                .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))?;
             self.runtime.publish_from(&runtime);
         }
         Ok(resolved)

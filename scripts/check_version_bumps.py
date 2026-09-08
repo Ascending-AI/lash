@@ -119,8 +119,18 @@ IDENTIFIER_RENAME_BASELINES = {
     # omitted from SessionPolicyWire, and RetryDecision.charge_safety is
     # serde-skipped. Both guarded Rust shapes changed while the persisted
     # session-node body stays byte-identical, so version 3 remains current.
+    # (Superseded state: sha256:b3b1b326e2b8a29da91388b4dfc7f6531a45338f50
+    # ffed061d04861166017632.)
+    #
+    # FIG-2479: PersistedSessionConfig gained the optional
+    # protocol_turn_options head field. The struct lives in session_graph.rs,
+    # so the node-body whole-file sweep sees it, but it is the session-head
+    # payload, not a node-body carrier: no FrameOpen/Event/Plugin byte
+    # changes, and the surface that actually changed took its honest bump
+    # (SESSION_HEAD_META_SCHEMA_VERSION 5 -> 6, now guarded on this struct
+    # directly). SESSION_NODE_BODY_SCHEMA_VERSION stays 10.
     "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
-        "sha256:b3b1b326e2b8a29da91388b4dfc7f6531a45338f50ffed061d04861166017632"
+        "sha256:8ac8f069e796ecc1d646138abd7d7759bf30a19bb860f9e5b4dc3b88d5954624"
     ),
     "crates/lash-core/src/runtime/process/validation.rs:"
     "PROCESS_REGISTRATION_FAMILY_VERSION": (
@@ -149,8 +159,16 @@ IDENTIFIER_RENAME_BASELINES = {
     # guard to the hand-written codecs, so this fingerprint covers the widened
     # signature; the identical residual applies as above -- the baseline pins a
     # STATE, so restoring exactly these bytes later would re-match.
+    # (FIG-1792 superseded state: sha256:2f04d80d453bf0e962e4c3a0eafa7189
+    # 7732e60e6922a975388f24160016a0a1.)
+    #
+    # FIG-2479: ProtocolTurnOptions gained PartialEq/Eq derives so the head
+    # config and config patch can carry it in their Eq types. The persisted
+    # envelope is emitted by the hand-written serialize_protocol_turn_options
+    # codec, which is untouched; serialized bytes are identical and
+    # PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION stays 1.
     "crates/lash-core/src/lib.rs:PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION": (
-        "sha256:2f04d80d453bf0e962e4c3a0eafa71897732e60e6922a975388f24160016a0a1"
+        "sha256:4189e3b8fd5f0589de7882132bf913c74963db9d86bebc531db66f1aface1632"
     ),
     # FIG-1980: tool_execution_grant_json_layout_is_stable witnesses that the
     # serde surface is unchanged, so TOOL_BATCH_FAMILY_VERSION remains 1.

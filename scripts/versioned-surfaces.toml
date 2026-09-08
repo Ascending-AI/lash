@@ -431,6 +431,14 @@ kind = "rust_items"
 paths = ["crates/lash-core/src/store/mod.rs"]
 symbols = ["SessionHeadPayload"]
 
+# The head payload's config column shape lives in session_graph.rs; guarding
+# it here makes head-config field changes trip this surface directly instead
+# of only the node-body whole-file sweep that happens to share the file.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/session_graph.rs"]
+symbols = ["PersistedSessionConfig"]
+
 [[surface]]
 constant = "SESSION_NODE_BODY_SCHEMA_VERSION"
 constant_path = "crates/lash-core/src/session_graph.rs"

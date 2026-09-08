@@ -558,6 +558,7 @@ pub enum RuntimePersistenceLaw {
     checkpoint_rejects_unknown_component_ref,
     session_read_loads_persisted_history,
     session_prompt_layer_round_trips_through_the_committed_head,
+    session_protocol_turn_options_round_trip_through_the_committed_head,
     session_metadata_round_trips,
     attachment_manifest_records_intent_and_commit_stamps,
     attachment_manifest_keeps_same_content_ownership_per_session,
@@ -669,6 +670,7 @@ async fn runtime_persistence_suite<F>(
         RuntimePersistenceLaw::checkpoint_rejects_unknown_component_ref => { checkpoint_rejects_unknown_component_ref(make("checkpoint-unknown-ref")).await; },
         RuntimePersistenceLaw::session_read_loads_persisted_history => { session_read_loads_persisted_history(make("branchy")).await; },
         RuntimePersistenceLaw::session_prompt_layer_round_trips_through_the_committed_head => { session_prompt_layer_round_trips_through_the_committed_head(make("session-prompt-layer")).await; },
+        RuntimePersistenceLaw::session_protocol_turn_options_round_trip_through_the_committed_head => { session_protocol_turn_options_round_trip_through_the_committed_head(make("session-protocol-turn-options")).await; },
         RuntimePersistenceLaw::session_metadata_round_trips => { session_metadata_round_trips(make("root")).await; },
         RuntimePersistenceLaw::attachment_manifest_records_intent_and_commit_stamps => { attachment_manifest_records_intent_and_commit_stamps(make("root")).await; },
         RuntimePersistenceLaw::attachment_manifest_keeps_same_content_ownership_per_session => { attachment_manifest_keeps_same_content_ownership_per_session(make("root")).await; },
@@ -839,6 +841,52 @@ async fn session_prompt_layer_round_trips_through_the_committed_head(
         .expect("load persisted session state")
         .expect("committed session state");
     assert_eq!(restored.policy.prompt, expected_prompt);
+}
+
+/// FIG-2479: the commanded protocol-turn-options fact round-trips resident
+/// state → committed head row (SESSION_HEAD_META v6) → cold load, and the head
+/// value is what the loaded state carries.
+async fn session_protocol_turn_options_round_trip_through_the_committed_head(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let expected = crate::ProtocolTurnOptions {
+        payload: serde_json::json!({
+            "dialect": "conformance-dialect",
+            "termination": {"kind": "conformance-termination"},
+        }),
+    };
+    let mut state = RuntimeSessionState {
+        session_id: "session-protocol-turn-options".to_string(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    state.protocol_turn_options = expected.clone();
+
+    commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        "session-protocol-turn-options",
+    )
+    .await
+    .expect("commit session protocol turn options");
+
+    let head = store
+        .load_session_head_meta()
+        .await
+        .expect("load session head")
+        .expect("committed session head");
+    assert_eq!(
+        head.config.protocol_turn_options,
+        Some(expected.clone()),
+        "the committed head row must carry the settled protocol turn options"
+    );
+    let restored = crate::store::load_persisted_session_state(store.as_ref())
+        .await
+        .expect("load persisted session state")
+        .expect("committed session state");
+    assert_eq!(
+        restored.protocol_turn_options, expected,
+        "cold load must restore the protocol turn options from the head"
+    );
 }
 
 async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(

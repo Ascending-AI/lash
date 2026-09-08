@@ -47,6 +47,8 @@ macro_rules! runtime_persistence_tests {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn session_prompt_layer_round_trips_through_the_committed_head() { $runner($crate::RuntimePersistenceLaw::session_prompt_layer_round_trips_through_the_committed_head).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn session_protocol_turn_options_round_trip_through_the_committed_head() { $runner($crate::RuntimePersistenceLaw::session_protocol_turn_options_round_trip_through_the_committed_head).await; }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn session_metadata_round_trips() { $runner($crate::RuntimePersistenceLaw::session_metadata_round_trips).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn attachment_manifest_records_intent_and_commit_stamps() { $runner($crate::RuntimePersistenceLaw::attachment_manifest_records_intent_and_commit_stamps).await; }
@@ -240,6 +242,8 @@ macro_rules! runtime_persistence_reopenable_tests {
         async fn session_read_loads_persisted_history() { $runner($crate::RuntimePersistenceLaw::session_read_loads_persisted_history).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn session_prompt_layer_round_trips_through_the_committed_head() { $runner($crate::RuntimePersistenceLaw::session_prompt_layer_round_trips_through_the_committed_head).await; }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn session_protocol_turn_options_round_trip_through_the_committed_head() { $runner($crate::RuntimePersistenceLaw::session_protocol_turn_options_round_trip_through_the_committed_head).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn session_metadata_round_trips() { $runner($crate::RuntimePersistenceLaw::session_metadata_round_trips).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

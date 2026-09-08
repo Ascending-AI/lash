@@ -96,7 +96,7 @@ pub use work_claim::{WorkClaim, WorkCompletion};
 fn default_root_session_id() -> String {
     "root".to_string()
 }
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 5;
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 6;
 
 #[cfg(test)]
 mod prompt_persistence_compat_tests;
@@ -299,6 +299,7 @@ fn persisted_session_config_from_state(
     let mut config = crate::PersistedSessionConfig::from(&state.policy);
     config.tool_access = state.authority.tool_access.clone();
     config.subagent = state.authority.subagent.clone();
+    config.protocol_turn_options = Some(state.protocol_turn_options.clone());
     config
 }
 
@@ -859,7 +860,17 @@ fn persisted_session_state_from_head(
         state.policy.prompt = prompt.clone();
     }
     state.policy.generation = head.config.generation.clone();
+    // Adopt the commanded head value before the checkpoint restore (so a
+    // checkpointless graph's initial frame captures it) and again after (the
+    // head row is authoritative over the checkpoint's turn-state copy; `None`
+    // is a pre-v6-content head, which keeps the checkpoint fallback).
+    if let Some(options) = head.config.protocol_turn_options.as_ref() {
+        state.protocol_turn_options = options.clone();
+    }
     crate::runtime::state::apply_session_checkpoint(&mut state, checkpoint)?;
+    if let Some(options) = head.config.protocol_turn_options.as_ref() {
+        state.protocol_turn_options = options.clone();
+    }
     Ok(state)
 }
 
