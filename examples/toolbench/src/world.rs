@@ -106,11 +106,11 @@ impl World {
 }
 
 #[derive(Clone)]
-pub(crate) struct SharedWorld(Arc<Mutex<World>>);
+pub(crate) struct SharedWorld(Arc<Mutex<World>>, Arc<Mutex<Vec<Value>>>);
 
 impl SharedWorld {
     pub(crate) fn new(world: World) -> Self {
-        Self(Arc::new(Mutex::new(world)))
+        Self(Arc::new(Mutex::new(world)), Arc::default())
     }
 
     pub(crate) fn snapshot(&self) -> World {
@@ -118,6 +118,32 @@ impl SharedWorld {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
             .clone()
+    }
+
+    pub(crate) fn submissions(&self) -> Vec<Value> {
+        self.1
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
+    pub(crate) fn standard_provider(&self) -> Arc<dyn ToolProvider> {
+        let mut tools = definitions();
+        tools.push(ToolDefinition::raw("tool:toolbench_submit", "submit", "Submit exactly the value the task asks for and end the task.", json!({"type":"object", "properties":{"value":{"type":["number","string","boolean","null","array","object"]}}, "required":["value"], "additionalProperties":false}), json!({})));
+        Arc::new(StaticToolProvider::new(tools, self.clone()))
+    }
+
+    fn submit(&self, args: &Value) -> ToolOutcome {
+        let Some(value) = args.get("value") else {
+            return ToolOutcome::err_fmt("value is required");
+        };
+        self.1
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .push(value.clone());
+        ToolOutcome::ok(value.clone()).with_control(lash::tools::ToolControl::Finish {
+            value: lash::tools::ToolValue::untrusted_json(value.clone()),
+        })
     }
 
     pub(crate) fn provider(&self) -> Arc<dyn ToolProvider> {
@@ -128,6 +154,9 @@ impl SharedWorld {
 #[async_trait]
 impl StaticToolExecute for SharedWorld {
     async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+        if call.name == "submit" {
+            return self.submit(call.args);
+        }
         match execute_call(
             &mut self.0.lock().unwrap_or_else(|poison| poison.into_inner()),
             call,
@@ -354,4 +383,17 @@ fn object_schema(fields: &[(&str, &str)]) -> Value {
         "required": required,
         "additionalProperties": false
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn submit_preserves_first_value_and_records_duplicates() {
+        let world = SharedWorld::new(World::seeded());
+        world.submit(&json!({"value": null}));
+        world.submit(&json!({"value": 2}));
+        assert_eq!(world.submissions(), vec![Value::Null, json!(2)]);
+        assert_eq!(world.snapshot(), World::seeded());
+    }
 }
