@@ -76,3 +76,6 @@ pub use runner::{
     run_generated_sim_profile, run_generated_sim_profile_for_seeds,
 };
 pub use stack_policy::{PRODUCT_STACK_BUDGET_BYTES, SIM_HARNESS_STACK_LIMIT_BYTES};
+
+#[cfg(test)]
+mod runtime_feedback;

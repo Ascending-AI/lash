@@ -26,6 +26,7 @@ impl RemoteToolRegistry for VecRegistry {
 #[test]
 fn remote_llm_request_json_round_trips() {
     let request = RemoteLlmRequest {
+        instructions: None,
         request_id: "request-1".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-1"),
         model_intent: RemoteModelIntent::new("gpt-test"),
@@ -98,6 +99,7 @@ fn v37_llm_decode_refuses_v36_and_v35_before_new_or_malformed_vocabulary() {
 #[test]
 fn current_llm_envelope_rejects_userinfo_in_replay_route_without_echoing_it() {
     let request = RemoteLlmRequest {
+        instructions: None,
         request_id: "request-userinfo".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-userinfo"),
         model_intent: RemoteModelIntent::new("gpt-test"),
@@ -153,6 +155,7 @@ fn removed_generation_options_are_rejected_rather_than_discarded() {
 #[test]
 fn remote_attachment_media_types_are_validated_syntactically() {
     let mut request = RemoteLlmRequest {
+        instructions: None,
         request_id: "request-invalid-mime".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-invalid-mime"),
         model_intent: RemoteModelIntent::new("gpt-test"),
@@ -1417,7 +1420,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 54,
+            "protocol_version": 55,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1432,7 +1435,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 54,
+            actual: 55,
             expected: 41,
         }
     ));
@@ -1478,7 +1481,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 51,
-            expected: 54,
+            expected: 55,
         }
     ));
 
@@ -1495,7 +1498,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 54, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 55, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         id: "process:1".to_string(),
         input: RemoteProcessInput::External {
@@ -1733,7 +1736,7 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
     let draft = RemoteTriggerSubscriptionDraft {
         subscription_key: "button-watcher".to_string(),
         env_ref:
-            "process-env:v4:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "process-env:v5:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .parse()
                 .expect("canonical env ref"),
         wake_target: Some(RemoteSessionScope::new("session")),
@@ -1828,7 +1831,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 54,
+            expected: 55,
         })
     ));
 }
@@ -1868,7 +1871,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 54,
+                expected: 55,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1904,7 +1907,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 54,
+                expected: 55,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1960,7 +1963,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 54,
+                expected: 55,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -1992,7 +1995,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 54,
+                expected: 55,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
@@ -2060,8 +2063,9 @@ fn remote_process_env_ref_is_validated_but_serializes_as_string() {
     for invalid in [
         "",
         "process-env:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "process-env:v4:blake3:abc",
-        "process-env:v4:blake3:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "process-env:v4:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "process-env:v5:blake3:abc",
+        "process-env:v5:blake3:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "tool-authority:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     ] {
         assert!(
@@ -2279,7 +2283,7 @@ fn remote_turn_request_schema_has_no_model_intent() {
 }
 
 fn canonical_env_ref() -> &'static str {
-    "process-env:v4:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    "process-env:v5:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 }
 
 fn remote_trigger_input_template() -> RemoteTriggerInputTemplate {
@@ -2348,7 +2352,7 @@ fn remote_process_record() -> RemoteProcessRecord {
             caused_by: None,
         },
         env_ref: Some(
-            "process-env:v4:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "process-env:v5:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .parse()
                 .expect("canonical env ref"),
         ),
@@ -2484,14 +2488,14 @@ fn remote_process_event() -> RemoteProcessEvent {
 }
 
 #[test]
-fn protocol_53_is_refused_before_window_54_payload_decode() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 54, "window 54 adjacency pin");
-    let old = br#"{"protocol_version":53,"outcome":{"type":"unknown_to_54"}}"#;
+fn protocol_54_is_refused_before_window_55_payload_decode() {
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 55, "window 55 adjacency pin");
+    let old = br#"{"protocol_version":54,"outcome":{"type":"unknown_to_55"}}"#;
     assert!(matches!(
         RemoteTurnReport::decode_json(old),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 53,
-            expected: 54
+            actual: 54,
+            expected: 55
         })
     ));
 }

@@ -1258,6 +1258,7 @@ async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_
 
 fn direct_llm_request(request_id: &str) -> crate::LlmRequest {
     crate::LlmRequest {
+        instructions: None,
         model: DIRECT_MODEL.to_string(),
         messages: vec![crate::llm::types::LlmMessage::new(
             crate::llm::types::LlmRole::User,

@@ -1,3 +1,4 @@
+mod runtime_feedback;
 use crate::support::*;
 use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{LlmJsonSchema, LlmMessage, LlmToolChoice, LlmToolSpec};
@@ -6,6 +7,7 @@ use lash_core::provider::{
     ReasoningCapability, ReasoningEncoding, RequestTimeout,
 };
 use lash_sansio::sync::MutexExt;
+use runtime_feedback::request_with_instructions;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
@@ -166,6 +168,8 @@ impl LlmHttpTransport for RecordingHttpTransport {
 
 fn reasoning_capability() -> ModelCapability {
     ModelCapability {
+        instruction_role: Default::default(),
+        native_mid_conversation_system: false,
         attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
@@ -184,6 +188,8 @@ fn reasoning_capability() -> ModelCapability {
 
 fn budget_reasoning_capability() -> ModelCapability {
     ModelCapability {
+        instruction_role: Default::default(),
+        native_mid_conversation_system: false,
         attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
@@ -203,6 +209,8 @@ fn budget_reasoning_capability() -> ModelCapability {
 
 fn toggle_false_reasoning_capability() -> ModelCapability {
     ModelCapability {
+        instruction_role: Default::default(),
+        native_mid_conversation_system: false,
         attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
@@ -219,6 +227,7 @@ fn toggle_false_reasoning_capability() -> ModelCapability {
 
 fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "openai/gpt-5.4".to_string(),
         messages,
         resolved_stored: Default::default(),
@@ -599,7 +608,7 @@ fn chat_unsupported_image_mime_is_rejected_at_request_boundary() {
     );
     assert_eq!(
         err.message,
-        "OpenAI Chat Completions cannot materialize attachment MIME `image/bmp` from source `inline`; providers accepting this MIME/source: none"
+        "message index 0: OpenAI Chat Completions cannot materialize attachment MIME `image/bmp` from source `inline`; providers accepting this MIME/source: none"
     );
 }
 
@@ -663,24 +672,6 @@ fn responses_unsupported_image_mime_is_rejected_at_request_boundary() {
         Some("unsupported_attachment_capability")
     );
     assert!(err.message.contains("OpenAI"));
-}
-
-#[test]
-fn builds_responses_body_with_instructions_and_input() {
-    let provider = OpenAiProvider::new("key");
-    let req = request(vec![
-        LlmMessage::text(LlmRole::System, "system prompt"),
-        LlmMessage::text(LlmRole::User, "hello"),
-    ]);
-    let body = provider.build_responses_request_body(&req, true).unwrap();
-    assert_eq!(body["instructions"], "system prompt");
-    assert_eq!(body["stream"], true);
-    assert!(body.get("messages").is_none());
-    assert!(body.get("cache_control").is_none());
-    assert_eq!(body["prompt_cache_key"], "session-1::session-1:frame:test");
-    assert_eq!(body["include"], json!(["reasoning.encrypted_content"]));
-    assert_eq!(body["input"][0]["role"], "user");
-    assert_eq!(body["input"][0]["content"][0]["type"], "input_text");
 }
 
 #[test]
@@ -784,10 +775,10 @@ fn openai_compatible_wire_config_serializes_only_when_customized() {
 
 #[test]
 fn chat_body_uses_messages_and_not_responses_input() {
-    let mut req = request(vec![
-        LlmMessage::text(LlmRole::System, "system prompt"),
-        LlmMessage::text(LlmRole::User, "hello"),
-    ]);
+    let mut req = request_with_instructions(
+        "system prompt",
+        vec![LlmMessage::text(LlmRole::User, "hello")],
+    );
     req.model = "anthropic/claude-sonnet-4.6".to_string();
     req.output_spec = Some(LlmOutputSpec::JsonObject);
 
@@ -935,10 +926,10 @@ fn chat_body_none_format_omits_resolved_reasoning_intent() {
 
 #[test]
 fn anthropic_cache_dialect_marks_canonical_breakpoints_for_an_arbitrary_model() {
-    let mut req = request(vec![
-        LlmMessage::text(LlmRole::System, "stable system prompt"),
-        LlmMessage::text(LlmRole::User, "dynamic tail"),
-    ]);
+    let mut req = request_with_instructions(
+        "stable system prompt",
+        vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
+    );
     req.model = "custom/model-v1".to_string();
     enable_cache_control(&mut req, CacheControlDialect::Anthropic);
     req.tools = Arc::new(vec![LlmToolSpec {
@@ -968,9 +959,9 @@ fn anthropic_cache_dialect_marks_canonical_breakpoints_for_an_arbitrary_model() 
 
 #[test]
 fn gemini_cache_dialect_emits_one_ephemeral_explicit_breakpoint() {
-    let mut req = request(vec![
-        LlmMessage::text(LlmRole::System, "stable system prompt"),
-        LlmMessage::new(
+    let mut req = request_with_instructions(
+        "stable system prompt",
+        vec![LlmMessage::new(
             LlmRole::User,
             vec![
                 LlmContentBlock::Text {
@@ -989,8 +980,8 @@ fn gemini_cache_dialect_emits_one_ephemeral_explicit_breakpoint() {
                     cache_breakpoint: false,
                 },
             ],
-        ),
-    ]);
+        )],
+    );
     req.model = "custom/model-v1".to_string();
     enable_cache_control(&mut req, CacheControlDialect::Gemini);
     req.tools = Arc::new(vec![LlmToolSpec {
@@ -1026,10 +1017,10 @@ fn gemini_cache_dialect_emits_one_ephemeral_explicit_breakpoint() {
 
 #[test]
 fn gemini_cache_dialect_falls_back_to_last_message_text() {
-    let mut req = request(vec![
-        LlmMessage::text(LlmRole::System, "stable system prompt"),
-        LlmMessage::text(LlmRole::User, "last stable text"),
-    ]);
+    let mut req = request_with_instructions(
+        "stable system prompt",
+        vec![LlmMessage::text(LlmRole::User, "last stable text")],
+    );
     req.model = "custom/model-v1".to_string();
     enable_cache_control(&mut req, CacheControlDialect::Gemini);
 
@@ -1215,9 +1206,9 @@ fn openrouter_can_be_configured_for_bedrock_safe_schema_dialect() {
 
 #[test]
 fn anthropic_cache_dialect_prefers_explicit_text_breakpoint() {
-    let mut req = request(vec![
-        LlmMessage::text(LlmRole::System, "stable system prompt"),
-        LlmMessage::new(
+    let mut req = request_with_instructions(
+        "stable system prompt",
+        vec![LlmMessage::new(
             LlmRole::User,
             vec![
                 LlmContentBlock::Text {
@@ -1231,8 +1222,8 @@ fn anthropic_cache_dialect_prefers_explicit_text_breakpoint() {
                     cache_breakpoint: false,
                 },
             ],
-        ),
-    ]);
+        )],
+    );
     req.model = "custom/model-v1".to_string();
     enable_cache_control(&mut req, CacheControlDialect::Anthropic);
 
@@ -1282,19 +1273,23 @@ fn cache_dialect_chat_history_shape_is_stable_when_breakpoint_moves() {
                 }],
             )
         };
-        let mut previous = request(vec![
-            LlmMessage::text(LlmRole::System, "stable system prompt"),
-            history("stable history one", true),
-            LlmMessage::text(LlmRole::User, "dynamic iteration one"),
-        ]);
+        let mut previous = request_with_instructions(
+            "stable system prompt",
+            vec![
+                history("stable history one", true),
+                LlmMessage::text(LlmRole::User, "dynamic iteration one"),
+            ],
+        );
         previous.model = model.to_string();
         enable_cache_control(&mut previous, dialect);
-        let mut next = request(vec![
-            LlmMessage::text(LlmRole::System, "stable system prompt"),
-            history("stable history one", false),
-            history("stable history two", true),
-            LlmMessage::text(LlmRole::User, "dynamic iteration two"),
-        ]);
+        let mut next = request_with_instructions(
+            "stable system prompt",
+            vec![
+                history("stable history one", false),
+                history("stable history two", true),
+                LlmMessage::text(LlmRole::User, "dynamic iteration two"),
+            ],
+        );
         next.model = model.to_string();
         enable_cache_control(&mut next, dialect);
 
@@ -1314,10 +1309,10 @@ fn cache_dialect_chat_history_shape_is_stable_when_breakpoint_moves() {
 
 #[test]
 fn cache_retention_none_removes_chat_cache_markers() {
-    let mut req = request(vec![
-        LlmMessage::text(LlmRole::System, "stable system prompt"),
-        LlmMessage::text(LlmRole::User, "dynamic tail"),
-    ]);
+    let mut req = request_with_instructions(
+        "stable system prompt",
+        vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
+    );
     enable_cache_control(&mut req, CacheControlDialect::Anthropic);
 
     let body = openrouter_provider()
@@ -1343,10 +1338,10 @@ fn cache_retention_none_removes_chat_cache_markers() {
 
 #[test]
 fn cache_retention_long_uses_anthropic_ttl_on_chat_cache_markers() {
-    let mut req = request(vec![
-        LlmMessage::text(LlmRole::System, "stable system prompt"),
-        LlmMessage::text(LlmRole::User, "dynamic tail"),
-    ]);
+    let mut req = request_with_instructions(
+        "stable system prompt",
+        vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
+    );
     enable_cache_control(&mut req, CacheControlDialect::Anthropic);
 
     let body = openrouter_provider()

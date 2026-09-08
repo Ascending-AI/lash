@@ -638,3 +638,34 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
         );
     }
 }
+
+#[test]
+fn configured_prompt_is_instructions_on_both_channels() {
+    for native in [false, true] {
+        for (prompt, expected) in [
+            ("  configured prompt\n", Some("configured prompt")),
+            ("", None),
+            (" \n\t", None),
+        ] {
+            let mut config = config(native, RlmTermination::Natural);
+            config.system_prompt = Arc::from(prompt);
+            let mut machine = TurnMachine::new(config, Vec::new(), Arc::new(Vec::new()), 0);
+            let effects = drain(&mut machine);
+            let request = effects
+                .iter()
+                .find_map(|effect| match effect {
+                    Effect::LlmCall { request, .. } => Some(request),
+                    _ => None,
+                })
+                .expect("initial provider request");
+            assert_eq!(request.instructions.as_deref(), expected, "native={native}");
+            assert!(
+                request
+                    .messages
+                    .iter()
+                    .all(|message| message.role != lash_core::llm::types::LlmRole::System),
+                "native={native}: configured prompt must not enter conversation history"
+            );
+        }
+    }
+}

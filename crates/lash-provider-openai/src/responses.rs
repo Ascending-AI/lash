@@ -30,8 +30,7 @@ impl OpenAiCompatibleProvider {
             compat.strict_tools,
             &compat.schema_capabilities,
         )?;
-        let (instructions, input) =
-            shared::build_responses_input(req, shared::ResponsesInputOptions::OPENAI);
+        let input = shared::build_responses_input(req, shared::ResponsesInputOptions::OPENAI);
         let policy = resolve_generation_policy(
             &req.generation,
             &self.options,
@@ -40,12 +39,14 @@ impl OpenAiCompatibleProvider {
         );
         let mut body = json!({
             "model": req.model,
-            "instructions": instructions,
             "input": null,
             "tools": tools,
             "stream": stream,
         });
         body["input"] = Value::Array(input);
+        if let Some(instructions) = &req.instructions {
+            body["instructions"] = json!(instructions);
+        }
         apply_max_tokens_field(&mut body, compat.max_tokens_field, policy.max_output_tokens);
         // Responses accepts `temperature` but has no `seed` field, so a
         // requested seed is simply not expressible on this wire.

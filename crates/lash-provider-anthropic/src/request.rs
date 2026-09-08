@@ -4,6 +4,7 @@
 
 use crate::policy::AnthropicThinkingConfig;
 use crate::support::*;
+use lash_core::llm::types::LlmMessage;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct BreakpointAddress {
@@ -115,6 +116,41 @@ impl AnthropicProvider {
         }
     }
 
+    fn message_has_content(msg: &LlmMessage) -> bool {
+        msg.blocks.iter().any(|block| match block {
+            LlmContentBlock::Text { text, .. } => !text.trim().is_empty(),
+            LlmContentBlock::Attachment { source } => source.media_type().is_some(),
+            LlmContentBlock::ToolCall { .. } | LlmContentBlock::ToolResult { .. } => true,
+            LlmContentBlock::Reasoning { text, replay, .. } => {
+                !text.trim().is_empty()
+                    || replay
+                        .as_ref()
+                        .is_some_and(|meta| meta.redacted && meta.signature.is_some())
+            }
+        })
+    }
+
+    fn native_feedback_content(msg: &LlmMessage) -> bool {
+        matches!(msg.role, LlmRole::System)
+            && msg
+                .blocks
+                .iter()
+                .all(|block| matches!(block, LlmContentBlock::Text { text, .. } if !text.trim().is_empty()))
+            && !msg.blocks.is_empty()
+    }
+
+    // Judge the emitted neighbors: a tagged fallback is a user block, not
+    // part of a native section. Lash has no server-tool-result variant.
+    fn native_feedback_position(req: &LlmRequest, index: usize, out: &[Value]) -> bool {
+        let before = out.last().and_then(|message| message["role"].as_str());
+        let after = req.messages[index + 1..].iter().find(|msg| {
+            !Self::native_feedback_content(msg)
+                && (matches!(msg.role, LlmRole::System) || Self::message_has_content(msg))
+        });
+        matches!(before, Some("user" | "system"))
+            && after.is_none_or(|msg| matches!(msg.role, LlmRole::Assistant))
+    }
+
     /// Build the `messages` array for Anthropic Messages API. Each lash
     /// `LlmMessage` becomes one wire message; adjacent same-role messages
     /// get merged to match Anthropic's alternation rules.
@@ -122,29 +158,52 @@ impl AnthropicProvider {
         &self,
         req: &LlmRequest,
     ) -> (Option<String>, Vec<Value>, Option<BreakpointAddress>) {
-        let mut system_prompt: Option<String> = None;
+        let system_prompt = req.instructions.as_deref().map(str::to_owned);
         let mut out: Vec<Value> = Vec::new();
         let mut breakpoint = None;
-        let mut first_system_seen = false;
-
-        for msg in &req.messages {
-            // First system message is the real system prompt; hoist it
-            // into the top-level `system` field. Subsequent system
-            // messages (runtime feedback) become user turns so the
-            // conversation ends on a user boundary.
-            if matches!(msg.role, LlmRole::System) && !first_system_seen {
-                first_system_seen = true;
-                let text = collect_text(&msg.blocks);
-                if !text.is_empty() {
-                    system_prompt = Some(text);
-                }
-                continue;
-            }
-
-            let wire_role = Self::role_name(&msg.role);
+        for (index, msg) in req.messages.iter().enumerate() {
+            let feedback = matches!(msg.role, LlmRole::System);
+            let native = Self::native_feedback_content(msg)
+                && req.model_capability.native_mid_conversation_system
+                && Self::native_feedback_position(req, index, &out);
+            let wire_role = if native {
+                "system"
+            } else {
+                Self::role_name(&msg.role)
+            };
             let mut blocks: Vec<Value> = Vec::new();
             let mut marked_block_index = None;
-            for block in msg.blocks.iter() {
+            let tagged;
+            let source_blocks = if feedback && !native {
+                let mut fallback = vec![LlmContentBlock::Text {
+                    text: format!(
+                        "<runtime_feedback>{}</runtime_feedback>",
+                        collect_text(&msg.blocks)
+                    )
+                    .into(),
+                    response_meta: None,
+                    cache_breakpoint: msg.blocks.iter().any(|block| {
+                        matches!(
+                            block,
+                            LlmContentBlock::Text {
+                                cache_breakpoint: true,
+                                ..
+                            }
+                        )
+                    }),
+                }];
+                fallback.extend(
+                    msg.blocks
+                        .iter()
+                        .filter(|block| !matches!(block, LlmContentBlock::Text { .. }))
+                        .cloned(),
+                );
+                tagged = fallback;
+                tagged.as_slice()
+            } else {
+                msg.blocks.as_slice()
+            };
+            for block in source_blocks {
                 if let Some(value) = Self::content_block_value(req, block) {
                     if matches!(
                         block,
@@ -192,6 +251,27 @@ impl AnthropicProvider {
             }));
         }
 
+        // A coalesced user turn may start with feedback injected between a
+        // tool call and its results. Anthropic requires every result first.
+        for (message_index, message) in out.iter_mut().enumerate() {
+            if message["role"] != "user" {
+                continue;
+            }
+            let blocks = message["content"].as_array_mut().expect("content blocks");
+            let is_result = |block: &Value| block["type"] == "tool_result";
+            if let Some(address) = breakpoint.as_mut()
+                && address.message_index == message_index
+            {
+                let old = address.block_index;
+                address.block_index = if is_result(&blocks[old]) {
+                    blocks[..old].iter().filter(|b| is_result(b)).count()
+                } else {
+                    blocks.iter().filter(|b| is_result(b)).count()
+                        + blocks[..old].iter().filter(|b| !is_result(b)).count()
+                };
+            }
+            blocks.sort_by_key(|block| !is_result(block));
+        }
         (system_prompt, out, breakpoint)
     }
 
@@ -275,7 +355,10 @@ impl AnthropicProvider {
 
         if breakpoint.is_none()
             && let Some(last_msg) = messages.last_mut()
-            && last_msg.get("role").and_then(|v| v.as_str()) == Some("user")
+            && matches!(
+                last_msg.get("role").and_then(|v| v.as_str()),
+                Some("user" | "system")
+            )
             && let Some(content) = last_msg.get_mut("content").and_then(|c| c.as_array_mut())
             && let Some(last_block) = content.last_mut()
             && last_block.is_object()
@@ -331,43 +414,57 @@ impl AnthropicProvider {
         let serving_route = self.route_identity(&req.model);
         let safe_request = req.replay_safe_for(&serving_route);
         let req = safe_request.as_ref();
-        for source in &req.attachments() {
-            if matches!(
-                source,
-                AttachmentSource::ProviderFile {
-                    provider_scope,
-                    media_type: None,
-                    ..
-                } if provider_scope.provider.eq_ignore_ascii_case("anthropic")
-            ) {
-                return Err(LlmTransportError::new(
+        for (message_index, message) in req.messages.iter().enumerate() {
+            for source in message.blocks.iter().filter_map(|block| match block {
+                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
+                _ => None,
+            }) {
+                let validation = (|| {
+                    if matches!(
+                        source,
+                        AttachmentSource::ProviderFile {
+                            media_type: None,
+                            ..
+                        }
+                    ) {
+                        return Err(LlmTransportError::new(
                     "Anthropic Messages requires the media type for provider file ids in order to choose the image/document modality; supply `media_type` on `ProviderFile`",
                 )
                 .with_kind(ProviderFailureKind::Validation)
                 .with_code("provider_file_media_type_required"));
-            }
-            let supported = req
-                .model_capability
-                .attachment_acceptance
-                .accepts("Anthropic Messages", source);
-            if !supported {
-                let accepted_by =
-                    known_attachment_acceptors(&req.model_capability.attachment_acceptance, source);
-                return Err(unsupported_attachment_capability(
-                    "Anthropic Messages",
-                    source,
-                    &accepted_by,
-                ));
-            }
-            if matches!(source, AttachmentSource::Stored { .. })
-                && req.attachment_bytes(source).is_none()
-            {
-                let mime = source.media_type().expect("stored source MIME");
-                return Err(LlmTransportError::new(format!(
+                    }
+                    let supported = req
+                        .model_capability
+                        .attachment_acceptance
+                        .accepts("Anthropic Messages", source);
+                    if !supported {
+                        let accepted_by = known_attachment_acceptors(
+                            &req.model_capability.attachment_acceptance,
+                            source,
+                        );
+                        return Err(unsupported_attachment_capability(
+                            "Anthropic Messages",
+                            source,
+                            &accepted_by,
+                        ));
+                    }
+                    if matches!(source, AttachmentSource::Stored { .. })
+                        && req.attachment_bytes(source).is_none()
+                    {
+                        let mime = source.media_type().expect("stored source MIME");
+                        return Err(LlmTransportError::new(format!(
                     "Anthropic Messages could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"
                 ))
                 .with_kind(ProviderFailureKind::Validation)
                 .with_code("stored_attachment_not_resolved"));
+                    }
+
+                    Ok(())
+                })();
+                validation.map_err(|mut error: LlmTransportError| {
+                    error.message = format!("message index {message_index}: {}", error.message);
+                    error
+                })?;
             }
         }
         let (system_text, mut messages, breakpoint) = self.build_messages(req);
@@ -506,16 +603,12 @@ impl AnthropicProvider {
     }
 }
 
-/// Join all `Text` blocks in a message into a single string, separated by
-/// blank lines. Non-text blocks are ignored. Used to collapse a multi-block
-/// system message into the top-level `system` field.
+/// Concatenate feedback text without changing any text bytes. Non-text
+/// blocks remain separate content blocks in the fallback user message.
 fn collect_text(blocks: &[LlmContentBlock]) -> String {
     let mut out = String::new();
     for block in blocks {
         if let LlmContentBlock::Text { text, .. } = block {
-            if !out.is_empty() {
-                out.push_str("\n\n");
-            }
             out.push_str(text);
         }
     }

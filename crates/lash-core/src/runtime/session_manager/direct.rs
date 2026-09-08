@@ -468,7 +468,8 @@ impl DirectCompletionCapability {
         } else {
             context.next_replay_ordinal(caused_by.as_ref(), usage_source)?
         };
-        let normalized = crate::direct::build_llm_request(&provider, request, model);
+        let normalized = crate::direct::build_llm_request(&provider, request, model)
+            .map_err(|error| crate::PluginError::Session(error.to_string()))?;
         let plan = self
             .plan_direct_effect(
                 &context,

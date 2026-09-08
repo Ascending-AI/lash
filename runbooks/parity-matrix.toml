@@ -34,6 +34,7 @@ frontier = ["openai/gpt-5.6-sol"]
 # Ordinary RLM scenarios: one judged row per dialect. Order is the shard order,
 # so a reordering moves rows between shards.
 [scenarios]
+provider-runtime-feedback = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "runtime_feedback_ workspace nextest companion; live outgoing retry request remains judged" }
 agent-service-branching = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 graceful-drain = { tier = "deterministic", model = "scripted-provider" }
 process-operations = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the `just process-operations-e2e` companion, the FIG-1292 preflight, and Phases 0-8; only the five FIG-1293 tool rows call a provider" }

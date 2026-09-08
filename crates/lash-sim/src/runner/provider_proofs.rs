@@ -99,6 +99,7 @@ fn codex_request(tools: bool, stream_events: Option<LlmEventSender>) -> LlmReque
         Vec::new()
     };
     LlmRequest {
+        instructions: None,
         model: "gpt-5.4-codex".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "lookup x")],
         resolved_stored: Default::default(),
@@ -792,6 +793,7 @@ pub(super) fn openai_compatible_request(stream: bool) -> LlmRequest {
 
 fn openai_compatible_request_with_events(stream_events: Option<LlmEventSender>) -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "openai/gpt-5.4".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "lookup x")],
         resolved_stored: Default::default(),
@@ -833,6 +835,7 @@ fn event_collector() -> (Arc<Mutex<Vec<LlmStreamEvent>>>, LlmEventSender) {
 
 fn openai_responses_request() -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "gpt-5.4".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
         resolved_stored: Default::default(),
@@ -854,6 +857,7 @@ fn openai_responses_request() -> LlmRequest {
 
 fn anthropic_messages_request() -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "claude-sonnet-4-20250514".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
         resolved_stored: Default::default(),
@@ -875,6 +879,7 @@ fn anthropic_messages_request() -> LlmRequest {
 
 fn google_request(stream: bool) -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "gemini-3.1-pro-preview".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
         resolved_stored: Default::default(),

@@ -1121,6 +1121,7 @@ lash::direct::DirectLlmError::InvalidRequest::message
 lash::direct::DirectLlmError::InvalidResponse
 lash::direct::DirectLlmError::InvalidResponse::message
 lash::direct::DirectLlmError::InvalidResponse::result
+lash::direct::DirectLlmError::LeadingSystemMessage
 lash::direct::DirectLlmError::Transport
 lash::direct::DirectLlmError::Transport::0
 lash::direct::DirectLlmOutcome
@@ -1144,6 +1145,7 @@ lash::direct::DirectRequest
 lash::direct::DirectRequest::attachments
 lash::direct::DirectRequest::caused_by
 lash::direct::DirectRequest::generation
+lash::direct::DirectRequest::instructions
 lash::direct::DirectRequest::json
 lash::direct::DirectRequest::json_schema
 lash::direct::DirectRequest::messages
@@ -5678,6 +5680,11 @@ lash::provider::GoogleDialect::ClaudeOnVertex
 lash::provider::GoogleDialect::Gemini3
 lash::provider::GoogleDialect::Legacy
 lash::provider::GoogleDialect::is_legacy
+lash::provider::InstructionRole
+lash::provider::InstructionRole::Developer
+lash::provider::InstructionRole::System
+lash::provider::InstructionRole::as_str
+lash::provider::InstructionRole::is_system
 lash::provider::LlmContentBlock
 lash::provider::LlmContentBlock::Attachment
 lash::provider::LlmContentBlock::Attachment::source
@@ -5714,6 +5721,7 @@ lash::provider::LlmRequest::attachments
 lash::provider::LlmRequest::continuation_key
 lash::provider::LlmRequest::drop_foreign_replay
 lash::provider::LlmRequest::generation
+lash::provider::LlmRequest::instructions
 lash::provider::LlmRequest::messages
 lash::provider::LlmRequest::model
 lash::provider::LlmRequest::model_capability
@@ -5769,7 +5777,9 @@ lash::provider::ModelCapability::allows_caller_temperature
 lash::provider::ModelCapability::attachment_acceptance
 lash::provider::ModelCapability::cache_control
 lash::provider::ModelCapability::google_dialect
+lash::provider::ModelCapability::instruction_role
 lash::provider::ModelCapability::is_empty
+lash::provider::ModelCapability::native_mid_conversation_system
 lash::provider::ModelCapability::reasoning
 lash::provider::ModelCapability::resolve_effort
 lash::provider::ModelCapability::sampling
@@ -6117,6 +6127,10 @@ lash::remote::llm::RemoteGoogleDialect::ClaudeOnVertex
 lash::remote::llm::RemoteGoogleDialect::Gemini3
 lash::remote::llm::RemoteGoogleDialect::Legacy
 lash::remote::llm::RemoteGoogleDialect::is_legacy
+lash::remote::llm::RemoteInstructionRole
+lash::remote::llm::RemoteInstructionRole::Developer
+lash::remote::llm::RemoteInstructionRole::System
+lash::remote::llm::RemoteInstructionRole::is_system
 lash::remote::llm::RemoteLlmCallRecord
 lash::remote::llm::RemoteLlmCallRecord::attempts
 lash::remote::llm::RemoteLlmCallRecord::call_id
@@ -6168,6 +6182,7 @@ lash::remote::llm::RemoteLlmRequest::decode_json
 lash::remote::llm::RemoteLlmRequest::encode_json
 lash::remote::llm::RemoteLlmRequest::from_core
 lash::remote::llm::RemoteLlmRequest::generation
+lash::remote::llm::RemoteLlmRequest::instructions
 lash::remote::llm::RemoteLlmRequest::messages
 lash::remote::llm::RemoteLlmRequest::metadata
 lash::remote::llm::RemoteLlmRequest::model_intent
@@ -6220,7 +6235,9 @@ lash::remote::llm::RemoteModelCapability
 lash::remote::llm::RemoteModelCapability::attachment_acceptance
 lash::remote::llm::RemoteModelCapability::cache_control
 lash::remote::llm::RemoteModelCapability::google_dialect
+lash::remote::llm::RemoteModelCapability::instruction_role
 lash::remote::llm::RemoteModelCapability::is_empty
+lash::remote::llm::RemoteModelCapability::native_mid_conversation_system
 lash::remote::llm::RemoteModelCapability::reasoning
 lash::remote::llm::RemoteModelCapability::sampling
 lash::remote::llm::RemoteModelCapability::stream_termination
@@ -7812,6 +7829,7 @@ lash::runtime::LashRuntime::validate_protocol_turn_extension
 lash::runtime::LlmRequestSpec
 lash::runtime::LlmRequestSpec::attachments
 lash::runtime::LlmRequestSpec::generation
+lash::runtime::LlmRequestSpec::instructions
 lash::runtime::LlmRequestSpec::messages
 lash::runtime::LlmRequestSpec::model
 lash::runtime::LlmRequestSpec::model_capability

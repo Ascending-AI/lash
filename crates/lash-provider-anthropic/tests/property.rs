@@ -95,6 +95,7 @@ fn tool_call_stream_bytes() -> Vec<u8> {
 
 fn request(deltas: Arc<Mutex<Vec<String>>>) -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "claude-sonnet-4-6".to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
         resolved_stored: Default::default(),

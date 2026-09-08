@@ -60,6 +60,7 @@ fn text_block(text: &str, cache_breakpoint: bool) -> LlmContentBlock {
 
 fn request(model: &str, messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
+        instructions: Some(Arc::from("stable system")),
         model: model.to_string(),
         messages,
         resolved_stored: Default::default(),
@@ -86,8 +87,8 @@ fn with_cache_control(mut request: LlmRequest, dialect: CacheControlDialect) -> 
 
 fn standard_iterations(model: &str) -> Vec<LlmRequest> {
     let first = vec![
-        LlmMessage::text(LlmRole::System, "stable system"),
         LlmMessage::text(LlmRole::User, "solve the task"),
+        LlmMessage::text(LlmRole::System, "stable runtime feedback"),
     ];
     let mut second = first.clone();
     second.extend([
@@ -208,29 +209,13 @@ fn prefix_for_openai_chat(body: Value, stable_messages: usize) -> SerializedProm
     }
 }
 
-fn non_system_message_count(request: &LlmRequest, stable_messages: usize) -> usize {
-    request.messages[..stable_messages]
-        .iter()
-        .filter(|message| message.role != LlmRole::System)
-        .count()
-}
-
-fn prefix_for_anthropic(
-    request: &LlmRequest,
-    body: Value,
-    prefix_body: &Value,
-    stable_messages: usize,
-) -> SerializedPromptRequest {
-    let message_count = non_system_message_count(request, stable_messages);
+fn prefix_for_anthropic(body: Value, prefix_body: &Value) -> SerializedPromptRequest {
     let mut stable_prefix = json!({
         "system": prefix_body.get("system").cloned(),
         "messages": prefix_body["messages"]
             .as_array()
             .expect("Anthropic messages")
-            .iter()
-            .take(message_count)
-            .cloned()
-            .collect::<Vec<_>>(),
+            .to_vec(),
     });
     strip_cache_directives(&mut stable_prefix);
     SerializedPromptRequest {
@@ -239,23 +224,14 @@ fn prefix_for_anthropic(
     }
 }
 
-fn prefix_for_google(
-    request: &LlmRequest,
-    body: Value,
-    prefix_body: &Value,
-    stable_messages: usize,
-) -> SerializedPromptRequest {
-    let message_count = non_system_message_count(request, stable_messages);
+fn prefix_for_google(body: Value, prefix_body: &Value) -> SerializedPromptRequest {
     let wire_request = &prefix_body["request"];
     let stable_prefix = json!({
         "systemInstruction": wire_request.get("systemInstruction").cloned(),
         "contents": wire_request["contents"]
             .as_array()
             .expect("Google contents")
-            .iter()
-            .take(message_count)
-            .cloned()
-            .collect::<Vec<_>>(),
+            .to_vec(),
     });
     SerializedPromptRequest {
         body,
@@ -281,7 +257,10 @@ fn serialize_prefix(
                 CacheRetention::Short,
             )
             .expect("OpenAI-compatible Chat request");
-            prefix_for_openai_chat(body, stable_messages)
+            prefix_for_openai_chat(
+                body,
+                stable_messages + usize::from(request.instructions.is_some()),
+            )
         }
         ProviderSerializer::AnthropicDirect => {
             let body =
@@ -294,7 +273,7 @@ fn serialize_prefix(
                 CacheRetention::Short,
             )
             .expect("Anthropic prefix request");
-            prefix_for_anthropic(request, body, &prefix_body, stable_messages)
+            prefix_for_anthropic(body, &prefix_body)
         }
         ProviderSerializer::GoogleDirect => {
             let body =
@@ -307,7 +286,7 @@ fn serialize_prefix(
                 CacheRetention::Short,
             )
             .expect("Google schema projection");
-            prefix_for_google(request, body, &prefix_body, stable_messages)
+            prefix_for_google(body, &prefix_body)
         }
     }
 }
@@ -394,7 +373,6 @@ fn cache_request(model: &str) -> LlmRequest {
     request(
         model,
         vec![
-            LlmMessage::text(LlmRole::System, "stable system"),
             LlmMessage::new(LlmRole::User, vec![text_block("stable history", true)]),
             LlmMessage::text(LlmRole::User, "volatile tail"),
         ],
@@ -655,4 +633,33 @@ fn requested_breakpoints_report_capability_driven_emission_and_drop() {
         lash_provider_openai::testing::serialize_chat_request(&request, CacheRetention::Short)
             .expect("capability-free Chat body");
     assert_eq!(unsupported.dropped, 1);
+}
+
+#[test]
+fn runtime_feedback_participates_in_serialized_cache_prefixes() {
+    for serializer in [
+        ProviderSerializer::ChatAnthropicDialect,
+        ProviderSerializer::ChatGeminiDialect,
+        ProviderSerializer::AnthropicDirect,
+        ProviderSerializer::GoogleDirect,
+    ] {
+        let iterations = standard_iterations("model");
+        for request in &iterations {
+            let serialized = serialize_prefix(serializer, request, 2);
+            let prefix = serialized.stable_prefix.to_string();
+            let expected = match serializer {
+                ProviderSerializer::ChatAnthropicDialect
+                | ProviderSerializer::ChatGeminiDialect => "stable runtime feedback",
+                ProviderSerializer::AnthropicDirect | ProviderSerializer::GoogleDirect => {
+                    "<runtime_feedback>stable runtime feedback</runtime_feedback>"
+                }
+            };
+            assert!(prefix.contains(expected), "{serializer:?}: {prefix}");
+        }
+        assert_prefix_stability(
+            &format!("feedback {serializer:?}"),
+            &iterations,
+            |request, stable| serialize_prefix(serializer, request, stable),
+        );
+    }
 }

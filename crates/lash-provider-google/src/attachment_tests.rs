@@ -11,6 +11,7 @@ fn request_with_inline_attachment(mime: &str) -> (LlmRequest, AttachmentSource) 
         ATTACHMENT_FIXTURE_BYTES.to_vec(),
     );
     let request = LlmRequest {
+        instructions: None,
         model: "gemini-3.1-pro-preview".to_string(),
         messages: vec![LlmMessage::new(
             LlmRole::User,

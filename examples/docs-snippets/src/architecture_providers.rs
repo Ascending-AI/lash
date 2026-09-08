@@ -98,10 +98,10 @@ mod asserted_examples {
     use std::time::Duration;
 
     use lash::provider::{
-        CacheControlDialect, ModelCapability, ProviderFailureKind, ProviderOptions,
-        ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy, ReasoningCapability,
-        ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, RequestTimeout,
-        SamplingCapability, StreamTermination,
+        CacheControlDialect, InstructionRole, ModelCapability, ProviderFailureKind,
+        ProviderOptions, ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy,
+        ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,
+        RequestTimeout, SamplingCapability, StreamTermination,
     };
 
     #[test]
@@ -129,6 +129,8 @@ mod asserted_examples {
         assert!(reasoning.mandatory);
 
         let capability = ModelCapability {
+            instruction_role: InstructionRole::Developer,
+            native_mid_conversation_system: true,
             attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(reasoning),
@@ -136,6 +138,8 @@ mod asserted_examples {
             stream_termination: Some(StreamTermination::RequireTerminalEvidence),
             sampling: SamplingCapability::Pinned,
         };
+        assert_eq!(capability.instruction_role, InstructionRole::Developer);
+        assert!(capability.native_mid_conversation_system);
         assert!(!ModelCapability::is_empty(&capability));
         assert!(!ModelCapability::allows_caller_temperature(&capability));
         assert_eq!(

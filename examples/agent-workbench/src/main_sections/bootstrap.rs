@@ -267,10 +267,20 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // no-progress budget is the inner bound on how long it may fail to do any.
     // Both are host policy, and a host that wants a turn to run unbounded now
     // has to say so.
+    let output_token_cap = std::env::var("AGENT_WORKBENCH_OUTPUT_TOKEN_CAP")
+        .ok()
+        .map(|value| value.parse::<std::num::NonZeroUsize>())
+        .transpose()
+        .map_err(|error| anyhow!("invalid AGENT_WORKBENCH_OUTPUT_TOKEN_CAP: {error}"))?;
     let builder = LashCore::rlm_builder(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS), factory)
         .provider(provider)
         .session_spec(
-            lash::SessionSpec::new().turn_budget(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS)),
+            lash::SessionSpec::new()
+                .turn_budget(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS))
+                .generation(lash::direct::GenerationOptions {
+                    output_token_cap,
+                    ..Default::default()
+                }),
         )
         .no_progress_budget(lash::NoProgressBudget::bounded(
             WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,

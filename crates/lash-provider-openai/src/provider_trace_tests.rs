@@ -114,6 +114,7 @@ fn provider_request_event(
 
 fn request() -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "test-model".to_string(),
         messages: vec![LlmMessage::text(
             LlmRole::User,

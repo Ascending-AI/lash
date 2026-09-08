@@ -1086,9 +1086,9 @@ pub(crate) use plugin::{
 
 pub use provider::{
     AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-    AttachmentMimeSource, CacheControlDialect, GoogleDialect, ModelCapability, ReasoningCapability,
-    ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
-    StreamTermination,
+    AttachmentMimeSource, CacheControlDialect, GoogleDialect, InstructionRole, ModelCapability,
+    ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,
+    SamplingCapability, StreamTermination,
 };
 pub(crate) use provider::{
     EmptyProviderResolver, ProviderBinding, ProviderCompletion, ProviderCompletionError,

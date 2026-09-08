@@ -88,6 +88,8 @@ pub(crate) fn default_remote_input_schema() -> RemoteSchemaContract {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteLlmRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
     pub request_id: String,
     pub scope: RemoteLlmRequestScope,
     pub model_intent: RemoteModelIntent,
@@ -459,6 +461,10 @@ pub struct RemoteModelIntent {
 /// encode effort exactly like a local runtime.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteModelCapability {
+    #[serde(default, skip_serializing_if = "RemoteInstructionRole::is_system")]
+    pub instruction_role: RemoteInstructionRole,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub native_mid_conversation_system: bool,
     #[serde(
         default,
         skip_serializing_if = "RemoteAttachmentCapabilitySnapshot::is_empty"
@@ -479,12 +485,28 @@ pub struct RemoteModelCapability {
 
 impl RemoteModelCapability {
     pub fn is_empty(&self) -> bool {
-        self.attachment_acceptance.is_empty()
+        self.instruction_role.is_system()
+            && !self.native_mid_conversation_system
+            && self.attachment_acceptance.is_empty()
             && self.google_dialect.is_legacy()
             && self.reasoning.is_none()
             && self.cache_control.is_none()
             && self.stream_termination.is_none()
             && self.sampling.is_default()
+    }
+}
+
+/// Wire mirror of the host-supplied instruction role.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteInstructionRole {
+    #[default]
+    System,
+    Developer,
+}
+impl RemoteInstructionRole {
+    pub fn is_system(&self) -> bool {
+        *self == Self::System
     }
 }
 

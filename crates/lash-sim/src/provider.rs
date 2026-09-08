@@ -2218,6 +2218,7 @@ mod tests {
 
     fn request(stream_events: Option<LlmEventSender>) -> LlmRequest {
         LlmRequest {
+            instructions: None,
             model: "openai/gpt-5.4".to_string(),
             messages: vec![LlmMessage::text(LlmRole::User, "lookup x")],
             resolved_stored: Default::default(),
@@ -2250,6 +2251,7 @@ mod tests {
 
     fn responses_request() -> LlmRequest {
         LlmRequest {
+            instructions: None,
             model: "gpt-5.4".to_string(),
             messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
             resolved_stored: Default::default(),

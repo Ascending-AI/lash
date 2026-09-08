@@ -83,6 +83,7 @@ fn transport(script: &str) -> Arc<ScriptedLlmHttpTransport> {
 
 fn request(model: &str, stream: bool, structured: bool) -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: model.to_string(),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
         resolved_stored: Default::default(),

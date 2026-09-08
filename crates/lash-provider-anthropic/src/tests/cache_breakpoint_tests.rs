@@ -84,7 +84,7 @@ fn marked_block_in_second_same_role_message_keeps_merged_address() {
 }
 
 #[test]
-fn marked_first_system_message_collapses_without_wire_marker() {
+fn marked_leading_feedback_keeps_its_wire_block_address() {
     let provider = AnthropicProvider::new("key");
     let req = request(vec![
         LlmMessage::new(
@@ -99,16 +99,20 @@ fn marked_first_system_message_collapses_without_wire_marker() {
     ]);
 
     let (_, _, breakpoint) = provider.build_messages(&req);
-    assert!(
-        breakpoint.is_none(),
-        "a block collapsed into the system prompt has no message address"
+    assert_eq!(
+        breakpoint,
+        Some(crate::request::BreakpointAddress {
+            message_index: 0,
+            block_index: 0
+        })
     );
 
     let body = provider.build_request_body(&req).expect("body");
 
+    assert!(body.get("system").is_none());
     assert_eq!(
-        body["system"][0]["cache_control"],
-        json!({ "type": "ephemeral" })
+        body["messages"][0]["content"][0]["text"],
+        "<runtime_feedback>stable system prompt</runtime_feedback>"
     );
     assert_eq!(
         body["messages"][0]["content"][0]["cache_control"],

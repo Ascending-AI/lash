@@ -481,6 +481,12 @@ kind = "rust_items"
 paths = ["crates/lash-core/src/session_graph.rs"]
 symbols = ["PersistedSessionConfig"]
 
+# Host instruction capability bytes also persist through the head's ModelSpec.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/llm/capability.rs"]
+symbols = ["ModelCapability", "InstructionRole"]
+
 [[surface]]
 constant = "SESSION_NODE_BODY_SCHEMA_VERSION"
 constant_path = "crates/lash-core/src/session_graph.rs"

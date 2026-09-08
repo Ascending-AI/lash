@@ -21,6 +21,8 @@ fn process_execution_env_identity_golden_corpus() {
             .build()
             .expect("valid rich model limits")
             .with_capability(crate::ModelCapability {
+                instruction_role: crate::InstructionRole::Developer,
+                native_mid_conversation_system: true,
                 attachment_acceptance: Default::default(),
                 google_dialect: Default::default(),
                 reasoning: Some(crate::ReasoningCapability {
@@ -76,11 +78,11 @@ fn process_execution_env_identity_golden_corpus() {
         [
             (
                 "{\"plugin_options\":{},\"policy\":{\"model\":{\"id\":\"\",\"variant\":\"provider_default\",\"limits\":{\"context_window_tokens\":1}},\"provider_id\":\"\",\"session_id\":null,\"autonomous\":false,\"turn_budget\":\"unbounded\"}}".to_string(),
-                "process-env:v4:blake3:daf76b156fd4e60c481117453fb793e488e495df6d82e16c190df609fb200377".to_string(),
+                "process-env:v5:blake3:121c494b7d7665eb7b77c0e0abf8cd09def126dae90dec99489179196c702a1c".to_string(),
             ),
             (
-                "{\"plugin_options\":{\"plugins\":{\"a:b\":{\"enabled\":true}}},\"policy\":{\"model\":{\"id\":\"model:rich\",\"variant\":{\"effort\":\"high\"},\"limits\":{\"context_window_tokens\":8192,\"output_token_capacity\":2048},\"capability\":{\"reasoning\":{\"efforts\":[\"low\",\"high\"],\"default_effort\":\"low\",\"aliases\":{\"max\":\"high\"},\"encoding\":{\"budget\":{\"high\":1024,\"low\":256}},\"disable\":\"toggle_false\",\"mandatory\":true},\"cache_control\":\"anthropic\",\"stream_termination\":\"eof_tolerated\",\"sampling\":\"pinned\"}},\"provider_id\":\"provider\",\"session_id\":\"session\",\"autonomous\":true,\"turn_budget\":{\"bounded\":1},\"prompt\":{\"template\":{\"sections\":[]}},\"generation\":{\"output_token_cap\":1024,\"temperature\":0.25,\"seed\":-7}}}".to_string(),
-                "process-env:v4:blake3:00c09251c190501bd728dd6d5c9ba8093c451cad96ce45ad06888e17634af34c".to_string(),
+                "{\"plugin_options\":{\"plugins\":{\"a:b\":{\"enabled\":true}}},\"policy\":{\"model\":{\"id\":\"model:rich\",\"variant\":{\"effort\":\"high\"},\"limits\":{\"context_window_tokens\":8192,\"output_token_capacity\":2048},\"capability\":{\"instruction_role\":\"developer\",\"native_mid_conversation_system\":true,\"reasoning\":{\"efforts\":[\"low\",\"high\"],\"default_effort\":\"low\",\"aliases\":{\"max\":\"high\"},\"encoding\":{\"budget\":{\"high\":1024,\"low\":256}},\"disable\":\"toggle_false\",\"mandatory\":true},\"cache_control\":\"anthropic\",\"stream_termination\":\"eof_tolerated\",\"sampling\":\"pinned\"}},\"provider_id\":\"provider\",\"session_id\":\"session\",\"autonomous\":true,\"turn_budget\":{\"bounded\":1},\"prompt\":{\"template\":{\"sections\":[]}},\"generation\":{\"output_token_cap\":1024,\"temperature\":0.25,\"seed\":-7}}}".to_string(),
+                "process-env:v5:blake3:09f8e21f8af6e6698f3b257a96b5b02fd8a371ee7c02d22045f1b2a8fc735c74".to_string(),
             ),
         ]
     );
@@ -160,5 +162,44 @@ fn process_list_filter_matches_status_sets_and_the_non_waiting_complement() {
         ProcessListFilter::decode(&json!({ "waiting": "yes" }))
             .expect_err("invalid waiting filter")
             .contains("unknown filter")
+    );
+}
+
+#[tokio::test]
+async fn runtime_feedback_process_environment_refuses_prior_family() {
+    use super::super::model::InMemoryProcessExecutionEnvStore;
+    use crate::{
+        ProcessExecutionEnvStore, load_process_execution_env, persist_process_execution_env,
+    };
+    let store = InMemoryProcessExecutionEnvStore::new();
+    let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+    policy.model = crate::ModelSpec::builder("model")
+        .context_window_tokens(100)
+        .build()
+        .unwrap()
+        .with_capability(crate::ModelCapability {
+            instruction_role: crate::InstructionRole::Developer,
+            native_mid_conversation_system: true,
+            ..Default::default()
+        });
+    let spec = ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy);
+    let bytes = spec.to_store_bytes().unwrap();
+    let old = ProcessExecutionEnvRef::new(format!(
+        "process-env:v4:blake3:{}",
+        crate::stable_hash::blake3_hex("lash-process-env/v4", &bytes)
+    ));
+    store.put_process_execution_env(&old, &bytes).await.unwrap();
+    assert!(
+        load_process_execution_env(&store, &old)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("recreate")
+    );
+    let current = persist_process_execution_env(&store, &spec).await.unwrap();
+    assert!(current.as_str().starts_with("process-env:v5:blake3:"));
+    assert_eq!(
+        load_process_execution_env(&store, &current).await.unwrap(),
+        spec
     );
 }

@@ -45,7 +45,7 @@ impl RemoteSessionScope {
 pub struct RemoteProcessExecutionEnvRef(String);
 
 impl RemoteProcessExecutionEnvRef {
-    pub const PREFIX: &'static str = "process-env:v4:blake3:";
+    pub const PREFIX: &'static str = "process-env:v5:blake3:";
 
     pub fn parse(value: impl Into<String>) -> Result<Self, RemoteProtocolError> {
         let value = value.into();
@@ -54,7 +54,7 @@ impl RemoteProcessExecutionEnvRef {
         } else {
             Err(RemoteProtocolError::InvalidEnvelope {
                 type_name: "RemoteProcessExecutionEnvRef",
-                message: "env_ref must match `process-env:v4:blake3:<64 lowercase hex>`"
+                message: "env_ref must match `process-env:v5:blake3:<64 lowercase hex>`"
                     .to_string(),
             })
         }
@@ -70,7 +70,7 @@ impl RemoteProcessExecutionEnvRef {
         } else {
             Err(RemoteProtocolError::InvalidEnvelope {
                 type_name,
-                message: "env_ref must match `process-env:v4:blake3:<64 lowercase hex>`"
+                message: "env_ref must match `process-env:v5:blake3:<64 lowercase hex>`"
                     .to_string(),
             })
         }

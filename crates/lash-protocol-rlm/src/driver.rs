@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 
 #[cfg(any(test, feature = "testing"))]
 use lash_core::llm::types::LlmContentBlock;
-use lash_core::llm::types::{LlmMessage, LlmRequestScope, LlmRole, LlmToolChoice};
+use lash_core::llm::types::{LlmMessage, LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
 use lash_core::{
     LlmRequest, ProjectorContext, PromptContribution, PromptUsage, ProtocolBuildInput,
@@ -315,12 +315,6 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         let bound_variables_prompt = self.bound_variables_prompt.read_recover().clone();
 
         let mut messages = Vec::new();
-        if !ctx.config.system_prompt.trim().is_empty() {
-            messages.push(LlmMessage::text(
-                LlmRole::System,
-                Arc::clone(&ctx.config.system_prompt),
-            ));
-        }
 
         messages.extend(build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
@@ -346,6 +340,8 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         generation.suppress_stop_sequences_for_protocol();
 
         Arc::new(LlmRequest {
+            instructions: (!ctx.config.system_prompt.trim().is_empty())
+                .then(|| Arc::from(ctx.config.system_prompt.trim())),
             model: ctx.config.model.clone(),
             messages,
             resolved_stored: Default::default(),
@@ -545,6 +541,7 @@ pub(crate) fn render_conformance_history_message(
 
 #[cfg(test)]
 mod tests {
+    use lash_core::llm::types::LlmRole;
     /// These fixtures cover the Lashlang wording; the cross-dialect walker in
     /// `dialect::prompt_walker_tests` covers both.
     fn final_answer_format_prompt_test(options: &RlmTurnOptions) -> Option<String> {
@@ -628,7 +625,7 @@ mod tests {
         })
     }
 
-    fn projector(max_output_chars: usize) -> RlmContextProjector {
+    pub(super) fn projector(max_output_chars: usize) -> RlmContextProjector {
         let mut bound_variables_cache = crate::rlm_support::BoundVariableRenderCache::default();
         RlmContextProjector {
             max_output_chars,
@@ -686,7 +683,23 @@ mod tests {
         generation: lash_core::GenerationOptions,
         max_context_tokens: Option<usize>,
     ) -> Arc<LlmRequest> {
-        let config = lash_core::TurnMachineConfig {
+        let config = projection_test_config(model, generation, max_context_tokens);
+        projector.project(ProjectorContext {
+            config: &config,
+            messages: &lash_core::facade_support::MessageSequence::default(),
+            events,
+            turn_causes: &[],
+            protocol_iteration,
+            use_tools: false,
+        })
+    }
+
+    pub(super) fn projection_test_config(
+        model: &str,
+        generation: lash_core::GenerationOptions,
+        max_context_tokens: Option<usize>,
+    ) -> lash_core::TurnMachineConfig {
+        lash_core::TurnMachineConfig {
             protocol_driver: Arc::new(crate::protocol::RlmDriver::default()),
             projector: Arc::new(lash_core::sansio::ChatContextProjector),
             sync_execution_environment: true,
@@ -709,15 +722,7 @@ mod tests {
                 let dialect = LashlangDialect::prompt_only(LashlangSurface::default());
                 crate::protocol::turn_limit_final_message(&dialect, message_id, max_turns)
             }),
-        };
-        projector.project(ProjectorContext {
-            config: &config,
-            messages: &lash_core::facade_support::MessageSequence::default(),
-            events,
-            turn_causes: &[],
-            protocol_iteration,
-            use_tools: false,
-        })
+        }
     }
 
     #[test]
@@ -1376,7 +1381,7 @@ mod tests {
     }
 
     #[test]
-    fn rlm_system_message_is_stable_while_history_and_globals_change() {
+    fn rlm_instructions_are_stable_while_history_and_globals_change() {
         let previous_events = vec![user_event("u1", "inspect"), step_event(0, "value = 1", "1")];
         let mut next_events = previous_events.clone();
         next_events.push(step_event(1, "scratch_note = \"saved\"", "saved"));
@@ -1391,12 +1396,25 @@ mod tests {
         *projector.bound_variables_prompt.write_recover() = next_bound;
         let next = project_iteration_request(&projector, &next_events, 1, "test-model");
 
+        assert_eq!(previous.instructions, next.instructions);
         assert_eq!(
-            serde_json::to_vec(&previous.messages[0]).unwrap(),
-            serde_json::to_vec(&next.messages[0]).unwrap()
+            previous.instructions.as_deref(),
+            Some("stable RLM system prompt")
         );
-        assert!(!message_text(&previous.messages[0]).contains("Bound Variables"));
-        assert!(!message_text(&next.messages[0]).contains("scratch_note"));
+        assert!(
+            !previous
+                .instructions
+                .as_deref()
+                .unwrap()
+                .contains("Bound Variables")
+        );
+        assert!(
+            !next
+                .instructions
+                .as_deref()
+                .unwrap()
+                .contains("scratch_note")
+        );
     }
 
     #[test]
@@ -1574,3 +1592,7 @@ mod tests {
         assert!(extended.contains("<lashlang>\nprint 2\n</lashlang>"));
     }
 }
+
+#[cfg(test)]
+#[path = "driver_runtime_feedback_tests.rs"]
+mod runtime_feedback_tests;

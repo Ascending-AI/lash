@@ -1,6 +1,7 @@
 //! Host policy for server-to-client MCP requests in the reference bot.
 
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use crate::log_out;
 use async_trait::async_trait;
@@ -60,12 +61,6 @@ impl McpSamplingHandler for DemoSamplingHandler {
         }
 
         let mut messages = Vec::new();
-        if let Some(system_prompt) = &params.system_prompt {
-            messages.push(DirectMessage {
-                role: DirectRole::System,
-                parts: vec![DirectPart::Text(system_prompt.clone())],
-            });
-        }
         for message in &params.messages {
             let role = match message.role {
                 Role::User => DirectRole::User,
@@ -91,6 +86,7 @@ impl McpSamplingHandler for DemoSamplingHandler {
         let mut direct = DirectRequest::text(&self.model.id, "");
         direct.model_variant = self.model.variant.clone();
         direct.model_capability = self.model.capability.clone();
+        direct.instructions = params.system_prompt.as_deref().map(Arc::from);
         direct.messages = messages;
         direct.generation.output_token_cap = NonZeroUsize::new(params.max_tokens as usize);
         direct.generation.stop_sequences = params.stop_sequences.clone().unwrap_or_default();

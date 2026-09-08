@@ -40,6 +40,7 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
         None,
     );
     let request = LlmRequest {
+        instructions: None,
         model: "mock-model".to_string(),
         messages: vec![LlmMessage::new(
             LlmRole::User,

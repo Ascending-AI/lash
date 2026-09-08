@@ -11,6 +11,7 @@ fn request_with_inline_attachment(mime: &str) -> LlmRequest {
         ATTACHMENT_FIXTURE_BYTES.to_vec(),
     );
     LlmRequest {
+        instructions: None,
         model: "claude-sonnet-4-6".to_string(),
         messages: vec![LlmMessage::new(
             LlmRole::User,

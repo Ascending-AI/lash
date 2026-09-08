@@ -4019,7 +4019,7 @@ async fn active_input_after_last_call_is_first_admitted_on_next_turn() {
     let requests = requests.lock_recover();
     assert_eq!(requests.len(), 2);
     assert_eq!(
-        serde_json::to_string(&requests[1][1..]).expect("serialize next-turn first-call messages"),
+        serde_json::to_string(&requests[1]).expect("serialize next-turn first-call messages"),
         r#"[{"role":"User","blocks":[{"Text":{"text":"first turn input","response_meta":null,"cache_breakpoint":false}}]},{"role":"Assistant","blocks":[{"Text":{"text":"first turn complete","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","blocks":[{"Text":{"text":"late active input","response_meta":null,"cache_breakpoint":false}}]}]"#
     );
 }
@@ -10043,6 +10043,8 @@ async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
         .into_handle();
 
     let capability = crate::ModelCapability {
+        instruction_role: Default::default(),
+        native_mid_conversation_system: false,
         attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(crate::ReasoningCapability {
@@ -10123,6 +10125,8 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() {
         .into_handle();
 
     let capability = crate::ModelCapability {
+        instruction_role: Default::default(),
+        native_mid_conversation_system: false,
         attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(crate::ReasoningCapability {

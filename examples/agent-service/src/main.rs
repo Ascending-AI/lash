@@ -35,6 +35,8 @@ mod ui;
 
 fn default_openrouter_model_capability() -> lash::provider::ModelCapability {
     lash::provider::ModelCapability {
+        instruction_role: Default::default(),
+        native_mid_conversation_system: false,
         attachment_acceptance: service_attachment_acceptance().into(),
         google_dialect: Default::default(),
         reasoning: Some(lash::provider::ReasoningCapability {

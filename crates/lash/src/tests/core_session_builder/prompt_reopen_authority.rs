@@ -55,16 +55,10 @@ fn prompt_capture_provider(
 
 fn rendered_system_prompt(request: &lash_core::LlmRequest) -> String {
     request
-        .messages
-        .first()
-        .filter(|message| matches!(message.role, lash_sansio::llm::types::LlmRole::System))
-        .into_iter()
-        .flat_map(|message| message.blocks.iter())
-        .filter_map(|block| match block {
-            lash_sansio::llm::types::LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
-            _ => None,
-        })
-        .collect()
+        .instructions
+        .as_deref()
+        .unwrap_or_default()
+        .to_owned()
 }
 
 #[tokio::test]

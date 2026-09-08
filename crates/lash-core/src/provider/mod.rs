@@ -27,7 +27,7 @@ pub use handle::{
 };
 pub use lash_sansio::llm::capability::{
     AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-    AttachmentMimeSource, CacheControlDialect, GoogleDialect, ModelCapability,
+    AttachmentMimeSource, CacheControlDialect, GoogleDialect, InstructionRole, ModelCapability,
     ModelEffortValidationCategory, ModelEffortValidationError, ReasoningCapability,
     ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
     StreamTermination,

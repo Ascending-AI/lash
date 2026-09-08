@@ -232,6 +232,7 @@ fn provider_file_media_type_round_trips_between_core_and_remote() {
 #[test]
 fn llm_request_and_response_round_trip_owned_dtos() {
     let request = core_llm::LlmRequest {
+        instructions: Some(Arc::from("I")),
         model: "gpt-test".to_string(),
         messages: vec![core_llm::LlmMessage::new(
             core_llm::LlmRole::User,
@@ -269,6 +270,8 @@ fn llm_request_and_response_round_trip_owned_dtos() {
         tool_choice: core_llm::LlmToolChoice::Auto,
         model_variant: core_llm::ReasoningSelection::Effort("fast".to_string()),
         model_capability: core_llm::ModelCapability {
+            instruction_role: core_llm::InstructionRole::Developer,
+            native_mid_conversation_system: true,
             attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(core_llm::ReasoningCapability {
@@ -328,6 +331,12 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     assert_eq!(remote.request_id, "request-1");
     assert_eq!(remote.scope.agent_frame_id, "session-1:frame:test");
     let core = core_llm::LlmRequest::try_from(remote).expect("core request");
+    assert_eq!(core.instructions.as_deref(), Some("I"));
+    assert_eq!(
+        core.model_capability.instruction_role,
+        core_llm::InstructionRole::Developer
+    );
+    assert!(core.model_capability.native_mid_conversation_system);
     assert_eq!(core.model, "gpt-test");
     assert_eq!(
         core.model_variant,
@@ -1990,7 +1999,7 @@ fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
     lash_core::TriggerSubscriptionDraft {
         subscription_key: "button-watcher".to_string(),
         env_ref: lash_core::ProcessExecutionEnvRef::new(
-            "process-env:v4:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "process-env:v5:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ),
         wake_target: Some(lash_core::SessionScope::new("session-a")),
         name: Some("button watcher".to_string()),
@@ -2485,16 +2494,5 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
     }
 }
 
-#[test]
-fn cancelled_stop_conversion_keeps_every_evidence_field() {
-    let core = lash_core::facade_support::TurnCancellationEvidence {
-        request_id: "cancel-exact".into(),
-        origin: Some("host".into()),
-        reason: Some("stop now".into()),
-        undelivered: lash_core::facade_support::TurnCancelDisposition::Defer,
-    };
-    let expected = RemoteTurnCancellationEvidence::from(core.clone());
-    let stop =
-        RemoteTurnStop::from(lash_core::facade_support::TurnStop::Cancelled { evidence: core });
-    assert_eq!(stop, RemoteTurnStop::Cancelled { evidence: expected });
-}
+#[path = "core_conversions_tests/cancellation.rs"]
+mod cancellation;

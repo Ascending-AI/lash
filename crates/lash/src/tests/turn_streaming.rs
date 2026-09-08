@@ -1244,7 +1244,7 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
         let requests = requests.lock_recover();
         assert_eq!(requests.len(), 1);
         assert_eq!(
-            serde_json::to_string(&requests[0][1..])
+            serde_json::to_string(&requests[0])
                 .expect("serialize queued-next request user messages"),
             r#"[{"role":"User","blocks":[{"Text":{"text":"queued work","response_meta":null,"cache_breakpoint":false}}]}]"#
         );
@@ -5897,7 +5897,7 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
         .map(|(_, messages)| messages)
         .expect("deferred active input provider request");
     assert_eq!(
-        serde_json::to_string(&deferred_request[1..])
+        serde_json::to_string(&deferred_request)
             .expect("serialize deferred active-input request messages"),
         r#"[{"role":"User","blocks":[{"Text":{"text":"primary hangs","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","blocks":[{"Text":{"text":"deferred active steer","response_meta":null,"cache_breakpoint":false}}]}]"#
     );
@@ -6128,7 +6128,7 @@ fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<()> {
             "active input was claimed but omitted from the next RLM provider request: {second_messages}"
         );
         assert_eq!(
-            serde_json::to_string(&requests[1][1..requests[1].len() - 1])
+            serde_json::to_string(&requests[1][..requests[1].len() - 1])
                 .expect("serialize stable request message prefix"),
             r#"[{"role":"User","blocks":[{"Text":{"text":"perform two iterations","response_meta":null,"cache_breakpoint":false}}]},{"role":"Assistant","blocks":[{"Text":{"text":"<lashlang>\nprint(\"first work complete\")\n</lashlang>","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","blocks":[{"Text":{"text":"history[1].output[0] (19 chars):\nfirst work complete","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","blocks":[{"Text":{"text":"mid-turn injection marker","response_meta":null,"cache_breakpoint":true}}]}]"#
         );

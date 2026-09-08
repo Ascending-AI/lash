@@ -43,29 +43,44 @@ impl GoogleOAuthProvider {
     }
 
     pub(crate) fn validate_attachments(req: &LlmRequest) -> Result<(), LlmTransportError> {
-        for source in &req.attachments() {
-            let supported = req
-                .model_capability
-                .attachment_acceptance
-                .accepts("Google Gemini", source);
-            if !supported {
-                let accepted_by =
-                    known_attachment_acceptors(&req.model_capability.attachment_acceptance, source);
-                return Err(unsupported_attachment_capability(
-                    "Google Gemini",
-                    source,
-                    &accepted_by,
-                ));
-            }
-            if matches!(source, AttachmentSource::Stored { .. })
-                && req.attachment_bytes(source).is_none()
-            {
-                let mime = source.media_type().expect("stored source MIME");
-                return Err(LlmTransportError::new(format!(
+        for (message_index, message) in req.messages.iter().enumerate() {
+            for source in message.blocks.iter().filter_map(|block| match block {
+                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
+                _ => None,
+            }) {
+                let validation = (|| {
+                    let supported = req
+                        .model_capability
+                        .attachment_acceptance
+                        .accepts("Google Gemini", source);
+                    if !supported {
+                        let accepted_by = known_attachment_acceptors(
+                            &req.model_capability.attachment_acceptance,
+                            source,
+                        );
+                        return Err(unsupported_attachment_capability(
+                            "Google Gemini",
+                            source,
+                            &accepted_by,
+                        ));
+                    }
+                    if matches!(source, AttachmentSource::Stored { .. })
+                        && req.attachment_bytes(source).is_none()
+                    {
+                        let mime = source.media_type().expect("stored source MIME");
+                        return Err(LlmTransportError::new(format!(
                     "Google Gemini could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"
                 ))
                 .with_kind(ProviderFailureKind::Validation)
                 .with_code("stored_attachment_not_resolved"));
+                    }
+
+                    Ok(())
+                })();
+                validation.map_err(|mut error: LlmTransportError| {
+                    error.message = format!("message index {message_index}: {}", error.message);
+                    error
+                })?;
             }
         }
         Ok(())
@@ -98,18 +113,27 @@ impl GoogleOAuthProvider {
         };
 
         for msg in &req.messages {
-            if matches!(msg.role, LlmRole::System) {
-                // System content is hoisted into `systemInstruction` on the
-                // Gemini request, not the `contents` list.
-                continue;
-            }
             let role = match msg.role {
                 LlmRole::Assistant => "model",
                 LlmRole::User | LlmRole::System => "user",
             };
 
             let mut parts: Vec<Value> = Vec::new();
-            for block in msg.blocks.iter() {
+            if matches!(msg.role, LlmRole::System) {
+                let text = msg
+                    .blocks
+                    .iter()
+                    .filter_map(|block| match block {
+                        LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+                        _ => None,
+                    })
+                    .collect::<String>();
+                parts.push(json!({"text": format!("<runtime_feedback>{text}</runtime_feedback>")}));
+            }
+            for block in msg.blocks.iter().filter(|block| {
+                !matches!(msg.role, LlmRole::System)
+                    || !matches!(block, LlmContentBlock::Text { .. })
+            }) {
                 match block {
                     LlmContentBlock::Text {
                         text,
@@ -129,7 +153,7 @@ impl GoogleOAuthProvider {
                         parts.push(part);
                     }
                     LlmContentBlock::Attachment { source } => {
-                        if matches!(msg.role, LlmRole::User) {
+                        if matches!(msg.role, LlmRole::User | LlmRole::System) {
                             parts.push(
                                 attachment_parts
                                     .iter()
@@ -216,6 +240,16 @@ impl GoogleOAuthProvider {
                 }));
             }
         }
+        for content in &mut out {
+            if content["role"] == "user" {
+                // Keep parallel function responses together before the tagged
+                // feedback in their coalesced user turn.
+                content["parts"]
+                    .as_array_mut()
+                    .expect("content parts")
+                    .sort_by_key(|part| part.get("functionResponse").is_none());
+            }
+        }
         out
     }
 
@@ -253,26 +287,9 @@ impl GoogleOAuthProvider {
     }
 
     fn system_instruction(req: &LlmRequest) -> Option<Value> {
-        let mut parts: Vec<String> = Vec::new();
-        for msg in &req.messages {
-            if !matches!(msg.role, LlmRole::System) {
-                continue;
-            }
-            for block in msg.blocks.iter() {
-                if let LlmContentBlock::Text { text, .. } = block
-                    && !text.is_empty()
-                {
-                    parts.push(text.to_string());
-                }
-            }
-        }
-        if parts.is_empty() {
-            None
-        } else {
-            Some(json!({
-                "parts": [{ "text": parts.join("\n\n") }],
-            }))
-        }
+        req.instructions
+            .as_ref()
+            .map(|text| json!({"parts": [{"text": text}]}))
     }
 
     fn thinking_config_from_capability(req: &LlmRequest) -> Option<GoogleThinkingConfig> {

@@ -45,6 +45,9 @@ pub enum DirectOutputSpec {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct DirectRequest {
+    /// Initial instructions; System messages are runtime feedback only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<Arc<str>>,
     pub model: String,
     #[serde(default)]
     pub model_variant: crate::ReasoningSelection,
@@ -90,6 +93,7 @@ impl DirectRequest {
 
     pub fn text(model: impl Into<String>, prompt: impl Into<String>) -> Self {
         Self {
+            instructions: None,
             model: model.into(),
             model_variant: crate::ReasoningSelection::ProviderDefault,
             model_capability: ModelCapability::default(),
@@ -141,6 +145,8 @@ impl DirectRequest {
 #[derive(Debug, thiserror::Error, Clone)]
 #[non_exhaustive]
 pub enum DirectLlmError {
+    #[error("leading System messages are ambiguous; put initial instructions in `instructions`")]
+    LeadingSystemMessage,
     #[error("invalid request: {message}")]
     InvalidRequest {
         category: ModelEffortValidationCategory,
@@ -234,7 +240,7 @@ impl DirectLlmClient {
 
         let output_for_validation = request.output.clone();
         let model = request.model.clone();
-        let llm_request = build_llm_request(&self.provider, request, model);
+        let llm_request = build_llm_request(&self.provider, request, model)?;
         let request_model = llm_request.model.clone();
         let llm_call_id = if self.trace_sink.is_some() {
             let id = uuid::Uuid::new_v4().to_string();
@@ -318,9 +324,17 @@ pub(crate) fn build_llm_request(
     provider: &ProviderHandle,
     request: DirectRequest,
     model: String,
-) -> LlmRequest {
+) -> Result<LlmRequest, DirectLlmError> {
+    if request
+        .messages
+        .first()
+        .is_some_and(|message| matches!(message.role, DirectRole::System))
+    {
+        return Err(DirectLlmError::LeadingSystemMessage);
+    }
     let stream_events = transport_stream_events_for_direct(provider, request.stream_events);
     let DirectRequest {
+        instructions,
         model: _,
         model_variant,
         model_capability,
@@ -392,7 +406,8 @@ pub(crate) fn build_llm_request(
         }
     };
 
-    LlmRequest {
+    Ok(LlmRequest {
+        instructions,
         model,
         messages: llm_messages,
         resolved_stored: Default::default(),
@@ -405,7 +420,7 @@ pub(crate) fn build_llm_request(
         output_spec,
         stream_events,
         provider_trace: None,
-    }
+    })
 }
 
 fn validate_direct_output(output: &DirectOutputSpec, response: &LlmResponse) -> Result<(), String> {
@@ -848,6 +863,8 @@ mod tests {
 
     fn reasoning_capability() -> ModelCapability {
         ModelCapability {
+            instruction_role: Default::default(),
+            native_mid_conversation_system: false,
             attachment_acceptance: Default::default(),
             google_dialect: Default::default(),
             reasoning: Some(crate::ReasoningCapability {
@@ -1023,7 +1040,7 @@ mod tests {
         request.stream_events = Some(requested_sender);
         let provider = TestProvider::default().into_handle();
 
-        let llm_request = build_llm_request(&provider, request, "model".to_string());
+        let llm_request = build_llm_request(&provider, request, "model".to_string()).unwrap();
         let sender = llm_request
             .stream_events
             .expect("explicit direct stream sender must be preserved");
@@ -1038,10 +1055,60 @@ mod tests {
             &streaming_provider,
             DirectRequest::text("model", "prompt"),
             "model".to_string(),
-        );
+        )
+        .unwrap();
         assert!(
             llm_request.stream_events.is_some(),
             "providers that require streaming need a no-op sender even when direct caller did not request one"
+        );
+    }
+}
+
+#[cfg(test)]
+mod runtime_feedback_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn direct_leading_system_is_refused_with_instructions_error() {
+        let provider = crate::testing::TestProvider::default().into_handle();
+        let mut client = DirectLlmClient::new(provider);
+        let mut request = DirectRequest::text("model", "user");
+        request.messages.insert(
+            0,
+            DirectMessage {
+                role: DirectRole::System,
+                parts: vec![DirectPart::Text("ambiguous".into())],
+            },
+        );
+        let error = client.complete(request).await.unwrap_err();
+        assert!(matches!(error, DirectLlmError::LeadingSystemMessage));
+        assert!(error.to_string().contains("instructions"));
+    }
+
+    #[test]
+    fn direct_explicit_instructions_keep_mid_conversation_feedback() {
+        let provider = crate::testing::TestProvider::default().into_handle();
+        let mut request = DirectRequest::text("model", "user");
+        request.instructions = Some(Arc::from("I"));
+        request.messages.extend([
+            DirectMessage {
+                role: DirectRole::Assistant,
+                parts: vec![DirectPart::Text("partial".into())],
+            },
+            DirectMessage {
+                role: DirectRole::System,
+                parts: vec![DirectPart::Text("retry".into())],
+            },
+        ]);
+        let normalized = build_llm_request(&provider, request, "model".into()).unwrap();
+        assert_eq!(normalized.instructions.as_deref(), Some("I"));
+        assert_eq!(
+            normalized
+                .messages
+                .iter()
+                .map(|m| m.role.clone())
+                .collect::<Vec<_>>(),
+            vec![LlmRole::User, LlmRole::Assistant, LlmRole::System]
         );
     }
 }

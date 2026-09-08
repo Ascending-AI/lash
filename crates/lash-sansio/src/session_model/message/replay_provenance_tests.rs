@@ -56,6 +56,7 @@ fn replay_request_from_reopened_message(
     let reopened: Vec<Message> =
         serde_json::from_slice(&persisted).expect("session history reopens");
     crate::llm::types::LlmRequest {
+        instructions: None,
         model: serving_model.to_string(),
         messages: render_prompt(&reopened).messages,
         resolved_stored: Default::default(),

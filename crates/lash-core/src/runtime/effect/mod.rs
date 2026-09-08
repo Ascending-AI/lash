@@ -156,6 +156,7 @@ mod tests {
     async fn runtime_effect_envelope_and_request_specs_round_trip_without_live_fields() {
         let attachment_store = crate::SessionAttachmentStore::in_memory();
         let llm_request = CoreLlmRequest {
+            instructions: Some(Arc::from("I")),
             model: "model".to_string(),
             messages: vec![LlmMessage::new(
                 crate::llm::types::LlmRole::User,
@@ -202,6 +203,7 @@ mod tests {
         let decoded: LlmRequestSpec = serde_json::from_str(&encoded).expect("decode llm spec");
         let live = decoded.into_request(None, None);
         assert_eq!(live.model, "model");
+        assert_eq!(live.instructions.as_deref(), Some("I"));
         assert!(matches!(
             live.attachments()[0],
             AttachmentSource::Stored { .. }

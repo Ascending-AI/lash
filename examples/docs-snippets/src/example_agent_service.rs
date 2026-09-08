@@ -163,6 +163,8 @@ async fn service_turn(
 
 fn adaptive_reasoning_capability() -> lash::provider::ModelCapability {
     lash::provider::ModelCapability {
+        instruction_role: Default::default(),
+        native_mid_conversation_system: false,
         attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(lash::provider::ReasoningCapability {

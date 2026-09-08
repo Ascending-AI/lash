@@ -335,16 +335,10 @@ mod dialect_pin_tests {
 
     fn system_text(request: &lash::provider::LlmRequest) -> String {
         request
-            .messages
-            .iter()
-            .filter(|message| message.role == lash::provider::LlmRole::System)
-            .flat_map(|message| message.blocks.iter())
-            .filter_map(|block| match block {
-                lash::provider::LlmContentBlock::Text { text, .. } => Some(text.to_string()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+            .instructions
+            .as_deref()
+            .unwrap_or_default()
+            .to_owned()
     }
 
     fn mock_model_spec() -> ModelSpec {

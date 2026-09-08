@@ -1595,6 +1595,7 @@ fn attachment_request(
         })
         .collect();
     Arc::new(crate::llm::types::LlmRequest {
+        instructions: None,
         model: "attachment-model".to_string(),
         messages: vec![crate::llm::types::LlmMessage::new(
             crate::llm::types::LlmRole::User,

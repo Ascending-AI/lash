@@ -62,7 +62,7 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
             RemoteTurnActivity::decode_json(&serde_json::to_vec(&old).unwrap()),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 52,
-                expected: 54
+                expected: 55
             })
         ));
     }

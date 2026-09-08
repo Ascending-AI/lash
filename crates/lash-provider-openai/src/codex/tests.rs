@@ -48,6 +48,8 @@ fn response_from_state(state: CodexStreamState) -> LlmResponse {
 
 fn reasoning_capability() -> ModelCapability {
     ModelCapability {
+        instruction_role: Default::default(),
+        native_mid_conversation_system: false,
         attachment_acceptance: Default::default(),
         google_dialect: Default::default(),
         reasoning: Some(ReasoningCapability {
@@ -66,6 +68,7 @@ fn reasoning_capability() -> ModelCapability {
 
 fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "gpt-5.4".to_string(),
         messages,
         resolved_stored: Default::default(),

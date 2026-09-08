@@ -6,6 +6,7 @@ fn route(provider: &str, endpoint: &str, model: &str) -> ProviderRouteIdentity {
 
 fn replay_request(blocks: Vec<LlmContentBlock>) -> LlmRequest {
     LlmRequest {
+        instructions: None,
         model: "model-a".to_string(),
         messages: vec![LlmMessage::new(LlmRole::Assistant, blocks)],
         resolved_stored: Default::default(),

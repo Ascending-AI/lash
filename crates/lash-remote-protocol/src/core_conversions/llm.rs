@@ -4,6 +4,7 @@ impl RemoteLlmRequest {
     pub fn from_core(request_id: impl Into<String>, value: core_llm::LlmRequest) -> Self {
         let core_llm::LlmRequest {
             model,
+            instructions,
             messages,
             tools,
             tool_choice,
@@ -26,6 +27,7 @@ impl RemoteLlmRequest {
                 provider: None,
                 metadata: HashMap::new(),
             },
+            instructions: instructions.map(|text| text.to_string()),
             messages: messages.into_iter().map(Into::into).collect(),
             tools: tools.iter().cloned().map(Into::into).collect(),
             tool_choice: tool_choice.into(),
@@ -44,6 +46,7 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
         let RemoteLlmRequest {
             request_id: _,
             model_intent,
+            instructions,
             messages,
             tools,
             tool_choice,
@@ -61,6 +64,7 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
         } = model_intent;
         Ok(Self {
             model,
+            instructions: instructions.map(Into::into),
             messages: messages
                 .into_iter()
                 .map(TryInto::try_into)
@@ -82,6 +86,8 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
 impl From<core_llm::ModelCapability> for RemoteModelCapability {
     fn from(value: core_llm::ModelCapability) -> Self {
         let core_llm::ModelCapability {
+            instruction_role,
+            native_mid_conversation_system,
             attachment_acceptance,
             google_dialect,
             reasoning,
@@ -90,6 +96,8 @@ impl From<core_llm::ModelCapability> for RemoteModelCapability {
             sampling,
         } = value;
         Self {
+            instruction_role: instruction_role.into(),
+            native_mid_conversation_system,
             attachment_acceptance: std::sync::Arc::unwrap_or_clone(attachment_acceptance).into(),
             google_dialect: google_dialect.into(),
             reasoning: reasoning.map(Into::into),
@@ -103,6 +111,8 @@ impl From<core_llm::ModelCapability> for RemoteModelCapability {
 impl From<RemoteModelCapability> for core_llm::ModelCapability {
     fn from(value: RemoteModelCapability) -> Self {
         let RemoteModelCapability {
+            instruction_role,
+            native_mid_conversation_system,
             attachment_acceptance,
             google_dialect,
             reasoning,
@@ -111,6 +121,8 @@ impl From<RemoteModelCapability> for core_llm::ModelCapability {
             sampling,
         } = value;
         Self {
+            instruction_role: instruction_role.into(),
+            native_mid_conversation_system,
             attachment_acceptance: std::sync::Arc::new(attachment_acceptance.into()),
             google_dialect: google_dialect.into(),
             reasoning: reasoning.map(Into::into),
@@ -1394,6 +1406,23 @@ impl From<RemoteGoogleDialect> for core_llm::GoogleDialect {
             RemoteGoogleDialect::Legacy => Self::Legacy,
             RemoteGoogleDialect::Gemini3 => Self::Gemini3,
             RemoteGoogleDialect::ClaudeOnVertex => Self::ClaudeOnVertex,
+        }
+    }
+}
+
+impl From<core_llm::InstructionRole> for RemoteInstructionRole {
+    fn from(value: core_llm::InstructionRole) -> Self {
+        match value {
+            core_llm::InstructionRole::System => Self::System,
+            core_llm::InstructionRole::Developer => Self::Developer,
+        }
+    }
+}
+impl From<RemoteInstructionRole> for core_llm::InstructionRole {
+    fn from(value: RemoteInstructionRole) -> Self {
+        match value {
+            RemoteInstructionRole::System => Self::System,
+            RemoteInstructionRole::Developer => Self::Developer,
         }
     }
 }

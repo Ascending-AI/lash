@@ -122,3 +122,12 @@ dialect, in both directions, and one executable walker enforces it.**
   instance). This ADR binds the substrate; a host that injects code examples
   owns the same rule for its own copy, and the reference hosts carry the
   matching fixture.
+
+### FIG-2505 process-environment family amendment
+
+[ADR 0084](0084-runtime-feedback-position.md) advances the process-environment
+identity family from v4 to v5 for persisted host instruction capabilities.
+This is a format cutover, not a display rename: existing environments must be
+recreated, local loading refuses old or mismatched references, and the remote
+reference decoder accepts only v5. All other journal/effect identity strings
+and this ADR's language carve-outs remain as defined above.
