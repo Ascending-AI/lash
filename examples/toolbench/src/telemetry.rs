@@ -106,8 +106,38 @@ impl Telemetry {
                 }
             }
         }
+        if has_unsealed_request(&activities) {
+            // Cancellation can drop the provider future before its ledger is
+            // sealed. Preserve the unknown attempt instead of presenting the
+            // preceding calls' partial token/cost totals as a complete bill.
+            let mut row = serde_json::json!({
+                "call_index": calls.len(), "attempt_index": null,
+                "decision": "interrupted_provider_call", "tokens": null,
+                "wall_ms": null, "cost": null, "cost_unknown": true,
+                "evidence": null, "outcome": "interrupted",
+            });
+            row.as_object_mut().expect("attempt object").extend(
+                execution_fields(&[], standard)
+                    .as_object()
+                    .expect("execution object")
+                    .clone(),
+            );
+            rows.push(row);
+        }
         rows
     }
+}
+
+fn has_unsealed_request(activities: &[TurnActivity]) -> bool {
+    activities
+        .iter()
+        .rev()
+        .find_map(|activity| match activity.event {
+            TurnEvent::ModelRequestStarted { .. } => Some(true),
+            TurnEvent::ModelCallRecorded { .. } => Some(false),
+            _ => None,
+        })
+        .unwrap_or(false)
 }
 
 // ModelCallRecorded precedes execution; only the completed provider attempt
@@ -220,6 +250,24 @@ mod tests {
             fields["tool_calls"],
             serde_json::json!([{"name":"kv_get","arguments":{"key":"project"}}])
         );
+    }
+
+    #[test]
+    fn interrupted_provider_call_keeps_cost_unknown() {
+        let telemetry = Telemetry::default();
+        telemetry
+            .activities
+            .lock()
+            .unwrap()
+            .push(activity(TurnEvent::ModelRequestStarted {
+                protocol_iteration: 1,
+            }));
+        let rows = telemetry.rows(&[], false);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["outcome"], "interrupted");
+        assert_eq!(rows[0]["cost_unknown"], true);
+        assert!(rows[0]["code"].is_null());
+        assert_eq!(crate::summary::Usage::from_attempts(&rows).cost, None);
     }
 
     #[test]
