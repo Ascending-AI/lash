@@ -25,11 +25,6 @@ pub struct ReopenableRuntimePersistence {
     pub reopen: Arc<dyn RuntimePersistence>,
 }
 
-/// Admit the session every conformance read intends to inspect.
-///
-/// Factory-produced handles are already explicitly bound; this call also
-/// checks that independently reopened handles retain that identity.
-
 /// A pair of [`AttachmentStore`](crate::AttachmentStore) handles opened against
 /// the same durable backing store.
 pub struct ReopenableAttachmentStore {
