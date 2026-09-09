@@ -207,7 +207,7 @@ impl EffectHost for RestateEffectHost {
     /// and groups under it through the scope's `LashDurableWaitIndex` object,
     /// which survives restarts and redeploys. Session retirements stay a
     /// no-op: session promises are revoked through the session lever the
-    /// host already calls. A [`EffectRetirementGate::WhenQuiescent`] request
+    /// host already calls. A [`lash_core::EffectRetirementGate::WhenQuiescent`] request
     /// is refused with `effect_scope_not_quiescent` while a durable wait under
     /// the scope is unresolved: the only Lash-owned rows under a scope are its
     /// promises (effects in flight complete under Restate's own journal), and
