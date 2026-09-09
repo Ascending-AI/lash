@@ -107,9 +107,15 @@ impl RlmDialect for LashlangDialect {
             .map_err(|error| {
                 SessionError::Protocol(format!("invalid Lashlang host tool surface: {error}"))
             })?;
-        Ok(crate::protocol::rlm_execution_section_for_host_environment(
+        let paths = tool_catalog
+            .tools
+            .iter()
+            .filter_map(|tool| self.tool_call_path(&tool.manifest).ok())
+            .collect::<Vec<_>>();
+        Ok(crate::protocol::prompt::render_execution_for_catalog(
             features,
             &host_environment,
+            &paths,
         ))
     }
 
@@ -159,7 +165,7 @@ Done. I inspected the value and summarized the result."#.to_string()
              1. Summary of what you accomplished\n\
              2. List of remaining tasks not yet completed\n\
              3. Recommended next steps\n\
-             Do NOT emit a <lashlang> block, invoke module operations, or call finish/control.continue_as."
+             Do NOT emit a <lashlang> block, invoke module operations, or call finish."
         )
     }
 

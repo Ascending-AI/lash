@@ -35,6 +35,14 @@ pub fn rlm_execution_section_for_host_environment(
     features: RlmPromptFeatures,
     surface: &lashlang::LashlangHostEnvironment,
 ) -> String {
+    render_execution_for_catalog(features, surface, &[])
+}
+
+pub(crate) fn render_execution_for_catalog(
+    features: RlmPromptFeatures,
+    surface: &lashlang::LashlangHostEnvironment,
+    documented_tools: &[String],
+) -> String {
     let has_operations = surface.resources.has_operations();
     let mut sections = Vec::new();
     sections.push(render_execution_intro(has_operations));
@@ -44,19 +52,21 @@ pub fn rlm_execution_section_for_host_environment(
         &surface.abilities,
         &surface.language_features,
     ));
-    if let Some(section) = render_host_environment_section(surface) {
+    if let Some(section) = render_host_environment_section(surface, documented_tools) {
         sections.push(section);
     }
-    sections.push(render_builtins_section(features.images));
+    sections.push(render_builtins_section(
+        features.images,
+        features.type_literals,
+    ));
     if features.type_literals {
         sections.push(LASHLANG_TYPE_LITERALS_SECTION.to_string());
     }
-    if features.decomposition {
-        sections.push(render_decomposition_section(
-            has_operations,
-            surface.abilities.processes,
-        ));
-    }
+    sections.push(render_decomposition_section(
+        has_operations,
+        surface.abilities.processes,
+        features.decomposition,
+    ));
     sections.join("\n\n")
 }
 
@@ -200,8 +210,14 @@ pub(crate) fn host_surface_inventory(
     }
 }
 
-fn render_host_environment_section(surface: &lashlang::LashlangHostEnvironment) -> Option<String> {
-    let inventory = host_surface_inventory(surface);
+fn render_host_environment_section(
+    surface: &lashlang::LashlangHostEnvironment,
+    documented_tools: &[String],
+) -> Option<String> {
+    let mut inventory = host_surface_inventory(surface);
+    inventory.operations.retain(|operation| {
+        !documented_tools.contains(&format!("{}.{}", operation.alias, operation.operation))
+    });
     if inventory.is_empty() {
         return None;
     }
@@ -264,9 +280,9 @@ fn render_host_environment_section(surface: &lashlang::LashlangHostEnvironment) 
 }
 
 fn render_execution_intro(has_operations: bool) -> String {
-    let mut section = String::from("### Operating contract\n\n");
+    let mut section = String::new();
     if has_operations {
-        section.push_str("Use plain prose only for direct conversational replies that need no action or computation. Use Lashlang when you need to call an available operation, inspect variables, compute values, edit, validate, or return structured/computed results. Invoke documented operations with module syntax — `await module.operation({ ... })?` — from inside a paired `<lashlang>` block, using the real names and signatures listed under **Tools**. If a discovery tool is available, use it to find operations beyond those listed.");
+        section.push_str("Use prose for conversation; use a paired `<lashlang>` block for action or computation. Call only documented tools: `await module.operation({ ... })?`. Use discovery if available.");
     } else {
         section.push_str("Use plain prose only for direct conversational replies that need no computation. Use Lashlang to compute values, inspect current variables, validate data, or return structured/computed results. No module operations are available in this turn, so do not invent tool calls.");
     }
@@ -275,12 +291,12 @@ fn render_execution_intro(has_operations: bool) -> String {
 
 ### `print` vs `finish`
 
-- `print <expr>` — inspect a value and keep going; output appears on the next step. Print the part you need to decide the next step: a whole value when it is small and all of it is useful (e.g. state you consult each turn), otherwise selected fields, samples, or slices. Avoid dumping a large value when only part of it is relevant.
-- `finish <expr>` — final answer; ends the turn. Strings pass through as the reply. Non-string values render as pretty JSON for machine consumers; for user-facing turns, follow the current final-answer format guidance. Keep the final value concise; do not include large variables such as diffs, full logs, raw command output, or other bulky dumps unless the user explicitly asks for them.
+- `print <expr>` inspects and continues; output appears next step. Print small useful values or selected fields/slices.
+- `finish <expr>` ends the turn: strings pass through, other values render as pretty JSON. Follow final-answer guidance; omit bulky dumps unless requested.
 
-Never `finish` a raw tool-result dump. If you need to look at something, `print` it, then `finish` a summary on a later step.
+Never `finish` a raw tool-result dump: `print` it first, then summarize.
 
-Do not finish with final results that depend on operations, files, generated patches, or other current-state artifacts without inspecting first. Only `finish` once you have observed and verified the relevant results.
+Inspect and verify current-state results before finishing.
 
 "#,
     );
@@ -311,20 +327,25 @@ fn render_language_section(
         bullets.push(module_operations_language_bullet());
     }
     if abilities.sleep {
-        bullets.push(sleep_language_bullet());
+        bullets.push(sleep_language_bullet().replace(
+            "foreground code or process code",
+            if abilities.processes {
+                "foreground code or process code"
+            } else {
+                "foreground code"
+            },
+        ));
     }
     if abilities.processes {
         push_process_language_bullets(&mut bullets, abilities);
     }
     if language_features.label_annotations {
-        bullets.push(label_annotations_language_bullet());
+        bullets.push(label_annotations_language_bullet(abilities));
     }
     if abilities.triggers && abilities.processes {
         bullets.push(trigger_registry_language_bullet());
     }
-    if has_operations {
-        bullets.push(operation_scheduling_language_bullet(abilities.processes));
-    }
+    bullets.push(operation_scheduling_language_bullet(abilities.processes));
     bullets.extend(base_tail_language_bullets());
     format!("### Language\n\n{}", bullets.join("\n"))
 }
@@ -339,27 +360,27 @@ fn push_value_language_bullets(bullets: &mut Vec<String>, images: bool) {
 }
 
 fn strings_language_bullet() -> String {
-    "- Strings: `\"...\"` and `'...'` support `\\n`, `\\r`, `\\t`, escaped matching quotes, and `\\\\`; `\"\"\"...\"\"\"` and `'''...'''` are multiline with the same escapes. Raw strings `r\"...\"`, `r'...'`, `r\"\"\"...\"\"\"`, and `r'''...'''` preserve content exactly. Use raw strings for JSON, Markdown, patches, shell scripts, and other payloads with braces, backslashes, quotes, heredocs, or `@@` hunk markers. Use `format(...)` for interpolation; there are no f-strings.".to_string()
+    r#"- Strings: single/double quotes and triple-quoted multiline forms support `\n`, `\r`, `\t`, escaped quotes and `\\`. Prefix any with `r` for raw text (JSON, patches, shell payloads). Interpolate with `format`, not f-strings."#.to_string()
 }
 
 fn operator_language_bullet() -> String {
-    "- Operators, tightest to loosest: postfix calls/fields/indexing/result `?`; unary `-`/`!`/`not`; `*`/`/`/`%`; `+`/`-`; comparisons `== != < <= > >= in`; `and`/`&&`; `or`/`||`; ternary `? :`. `x in y` tests list/tuple membership, record keys, and string substrings like Python; negate with `!(x in y)` — there is no `not in`. When an `any`-typed operand resolves to an unsupported membership pair at runtime, Lashlang reports a typed error (except `null` haystacks, which return false).".to_string()
+    r#"- Precedence: postfix calls/fields/indexing/result `?`; unary `-`/`!`/`not`; `* / %`; `+ -`; comparisons `== != < <= > >= in`; `and`/`&&`; `or`/`||`; ternary `? :`. `in` tests list/tuple membership, record keys or substrings; negate with `!(x in y)`, never `not in`. Unsupported pairs error; null haystacks return false."#.to_string()
 }
 
 fn assignment_language_bullet() -> String {
-    "- Assign with `name = expr`. Variables persist across `<lashlang>` blocks within the turn. You can also update mutable collection paths rooted at a variable: `record.field = value`, `record[key] = value`, `list[i] = value`, and nested forms like `state.groups[g].count = count + 1`. Record field/index assignment inserts or replaces fields; list assignment replaces an existing integer index only. Record indexing reads dynamic string-coerced keys and returns `null` when missing, so histogram code can use `counts[g] = counts[g] + 1`.".to_string()
+    r#"- `name = expr` persists across `<lashlang>` blocks. Update paths: `record.field = v`, `record[key] = v`, `list[i] = v`, and nested paths. Record writes insert/replace; lists require existing indices. Record keys stringify; missing reads return null, so `counts[g] = counts[g] + 1` works."#.to_string()
 }
 
 fn list_comprehension_language_bullet() -> String {
-    "- List comprehensions: `[expr for name in iterable]` and `[expr for name in iterable if condition]`; multiple `for`/`if` clauses run left-to-right like Python. Comprehension bindings are local and do not overwrite outer variables. Use explicit loops when you need mutation, `break`, or `continue`.".to_string()
+    r#"- Comprehensions: `[expr for x in xs if cond]`; multiple for/if clauses execute left-to-right. Bindings are local. Use loops for mutation, break or continue."#.to_string()
 }
 
 fn functions_language_bullet() -> String {
-    "- Functions: declare reusable pure logic at the top level with `fn name(param: type, ...) -> type { body }`; parameter types and the return type are required, the last expression is the result, and the body sees only its parameters. Call one like a builtin: `name(arg)`. Arithmetic always produces a float, so a body that computes with `+ - * / %` returns `float`, not `int` — declare `-> float` there, and use `int` only for values you pass straight through. Functions may call each other and themselves in any declaration order. Effects are not allowed inside a function body — no module operations, `await`, `start`, `sleep`, `print`, or `finish` — so keep those at the top level and pass their results in as arguments.".to_string()
+    r#"- Pure functions: `fn f(x: type) -> type { body }`; types required; last expression returns; parameters-only scope. Call `f(arg)`; recursion and forward calls work. Arithmetic yields float: use `-> float`, not int. Keep effects outside functions and pass results in."#.to_string()
 }
 
 fn module_operations_language_bullet() -> String {
-    "- Module operations: call host capabilities through documented lowercase module paths, e.g. `await module.operation({ field: value })?` — the real names and signatures are under **Tools**. Host operations are awaited effects; pure UpperCamel value constructors shown in the Host Surface are ordinary expressions and must not be awaited. Bare calls are builtins only, not tools — do not assume a tool exists from generic syntax; call only operations documented under **Tools**. `?` aborts the block with sanitized operation metadata if the operation fails.".to_string()
+    r#"- Tools: `await module.op({ field: value })?`; use only names under **Tools**. Bare calls are builtins; UpperCamel host constructors are pure (never await). `?` aborts on failure with sanitized operation metadata."#.to_string()
 }
 
 fn sleep_language_bullet() -> String {
@@ -390,7 +411,7 @@ fn push_process_language_bullets(
         ""
     };
     bullets.push(format!(
-        "- Background processes: `process name(param: TYPE) {{ ... }}` declares a reusable process definition.{signal_declaration_note} `handle = start name(param: value)` creates one process run from that definition and returns its run handle;{trigger_process_note} For account-parametric work, pass typed module authorities explicitly, e.g. `process notify(mail: Gmail) {{ await mail.send({{ body: body }})? finish true }}` and `start notify(mail: gmail.work)`. For one-off concrete automations, a process body may reference concrete host paths such as `agents`, `web`, or `gmail.work` directly; params and locals shadow those captures. Inside a process use {}. `wake value` emits a `process.wake` event that notifies the agent/session with `value`; use it when process progress, trigger output, or other background work should re-enter the model as context. `finish value` completes the run and stores `value` as the process success value. `fail value` completes it as failed; falling off the end is `finish null`. `print` is foreground-only and invalid inside processes. Parallelism comes from starting all independent process handles before waiting for any of them; join a list or record of handles with `results = await handles`. `await handle` waits and returns a result wrapper like `{{ ok: true, value: ... }}`; when you need fields from the `finish` value, use `result = (await handle)?` and then read `result.field`. Cancel a live run with `cancel handle` (best-effort). If the Host Surface includes `processes.list`, use `await processes.list({{}})?` for running runs, `await processes.list({{ definition: name }})?` for runs of a definition, and `await processes.list({{ status: \"any\" }})?` for visible run history.",
+        "- Background processes: `process name(param: TYPE) {{ ... }}` declares a reusable process definition.{signal_declaration_note} `handle = start name(param: value)` creates one process run from that definition and returns its run handle;{trigger_process_note} For account-parametric work, pass typed module authorities explicitly, e.g. `process notify(mail: Gmail) {{ await mail.send({{ body: body }})? finish true }}` and `start notify(mail: gmail.work)`. For one-off concrete automations, a process body may reference concrete host paths such as `agents`, `web`, or `gmail.work` directly; params and locals shadow those captures. Inside a process use {}. `wake value` emits a `process.wake` event that notifies the agent/session with `value`; use it when process progress or other background work should re-enter the model as context. `finish value` completes the run and stores `value` as the process success value. `fail value` completes it as failed; falling off the end is `finish null`. `print` is foreground-only and invalid inside processes. Parallelism comes from starting all independent process handles before waiting for any of them; join a list or record of handles with `results = await handles`. `await handle` waits and returns a result wrapper like `{{ ok: true, value: ... }}`; when you need fields from the `finish` value, use `result = (await handle)?` and then read `result.field`. Cancel a live run with `cancel handle` (best-effort). If the Host Surface includes `processes.list`, use `await processes.list({{}})?` for running runs, `await processes.list({{ definition: name }})?` for runs of a definition, and `await processes.list({{ status: \"any\" }})?` for visible run history.",
         join_words(&forms),
     ));
     if abilities.process_signals {
@@ -398,8 +419,43 @@ fn push_process_language_bullets(
     }
 }
 
-fn label_annotations_language_bullet() -> String {
-    "- Execution labels: `@label(title: \"Label\")` or `@label(title: \"Label\", description: \"Details\")` names important Lashlang phases and graph steps. It is a prefix annotation, not a standalone statement; it must appear immediately before the one statement or process declaration it labels, e.g. `@label(title: \"Prepare query\")\\nquery = \"runtime architecture\"`. Do not emit `@label(...)` by itself or stack multiple labels before one statement. At top level, label meaningful setup, resource calls, submissions, branches, loops, or process declarations. Inside a `process` body, label durable steps such as awaited module calls, `start`, `sleep`, `wait_signal`, `signal_run`, `wake`, `yield`, `finish`, `fail`, `if`, loops, and setup statements that explain the process. Titles/descriptions must be string literals; do not use variables, interpolation, icons, colors, layout hints, or extra keys.".to_string()
+fn label_annotations_language_bullet(abilities: &lashlang::LashlangAbilities) -> String {
+    let declaration = if abilities.processes {
+        " or process declaration"
+    } else {
+        ""
+    };
+    let targets = if abilities.processes {
+        "branches, loops, or process declarations"
+    } else {
+        "branches, and loops"
+    };
+    let mut process = String::new();
+    if abilities.processes {
+        let mut steps = vec!["awaited module calls", "`start`"];
+        if abilities.sleep {
+            steps.push("`sleep`");
+        }
+        if abilities.process_signals {
+            steps.extend(["`wait_signal`", "`signal_run`"]);
+        }
+        steps.extend([
+            "`wake`",
+            "`yield`",
+            "`finish`",
+            "`fail`",
+            "`if`",
+            "loops",
+            "and setup statements that explain the process",
+        ]);
+        process = format!(
+            " Inside a `process` body, label durable steps such as {}.",
+            steps.join(", ")
+        );
+    }
+    format!(
+        "- Execution labels: `@label(title: \"Label\")` or `@label(title: \"Label\", description: \"Details\")` names important Lashlang phases and graph steps. It is a prefix annotation, not a standalone statement; it must appear immediately before the one statement{declaration} it labels, e.g. `@label(title: \"Prepare query\")\\nquery = \"runtime architecture\"`. Do not emit `@label(...)` by itself or stack multiple labels before one statement. At top level, label meaningful setup, resource calls, submissions, {targets}.{process} Titles/descriptions must be string literals; do not use variables, interpolation, icons, colors, layout hints, or extra keys."
+    )
 }
 
 fn trigger_registry_language_bullet() -> String {
@@ -415,139 +471,119 @@ fn trigger_registry_language_bullet() -> String {
 
 fn operation_scheduling_language_bullet(processes: bool) -> String {
     let process_note = if processes {
-        " Process parallelism still comes from starting all independent process handles before joining them with `await handles` or `await { key: handle }`."
+        " Start independent process handles before joining with `await handles`."
     } else {
         ""
     };
     format!(
-        "- Operation scheduling: consecutive `await module.op(...)` statements run one at a time. For independent module operations, use aggregate await: `results = await {{ first: module.a({{ ... }}), second: module.b({{ ... }}), label: \"kept\" }}`; direct receiver-call leaves in nested lists/records fan out through the host scheduler, pure value leaves are preserved, and results keep the same shape. Put `?` on each operation leaf you want unwrapped, e.g. `first: module.a({{ ... }})?`; all siblings finish before the first source-order failure is reported.{process_note}"
+        "- Aggregate await: `results = await {{ a: module.a({{}})?, b: module.b({{}})?, label: \"kept\" }}` fans out direct operation leaves in nested lists/records, retaining shape and pure values. `?` unwraps each leaf; all siblings settle before the first source-order failure. Consecutive awaits serialize.{process_note}"
     )
 }
 
 fn base_tail_language_bullets() -> [String; 3] {
     [
-        "- Control flow: statement `if`/`for`/`while`; `break` exits the nearest loop; `continue` skips to the nearest loop's next iteration; expression ternary `cond ? yes : no` (there is no expression-form `if`); boolean negation via `!cond` or `not cond`. Prefer bounded `while` loops where possible and bounded `for` loops over ranges/lists for fill or retry logic. `finish` is different from `break`: it ends the whole program/turn.".to_string(),
-        "- Bare expressions are valid statements in normal blocks.".to_string(),
-        "- Values already in scope are listed under **Bound Variables** (plus `history`) — use them directly in lashlang, don't recreate them.".to_string(),
+        "- Statements: `if`, `for`, `while`; prefer bounded loops. `break` exits the nearest loop; `continue` skips an iteration; `finish` ends the turn. Expression conditional: `cond ? yes : no`, never expression-form if. Negate with `!cond` or `not cond`.".into(),
+        "- Bare expressions are statements.".into(),
+        "- Use Bound Variables and `history` directly; do not recreate them.".into(),
     ]
 }
 
-fn render_builtins_section(images: bool) -> String {
-    let builtins = lashlang::builtin_names()
-        .map(|name| format!("`{name}`"))
-        .collect::<Vec<_>>()
-        .join(", ");
+fn render_builtins_section(images: bool, type_literals: bool) -> String {
     let bullets = lashlang::builtin_names()
+        .filter(|name| type_literals || *name != "validate")
         .map(|name| builtin_prompt_bullet(name, images))
         .collect::<Vec<_>>()
         .join("\n");
 
     format!(
-        "### Builtins\n\nAvailable builtins (generated from the runtime registry): {builtins}.\n\nCall them as functions.\n\n{bullets}\n\nRegex and date/time operations are deliberately host tools, not builtins.\n\nExample using stable record sorting and membership:\n\n<lashlang>\nrows = [{{ name: \"first\", score: 2 }}, {{ name: \"second\", score: 1 }}]\nranked = sort_by(rows, \"score\")\nfinish ranked[0].name in [\"second\", \"third\"] ? ranked : reverse(ranked)\n</lashlang>\n"
+        "### Builtins\n\nCall as functions:\n\n{bullets}\n\nRegex/date operations require host tools."
     )
 }
 
 fn builtin_prompt_bullet(name: &str, images: bool) -> String {
     let detail = match name {
         "len" if images => {
-            "`len(x)` — length of a string, tuple, list, or record (`0` for `null`); invalid for images, so use `image.size`"
+            "`len(x)` — string/tuple/list/record length; null = 0; invalid for images, so use `image.size`"
         }
-        "len" => "`len(x)` — length of a string, tuple, list, or record (`0` for `null`)",
-        "empty" => "`empty(x)` — true when a string, tuple, list, record, or `null` has length `0`",
-        "keys" => "`keys(record)` — record keys as a new list (`[]` for `null`)",
-        "values" => "`values(record)` — record values as a new list (`[]` for `null`)",
-        "trim" => "`trim(s)` — strip surrounding whitespace",
-        "to_string" => "`to_string(x)` — convert a value to text",
-        "to_int" => "`to_int(x)` — convert a numeric value or numeric string to an integer",
-        "to_float" => "`to_float(x)` — convert a numeric value or numeric string to a float",
-        "json_parse" => "`json_parse(s)` — parse a JSON string into a value",
-        "contains" => {
-            "`contains(haystack, needle)` — substring, tuple/list item, or record-key membership"
-        }
+        "len" => "`len(x)` — string/tuple/list/record length; null = 0",
+        "empty" => "`empty(x)` — len(x) == 0",
+        "keys" => "`keys(record)` — new key list; null = []",
+        "values" => "`values(record)` — new value list; null = []",
+        "trim" => "`trim(s)` — trim whitespace",
+        "to_string" => "`to_string(x)` — to text",
+        "to_int" => "`to_int(x)` — number/numeric string to int",
+        "to_float" => "`to_float(x)` — number/numeric string to float",
+        "json_parse" => "`json_parse(s)` — parse JSON text",
+        "contains" => "`contains(haystack, needle)` — substring, tuple/list item or record key",
         "grep_text" => {
-            "`grep_text(s, needle)` — literal in-memory line search; `needle` must be non-empty; returns one record per matching line: `{ line: int, text: str, match: str, start: int, end: int }`, with 1-based lines and zero-based character offsets (`end` exclusive)"
+            "`grep_text(s, needle)` — literal lines, nonempty needle; match rows: `{ line: int, text: str, match: str, start: int, end: int }`, 1-based lines, 0-based characters, exclusive end"
         }
-        "starts_with" => "`starts_with(s, prefix)` — true when text starts with the literal prefix",
-        "ends_with" => "`ends_with(s, suffix)` — true when text ends with the literal suffix",
-        "split" => "`split(s, sep)` — split text on a literal separator into a list",
-        "join" => "`join(list, sep)` — join a tuple/list of values with a text separator",
+        "starts_with" => "`starts_with(s, prefix)` — literal prefix test",
+        "ends_with" => "`ends_with(s, suffix)` — literal suffix test",
+        "split" => "`split(s, sep)` — literal split to list",
+        "join" => "`join(list, sep)` — join tuple/list with separator",
         "validate" => {
             "`validate(value, Type { ... })` — return a value unchanged when it matches the type literal, otherwise abort with a typed validation error"
         }
-        "ceil_div" => {
-            "`ceil_div(a, b)` — ceiling integer division for chunk/count math; divisor must not be `0`"
-        }
-        "floor_div" => {
-            "`floor_div(a, b)` — floor integer division for chunk/count math; divisor must not be `0`"
-        }
-        "push" => {
-            "`push(list, item)` — return a new list with one item appended; the input is not mutated"
-        }
+        "ceil_div" => "`ceil_div(a, b)` — ceil(a/b); b != 0",
+        "floor_div" => "`floor_div(a, b)` — floor(a/b); b != 0",
+        "push" => "`push(list, item)` — new appended list",
         "slice" => {
-            "`slice(s, start, end)` — substring or sublist; `null` opens either bound and negative bounds count from the end"
+            "`slice(s, start, end)` — string/list slice; null = open bound; negative = from end"
         }
         "find" => {
-            "`find(s, needle, start?)` — zero-based character index of the first literal match, or `null`; `start` defaults to `0` and must be non-negative; an empty needle returns an in-bounds `start`"
+            "`find(s, needle, start?)` — first literal character index or null; start >= 0 (default 0); empty needle returns in-bounds start"
         }
         "format" => {
-            "`format(template, arg0, arg1, ...)` — positional interpolation: `{}` auto-numbers, `{0}` selects an arg, and `{{`/`}}` escape braces. Do not wrap args in a list: use `format(\"It is {}.\", trim(value))`, not `format(\"It is {}.\", [trim(value)])`"
+            "`format(template, arg0, arg1, ...)` — interpolate: `{}` auto, `{0}` indexed, `{{`/`}}` escaped braces; separate args, not a list"
         }
         "range" => {
-            "`range(end)` / `range(start, end)` / `range(start, end, step)` — end-exclusive integer list; `step` may be positive or negative but never `0`"
+            "`range(end)` / `range(start, end, step=1)` — end-exclusive integers; signed nonzero step"
         }
-        "sort" => {
-            "`sort(list)` — stable ascending sort of one comparable item type, returning a new list"
-        }
+        "sort" => "`sort(list)` — stable ascending, one comparable type; new list",
         "sort_by" => {
-            "`sort_by(list, \"field.path\")` — stable ascending record sort by a required non-empty dotted field path, returning a new list"
+            "`sort_by(list, \"field.path\")` — stable ascending by nonempty dotted path; new list"
         }
-        "sum" => "`sum(list)` — numeric total; `sum([])` is `0`",
-        "min" => {
-            "`min(list)` — least item from a non-empty list of one comparable type; an empty list is a typed runtime error"
-        }
-        "max" => {
-            "`max(list)` — greatest item from a non-empty list of one comparable type; an empty list is a typed runtime error"
-        }
+        "sum" => "`sum(list)` — numeric total; sum([]) = 0",
+        "min" => "`min(list)` — least of one comparable type; empty errors",
+        "max" => "`max(list)` — greatest of one comparable type; empty errors",
         "replace" => {
-            "`replace(s, from, to)` — literal Rust-style text replacement; an empty `from` inserts `to` at every UTF-8 boundary, including both ends"
+            "`replace(s, from, to)` — literal replace; empty from inserts at UTF-8 boundaries and ends"
         }
-        "lower" => "`lower(s)` — Unicode lowercase conversion",
-        "upper" => "`upper(s)` — Unicode uppercase conversion",
-        "unique" => {
-            "`unique(list)` — stable typed-equality deduplication that keeps first occurrences, returning a new list"
-        }
-        "reverse" => "`reverse(list)` — reverse a list or tuple into a new list",
+        "lower" => "`lower(s)` — Unicode lowercase",
+        "upper" => "`upper(s)` — Unicode uppercase",
+        "unique" => "`unique(list)` — new list, first occurrences, typed equality",
+        "reverse" => "`reverse(list)` — new reversed list/tuple",
         _ => panic!("builtin `{name}` is missing its prompt contract"),
     };
     format!("- {detail}")
 }
 
-fn render_decomposition_section(has_operations: bool, processes: bool) -> String {
+fn render_decomposition_section(
+    has_operations: bool,
+    processes: bool,
+    decomposition: bool,
+) -> String {
     let mut section = String::from(
-        "### Working with context\n\nYour turn's REPL trace is your working memory — keep it decision-sized and current. Large transient artifacts (files, search results, long pages, raw tool dumps) should stay in variables until you need a focused view; small durable state you consult each turn should stay visible.",
+        "### Working with context\n\nKeep large artifacts in variables; show small working state.",
     );
-    if has_operations {
-        section.push_str(" Tool-specific lifecycle and output details live under **Tools**.");
-    }
+
     section.push_str(
-        "\n\nTruncation in the transcript is a display window, not lost state. A value shown truncated or summarized still has its full contents live — in the bound variable that holds it, and re-printable via its `history[N].output[M]` handle. A short preview never means the data is gone; `print` the variable or the slice you need and keep going. Never restart or abandon a task because earlier output looks truncated.",
+        "\n\nRead full prior output via `history[N].output[M]`; print the variable or slice you need.",
     );
-    section.push_str(
-        "\n\nChoose the lightest mechanism that preserves progress:\n\n- Current variables already hold what you need -> reason inline in lashlang.",
-    );
-    if has_operations {
-        if processes {
-            section.push_str("\n- Several independent slow operations are needed -> use aggregate await over a record/list of direct module calls plus any pure values you want preserved, putting `?` on each operation leaf that should unwrap.");
-        } else {
-            section.push_str("\n- Several independent operations are needed -> use aggregate await over a record/list of direct module calls plus any pure values you want preserved, putting `?` on each operation leaf that should unwrap.");
-        }
+
+    if !has_operations || processes || decomposition {
+        section.push('\n');
     }
-    section.push_str("\n- The trace is bloated, stale, or failed attempts dominate -> use an available continuation tool to switch to a fresh AgentFrame with concrete state.");
     if has_operations && processes {
-        section.push_str("\n- Anything tool-specific (parameters, return shapes, lifecycle) lives under **Tools**.\n\nExample parallel fan-out around an available operation (aggregate await preserves the record shape; use `?` on each leaf to unwrap it):\n\n    <lashlang>\n    results = await {\n      one: module.operation({ query: \"one\" })?,\n      two: module.operation({ query: \"two\" })?\n    }\n    finish format(\"First result: {}\\n\\nSecond result: {}\", slice(to_string(results.one), 0, 800), slice(to_string(results.two), 0, 800))\n    </lashlang>");
-    } else if has_operations {
-        section.push_str("\n- Anything tool-specific (parameters, return shapes, lifecycle) lives under **Tools**.");
-    } else {
+        section.push_str("\n- Several independent slow operations are needed -> use aggregate await over a record/list of direct module calls plus any pure values you want preserved, putting `?` on each operation leaf that should unwrap.");
+    }
+    if decomposition {
+        section.push_str("\n- The trace is bloated, stale, or failed attempts dominate -> use an available continuation tool to switch to a fresh AgentFrame with concrete state.");
+    }
+    if has_operations && processes {
+        section.push_str("\n- See **Tools** for parameters and results.\n\nExample parallel fan-out around an available operation (aggregate await preserves the record shape; use `?` on each leaf to unwrap it):\n\n    <lashlang>\n    results = await {\n      one: module.operation({ query: \"one\" })?,\n      two: module.operation({ query: \"two\" })?\n    }\n    finish format(\"First result: {}\\n\\nSecond result: {}\", slice(to_string(results.one), 0, 800), slice(to_string(results.two), 0, 800))\n    </lashlang>");
+    } else if !has_operations {
         section.push_str("\n- No module operations are available in this turn — don't infer one exists from generic lashlang syntax.");
     }
     section

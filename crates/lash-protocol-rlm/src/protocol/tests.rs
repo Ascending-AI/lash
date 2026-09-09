@@ -88,19 +88,16 @@ fn rendered_builtin_inventory_exactly_matches_runtime_registry() {
     ] {
         let prompt =
             rlm_execution_section_for_host_environment(features, &full_prompt_host_environment());
-        let line = prompt
-            .lines()
-            .find(|line| {
-                line.starts_with("Available builtins (generated from the runtime registry):")
-            })
-            .expect("generated builtin inventory line");
-        let rendered = line
-            .split_once(": ")
-            .expect("builtin inventory separator")
+        let rendered = prompt
+            .split_once("### Builtins")
+            .unwrap()
             .1
-            .trim_end_matches('.')
-            .split(", ")
-            .map(|name| name.trim_matches('`'))
+            .split("### Type literals")
+            .next()
+            .unwrap()
+            .lines()
+            .filter(|line| line.starts_with("- `"))
+            .map(|line| line.trim_start_matches("- `").split('(').next().unwrap())
             .collect::<Vec<_>>();
         assert_eq!(rendered, lashlang::builtin_names().collect::<Vec<_>>());
     }
@@ -236,22 +233,18 @@ fn execution_section_makes_paired_lashlang_tag_contract_explicit() {
         &full_prompt_host_environment(),
     );
 
-    assert!(section.contains("Use plain prose only for direct conversational replies"));
+    assert!(section.contains("Use prose for conversation"));
     assert!(
         section
             .contains("Executable code must be inside paired `<lashlang>` and `</lashlang>` tags")
     );
-    assert!(section.contains("tag lines must be standalone after trimming"));
+    assert!(section.contains("Tag lines must be standalone after trimming"));
     assert!(section.contains("terminates the cell even inside a multiline string"));
-    assert!(
-        section.contains("When action is needed, place the lashlang block after any visible prose")
-    );
+    assert!(section.contains("Put the lashlang block after optional commentary"));
     assert!(!section.contains("exactly one Lashlang block"));
     assert!(!section.contains("NEVER have multiple `<lashlang>` blocks"));
     assert!(!section.contains("Any text after it is ignored"));
-    assert!(
-        section.contains("Only `finish` once you have observed and verified the relevant results")
-    );
+    assert!(section.contains("Inspect and verify current-state results before finishing"));
     assert!(!section.contains("### Persistence"));
     assert!(!section.contains("Every message before the final answer"));
     assert!(!section.contains("Prose-only does not end the turn"));
@@ -265,13 +258,11 @@ fn execution_section_claims_the_operator_ladder_and_new_builtin_semantics() {
     );
     assert!(section.contains("postfix calls/fields/indexing/result `?`"));
     assert!(section.contains("comparisons `== != < <= > >= in`"));
-    assert!(section.contains("`sort(list)` — stable ascending sort"));
-    assert!(section.contains(
-        "`unique(list)` — stable typed-equality deduplication that keeps first occurrences"
-    ));
-    assert!(section.contains("`replace(s, from, to)` — literal Rust-style text replacement"));
-    assert!(section.contains("`min(list)` — least item from a non-empty list"));
-    assert!(section.contains("`sum(list)` — numeric total; `sum([])` is `0`"));
+    assert!(section.contains("`sort(list)` — stable ascending"));
+    assert!(section.contains("`unique(list)` — new list, first occurrences, typed equality"));
+    assert!(section.contains("`replace(s, from, to)` — literal replace"));
+    assert!(section.contains("`min(list)` — least of one comparable type; empty errors"));
+    assert!(section.contains("`sum(list)` — numeric total; sum([]) = 0"));
 }
 
 #[test]
@@ -334,7 +325,7 @@ fn execution_section_distinguishes_foreground_finish_from_process_finish() {
     let section =
         rlm_execution_section_for_host_environment(RlmPromptFeatures::default(), &surface);
 
-    assert!(section.contains("`finish <value>` at the top level of the foreground cell ends the turn with a computed value."));
+    assert!(section.contains("Top-level `finish <value>` ends the turn with a value"));
     assert!(section.contains(
         "`finish value` completes the run and stores `value` as the process success value."
     ));
@@ -561,8 +552,8 @@ fn execution_section_mentions_while_and_bounded_loop_guidance() {
         &full_prompt_host_environment(),
     );
 
-    assert!(section.contains("statement `if`/`for`/`while`"));
-    assert!(section.contains("Prefer bounded `while` loops where possible"));
+    assert!(section.contains("Statements: `if`, `for`, `while`"));
+    assert!(section.contains("prefer bounded loops"));
 }
 
 #[test]
@@ -572,9 +563,9 @@ fn execution_section_documents_list_comprehensions() {
         &full_prompt_host_environment(),
     );
 
-    assert!(section.contains("[expr for name in iterable]"));
-    assert!(section.contains("multiple `for`/`if` clauses run left-to-right like Python"));
-    assert!(section.contains("Comprehension bindings are local"));
+    assert!(section.contains("[expr for x in xs if cond]"));
+    assert!(section.contains("multiple for/if clauses execute left-to-right"));
+    assert!(section.contains("Bindings are local"));
     assert!(!section.contains("Do not use comprehensions"));
 }
 

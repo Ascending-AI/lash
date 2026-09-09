@@ -1,6 +1,7 @@
 use super::history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 use crate::dialect::RlmDialect;
 use crate::driver::{RlmPreambleConfig, SharedPromptUsage};
+use crate::execution_prompt::render_system_prompt;
 use crate::rlm_support::{SharedBoundVariablesPrompt, decode_rlm_options, effective_budget_tokens};
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
@@ -22,9 +23,16 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     let tool_names_fingerprint = tool_catalog.tool_names_fingerprint();
     let mut prompt_contributions = Vec::new();
 
-    let tool_docs = crate::tool_catalog::rlm_prompt_tool_docs(tool_catalog, dialect.as_ref());
-    if !tool_docs.trim().is_empty() {
-        prompt_contributions.push(PromptContribution::execution("Tools", tool_docs));
+    let tool_docs = crate::tool_catalog::rlm_prompt_tool_docs(
+        tool_catalog,
+        dialect.as_ref(),
+        config.prompt_features,
+    );
+    if !dialect.renders_tool_catalogue_inline() && !tool_docs.trim().is_empty() {
+        prompt_contributions.push(PromptContribution::execution(
+            "Tools",
+            format!("Await these documented operations:\n\n{tool_docs}"),
+        ));
     }
     prompt_contributions.extend(input.extra_prompt_contributions);
     let turn_limit_dialect = Arc::clone(&dialect);
@@ -34,6 +42,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
                 &dialect,
             ))),
             projector: Arc::new(NativeContextProjector {
+                prompt_features: config.prompt_features,
                 max_output_chars: config.max_output_chars,
                 max_budget_tokens: config.max_budget_tokens,
                 last_prompt_usage: config.last_prompt_usage,
@@ -62,6 +71,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
 }
 
 struct NativeContextProjector {
+    prompt_features: crate::protocol::RlmPromptFeatures,
     max_output_chars: usize,
     max_budget_tokens: Option<usize>,
     last_prompt_usage: SharedPromptUsage,
@@ -84,12 +94,14 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
             guard.as_ref(),
             effective_budget_tokens(self.max_budget_tokens, ctx.config.max_context_tokens),
             vocabulary,
+            self.prompt_features.decomposition,
         );
         let bound_variables_prompt = self.bound_variables_prompt.read_recover().clone();
 
         let mut messages = Vec::new();
         messages.extend(build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
+                images: self.prompt_features.images,
                 dialect: self.dialect.as_ref(),
                 events: ctx.events,
                 turn_messages: ctx.messages,
@@ -111,8 +123,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
 
         Arc::new(LlmRequest {
             model: ctx.config.model.clone(),
-            instructions: (!ctx.config.system_prompt.trim().is_empty())
-                .then(|| Arc::from(ctx.config.system_prompt.trim())),
+            instructions: render_system_prompt(&ctx.config.system_prompt, self.dialect.as_ref()),
             messages,
             resolved_stored: Default::default(),
             tools: Arc::new(vec![super::tool::tool_spec(self.dialect.as_ref())]),

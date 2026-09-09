@@ -32,12 +32,17 @@ pub(crate) fn rlm_tool_catalog(
 pub(crate) fn rlm_prompt_tool_docs(
     tool_catalog: &ToolCatalog,
     dialect: &dyn crate::dialect::RlmDialect,
+    features: crate::protocol::RlmPromptFeatures,
 ) -> String {
-    let vocabulary = dialect.prompt_vocabulary();
+    let mut vocabulary = dialect.prompt_vocabulary();
+    if !features.type_literals {
+        vocabulary.type_literal_hint = "";
+    }
     tool_catalog
         .tools
         .iter()
         .filter(|tool| tool.manifest.activation != ToolActivation::Internal)
+        .filter(|tool| features.decomposition || tool.manifest.name != "continue_as")
         .filter_map(|tool| {
             let contract = tool_catalog.resolve_contract(&tool.manifest.name)?;
             let call_path = dialect
@@ -58,7 +63,27 @@ pub(crate) fn rlm_prompt_tool_docs(
             compact.description = vocabulary.render_tool_prose(&compact.description);
             render_doc_field_prose(vocabulary, &mut compact.parameters);
             render_doc_field_prose(vocabulary, &mut compact.return_fields);
-            Some(compact.render_markdown())
+            let markdown = compact.render_markdown();
+            if dialect.renders_tool_catalogue_inline() {
+                let signature = lash_typescript::render_tool_signature(
+                    &call_path,
+                    contract.input_schema.canonical(),
+                    Some(contract.output_schema.canonical()),
+                );
+                let notes = markdown
+                    .lines()
+                    .skip(1)
+                    .map(|line| format!(" * {}", line.replace("*/", "* /")))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Some(format!("/**\n{notes}\n */\n{signature}"))
+            } else {
+                let (_, notes) = markdown.split_once('\n').unwrap_or((&markdown, ""));
+                Some(format!(
+                    "### `await {}? -> {}`\n{notes}",
+                    compact.signature, compact.returns
+                ))
+            }
         })
         .collect::<Vec<_>>()
         .join("\n\n")
@@ -476,7 +501,11 @@ mod tests {
 
         assert!(catalog.has_callable_tool("fetch_url"));
         assert!(catalog.has_callable_tool("read_file"));
-        let docs = rlm_prompt_tool_docs(&catalog, &lashlang_test_dialect());
+        let docs = rlm_prompt_tool_docs(
+            &catalog,
+            &lashlang_test_dialect(),
+            crate::protocol::RlmPromptFeatures::default(),
+        );
         assert!(docs.contains("web.fetch"), "{docs}");
         assert!(docs.contains("files.read"), "{docs}");
         // No legacy catalogue notes or tier filtering.
@@ -673,7 +702,11 @@ mod tests {
             contributions: vec![contribution],
         });
 
-        let docs = rlm_prompt_tool_docs(&catalog, &lashlang_test_dialect());
+        let docs = rlm_prompt_tool_docs(
+            &catalog,
+            &lashlang_test_dialect(),
+            crate::protocol::RlmPromptFeatures::default(),
+        );
         assert!(docs.len() <= 768, "plan.update docs exceeded budget");
         assert!(docs.contains("plan.update("), "{docs}");
         assert!(
@@ -838,12 +871,20 @@ mod tests {
             contributions: vec![ToolCatalogContribution::default()],
         });
 
-        let lashlang = rlm_prompt_tool_docs(&catalog, &lashlang_test_dialect());
+        let lashlang = rlm_prompt_tool_docs(
+            &catalog,
+            &lashlang_test_dialect(),
+            crate::protocol::RlmPromptFeatures::default(),
+        );
         assert!(
             lashlang.contains("or pass a `Type { ... }` literal for nested shapes"),
             "{lashlang}"
         );
-        let typescript = rlm_prompt_tool_docs(&catalog, &crate::dialect::typescript_test_dialect());
+        let typescript = rlm_prompt_tool_docs(
+            &catalog,
+            &crate::dialect::typescript_test_dialect(),
+            crate::protocol::RlmPromptFeatures::default(),
+        );
         assert!(
             typescript.contains("e.g. `{ queries: \"list[str]\" }`."),
             "{typescript}"

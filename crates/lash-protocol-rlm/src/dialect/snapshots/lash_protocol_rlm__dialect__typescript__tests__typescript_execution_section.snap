@@ -2,11 +2,9 @@
 source: crates/lash-protocol-rlm/src/dialect/typescript.rs
 expression: section
 ---
-## TypeScript execution
-
 ### Response shape
 
-Executable code must be inside paired `<typescript>` and `</typescript>` tags. The start and close tag lines must be standalone after trimming. Markdown code fences are documentation and never execute here. A standalone `</typescript>` line terminates the cell even inside a multiline string, so construct such string content without that standalone delimiter line. When action is needed, place the TypeScript block after any visible prose or omit prose. Prose before the block is commentary only. `finish(value)` at the top level of the foreground cell ends the turn with a computed value. Any turn-ending rules for prose-only responses versus `finish` are listed in the current **FINALIZATION** section.
+Executable code must be inside paired `<typescript>` and `</typescript>` tags. Tag lines must be standalone after trimming; `</typescript>` terminates the cell even inside a multiline string. Markdown fences never execute. Put the TypeScript block after optional commentary. Top-level `finish(value)` ends the turn with a value; **FINALIZATION** defines prose-only versus finish rules.
 
 ### Example cell
 
@@ -17,45 +15,25 @@ finish(total);
 
 Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
 
+Standard `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp`, `URL` are supported.
+
 ### Host API
 
-    interface ProcessDefinition<Input, Output> { readonly name: string }
-    interface ProcessHandle<Output> extends PromiseLike<Output> { readonly id: string }
-    declare const console: {
-      log(...values: unknown[]): void;
-      warn(...values: unknown[]): void;
-      error(...values: unknown[]): void;
-      info(...values: unknown[]): void;
-      debug(...values: unknown[]): void;
-    };
-    declare function print(value: unknown): void;
-    declare function finish(value: unknown): never;
-    declare function sleep(milliseconds: number): Promise<void>;
-    declare function waitSignal(name: string): Promise<unknown>; // inside a defineProcess run body only
-    declare function defineProcess<Input, Output>(config: { name: string; signals: Record<string, null>; run: (input: Input) => Promise<Output> }): ProcessDefinition<Input, Output>;
-    declare function start<Input, Output>(process: ProcessDefinition<Input, Output>, args?: Record<string, unknown>): ProcessHandle<Output>;
-    declare function wake(progress: unknown): void;
-    declare function wake(handle: ProcessHandle<unknown>, signal: string, payload: unknown): void;
-    declare function registerTrigger(config: { source: unknown; target: ProcessDefinition<unknown, unknown>; inputs: Record<string, unknown>; name?: string }): Promise<unknown>;
+`console.log/warn/error/info/debug(...values)` and `print(value)` inspect values; `finish(value)` ends the turn.
+declare function sleep(ms: number): Promise<void>; // cell
+`Promise.all`/`Promise.allSettled` accept tool promises and resolved values; all leaves settle before `all` reports the first-settled rejection.
 
-Declare durable work only as a top-level `const p = defineProcess({ name: "literal", signals: { signal: null }, run: async (...) => { ... } })`. The keys of `start`'s second argument are the `run` function's own parameter names, not a fixed `input` field — `run: async (request: unknown)` is started as `start(p, { request: value })`, and any other key rejects; `registerTrigger`'s `inputs` keys work the same way. `await start(...)` waits for its result; an un-awaited handle can be signalled. In `run`, `wake(value)` emits progress, `await waitSignal("literal")` and `await sleep(ms)` suspend durably, `return` succeeds after enclosing `finally` blocks, and an uncaught `throw` fails. `waitSignal` is the only primitive above that is scoped to a process body: outside one it is refused as "`waitSignal` can only be used inside a process body", while `await sleep(ms)` is also valid in a cell. `await registerTrigger(...)` requires a literal process target. `Promise.all`/`Promise.allSettled` accept top-level tool promises and resolved values; `Promise.all` reports the first-settled rejection (v1 waits for every leaf before reporting).
+A failed tool call rejects with an `Error`: `message` is the host text, `name` is `EffectError` (`RuntimeError` for runtime faults), and `cause` carries `{ code, details }`. An `allSettled` rejection uses that same error. Errors in `finish` or tool arguments become `{ name, message, cause }`.
 
-A failed tool call rejects with a real `Error`: `error instanceof Error` holds, `error.message` is the host's own text, `error.name` is `EffectError` (`RuntimeError` for a runtime fault), and `error.cause` carries `{ code, details }`. A rejected `allSettled` leaf's `reason` is that same value. An `Error` returned to the host — from `finish`, or inside a tool argument — is flattened to `{ name, message, cause }`.
 
-### v1 guardrails
-
-Use ordinary modern TypeScript control flow and expression syntax: destructuring (including defaults/rest), optional chaining, spread, compound/update operators, `switch`, `do...while`, `for...in`, `for...of`, parameter defaults/rest, `var`, runtime enums, and const enums are supported. Async functions and arrows are supported wherever every awaited value is a tool call, `sleep`, or a process handle; fan out with `await Promise.all(items.map(async (item) => ...))` or its `Promise.allSettled` form, which runs the callbacks sequentially and durably. Error-family constructors, `new Map`/`Set`/`Date`/`RegExp`, and `new URL(input, base?)` / `new URLSearchParams(init?)` are supported; `instanceof` accepts exactly those built-ins plus `Array` and `Object`. A `URL`'s `searchParams` is one live object, so mutating it updates `href`. RegExp literals and `new RegExp(pattern?, flags?)` accept `gimsuy`; use `exec`/`test` or string `match`/`search`/`replace`/`replaceAll`/`split`, and consume `matchAll` directly with `for...of`, spread, or `Array.from`. Date math is UTC-only; use `getUTC*` and `toISOString()`. Bare conversions and number parsers are available; other iterators must be consumed directly by `for...of`, spread, `Array.from`, `new Map|Set`, or `Object.fromEntries`. `globalThis.name` and top-level bindings address the durable session state.
-
-Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), namespaces (`TS_NAMESPACE_UNSUPPORTED`), decorators (`TS_DECORATOR_UNSUPPORTED`), `for await` (`TS_FOR_OF_UNSUPPORTED`), labels (`TS_LABEL_UNSUPPORTED`), arbitrary `new` (`TS_NEW_UNSUPPORTED`), and arbitrary `instanceof` (`TS_INSTANCEOF_UNSUPPORTED`) reject with a replacement in the diagnostic. A rejection names what it refused on its first line, points at the offending line and column, and — whenever the dialect has an accepted alternative — names it on a following `hint:` line. When a `hint:` line is present it is the rewrite; when it is absent the diagnostic itself is the whole answer. RegExp flags `d`/`v` reject as `TS_REGEX_INDICES_FLAG_UNSUPPORTED`/`TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED`; remove `d` and use `match.index` plus capture lengths, or replace `v` with `u` and ordinary Unicode classes. A retained `matchAll` iterator rejects as `TS_REGEX_ITERATOR_POSITION`; spread it immediately. Assigning to a captured `let` rejects as `TS_MUTABLE_CAPTURE_UNSUPPORTED`; mutate a captured object's field instead. `for...of` snapshots its input, so a body that aliases or mutates that input rejects as `TS_FOR_OF_UNSUPPORTED`. Promise chaining and `Promise.resolve`/`reject` reject: use direct `await` and `try/catch`. `Promise.race`/`any` reject pending FIG-1416; use `Promise.all`, `Promise.allSettled`, or durable `sleep`. Unsupported methods reject as `TS_METHOD_UNSUPPORTED`. `localeCompare` and locale formatting reject; use `(a < b ? -1 : a > b ? 1 : 0)` and `toFixed(digits)`. `Date.now()` and argless `new Date()` use the same journaled clock effect; non-ISO parsing, local-time Date methods, and implicit Date string coercion reject with UTC/ISO repairs. `Math.random()` is journaled.
-
-### Deterministic standard library
-
-Static calls: `Object.keys`(value), `Object.values`(value), `Object.entries`(value), `Object.fromEntries`(iterable), `Object.assign`(target, ...sources), `Object.groupBy`(iterable, callback), `Object.hasOwn`(value, key), `Object.is`(left, right), `Array.from`(source[, mapFn[, thisArg]]), `Array.isArray`(value), `Array.of`(...values), `String.fromCharCode`(...codeUnits), `String.fromCodePoint`(...codePoints), `Map.groupBy`(iterable, callback), `Date.parse`(value), `Date.UTC`(year[, month[, date[, hours[, minutes[, seconds[, milliseconds]]]]]]), `Number.isFinite`(value), `Number.isInteger`(value), `Number.isNaN`(value), `Number.isSafeInteger`(value), `Number.parseFloat`(value), `Number.parseInt`(value[, radix]), `JSON.parse`(text), `JSON.stringify`([value[, replacer[, space]]]), `Math.abs`(value), `Math.acos`(value), `Math.asin`(value), `Math.acosh`(value), `Math.asinh`(value), `Math.atan`(value), `Math.atan2`(y, x), `Math.atanh`(value), `Math.cbrt`(value), `Math.ceil`(value), `Math.clz32`(value), `Math.cos`(value), `Math.cosh`(value), `Math.exp`(value), `Math.expm1`(value), `Math.floor`(value), `Math.fround`(value), `Math.hypot`(...values), `Math.imul`(left, right), `Math.log`(value), `Math.log1p`(value), `Math.log10`(value), `Math.log2`(value), `Math.round`(value), `Math.sin`(value), `Math.sinh`(value), `Math.tan`(value), `Math.tanh`(value), `Math.trunc`(value), `Math.max`(...values), `Math.min`(...values), `Math.pow`(base, exponent), `Math.random`(), `Math.sqrt`(value), `Math.sign`(value), `URL.canParse`(input[, base]).
-
-Instance calls: `instance.at`([index]), `instance.concat`(...values), `instance.charAt`([index]), `instance.charCodeAt`([index]), `instance.codePointAt`([index]), `instance.append`(name, value), `instance.add`(value), `instance.clear`(), `instance.delete`(key[, value]), `instance.entries`(), `instance.exec`(input), `instance.endsWith`(search[, endPosition]), `instance.filter`(callback[, thisArg]), `instance.fill`([value[, start[, end]]]), `instance.find`(callback[, thisArg]), `instance.findIndex`(callback[, thisArg]), `instance.findLast`(callback[, thisArg]), `instance.findLastIndex`(callback[, thisArg]), `instance.flat`([depth]), `instance.flatMap`(callback[, thisArg]), `instance.forEach`(callback[, thisArg]), `instance.get`(key), `instance.getAll`(name), `instance.has`(key[, value]), `instance.includes`(value[, fromIndex]), `instance.indexOf`(value[, fromIndex]), `instance.join`([separator]), `instance.lastIndexOf`(value[, fromIndex]), `instance.map`(callback[, thisArg]), `instance.match`(regexp), `instance.matchAll`(globalRegExp), `instance.every`(callback[, thisArg]), `instance.padEnd`(length[, padString]), `instance.padStart`(length[, padString]), `instance.repeat`([count]), `instance.replace`([search[, replacement|callback(match, offset, string)]]), `instance.replaceAll`([searchString[, replacementString]]), `instance.reduce`(callback[, initialValue]), `instance.reduceRight`(callback[, initialValue]), `instance.reverse`(), `instance.slice`([start[, end]]), `instance.sort`([compareFn]), `instance.some`(callback[, thisArg]), `instance.splice`([start[, deleteCount[, ...items]]]), `instance.push`(...values), `instance.pop`(), `instance.shift`(), `instance.unshift`(...values), `instance.split`([separator[, limit]]), `instance.search`(regexp), `instance.startsWith`(search[, position]), `instance.substring`([start[, end]]), `instance.toExponential`([fractionDigits]), `instance.toFixed`([digits]), `instance.toPrecision`([precision]), `instance.toReversed`(), `instance.toSorted`([compareFn]), `instance.toSpliced`([start[, deleteCount[, ...items]]]), `instance.set`(key, value), `instance.keys`(), `instance.toLowerCase`(), `instance.toUpperCase`(), `instance.toString`(), `instance.trim`(), `instance.trimEnd`(), `instance.trimStart`(), `instance.test`(input), `instance.valueOf`(), `instance.values`(), `instance.with`(index, value), `instance.hasOwnProperty`(key), `instance.union`(set), `instance.intersection`(set), `instance.difference`(set), `instance.symmetricDifference`(set), `instance.isSubsetOf`(set), `instance.isSupersetOf`(set), `instance.isDisjointFrom`(set), `instance.toJSON`([key]), `instance.getTime`(), `instance.getUTCFullYear`(), `instance.getUTCMonth`(), `instance.getUTCDate`(), `instance.getUTCDay`(), `instance.getUTCHours`(), `instance.getUTCMinutes`(), `instance.getUTCSeconds`(), `instance.getUTCMilliseconds`(), `instance.toISOString`().
 
 ### Tools
 
 Every call requires `await` and returns the declared `Promise<T>`:
 
-    declare namespace web { function fetch(input: { url: string }): Promise<string>; }
+/**
+ * Fetch a URL
+ * Parameters:
+ * - `url: str`
+ */
+declare namespace web { function fetch(input: { url: string }): Promise<string>; }

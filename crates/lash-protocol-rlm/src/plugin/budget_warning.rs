@@ -29,14 +29,41 @@ impl TurnContextTransform for BudgetUsageObserver {
 #[cfg(test)]
 mod tests {
     use crate::rlm_support::{effective_budget_tokens, format_budget_suffix_with_vocabulary};
+    use lash_core::PromptUsage;
 
-    fn prompt_usage(context_budget_tokens: usize) -> lash_core::PromptUsage {
-        lash_core::PromptUsage {
+    fn prompt_usage(context_budget_tokens: usize) -> PromptUsage {
+        PromptUsage {
             prompt_context_tokens: context_budget_tokens,
             input_tokens: context_budget_tokens,
             cache_read_input_tokens: 0,
             cache_write_input_tokens: 0,
             context_budget_tokens,
+        }
+    }
+
+    #[test]
+    fn disabled_decomposition_finishes_at_budget_thresholds() {
+        for vocabulary in [
+            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY,
+        ] {
+            for used in [60, 90, 100, 110] {
+                let usage = PromptUsage {
+                    context_budget_tokens: used,
+                    ..Default::default()
+                };
+                let text = format_budget_suffix_with_vocabulary(
+                    2,
+                    Some(&usage),
+                    Some(100),
+                    vocabulary,
+                    false,
+                )
+                .unwrap();
+                assert!(text.contains("finish concisely"), "{text}");
+                assert!(!text.contains("continue_as"), "{text}");
+                assert!(!text.contains("frame switch"), "{text}");
+            }
         }
     }
 
@@ -58,6 +85,7 @@ mod tests {
                 Some(&prompt_usage(threshold)),
                 Some(threshold),
                 crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                true,
             )
             .expect("budget suffix should render");
             assert!(content.contains(&format!("frame switch threshold: {threshold}")));
@@ -72,6 +100,7 @@ mod tests {
             Some(&usage),
             Some(200_000),
             crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            true,
         )
         .expect("budget suffix should render");
 
@@ -90,6 +119,7 @@ mod tests {
             Some(&usage),
             Some(100_000),
             crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            true,
         )
         .expect("budget suffix should render");
 
@@ -107,6 +137,7 @@ mod tests {
             Some(&usage),
             Some(100_000),
             crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            true,
         )
         .expect("budget suffix should render");
 
@@ -125,6 +156,7 @@ mod tests {
             Some(&usage),
             Some(100_000),
             crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            true,
         )
         .expect("budget suffix should render");
 
@@ -144,7 +176,8 @@ mod tests {
                 0,
                 Some(&usage),
                 None,
-                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY
+                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                true,
             )
             .is_none()
         );
@@ -159,7 +192,8 @@ mod tests {
                 0,
                 Some(&usage),
                 Some(200_000),
-                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY
+                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                true,
             )
             .is_none()
         );
