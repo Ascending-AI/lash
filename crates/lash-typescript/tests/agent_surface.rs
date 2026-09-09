@@ -718,7 +718,7 @@ fn sibling_receiver_branches_pin_regexp_and_unsupported_checks() {
 
     // Branch :775 — Unbound ECMA globals and unsupported methods on bound
     // receivers refuse with TS_METHOD_UNSUPPORTED, while unawaited tool
-    // operations refuse with TS_AWAIT_REQUIRED.
+    // operations create pending handles and require runtime consumption.
     let ecma_err = lash_typescript::compile("finish(Error.isError(new Error('x')));")
         .expect_err("ECMA static namespace method must refuse");
     assert_eq!(
@@ -733,26 +733,25 @@ fn sibling_receiver_branches_pin_regexp_and_unsupported_checks() {
         lash_typescript::DiagnosticCode::MethodUnsupported
     );
 
-    let unawaited_web = lash_typescript::parse("web.search({ query: 'x' });")
-        .expect_err("unawaited web.search must require await");
-    assert_eq!(
-        unawaited_web.code,
-        lash_typescript::DiagnosticCode::AwaitRequired
-    );
-
-    let unawaited_tools = lash_typescript::parse("tools.search({ query: 'x' });")
-        .expect_err("unawaited tools.search must require await");
-    assert_eq!(
-        unawaited_tools.code,
-        lash_typescript::DiagnosticCode::AwaitRequired
-    );
-
-    let unawaited_inbox = lash_typescript::parse("inbox.alpha.delete({ id: '1' });")
-        .expect_err("unawaited inbox.alpha.delete must require await");
-    assert_eq!(
-        unawaited_inbox.code,
-        lash_typescript::DiagnosticCode::AwaitRequired
-    );
+    // Expression-position tool calls create pending handles; abandonment is
+    // diagnosed at runtime, including through reserved-word property paths.
+    for source in [
+        "web.search({ query: 'x' });",
+        "tools.search({ query: 'x' });",
+        "inbox.alpha.delete({ id: '1' });",
+    ] {
+        let program = lash_typescript::compile(source).expect("pending tool compiles");
+        let error = futures::executor::block_on(lashlang::execute(
+            &program,
+            &mut State::new(),
+            &AggregateHost,
+        ))
+        .expect_err("unawaited handle");
+        assert!(
+            matches!(error, lashlang::RuntimeError::PendingTool { .. }),
+            "{source}: {error}"
+        );
+    }
 }
 
 struct AggregateHost;
@@ -2198,4 +2197,23 @@ fn typescript_host_catalog_composition_refuses_duplicate_operations() {
             ..
         }) if module == "tools" && operation == "lookup"
     ));
+}
+
+#[test]
+fn runtime_array_rejections_use_recorded_settlement_order() {
+    let environment = two_leaf_web_environment();
+    for array in [
+        "['a', 'b'].map(url => web.fetch({url}))",
+        "[web.fetch({url:'a'}), 42, web.fetch({url:'b'})]",
+    ] {
+        let source = format!("const pending = {array}; finish(await Promise.all(pending));");
+        let linked = lash_typescript::link(&source, &environment).expect("runtime array links");
+        let error = futures::executor::block_on(lashlang::execute(
+            &lash_typescript::compile_linked(&linked),
+            &mut State::new(),
+            &FirstSettledRejectionHost,
+        ))
+        .expect_err("both leaves reject");
+        assert!(error.to_string().contains("early-B"), "{source}: {error}");
+    }
 }

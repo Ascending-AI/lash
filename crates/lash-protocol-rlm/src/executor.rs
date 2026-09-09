@@ -1837,13 +1837,13 @@ mod tests {
             assert_eq!(
                 without_trace.call_id.as_deref(),
                 Some(
-                    "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:24074777f4d91617b7de1aaf:1"
+                    "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:4172d203d154f0c27912e87c:1"
                 )
             );
             assert_eq!(
                 with_trace.call_id.as_deref(),
                 Some(
-                    "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:24074777f4d91617b7de1aaf:1"
+                    "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:4172d203d154f0c27912e87c:1"
                 )
             );
 

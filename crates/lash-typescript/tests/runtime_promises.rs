@@ -81,6 +81,10 @@ fn abandoned_and_settled_handles_are_loud_errors() {
         "web.fetch({id:1});",
         "const p = web.fetch({id:1}); finish(42);",
         "await 42;",
+        "await (async () => { web.fetch({id:1}); })();",
+        "await Promise.all([1].map(async id => { web.fetch({id}); return id; }));",
+        "await Promise.all(42);",
+        "const p = web.fetch({id:1}); await p; await p;",
     ] {
         assert!(
             matches!(

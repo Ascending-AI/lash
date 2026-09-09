@@ -132,12 +132,7 @@ rejection_test!(rejects_unawaited_sleep, "sleep(1);", Code::AwaitRequired);
 
 #[test]
 fn await_permission_stops_at_nested_function_boundaries() {
-    let operations = [
-        "sleep(1)",
-        "waitSignal('ready')",
-        "registerTrigger({})",
-        "web.fetch({ url: 'https://example.test' })",
-    ];
+    let operations = ["sleep(1)", "waitSignal('ready')", "registerTrigger({})"];
     for operation in operations {
         for source in [
             format!("await (async () => {{ {operation}; }})();"),
