@@ -12,21 +12,23 @@
 //! the memory, SQLite and PostgreSQL backends with the shipped RLM plugin, not
 //! a test protocol.
 //!
-//! Two bounds on that rebuild are witnessed alongside: a storeless session
-//! keeps its accepted execution across a post-commit observer failure, and a
+//! Three bounds on that rebuild are witnessed alongside: a storeless session
+//! keeps its accepted execution across a post-commit observer failure, a
 //! rolled-back append leaves the next commit exactly as large as it would have
-//! been without the append.
+//! been without the append, and a turn rejected before its commit never hands
+//! its execution to the next ordinary turn (storeless and store-backed).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash_core::facade_support::{
     EmbeddedRuntimeHost, InMemorySessionStoreFactory, LashRuntime, NativeRuntimeEffectController,
-    PersistentRuntimeServices, PluginHost, PluginSession, RuntimeHostConfig,
+    PersistentRuntimeServices, PluginHost, PluginSession, PluginSpec, RuntimeHostConfig,
     SingleProviderResolver, TurnFinish, TurnOutcome,
 };
 use lash_core::plugin::{
     PluginFactory, PromptHookContext, RecordedSessionConfig, RuntimeServices, SessionStateService,
+    StaticPluginFactory,
 };
 use lash_core::store::{RuntimeCommitReceipt, RuntimePersistenceDecorator};
 use lash_core::{
@@ -197,8 +199,9 @@ async fn durable_globals(store: &FaultStore, name: &str) -> (Vec<String>, Option
     snapshot_globals(&state, name)
 }
 
-fn plugin_host() -> PluginHost {
-    PluginHost::new(vec![Arc::new(
+/// The RLM plugin plus any extra plugin factories.
+fn plugin_host_with_plugins(extra_plugins: &[Arc<dyn PluginFactory>]) -> PluginHost {
+    let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(
         RlmProtocolPluginFactory::new(
             RlmProtocolPluginConfig::builder()
                 .instruction_limit(InstructionBound::instructions(1_000_000))
@@ -208,7 +211,9 @@ fn plugin_host() -> PluginHost {
             Arc::new(crate::persistence::InMemoryLashlangArtifactStore::new()),
         )
         .with_process_lifecycle(false),
-    ) as Arc<dyn PluginFactory>])
+    )];
+    factories.extend(extra_plugins.iter().cloned());
+    PluginHost::new(factories)
 }
 
 /// Scripted provider: one response per call, in order; the last response
@@ -258,12 +263,13 @@ fn provider(
         .into_handle()
 }
 
-async fn open(
+async fn open_with_plugins(
     store: Arc<FaultStore>,
     script: Arc<Script>,
     state: RuntimeSessionState,
+    extra_plugins: &[Arc<dyn PluginFactory>],
 ) -> (LashRuntime, Arc<PluginSession>) {
-    let host = plugin_host();
+    let host = plugin_host_with_plugins(extra_plugins);
     let plugins = if let Some(snapshot) = state.plugin_state() {
         host.rematerialize_session(
             &state.session_id,
@@ -384,6 +390,17 @@ impl Backend {
     /// (`projected_original`), reopens it cold so the live plugin holds that
     /// seed on the session's only frame, and returns the reopened runtime.
     async fn seeded_session(&self, scenario: &str, script: Arc<Script>) -> SeededSession {
+        Box::pin(self.seeded_session_with_plugins(scenario, script, &[])).await
+    }
+
+    /// [`seeded_session`](Self::seeded_session) with extra plugin factories
+    /// materialized alongside the RLM plugin on both opens.
+    async fn seeded_session_with_plugins(
+        &self,
+        scenario: &str,
+        script: Arc<Script>,
+        extra_plugins: &[Arc<dyn PluginFactory>],
+    ) -> SeededSession {
         let session_id = format!(
             "fig2521-{scenario}-{}-{}",
             self.label,
@@ -414,7 +431,13 @@ impl Backend {
             .expect("rlm options"),
             ..RuntimeSessionState::new(policy())
         };
-        let (mut runtime, plugins) = open(Arc::clone(&store), Arc::clone(&script), initial).await;
+        let (mut runtime, plugins) = open_with_plugins(
+            Arc::clone(&store),
+            Arc::clone(&script),
+            initial,
+            extra_plugins,
+        )
+        .await;
         runtime
             .append_session_nodes(AppendSessionNodesRequest {
                 operation_id: "fig2521-seed".to_string(),
@@ -443,7 +466,8 @@ impl Backend {
             .await
             .expect("load")
             .expect("persisted state");
-        let (mut runtime, plugins) = open(Arc::clone(&store), script, durable).await;
+        let (mut runtime, plugins) =
+            open_with_plugins(Arc::clone(&store), script, durable, extra_plugins).await;
         let prompt = projected_prompt(&runtime, &plugins).await;
         assert_eq!(
             count(&prompt, "projected_original"),
@@ -984,11 +1008,29 @@ async fn committed_session(
     scenario: &str,
     responses: Vec<String>,
 ) -> SeededSession {
+    Box::pin(committed_session_with_plugins(
+        backend,
+        scenario,
+        responses,
+        &[],
+    ))
+    .await
+}
+
+/// [`committed_session`] with extra plugin factories materialized alongside
+/// the RLM plugin.
+async fn committed_session_with_plugins(
+    backend: &Backend,
+    scenario: &str,
+    responses: Vec<String>,
+    extra_plugins: &[Arc<dyn PluginFactory>],
+) -> SeededSession {
     let script = Arc::new(Script {
         responses,
         ..Script::default()
     });
-    let mut seeded = Box::pin(backend.seeded_session(scenario, script)).await;
+    let mut seeded =
+        Box::pin(backend.seeded_session_with_plugins(scenario, script, extra_plugins)).await;
     let frame = seeded
         .runtime
         .export_persistence_state()
@@ -1483,6 +1525,135 @@ async fn message_append_keeps_the_committed_execution(backend: Backend) {
         &turn(&mut runtime, "after-message").await,
         serde_json::json!("COMMITTED"),
     );
+}
+
+/// A plugin whose second `after_turn` hook refuses the turn: the first turn
+/// commits, the second turn's finalization fails before its commit, and the
+/// third turn runs.
+fn refuse_second_turn_finalize() -> Arc<dyn PluginFactory> {
+    let calls = Arc::new(AtomicUsize::new(0));
+    Arc::new(StaticPluginFactory::new(
+        "fig2521-refuse-second-finalize",
+        PluginSpec::new().with_after_turn(Arc::new(move |_| {
+            let calls = Arc::clone(&calls);
+            Box::pin(async move {
+                if calls.fetch_add(1, Ordering::SeqCst) == 1 {
+                    Err(lash_core::PluginError::Session(
+                        "injected pre-commit finalize failure".to_string(),
+                    ))
+                } else {
+                    Ok(Vec::new())
+                }
+            })
+        })),
+    ))
+}
+
+fn reassign_response() -> String {
+    lashlang_block("accumulated = \"REJECTED\"\nfinish accumulated")
+}
+
+/// Runs the rejected turn: the executor has already assigned `REJECTED` when
+/// the after-turn hook refuses finalization, so the turn returns an error
+/// without a commit.
+async fn rejected_reassignment(label: &str, runtime: &mut LashRuntime) {
+    let rejected = runtime
+        .run_turn_assembled(
+            TurnInput::text("reject-reassignment"),
+            tokio_util::sync::CancellationToken::new(),
+            turn_scope(runtime, "reject-reassignment"),
+        )
+        .await
+        .expect_err("the refused finalization fails the turn");
+    assert!(
+        rejected
+            .to_string()
+            .contains("injected pre-commit finalize failure"),
+        "{label}: {rejected:?}"
+    );
+}
+
+/// (g) Storeless: the accepted execution holds `COMMITTED`; the next turn
+/// assigns `REJECTED` and its after-turn hook refuses finalization before the
+/// commit. A rejected first physical turn invalidates the resident state
+/// exactly like a rejected follow-on turn, so the next ordinary turn rebuilds
+/// from the accepted execution and reads `COMMITTED`, not the rejected
+/// executor's `REJECTED`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_storeless_rejected_turn_does_not_reach_the_next_turn() {
+    let mut runtime = storeless_runtime(
+        vec![establish_response(), reassign_response(), read_response()],
+        vec![refuse_second_turn_finalize()],
+    )
+    .await;
+    assert_final_value(
+        "storeless",
+        &turn(&mut runtime, "establish").await,
+        serde_json::json!("COMMITTED"),
+    );
+    let accepted = runtime
+        .export_persistence_state()
+        .execution_state_hydration()
+        .expect("the accepted execution is retained, not refused")
+        .expect("the accepted execution is retained, not absent");
+
+    rejected_reassignment("storeless", &mut runtime).await;
+    assert_eq!(
+        runtime
+            .export_persistence_state()
+            .execution_state_hydration()
+            .expect("the accepted execution is still retained"),
+        Some(accepted),
+        "storeless: the rejected turn must not replace the accepted resident execution"
+    );
+
+    assert_final_value(
+        "storeless",
+        &turn(&mut runtime, "after-rejection").await,
+        serde_json::json!("COMMITTED"),
+    );
+}
+
+/// (g) store-backed: same shape as the storeless witness; the next ordinary
+/// turn after the rejected reassignment reads the durable head's `COMMITTED`.
+async fn rejected_turn_does_not_reach_the_next_turn(backend: Backend) {
+    let SeededSession {
+        mut runtime,
+        plugins,
+        ..
+    } = committed_session_with_plugins(
+        &backend,
+        "rejected-turn",
+        vec![establish_response(), reassign_response(), read_response()],
+        &[refuse_second_turn_finalize()],
+    )
+    .await;
+
+    rejected_reassignment(backend.label, &mut runtime).await;
+
+    assert_final_value(
+        backend.label,
+        &turn(&mut runtime, "after-rejection").await,
+        serde_json::json!("COMMITTED"),
+    );
+    drop(plugins);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_rejected_turn_does_not_reach_the_next_turn_on_memory() {
+    Box::pin(rejected_turn_does_not_reach_the_next_turn(Backend::memory())).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_rejected_turn_does_not_reach_the_next_turn_on_sqlite() {
+    Box::pin(rejected_turn_does_not_reach_the_next_turn(Backend::sqlite())).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_rejected_turn_does_not_reach_the_next_turn_on_postgres() {
+    if let Some(backend) = Backend::postgres().await {
+        Box::pin(rejected_turn_does_not_reach_the_next_turn(backend)).await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

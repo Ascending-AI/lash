@@ -285,6 +285,13 @@ impl LashRuntime {
                 // was live are pinned to a turn id no later turn will ever carry
                 // again, so the teardown owes them the same repair. Both ids are
                 // dead by construction here, which keeps the live-turn hazard out.
+                //
+                // The rejected turn may have mutated the live execution before
+                // it failed (an after-turn hook refusing finalization runs after
+                // the executor already applied the turn), so the resident state
+                // is invalidated exactly like a rejected follow-on turn's: the
+                // next use reloads from the accepted snapshot instead of running
+                // the executor this turn dirtied.
                 Err(err) if turns.is_empty() => {
                     self.defer_orphaned_turn_inputs_after_teardown(
                         &turn_trace_turn_id,
@@ -294,6 +301,7 @@ impl LashRuntime {
                             .as_ref(),
                     )
                     .await;
+                    self.invalidate_resident_session_state();
                     return Err(err);
                 }
                 Err(err) => {
