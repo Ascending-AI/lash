@@ -419,43 +419,8 @@ fn push_process_language_bullets(
     }
 }
 
-fn label_annotations_language_bullet(abilities: &lashlang::LashlangAbilities) -> String {
-    let declaration = if abilities.processes {
-        " or process declaration"
-    } else {
-        ""
-    };
-    let targets = if abilities.processes {
-        "branches, loops, or process declarations"
-    } else {
-        "branches, and loops"
-    };
-    let mut process = String::new();
-    if abilities.processes {
-        let mut steps = vec!["awaited module calls", "`start`"];
-        if abilities.sleep {
-            steps.push("`sleep`");
-        }
-        if abilities.process_signals {
-            steps.extend(["`wait_signal`", "`signal_run`"]);
-        }
-        steps.extend([
-            "`wake`",
-            "`yield`",
-            "`finish`",
-            "`fail`",
-            "`if`",
-            "loops",
-            "and setup statements that explain the process",
-        ]);
-        process = format!(
-            " Inside a `process` body, label durable steps such as {}.",
-            steps.join(", ")
-        );
-    }
-    format!(
-        "- Execution labels: `@label(title: \"Label\")` or `@label(title: \"Label\", description: \"Details\")` names important Lashlang phases and graph steps. It is a prefix annotation, not a standalone statement; it must appear immediately before the one statement{declaration} it labels, e.g. `@label(title: \"Prepare query\")\\nquery = \"runtime architecture\"`. Do not emit `@label(...)` by itself or stack multiple labels before one statement. At top level, label meaningful setup, resource calls, submissions, {targets}.{process} Titles/descriptions must be string literals; do not use variables, interpolation, icons, colors, layout hints, or extra keys."
-    )
+fn label_annotations_language_bullet(_abilities: &lashlang::LashlangAbilities) -> String {
+    r#"- `@label(title: "…")` (optional `description: "…"`) goes on the line before the one top-level statement it names: setup, tool calls, submissions, branches, loops. String literals only; never standalone or stacked."#.to_string()
 }
 
 fn trigger_registry_language_bullet() -> String {

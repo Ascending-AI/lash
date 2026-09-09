@@ -21,8 +21,8 @@ use crate::driver::SharedPromptUsage;
 use crate::executor::RlmLashlangExecutionTraceConfig;
 use crate::projection::{ProjectionRegistry, ProjectionResolver};
 
-/// Apply the RLM protocol config transformation: enable label annotations, and
-/// (when process lifecycle is available) the process/sleep/signal abilities.
+/// Enable process/sleep/signal abilities when process lifecycle is available.
+/// Language features remain exactly as declared by the host.
 ///
 /// This is protocol logic; it lives here rather than in the facade because both
 /// the plugin surface and the contributed Lashlang process engine derive from
@@ -31,8 +31,7 @@ pub fn rlm_protocol_config(
     config: RlmProtocolPluginConfig,
     process_lifecycle: bool,
 ) -> RlmProtocolPluginConfig {
-    let language_features = config.lashlang_language_features.with_label_annotations();
-    let mut config = config.with_lashlang_language_features(language_features);
+    let mut config = config;
     if process_lifecycle {
         config.lashlang_abilities = config
             .lashlang_abilities
@@ -433,5 +432,23 @@ impl SessionPlugin for RlmProtocolPlugin {
             Arc::clone(&self.dialect),
             Arc::clone(&self.last_prompt_usage),
         )
+    }
+}
+
+#[cfg(test)]
+mod label_config_tests {
+    use super::*;
+    #[test]
+    fn host_owns_label_annotations_in_the_plugin_prompt() {
+        assert!(!super::super::RlmLanguageFeatures::default().label_annotations);
+        for enabled in [false, true] {
+            let mut config = RlmProtocolPluginConfig::default();
+            config.lashlang_language_features.label_annotations = enabled;
+            let config = rlm_protocol_config(config, false);
+            let dialect = LashlangDialect::prompt_only(rlm_lashlang_surface(&config, false));
+            let prompt = dialect.render_execution_section(Default::default(), &Default::default()).unwrap();
+            assert_eq!(prompt.contains("@label"), enabled);
+            if enabled { assert!(prompt.contains("String literals only; never standalone or stacked.")); }
+        }
     }
 }
