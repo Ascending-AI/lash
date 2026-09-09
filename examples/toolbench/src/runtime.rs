@@ -11,6 +11,7 @@ use crate::grading::RunEvidence;
 use crate::tasks::Task;
 use crate::world::{SharedWorld, World};
 
+#[tracing::instrument(name = "task", skip_all, fields(model = model, task = task.id, repetition = run, channel = channel.name(), dialect = if channel == crate::ChannelSelection::Standard { "none" } else { dialect.language_id() }))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_task(
     task: &Task,
@@ -21,6 +22,7 @@ pub(crate) async fn run_task(
     channel: crate::ChannelSelection,
     effort: crate::ReasoningEffort,
     turn_wall_limit_secs: u64,
+    provider_retries: u32,
 ) -> (World, RunEvidence) {
     let started = std::time::Instant::now();
     // Every run owns its world, telemetry, provider and in-memory stores. No
@@ -30,11 +32,20 @@ pub(crate) async fn run_task(
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(turn_wall_limit_secs),
         run_turn(
-            task, dialect, model, api_key, run, channel, effort, &world, &telemetry,
+            task,
+            dialect,
+            model,
+            api_key,
+            run,
+            channel,
+            effort,
+            &world,
+            &telemetry,
+            provider_retries,
         ),
     )
     .await;
-    let (completed, completion_error, finish_value, decisions) = match result {
+    let (completed, completion_error, finish_value, decisions, turn_outcome) = match result {
         Ok(Ok((output, decisions))) => (
             output.is_success(),
             (!output.is_success()).then(|| format!("turn outcome: {:?}", output.result.outcome)),
@@ -44,22 +55,31 @@ pub(crate) async fn run_task(
                 output.final_value().cloned()
             },
             decisions,
+            Some(format!("{:?}", output.result.outcome)),
         ),
         Ok(Err(error)) => (
             false,
             Some(format!("{error:#}")),
             world.submissions().first().cloned(),
             Vec::new(),
+            None,
         ),
         Err(_) => (
             false,
             Some("wall_limit".into()),
             world.submissions().first().cloned(),
             Vec::new(),
+            None,
         ),
     };
     let activities = telemetry.activities();
     let attempts = telemetry.rows(&decisions, channel == crate::ChannelSelection::Standard);
+    let retries = attempts
+        .iter()
+        .filter(|row| row["is_retry"] == true)
+        .count();
+    let error = attempts.iter().rev().find_map(|row| row.get("error").filter(|e| !e.is_null()).cloned())
+        .or_else(|| completion_error.as_ref().map(|message| serde_json::json!({"kind":"turn_failure", "message":message, "status":null, "body_excerpt":null, "provider_request_id":null, "provider_response_id":null, "retry_after":null})));
     let iterations = activities
         .iter()
         .filter_map(|activity| match activity.event {
@@ -99,6 +119,10 @@ pub(crate) async fn run_task(
             standard: channel == crate::ChannelSelection::Standard,
             rounds: attempts.len(),
             submit_count: telemetry.submit_count(),
+            submit_values: telemetry.submit_values(),
+            retries,
+            turn_outcome,
+            error,
             attempts,
             wall_ms: started.elapsed().as_millis(),
             completed,
@@ -123,15 +147,23 @@ async fn run_turn(
     effort: crate::ReasoningEffort,
     world: &SharedWorld,
     telemetry: &Arc<crate::telemetry::Telemetry>,
+    provider_retries: u32,
 ) -> Result<(lash::TurnOutput, Vec<String>)> {
     let provider = ProviderHandle::new(
-        OpenAiCompatibleProvider::new(api_key.to_string(), OPENROUTER_BASE_URL)
-            .with_compat(OpenAiCompat::openrouter())
-            .with_options(ProviderOptions {
-                expose_thinking: true,
-                ..ProviderOptions::default()
-            })
-            .into_components(),
+        telemetry.capture.wrap(
+            OpenAiCompatibleProvider::new(api_key.to_string(), OPENROUTER_BASE_URL)
+                .with_compat(OpenAiCompat::openrouter())
+                .with_options(ProviderOptions {
+                    expose_thinking: true,
+                    reliability: lash::provider::ProviderReliability {
+                        retry: crate::provider_log::retry_policy(provider_retries),
+                        ..Default::default()
+                    },
+                    ..ProviderOptions::default()
+                })
+                .into_components(),
+            api_key,
+        ),
     );
     let budget = if task.id.starts_with("__") {
         lash::TurnBudget::bounded(1)
@@ -253,6 +285,7 @@ pub(crate) async fn preflight(
     channel: crate::ChannelSelection,
     effort: crate::ReasoningEffort,
     turn_wall_limit_secs: u64,
+    provider_retries: u32,
 ) -> Result<(), String> {
     let mut probe = task.clone();
     probe.id = "__native_probe";
@@ -274,6 +307,7 @@ pub(crate) async fn preflight(
             channel,
             effort,
             turn_wall_limit_secs,
+            provider_retries,
         )
         .await;
         if crate::grading::grade(&probe, &probe.seed, &evidence, f64::INFINITY).passed

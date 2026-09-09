@@ -5,12 +5,14 @@ use std::sync::{Arc, Mutex};
 #[derive(Default)]
 pub(crate) struct Telemetry {
     activities: Mutex<Vec<TurnActivity>>,
-    costs: Mutex<Vec<Option<Value>>>,
+    pub(crate) capture: crate::provider_log::Capture,
+    submit_values: Mutex<Vec<Option<Value>>>,
     submit_calls: std::sync::atomic::AtomicUsize,
 }
 #[async_trait::async_trait]
 impl TurnActivitySink for Telemetry {
     async fn emit(&self, activity: TurnActivity) {
+        tracing::debug!(target: "toolbench", parent: &self.capture.span(), activity = %self.capture.redact(serde_json::to_value(&activity).expect("activity serializes")), "turn activity");
         self.activities
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -23,9 +25,38 @@ impl Telemetry {
     }
 
     fn record_submits(&self, parts: &[lash::direct::LlmOutputPart]) {
-        let count = parts.iter().filter(|part| matches!(part, lash::direct::LlmOutputPart::ToolCall { tool_name, .. } if tool_name == "submit")).count();
+        let values = parts
+            .iter()
+            .filter_map(|part| {
+                if let lash::direct::LlmOutputPart::ToolCall {
+                    tool_name,
+                    input_json,
+                    ..
+                } = part
+                    && tool_name == "submit"
+                {
+                    Some(
+                        serde_json::from_str::<Value>(input_json)
+                            .ok()
+                            .and_then(|args| args.get("value").cloned()),
+                    )
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
         self.submit_calls
-            .fetch_add(count, std::sync::atomic::Ordering::Relaxed);
+            .fetch_add(values.len(), std::sync::atomic::Ordering::Relaxed);
+        self.submit_values
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend(values);
+    }
+    pub(crate) fn submit_values(&self) -> Vec<Option<Value>> {
+        self.submit_values
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub(crate) fn activities(&self) -> Vec<TurnActivity> {
@@ -42,18 +73,6 @@ impl Telemetry {
                 let telemetry = Arc::clone(&telemetry);
                 Box::pin(async move {
                     telemetry.record_submits(&ctx.response.parts);
-                    let cost = ctx
-                        .response
-                        .provider_usage
-                        .as_ref()
-                        .and_then(|usage| usage.get("cost"))
-                        .filter(|value| value.is_number())
-                        .cloned();
-                    telemetry
-                        .costs
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner())
-                        .push(cost);
                     Ok(lash::plugins::AssistantResponseTransform {
                         response: ctx.response,
                         events: Vec::new(),
@@ -63,7 +82,7 @@ impl Telemetry {
         ))
     }
     pub(crate) fn rows(&self, decisions: &[String], standard: bool) -> Vec<Value> {
-        let costs = self.costs.lock().unwrap_or_else(|error| error.into_inner());
+        let captured = self.capture.rows();
         let activities = self.activities();
         let calls = activities
             .iter()
@@ -80,7 +99,8 @@ impl Telemetry {
                 .get(index + 1)
                 .map_or(activities.len(), |(offset, _)| *offset);
             let execution = execution_fields(&activities[offset + 1..end], standard);
-            for attempt in &record.attempts {
+            for (attempt_offset, attempt) in record.attempts.iter().enumerate() {
+                let transport = captured.get(rows.len());
                 let completed =
                     matches!(attempt.outcome, lash::provider::AttemptOutcome::Completed);
                 let mut row = serde_json::json!({
@@ -88,7 +108,18 @@ impl Telemetry {
                     "decision": if completed { decisions.get(response_index).map(String::as_str).unwrap_or(if standard { "standard_tools_or_prose" } else { "empty_or_unclassified" }) } else { "transport_retry_or_failure" },
                     "tokens":attempt.usage.as_ref().map(|usage| serde_json::json!({"input":usage.input_tokens,"output":usage.output_tokens,"cache_read":usage.cache_read_input_tokens,"cache_write":usage.cache_write_input_tokens})),
                     "wall_ms":attempt.duration.as_millis(),
-                    "cost": if completed { costs.get(response_index).cloned().flatten() } else { None },
+                    "cost": transport.map(|r| r["cost"].clone()).unwrap_or_else(|| serde_json::json!(0)),
+                    "request_ms":transport.and_then(|r| r.get("request_ms")),
+                    "retry_decision":attempt.retry_decision, "protocol_position":attempt.protocol_position,
+                    "retry_budget_consumed":attempt.retry_budget_consumed,
+                    "retries":attempt_offset, "is_retry":attempt_offset > 0,
+                    "error": transport.and_then(|r| r.get("error")).filter(|e| !e.is_null()).cloned().or_else(|| {
+                        if completed { None } else {
+                            let e = attempt.error.as_ref();
+                            Some(serde_json::json!({"kind":e.map(|e| e.class.as_str()).unwrap_or("provider_failure"), "status":e.and_then(|e| e.http_status), "message":e.and_then(|e| e.diagnostic.as_deref()).map(str::to_owned).unwrap_or_else(|| format!("{:?}",attempt.outcome)), "body_excerpt":e.and_then(|e| e.diagnostic.as_deref()), "provider_request_id":e.and_then(|e| e.provider_request_id.as_deref()), "provider_response_id":attempt.evidence.as_ref().and_then(|e| e.provider_response_id.as_deref()), "retry_after":e.and_then(|e| e.retry_after)}))
+                        }
+                    }),
+                    "normalized_error":attempt.error,
                     "evidence":attempt.evidence, "outcome":attempt.outcome,
                 });
                 row["cost_unknown"] = row["cost"].is_null().into();
@@ -107,25 +138,35 @@ impl Telemetry {
             }
         }
         if has_unsealed_request(&activities) {
-            // Cancellation can drop the provider future before its ledger is
-            // sealed. Preserve the unknown attempt instead of presenting the
-            // preceding calls' partial token/cost totals as a complete bill.
-            let mut row = serde_json::json!({
-                "call_index": calls.len(), "attempt_index": null,
-                "decision": "interrupted_provider_call", "tokens": null,
-                "wall_ms": null, "cost": null, "cost_unknown": true,
-                "evidence": null, "outcome": "interrupted",
-            });
-            row.as_object_mut().expect("attempt object").extend(
-                execution_fields(&[], standard)
-                    .as_object()
-                    .expect("execution object")
-                    .clone(),
-            );
-            rows.push(row);
+            // A deadline may interrupt a request OR the backoff between requests.
+            // Preserve every transport invocation already observed, with costs,
+            // even though Lash has not returned the logical call's ledger yet.
+            let unsealed = &captured[rows.len().min(captured.len())..];
+            for (offset, transport) in unsealed.iter().enumerate() {
+                let mut row = serde_json::json!({
+                    "call_index":calls.len(), "attempt_index":offset + 1,
+                    "decision":"unsealed_provider_call", "tokens":transport["response"].get("usage").map(|u| serde_json::json!({"input":u["input_tokens"],"output":u["output_tokens"],"cache_read":u["cache_read_input_tokens"],"cache_write":u["cache_write_input_tokens"]})),
+                    "request_ms":transport["request_ms"], "wall_ms":null,
+                    "cost":transport["cost"], "cost_unknown":transport["cost"].is_null(),
+                    "evidence":transport["response"]["execution_evidence"], "outcome":"interrupted",
+                    "error":transport["error"].as_object().map(|e| Value::Object(e.clone())).unwrap_or_else(interrupted_error),
+                    "retry_decision":null, "retry_decision_unavailable":"call interrupted before ledger sealed",
+                    "retries":offset, "is_retry":offset > 0,
+                });
+                row.as_object_mut()
+                    .unwrap()
+                    .extend(execution_fields(&[], standard).as_object().unwrap().clone());
+                rows.push(row);
+            }
         }
-        rows
+        rows.into_iter()
+            .map(|row| self.capture.redact(row))
+            .collect()
     }
+}
+
+fn interrupted_error() -> Value {
+    serde_json::json!({"kind":"interrupted", "status":null, "message":"provider call interrupted before ledger sealed", "body_excerpt":null,"provider_request_id":null,"provider_response_id":null,"retry_after":null})
 }
 
 fn has_unsealed_request(activities: &[TurnActivity]) -> bool {
@@ -262,6 +303,12 @@ mod tests {
             .push(activity(TurnEvent::ModelRequestStarted {
                 protocol_iteration: 1,
             }));
+        telemetry
+            .capture
+            .entries
+            .lock()
+            .unwrap()
+            .push(serde_json::json!({"cost":null}));
         let rows = telemetry.rows(&[], false);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["outcome"], "interrupted");

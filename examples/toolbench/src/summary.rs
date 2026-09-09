@@ -35,7 +35,7 @@ impl Usage {
 }
 fn complete_cost(costs: impl Iterator<Item = Option<f64>>) -> Option<f64> {
     let values = costs.collect::<Option<Vec<_>>>()?;
-    (!values.is_empty()).then(|| values.iter().sum())
+    Some(values.iter().sum())
 }
 
 #[derive(Debug, Serialize)]
@@ -47,6 +47,7 @@ pub(crate) struct Summary {
     passed: usize,
     rows: usize,
     rounds: usize,
+    retries: usize,
     executions: usize,
     failed_exec_iterations: usize,
     tool_call_count: usize,
@@ -98,6 +99,7 @@ pub(crate) fn aggregate(results: &[TaskResult]) -> Vec<Summary> {
                 passed: rows.iter().filter(|row| row.passed).count(),
                 rows: rows.len(),
                 rounds: rows.iter().map(|row| row.rounds).sum(),
+                retries: rows.iter().map(|row| row.retries).sum(),
                 executions: rows.iter().map(|row| row.executions).sum(),
                 failed_exec_iterations: rows.iter().map(|row| row.failed_exec_iterations).sum(),
                 tool_call_count: rows.iter().map(|row| row.tool_call_count).sum(),
@@ -150,16 +152,16 @@ pub(crate) fn markdown(summaries: &[Summary]) -> String {
             rows[0].reasoning_effort.name()
         )
         .unwrap();
-        writeln!(out, "| Cohort | Pass/rows | Input | Output | Cache read | Cache write | Cost USD | Wall total s | Wall median s | Tokens/task | Cost/task USD | Executions | Failed exec | Host calls | Expected N | Matched N | Rounds | Cost unknown |").unwrap();
+        writeln!(out, "| Cohort | Pass/rows | Input | Output | Cache read | Cache write | Cost USD | Wall total s | Wall median s | Tokens/task | Cost/task USD | Executions | Failed exec | Host calls | Expected N | Matched N | Rounds | Retries | Cost unknown |").unwrap();
         writeln!(
             out,
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
         )
         .unwrap();
         for row in &rows {
             writeln!(
                 out,
-                "| {}/{} | {}/{} | {} | {} | {} | {} | {} | {:.3} | {:.3} | {:.1} | {} | {} | {} | {} | {} | {:.1}% | {} | {} |",
+                "| {}/{} | {}/{} | {} | {} | {} | {} | {} | {:.3} | {:.3} | {:.1} | {} | {} | {} | {} | {} | {:.1}% | {} | {} | {} |",
                 row.channel,
                 row.dialect,
                 row.passed,
@@ -173,7 +175,7 @@ pub(crate) fn markdown(summaries: &[Summary]) -> String {
                 row.wall_median_s,
                 row.tokens_per_task,
                 money(row.cost_per_task),
-                row.executions, row.failed_exec_iterations, row.tool_call_count, row.expected_tool_call_count, row.matched_tool_call_percent, row.rounds, row.cost_unknown
+                row.executions, row.failed_exec_iterations, row.tool_call_count, row.expected_tool_call_count, row.matched_tool_call_percent, row.rounds, row.retries, row.cost_unknown
             )
             .unwrap();
         }
@@ -248,6 +250,11 @@ mod tests {
             turn_wall_limit_secs: 120,
             tool_call_count: 1,
             submit_count: 1,
+            submit_values: vec![Some(json!(1))],
+            retries: 1,
+            provider_attempts: 2,
+            turn_outcome: None,
+            error: None,
             failed_exec_iterations: 0,
             finish_value: Some(json!(1)),
             seed: crate::world::World::seeded(),
@@ -266,6 +273,9 @@ mod tests {
             (300, 30, 100)
         );
         assert_eq!(summary.usage.cost, Some(0.06));
+        assert_eq!(summary.retries, 2);
+        assert!(markdown(&[summary]).contains("| Retries |"));
+        let summary = aggregate(&rows).remove(0);
         assert_eq!(
             (
                 summary.wall_total_s,
@@ -282,7 +292,7 @@ mod tests {
         assert_eq!(aggregate(&rows)[0].matched_tool_call_percent, 50.0);
         assert_eq!(aggregate(&rows)[0].usage.cost, None);
         assert!(markdown(&aggregate(&rows)).contains("n/a"));
-        assert_eq!(Usage::from_attempts(&[]).cost, None);
+        assert_eq!(Usage::from_attempts(&[]).cost, Some(0.0));
         assert_eq!(
             Usage::from_attempts(&[json!({"cost":1}), json!({})]).cost,
             None

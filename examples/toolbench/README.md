@@ -52,13 +52,15 @@ ordinary underscore-separated tool names.
 
 Standard adds `submit`, requiring `{"value": <any JSON>}`. Its handler records
 the value and returns `ToolControl::Finish`, so no later model output is needed
-or graded. Multiple submits in a response batch are counted before argument/ID validation
-and fail with `repeated submit`; the first submitted value remains the graded
-value.
+or graded. Submits are counted before argument/ID validation; their values are
+recorded in `submit_values`. Malformed arguments are tracked internally and
+never count as identical valid submissions. Identical
+repeated values count as one submission for grading. Differing values or malformed
+duplicates fail with `conflicting submits`; the first executed value is graded.
 
 The common grader checks the finish matchers (including Numeric), exact world
 equality, and task completion with a finish value.
-Standard must submit exactly once. Execution counts, failures, repeated errors,
+Standard must submit at least once with a consistent value. Execution counts, failures, repeated errors,
 host call counts and provider round-trips are metrics only.
 
 `--max-task-cost-usd` defaults to **0.10**. The grader compares this ceiling
@@ -109,3 +111,49 @@ elapsed duration of concurrent execution.
 Keep new tasks small: one to three host calls and at most three prompt sentences.
 Validate every channel/dialect against a 30-second target before adding a task. Cohort runs should run concurrently
 across models with an approximately one-hour external wall budget.
+
+## Provider logs and retries
+
+`--provider-retries N` defaults to 3: at most four transport attempts per
+provider round, with Lash's `ProviderRetryPolicy`. Backoff starts at 1 second,
+doubles to a 10-second cap, and adds up to 500 ms jitter. Retry-After is honored
+up to 60 seconds; longer delays are refused. Throttle courtesy attempts are
+disabled so N remains a strict retry bound. The 120-second outer task deadline
+still applies across requests and backoffs; the adapter's default request timeout
+is 300 seconds. There is no whole-task retry and no change to world grading.
+
+Lash decides whether a failure is retryable and charge-safe. Transient transport
+errors and throttles can retry; 400/422 request-shape errors never retry.
+The adapter can refuse malformed/empty responses or other errors, and Lash can
+refuse retries after a response/output was observed without an idempotency
+or resume guarantee. Toolbench preserves these verdicts instead of overriding
+them. Each attempt includes `retry_decision` (scheduled, delay, reason,
+charge_safety), adapter/classifier verdicts, protocol position and normalized
+error. `retries` on an attempt is its retry ordinal; task and summary `retries`
+count actual additional provider invocations, not scheduled sleeps.
+
+`--trace-log PATH` defaults to `<results-file>.trace.log`. A file-only tracing
+subscriber records Lash debug events and structured provider request/response
+pairs, with model, task, repetition, channel and dialect span context. `RUST_LOG`
+overrides `lash=debug,lash_core=debug,lash_provider_openai=debug,toolbench=debug`.
+Requests in these pairs are facade semantic requests; response evidence also
+includes the adapter's wire `request_body`. Stderr remains free of tracing output.
+
+Every failed attempt has an error object. Transport evidence includes status,
+message, raw body, headers, request id, response id, retry-after, partial response,
+classification and adapter verdict. `body_excerpt` is capped at 2,000 characters;
+`raw` preserves the facade's entire exposed body (the adapter already bounds
+non-2xx bodies to 4,096 bytes). Request bodies are capped at 4,096 UTF-8 bytes.
+Authorization, cookies, credential fields and the configured key are redacted.
+Normalized diagnostics remain available as a fallback (upstream caps them at
+1,024 characters). Non-completed turns carry their Debug `turn_outcome` when a
+turn result exists, plus the last error; a harness exception/deadline has no
+TurnOutcome and records null with its explicit error instead.
+
+All attempts, including failures with partial responses, contribute their
+reported costs, including `usage.cost` from a raw final response chunk when
+the adapter omits the partial response. A run with no provider invocations costs zero; an actual call
+with unavailable cost stays unknown. If cancellation interrupts a backoff, the
+row retains observed calls and their partial costs even though Lash has not
+sealed the call ledger. Such rows explicitly mark the retry decision unavailable.
+Summary tables include Retries. Probe calls remain outside cohort cost totals.

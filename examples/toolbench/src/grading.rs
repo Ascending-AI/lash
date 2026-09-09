@@ -9,6 +9,10 @@ pub(crate) struct RunEvidence {
     pub(crate) standard: bool,
     pub(crate) rounds: usize,
     pub(crate) submit_count: usize,
+    pub(crate) submit_values: Vec<Option<Value>>,
+    pub(crate) retries: usize,
+    pub(crate) turn_outcome: Option<String>,
+    pub(crate) error: Option<Value>,
     pub(crate) attempts: Vec<serde_json::Value>,
     pub(crate) wall_ms: u128,
     pub(crate) completed: bool,
@@ -72,8 +76,14 @@ pub(crate) fn grade(
         failures.push("cost_limit".to_string());
     }
     if evidence.standard {
-        if evidence.submit_count > 1 {
-            failures.push("repeated submit".to_string());
+        if evidence.submit_count > 1
+            && (evidence.submit_values.len() != evidence.submit_count
+                || evidence
+                    .submit_values
+                    .iter()
+                    .any(|v| v.is_none() || v != &evidence.finish_value))
+        {
+            failures.push("conflicting submits".to_string());
         } else if evidence.submit_count == 0 {
             failures.push("missing submit".to_string());
         }
@@ -176,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn standard_requires_exactly_one_submit() {
+    fn standard_accepts_identical_submits_and_rejects_conflicts() {
         let task = fixture();
         let mut evidence = passing_evidence();
         evidence.standard = true;
@@ -184,6 +194,16 @@ mod tests {
             evidence.submit_count = count;
             assert!(!grade(&task, &task.expected_world, &evidence, 0.10).passed);
         }
+        evidence.submit_count = 2;
+        evidence.submit_values = vec![Some(json!("saved")); 2];
+        assert!(grade(&task, &task.expected_world, &evidence, 0.10).passed);
+        evidence.submit_values[1] = Some(json!("other"));
+        assert_eq!(
+            grade(&task, &task.expected_world, &evidence, 0.10)
+                .failure_reason
+                .as_deref(),
+            Some("conflicting submits")
+        );
         evidence.submit_count = 1;
         assert!(grade(&task, &task.expected_world, &evidence, 0.10).passed);
     }
