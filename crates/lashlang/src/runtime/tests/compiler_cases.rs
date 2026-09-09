@@ -1876,3 +1876,433 @@ async fn json_helpers_cover_special_paths() {
     let record = value.as_record().expect("expected record");
     assert!(matches!(record["a"], Value::List(_)));
 }
+
+/// Records every host ability a comprehension-await program performs: one
+/// entry per batch (its operations, in order) and a count of single calls.
+#[derive(Default)]
+struct ComprehensionBatchHost {
+    batches: Mutex<Vec<Vec<String>>>,
+    singles: AtomicUsize,
+}
+
+impl ComprehensionBatchHost {
+    fn perform_operation(operation: ResourceOperation) -> Result<Value, ExecutionHostError> {
+        match operation.operation.as_str() {
+            "order" => {
+                let id = operation
+                    .args
+                    .first()
+                    .and_then(Value::as_record)
+                    .and_then(|record| record.get("id"))
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let mut record = Record::new();
+                record.insert("id".to_string(), id);
+                record.insert("status".to_string(), Value::String("shipped".into()));
+                Ok(Value::Record(Arc::new(record)))
+            }
+            "err" => Err(ExecutionHostError::new(format!(
+                "boom {}",
+                Self::describe(&operation)
+            ))),
+            "maybe_err" => {
+                if Self::describe(&operation) == "maybe_err:b" {
+                    Err(ExecutionHostError::new("failed order b"))
+                } else {
+                    Ok(Value::Null)
+                }
+            }
+            _ => Host::perform_resource_operation(operation),
+        }
+    }
+
+    fn describe(operation: &ResourceOperation) -> String {
+        let arg = operation
+            .args
+            .first()
+            .and_then(Value::as_record)
+            .and_then(|record| record.get("value").or_else(|| record.get("id")))
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+        format!("{}:{arg}", operation.operation)
+    }
+
+    fn batches(&self) -> Vec<Vec<String>> {
+        self.batches.lock_recover().clone()
+    }
+}
+
+impl ExecutionHost for ComprehensionBatchHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::ResourceOperation(operation) => {
+                self.singles.fetch_add(1, Ordering::SeqCst);
+                Self::perform_operation(operation).map(AbilityResult::Value)
+            }
+            AbilityOp::ResourceOperationBatch(batch) => {
+                self.batches
+                    .lock_recover()
+                    .push(batch.operations.iter().map(Self::describe).collect());
+                // Deliberately settle in reverse order: Lashlang must still
+                // select its rejection in written order.
+                let mut results =
+                    vec![ResourceOperationResult::Value(Value::Null); batch.operations.len()];
+                let mut settlement_order = Vec::with_capacity(results.len());
+                for (index, operation) in batch.operations.into_iter().enumerate().rev() {
+                    results[index] =
+                        ResourceOperationResult::from_result(Self::perform_operation(operation));
+                    settlement_order.push(index);
+                }
+                Ok(AbilityResult::ResourceOperationBatch(
+                    ResourceOperationBatchResult {
+                        results,
+                        settlement_order,
+                    },
+                ))
+            }
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            other => Err(ExecutionHostError::new(format!(
+                "unexpected host ability in comprehension await test: {other:?}"
+            ))),
+        }
+    }
+}
+
+fn comprehension_compile(source: &str) -> CompiledProgram {
+    let mut catalog = crate::LashlangHostCatalog::new();
+    for (module, operation) in [
+        ("tools", "echo"),
+        ("tools", "err"),
+        ("tools", "maybe_err"),
+        ("retail", "order"),
+    ] {
+        catalog
+            .add_module_operation(
+                [module],
+                module,
+                operation,
+                operation,
+                crate::TypeExpr::Any,
+                crate::TypeExpr::Any,
+            )
+            .unwrap();
+    }
+    let linked = crate::LinkedModule::link(
+        crate::parse(source).expect("program should parse"),
+        crate::LashlangHostEnvironment::new(catalog, crate::LashlangAbilities::all()),
+    )
+    .expect("program should link");
+    crate::compile_linked(&linked)
+}
+
+async fn comprehension_finish(host: &ComprehensionBatchHost, source: &str) -> Value {
+    let compiled = comprehension_compile(source);
+    let mut state = State::new();
+    match execute_compiled(&compiled, &mut state, host)
+        .await
+        .expect("program should run")
+    {
+        ExecutionOutcome::Finished(value) => value,
+        other => panic!("expected finish, got {other:?}"),
+    }
+}
+
+fn strings(items: &[&str]) -> Value {
+    Value::List(
+        items
+            .iter()
+            .map(|item| Value::String((*item).into()))
+            .collect::<Vec<_>>()
+            .into(),
+    )
+}
+
+#[test]
+fn comprehension_await_of_calls_compiles_to_one_comprehension_batch() {
+    let compiled = compile_source(
+        r#"
+        xs = ["a", "b"]
+        result = await [tools.echo({ value: x })? for x in xs]
+        finish result
+        "#,
+    )
+    .expect("program should compile");
+    let listing = compiled_instruction_listing(&compiled);
+    assert_eq!(
+        compiled
+            .chunk
+            .code
+            .iter()
+            .filter(|instruction| matches!(
+                instruction,
+                Instruction::ResourceOperationComprehensionBatch(_)
+            ))
+            .count(),
+        1,
+        "comprehension await should compile to one comprehension batch:\n{listing}"
+    );
+    assert!(
+        !compiled.chunk.code.iter().any(|instruction| matches!(
+            instruction,
+            Instruction::ResourceCall { .. }
+                | Instruction::ResourceCallUnwrap { .. }
+                | Instruction::ResourceOperationBatch(_)
+                | Instruction::AwaitHandle
+                | Instruction::AwaitHandleUnwrap
+        )),
+        "comprehension await should neither call sequentially nor await handles:\n{listing}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn comprehension_await_of_unwrapped_calls_settles_one_batch_and_unwraps() {
+    let host = ComprehensionBatchHost::default();
+    let value = comprehension_finish(
+        &host,
+        r#"
+        xs = ["a", "b", "c"]
+        result = await [tools.echo({ value: x })? for x in xs]
+        finish result
+        "#,
+    )
+    .await;
+    assert_eq!(value, strings(&["a", "b", "c"]));
+    assert_eq!(
+        host.batches(),
+        vec![vec![
+            "echo:a".to_string(),
+            "echo:b".to_string(),
+            "echo:c".to_string()
+        ]],
+        "every element settles in one host batch"
+    );
+    assert_eq!(host.singles.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn comprehension_await_of_calls_returns_result_records() {
+    let host = ComprehensionBatchHost::default();
+    let value = comprehension_finish(
+        &host,
+        r#"
+        result = await [tools.echo({ value: x }) for x in ["a", "b"]]
+        finish result
+        "#,
+    )
+    .await;
+    let Value::List(items) = value else {
+        panic!("expected list");
+    };
+    assert_eq!(items.len(), 2);
+    for (item, expected) in items.iter().zip(["a", "b"]) {
+        let record = item.as_record().expect("result record");
+        assert_eq!(record["ok"], Value::Bool(true));
+        assert_eq!(record["value"], Value::String(expected.into()));
+    }
+    assert_eq!(host.batches().len(), 1);
+    assert_eq!(host.singles.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn comprehension_element_shape_keeps_pure_values_around_unwrapped_calls() {
+    let host = ComprehensionBatchHost::default();
+    let value = comprehension_finish(
+        &host,
+        r#"
+        result = await [{ id: x, out: tools.echo({ value: x })? } for x in ["a", "b"]]
+        finish result
+        "#,
+    )
+    .await;
+    let Value::List(items) = value else {
+        panic!("expected list");
+    };
+    assert_eq!(items.len(), 2);
+    for (item, expected) in items.iter().zip(["a", "b"]) {
+        let record = item.as_record().expect("element record");
+        assert_eq!(record["id"], Value::String(expected.into()));
+        assert_eq!(record["out"], Value::String(expected.into()));
+    }
+    assert_eq!(
+        host.batches(),
+        vec![vec!["echo:a".to_string(), "echo:b".to_string()]]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn comprehension_await_over_empty_iterable_is_an_empty_list_without_a_batch() {
+    let host = ComprehensionBatchHost::default();
+    let value = comprehension_finish(
+        &host,
+        r#"
+        xs = []
+        result = await [tools.echo({ value: x })? for x in xs]
+        finish result
+        "#,
+    )
+    .await;
+    assert_eq!(value, Value::List(Vec::new().into()));
+    assert!(host.batches().is_empty());
+    assert_eq!(host.singles.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn sequential_comprehension_of_awaited_calls_is_unchanged() {
+    let source = r#"
+        xs = ["a", "b"]
+        result = [await tools.echo({ value: x })? for x in xs]
+        finish result
+        "#;
+    let compiled = compile_source(source).expect("program should compile");
+    let listing = compiled_instruction_listing(&compiled);
+    assert!(
+        !compiled.chunk.code.iter().any(|instruction| matches!(
+            instruction,
+            Instruction::ResourceOperationComprehensionBatch(_)
+                | Instruction::ResourceOperationBatch(_)
+        )),
+        "an await inside the element stays sequential:\n{listing}"
+    );
+    assert_resource_call_unwrap_without_handle_await(&compiled);
+
+    let host = ComprehensionBatchHost::default();
+    let value = comprehension_finish(&host, source).await;
+    assert_eq!(value, strings(&["a", "b"]));
+    assert!(host.batches().is_empty());
+    assert_eq!(host.singles.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn comprehension_await_failing_leaf_settles_siblings_then_names_the_leaf() {
+    let source =
+        "xs = [\"a\", \"b\"]\nresult = await [tools.err({ value: x })? for x in xs]\nfinish result";
+    let compiled = compile_source(source).expect("program should compile");
+    let host = ComprehensionBatchHost::default();
+    let mut state = State::new();
+    let failure = execute_compiled_traced(&compiled, &mut state, &host)
+        .await
+        .expect_err("unwrapped leaf failure should fail the program");
+    assert!(
+        matches!(
+            failure.error,
+            RuntimeError::UnwrappedModuleOperationFailed { .. }
+        ),
+        "{:?}",
+        failure.error
+    );
+    let message = crate::format_runtime_diagnostic(source, &failure.error, failure.span);
+    assert!(
+        message.contains("`?` unwrapped failed module operation: boom err:a"),
+        "{message}"
+    );
+    assert!(message.contains("--> line 2"), "{message}");
+    assert!(message.contains("tools.err({ value: x })?"), "{message}");
+    assert_eq!(
+        host.batches(),
+        vec![vec!["err:a".to_string(), "err:b".to_string()]],
+        "both leaves settle in the one batch before the failure is raised"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn ticket_program_awaiting_a_comprehension_of_order_calls_returns_every_order() {
+    // The exact FIG-2764 shape: `?` per element, outer `await` over the
+    // comprehension. Before the fix the outer await recursed into the settled
+    // records and replaced every field with an error record, so the filter
+    // matched nothing.
+    let host = ComprehensionBatchHost::default();
+    let value = comprehension_finish(
+        &host,
+        r#"
+        order_ids = ["o1", "o2", "o3"]
+        order_details = await [retail.order({ id: id })? for id in order_ids]
+        shipped = [o for o in order_details if o.status == "shipped"]
+        finish { orders: order_details, shipped: len(shipped) }
+        "#,
+    )
+    .await;
+    let record = value.as_record().expect("finish record");
+    assert_eq!(record["shipped"], Value::Number(3.0));
+    let Value::List(orders) = &record["orders"] else {
+        panic!("expected order list");
+    };
+    assert_eq!(orders.len(), 3);
+    for (order, id) in orders.iter().zip(["o1", "o2", "o3"]) {
+        let order = order.as_record().expect("order record");
+        assert_eq!(order["id"], Value::String(id.into()));
+        assert_eq!(order["status"], Value::String("shipped".into()));
+    }
+    assert_eq!(
+        host.batches(),
+        vec![vec![
+            "order:o1".to_string(),
+            "order:o2".to_string(),
+            "order:o3".to_string()
+        ]]
+    );
+}
+
+#[test]
+fn awaiting_a_settled_literal_is_a_link_diagnostic() {
+    for (source, kind) in [
+        ("finish await [1, 2]", "list"),
+        ("finish await { a: 1 }", "record"),
+        ("finish await [x for x in [1, 2]]", "list"),
+        ("finish await 1", "number"),
+        ("finish await (1 + 2)", "number"),
+        ("finish await [1 + 2]", "list"),
+        ("finish await { a: 1 + 2 }", "record"),
+    ] {
+        let diagnostic = link_diagnostic(source);
+        assert!(
+            diagnostic.contains(&format!("`await` of a settled {kind}:")),
+            "{source}: {diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("await [m.op({ id: x })? for x in xs]"),
+            "{source}: {diagnostic}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn comprehension_await_single_rejection_names_the_failing_element() {
+    let host = ComprehensionBatchHost::default();
+    let compiled = comprehension_compile(
+        r#"finish await [tools.maybe_err({ value: x })? for x in ["a", "b", "c"]]"#,
+    );
+    let error = execute_compiled(&compiled, &mut State::new(), &host)
+        .await
+        .unwrap_err();
+    let RuntimeError::UnwrappedModuleOperationFailed { source } = error else {
+        panic!("unexpected error: {error}");
+    };
+    assert_eq!(source.to_string(), "failed order b");
+    assert_eq!(
+        host.batches(),
+        vec![vec!["maybe_err:a", "maybe_err:b", "maybe_err:c"]]
+    );
+    assert_eq!(host.singles.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn comprehension_await_batches_multiple_clauses_in_written_order() {
+    let host = ComprehensionBatchHost::default();
+    let value = comprehension_finish(&host, r#"
+        finish await [tools.echo({ value: x + y })? for x in ["a", "b"] if x == "b" for y in ["1", "2"]]
+    "#).await;
+    assert_eq!(value, strings(&["b1", "b2"]));
+    assert_eq!(host.batches(), vec![vec!["echo:b1", "echo:b2"]]);
+}
+
+#[test]
+fn awaiting_a_handle_record_shape_is_not_rejected_as_settled() {
+    for source in [
+        r#"finish await { handle: "h" }"#,
+        r#"finish await { __handle__: "h" }"#,
+    ] {
+        let program = crate::parse(source).unwrap();
+        crate::LinkedModule::link(program, runtime_test_environment())
+            .expect("handle shape should link");
+    }
+}

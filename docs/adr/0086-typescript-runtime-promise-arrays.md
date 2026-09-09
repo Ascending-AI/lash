@@ -12,7 +12,15 @@ TypeScript tool calls in expression position create pending tool handles. Evalua
 
 Pending tool requests are VM roots and continuation state. Each pending request is consumed by await; an abandoned request at cell end and an await of a settled non-handle produce a typed runtime error. The bytecode format advances from 10 to 11, continuation format from 8 to 9, VM ABI from v6 to v7, and semantic hash from v3 to v4.
 
-Lashlang literal aggregates keep their source-order rejection rule and their existing language teaching. This decision does not implement FIG-2764.
+Lashlang aggregates keep their source-order rejection rule.
+
+### FIG-2764: Lashlang comprehension aggregates
+
+An outer `await` over a comprehension of operation calls captures each iteration's receivers and arguments, then submits one host batch. The existing aggregate shape and settlement path apply per-leaf `?` after every call settles, reporting the first rejection in written order. An `await` inside the element remains sequential. Empty call comprehensions return an empty list without host work.
+
+Awaiting settled scalars or containers raises `AwaitedSettledValue`, including the value kind and supported call/handle forms; it never substitutes error records into ordinary fields. Statically visible settled expressions are rejected by the linker. Literal aggregates containing calls still preserve their pure fields.
+
+This extension advances bytecode 11 to 12, VM ABI v7 to v8, and semantic hash v4 to v5 on top of FIG-2766. Continuation format 9 is unchanged because its wire shape is unchanged; artifact and cache identities change with the bytecode/ABI/semantic versions, and continuation callers must supply the same content-addressed compiled program.
 
 ## Consequences
 

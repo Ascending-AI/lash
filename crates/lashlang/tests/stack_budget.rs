@@ -22,8 +22,8 @@ right = start child(value: "right")
 joined = await { left: left, right: right }
 sleep for "0ms"
 finish {
-  left: joined.left.lookup,
-  right: joined.right.lookup,
+  left: (joined.left?).lookup,
+  right: (joined.right?).lookup,
   final: "stack-budget"
 }
 "#,
@@ -47,14 +47,8 @@ finish {
             assert_eq!(
                 serde_json::to_value(&value).expect("value json"),
                 serde_json::json!({
-                    "left": {
-                        "ok": true,
-                        "value": "lookup:left",
-                    },
-                    "right": {
-                        "ok": true,
-                        "value": "lookup:right",
-                    },
+                    "left": "lookup:left",
+                    "right": "lookup:right",
                     "final": "stack-budget",
                 })
             );
@@ -285,9 +279,18 @@ impl ExecutionHost for StackBudgetHost {
                     "lookup".to_string(),
                     Value::String(format!("lookup:{value}").into()),
                 );
-                Ok(AbilityResult::Value(Value::Record(Arc::new(record))))
+                let mut handle = Record::new();
+                handle.insert("__handle__".to_string(), Value::Record(Arc::new(record)));
+                Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
             }
-            AbilityOp::Await(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Await(handle) => {
+                let value = handle
+                    .as_record()
+                    .and_then(|record| record.get("__handle__"))
+                    .cloned()
+                    .ok_or_else(|| ExecutionHostError::new("expected process handle"))?;
+                Ok(AbilityResult::Value(value))
+            }
             AbilityOp::Sleep(_) => Ok(AbilityResult::Value(Value::Null)),
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
             _ => Err(ExecutionHostError::new(

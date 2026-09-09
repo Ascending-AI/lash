@@ -189,6 +189,7 @@ pub(super) fn instruction_heap_plan(
         | I::SleepUntil
         | I::AwaitHandle
         | I::AwaitHandleUnwrap
+        | I::ResourceOperationComprehensionBatch(_)
         | I::CancelHandle
         | I::WrapTypeLiteral
         | I::WrapHostDescriptor(_)

@@ -657,6 +657,14 @@ async fn golden_lashlang_diagnostic_corpus_is_exact() {
         "link_unresolved_receiver",
         link_diagnostic("value = 1\nfinish await value.echo({})?"),
     ));
+    cases.push(diagnostic_case(
+        "link_await_settled_literal",
+        link_diagnostic("finish await [1, 2]"),
+    ));
+    cases.push(diagnostic_case(
+        "runtime_await_settled_value",
+        runtime_diagnostic("orders = [{ ok: true, value: 1 }]\nfinish await orders").await,
+    ));
 
     insta::assert_snapshot!("lashlang_diagnostic_corpus", cases.join("\n\n---\n\n"));
 }
@@ -888,6 +896,15 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
             let batch = &chunk.resource_operation_batches[batch];
             format!(
                 "resource_operation_batch leaves={} values={} unwrap={}",
+                batch.leaves.len(),
+                batch.stack_value_count,
+                batch.aggregate_unwrap
+            )
+        }
+        Instruction::ResourceOperationComprehensionBatch(batch) => {
+            let batch = &chunk.resource_operation_batches[batch];
+            format!(
+                "resource_operation_comprehension_batch leaves={} values={} unwrap={}",
                 batch.leaves.len(),
                 batch.stack_value_count,
                 batch.aggregate_unwrap

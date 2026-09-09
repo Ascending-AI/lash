@@ -190,11 +190,10 @@ finish (await tools.err({})?)
 ---
 
 runtime_invalid_await_handle
-`?` unwrapped failed tool result: expected handle record
+`await` reached a settled number, not a handle; await the tool call itself (`await m.op({ id: x })?`), a literal list/record of calls (`await [m.a({})?, m.b({})?]`), or a comprehension of calls (`await [m.op({ id: x })? for x in xs]`) - values produced by `?` or an earlier `await` are already settled
 --> line 1, column 1
 finish (await 1)?
 ^~~~~~~~~~~~~~~~~
-hint: remove `?` and inspect `.ok` or `.error` when you need to handle failures
 
 ---
 
@@ -255,3 +254,19 @@ receiver for operation `echo` is not a module authority
 finish await value.echo({})?
              ^~~~~~~~~~~~~~
 hint: use a module authority, e.g. `tools.echo`
+
+---
+
+link_await_settled_literal
+`await` of a settled list: only tool calls, handles, or lists/records/comprehensions of them can be awaited - write `await m.op({ id: x })?`, `await [m.a({})?, m.b({})?]`, or `await [m.op({ id: x })? for x in xs]`
+--> line 1, column 8
+finish await [1, 2]
+       ^~~~~~~~~~~~
+
+---
+
+runtime_await_settled_value
+`await` reached a settled list, not a handle; await the tool call itself (`await m.op({ id: x })?`), a literal list/record of calls (`await [m.a({})?, m.b({})?]`), or a comprehension of calls (`await [m.op({ id: x })? for x in xs]`) - values produced by `?` or an earlier `await` are already settled
+--> line 2, column 1
+finish await orders
+^~~~~~~~~~~~~~~~~~~

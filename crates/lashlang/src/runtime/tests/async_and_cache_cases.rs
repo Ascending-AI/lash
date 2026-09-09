@@ -634,30 +634,94 @@ async fn profile_report_tracks_list_comprehension_append_and_iteration() {
     assert!(count("iter_next") > 0, "{:?}", report.instruction_stats());
 }
 
+fn expect_awaited_settled_value(err: RuntimeError, expected_actual: &str, expected_path: &str) {
+    let RuntimeError::AwaitedSettledValue { actual, path } = &err else {
+        panic!("expected AwaitedSettledValue, got {err:?}");
+    };
+    assert_eq!(actual, expected_actual, "{err}");
+    assert_eq!(path, expected_path, "{err}");
+    let message = err.to_string();
+    assert!(
+        message.contains(&format!(
+            "`await` reached a settled {expected_actual}{expected_path}, not a handle"
+        )),
+        "{message}"
+    );
+    assert!(
+        message.contains("await [m.op({ id: x })? for x in xs]"),
+        "{message}"
+    );
+}
+
+async fn settled_await_error(source: &str) -> RuntimeError {
+    let program = crate::parse(source).expect("program should parse");
+    let mut state = State::new();
+    execute_program(&program, &mut state, &AsyncHost)
+        .await
+        .expect_err("awaiting a settled value must fail loudly")
+}
+
 #[tokio::test(flavor = "current_thread")]
-async fn await_unknown_handle_reports_runtime_error() {
-    let program = crate::parse(
+async fn await_settled_number_is_a_typed_error() {
+    let err = settled_await_error("result = await 1\nfinish result").await;
+    expect_awaited_settled_value(err, "number", "");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn await_settled_list_literal_is_a_typed_error() {
+    let err = settled_await_error("finish await [1, 2]").await;
+    expect_awaited_settled_value(err, "list", "");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn await_settled_record_literal_is_a_typed_error() {
+    let err = settled_await_error("finish await { a: 1 }").await;
+    expect_awaited_settled_value(err, "record", "");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn await_settled_record_value_is_a_typed_error() {
+    let err = settled_await_error("settled = { ok: true, value: 1 }\nfinish await settled").await;
+    expect_awaited_settled_value(err, "record", "");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn await_list_of_settled_records_names_the_list_not_a_field() {
+    // The ticket's shape at run time: a list of already-settled records holds
+    // no handle anywhere, so the list itself is what `await` refuses.
+    let err = settled_await_error(
+        "orders = [{ ok: true, value: 1 }, { ok: true, value: 2 }]\nfinish await orders",
+    )
+    .await;
+    expect_awaited_settled_value(err, "list", "");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn await_list_mixing_handles_and_settled_items_names_the_settled_item() {
+    let err = settled_await_error(
         r#"
-        result = await 1
-        finish result
+        process echo(value: str) { finish value }
+        handles = [start echo(value: "done"), 1]
+        results = await handles
+        finish results
         "#,
     )
-    .expect("program should parse");
-    let mut state = State::new();
-    let outcome = execute_program(&program, &mut state, &AsyncHost)
-        .await
-        .expect("program should run");
-    let ExecutionOutcome::Finished(value) = outcome else {
-        panic!("expected finish");
-    };
-    let record = value
-        .as_record()
-        .expect("await should return wrapped error");
-    assert_eq!(record["ok"], Value::Bool(false));
-    assert_eq!(
-        record["error"],
-        Value::String("expected handle record".into())
-    );
+    .await;
+    expect_awaited_settled_value(err, "number", " at `[1]`");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn await_record_mixing_handles_and_settled_fields_names_the_settled_field() {
+    let err = settled_await_error(
+        r#"
+        process echo(value: str) { finish value }
+        handles = { first: start echo(value: "one"), label: "kept" }
+        results = await handles
+        finish results
+        "#,
+    )
+    .await;
+    expect_awaited_settled_value(err, "string", " at `.label`");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -693,40 +757,6 @@ async fn await_list_of_handles_returns_results_in_order() {
         assert_eq!(record["ok"], Value::Bool(true));
         assert_eq!(record["value"], Value::String(expected.into()));
     }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn await_list_preserves_per_item_errors() {
-    let program = crate::parse(
-        r#"
-        process echo(value: str) { finish value }
-        handles = [start echo(value: "done"), 1]
-        results = await handles
-        finish results
-        "#,
-    )
-    .expect("program should parse");
-    let mut state = State::new();
-    let outcome = execute_program(&program, &mut state, &AsyncHost)
-        .await
-        .expect("program should run");
-    let ExecutionOutcome::Finished(value) = outcome else {
-        panic!("expected finish");
-    };
-    let Value::List(results) = value else {
-        panic!("await list should return a list");
-    };
-    let ok = results[0]
-        .as_record()
-        .expect("first result should be wrapped");
-    assert_eq!(ok["ok"], Value::Bool(true));
-    assert_eq!(ok["value"], Value::String("done".into()));
-
-    let err = results[1]
-        .as_record()
-        .expect("second result should be wrapped");
-    assert_eq!(err["ok"], Value::Bool(false));
-    assert_eq!(err["error"], Value::String("expected handle record".into()));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1447,4 +1477,14 @@ fn a_compiled_process_cache_hit_builds_no_key() {
     );
     assert_eq!(cache.stats().hits, 8);
     assert_eq!(cache.stats().misses, 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn await_empty_settled_collections_is_a_typed_error() {
+    for (source, kind) in [
+        ("value = []\nfinish await value", "list"),
+        ("value = {}\nfinish await value", "record"),
+    ] {
+        expect_awaited_settled_value(settled_await_error(source).await, kind, "");
+    }
 }

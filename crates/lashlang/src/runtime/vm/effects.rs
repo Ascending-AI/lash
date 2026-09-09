@@ -8,8 +8,9 @@ use super::super::host::{
     ResourceOperation, ResourceOperationBatch, ResourceOperationResult, Sleep, SleepKind,
 };
 use super::super::{
-    CompiledAggregateAwaitShape, ExecutionHost, RuntimeError, Value, error_value,
-    is_process_handle, record_with_capacity, success, unwrap_tool_result,
+    CompiledAggregateAwaitShape, CompiledResourceOperationBatch,
+    CompiledResourceOperationBatchLeaf, ExecutionHost, RuntimeError, Value, error_value,
+    is_process_handle, record_with_capacity, success, unwrap_tool_result, value_type_name,
 };
 use super::control::VmOutcome;
 use super::{ActiveLashlangExecutionNode, Vm};
@@ -21,6 +22,7 @@ pub(super) enum VmEffect {
     AwaitArray { settle: bool },
     AwaitPending,
     ResourceOperationBatch(usize),
+    ResourceOperationComprehensionBatch(usize),
     StartProcess { process: usize, keys: usize },
     AwaitHandle,
     Sleep(SleepKind),
@@ -123,6 +125,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmEffect::ResourceOperationBatch(batch) => {
                 self.resolve_resource_operation_batch(batch).await?;
             }
+            VmEffect::ResourceOperationComprehensionBatch(batch) => {
+                self.resolve_resource_operation_comprehension_batch(batch)
+                    .await?;
+            }
             VmEffect::StartProcess { process, keys } => {
                 let args = self.drain_record_from_stack(keys)?;
                 let start_site = active
@@ -174,7 +180,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             VmEffect::AwaitHandle => {
                 let handle = self.pop_stack()?;
-                let result = self.await_value(handle).await;
+                let result = self.await_value(handle, String::new()).await?;
                 self.stack.push(result);
             }
             VmEffect::Sleep(kind) => {
@@ -301,6 +307,68 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let batch = self.chunk.resource_operation_batches[batch].clone();
         let start = self.stack_drain_start(batch.stack_value_count)?;
         let values = self.stack.drain(start..).collect::<Vec<_>>();
+        self.resolve_batch_spec(&batch, values).await
+    }
+
+    /// Settles a comprehension of operation calls as one batch. The loop left a
+    /// list of packed tuples on the stack, one per element, each holding the
+    /// receiver and argument values the per-element template expects; this
+    /// flattens them into a single batch whose shape is a list of the template
+    /// shape, offset per element, and hands it to the same settlement path the
+    /// literal aggregate uses.
+    async fn resolve_resource_operation_comprehension_batch(
+        &mut self,
+        batch: usize,
+    ) -> Result<(), RuntimeError> {
+        let template = self.chunk.resource_operation_batches[batch].clone();
+        let Value::List(elements) = self.pop_stack()? else {
+            return Err(RuntimeError::InvalidResourceComprehensionElement);
+        };
+        let mut values = Vec::with_capacity(elements.len() * template.stack_value_count);
+        let mut leaves = Vec::with_capacity(elements.len() * template.leaves.len());
+        let mut shapes = Vec::with_capacity(elements.len());
+        for element in elements.iter() {
+            let Value::Tuple(packed) = element else {
+                return Err(RuntimeError::InvalidResourceComprehensionElement);
+            };
+            if packed.len() != template.stack_value_count {
+                return Err(RuntimeError::InvalidResourceComprehensionElement);
+            }
+            let value_offset = values.len();
+            let leaf_offset = leaves.len();
+            values.extend(packed.iter().cloned());
+            leaves.extend(
+                template
+                    .leaves
+                    .iter()
+                    .map(|leaf| CompiledResourceOperationBatchLeaf {
+                        receiver_stack_index: leaf.receiver_stack_index + value_offset,
+                        ..leaf.clone()
+                    }),
+            );
+            shapes.push(offset_aggregate_await_shape(
+                &template.shape,
+                leaf_offset,
+                value_offset,
+            ));
+        }
+        let batch = CompiledResourceOperationBatch {
+            leaves: leaves.into_boxed_slice(),
+            shape: CompiledAggregateAwaitShape::List(shapes.into_boxed_slice()),
+            stack_value_count: values.len(),
+            aggregate_unwrap: template.aggregate_unwrap,
+            first_settled_rejection: template.first_settled_rejection,
+        };
+        if batch.leaves.is_empty() {
+            // Nothing to settle: an empty comprehension is an empty list, and
+            // the host is never asked to run a batch of zero operations.
+            let mut value = Value::List(Vec::new().into());
+            if batch.aggregate_unwrap {
+                value = unwrap_tool_result(value)?;
+            }
+            self.stack.push(value);
+            return Ok(());
+        }
         self.resolve_batch_spec(&batch, values).await
     }
 
@@ -461,27 +529,37 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
+    /// Awaits a handle, or a list/tuple/record whose leaves are handles, by
+    /// asking the host for each handle in written order. A value that is
+    /// already settled - a scalar, or a collection holding no handle at all -
+    /// is a typed error rather than a silent error record: the host is never
+    /// asked to await something that cannot be awaited. `path` names the leaf
+    /// inside the awaited value for that diagnostic (empty at the root).
     fn await_value(
         &self,
         handle: Value,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Value> + Send + '_>> {
+        path: String,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + Send + '_>>
+    {
         Box::pin(async move {
             match handle {
                 Value::Tuple(handles) => {
+                    reject_settled_aggregate(&handles, "tuple", &path)?;
                     let mut values = Vec::with_capacity(handles.len());
-                    for handle in handles.iter().cloned() {
-                        values.push(self.await_value(handle).await);
+                    for (index, handle) in handles.iter().cloned().enumerate() {
+                        values.push(self.await_value(handle, format!("{path}[{index}]")).await?);
                     }
-                    Value::Tuple(values.into())
+                    Ok(Value::Tuple(values.into()))
                 }
                 Value::List(handles) => {
+                    reject_settled_aggregate(&handles, "list", &path)?;
                     let mut values = Vec::with_capacity(handles.len());
-                    for handle in handles.iter().cloned() {
-                        values.push(self.await_value(handle).await);
+                    for (index, handle) in handles.iter().cloned().enumerate() {
+                        values.push(self.await_value(handle, format!("{path}[{index}]")).await?);
                     }
-                    Value::List(values.into())
+                    Ok(Value::List(values.into()))
                 }
-                Value::Record(handles) if is_process_handle(&handles) => {
+                Value::Record(handles) if is_process_handle(&handles) => Ok(
                     match self
                         .host
                         .perform(AbilityOp::Await(Value::Record(handles)))
@@ -495,27 +573,24 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             error_value("await returned no value".to_string())
                         }
                         Err(error) => error_value(error.to_string()),
-                    }
-                }
+                    },
+                ),
                 Value::Record(handles) => {
+                    if !value_contains_handle(&Value::Record(handles.clone())) {
+                        return Err(awaited_settled_value("record", &path));
+                    }
                     let mut record = record_with_capacity(handles.len());
                     for entry in handles.entries.iter() {
                         record.insert_symbolized(
                             entry.symbol,
                             entry.name.clone(),
-                            self.await_value(entry.value.clone()).await,
+                            self.await_value(entry.value.clone(), format!("{path}.{}", entry.name))
+                                .await?,
                         );
                     }
-                    Value::Record(Arc::new(record))
+                    Ok(Value::Record(Arc::new(record)))
                 }
-                handle => match self.host.perform(AbilityOp::Await(handle)).await {
-                    Ok(AbilityResult::Value(value)) => host_success(value),
-                    Ok(AbilityResult::ResourceOperationBatch(_)) => {
-                        error_value("await returned a resource operation batch result".to_string())
-                    }
-                    Ok(AbilityResult::Unit) => error_value("await returned no value".to_string()),
-                    Err(error) => error_value(error.to_string()),
-                },
+                handle => Err(awaited_settled_value(value_type_name(&handle), &path)),
             }
         })
     }
@@ -531,16 +606,84 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     message: error.to_string(),
                 }),
             Value::Tuple(_) | Value::List(_) | Value::Record(_) => {
-                unwrap_tool_result(self.await_value(handle).await)
+                unwrap_tool_result(self.await_value(handle, String::new()).await?)
             }
-            handle => self
-                .host
-                .perform(AbilityOp::Await(handle))
-                .await
-                .and_then(|result| result.into_value("await"))
-                .map_err(|error| RuntimeError::UnwrappedToolResultFailed {
-                    message: error.to_string(),
-                }),
+            handle => Err(awaited_settled_value(value_type_name(&handle), "")),
+        }
+    }
+}
+
+/// A collection with no handle anywhere inside it is a settled value
+/// that `await` must refuse, naming the collection rather than its first leaf.
+fn reject_settled_aggregate(
+    items: &[Value],
+    actual: &'static str,
+    path: &str,
+) -> Result<(), RuntimeError> {
+    if !items.iter().any(value_contains_handle) {
+        return Err(awaited_settled_value(actual, path));
+    }
+    Ok(())
+}
+
+fn value_contains_handle(value: &Value) -> bool {
+    match value {
+        Value::Record(record) if is_process_handle(record) => true,
+        Value::Record(record) => record
+            .entries
+            .iter()
+            .any(|entry| value_contains_handle(&entry.value)),
+        Value::Tuple(items) | Value::List(items) => items.iter().any(value_contains_handle),
+        _ => false,
+    }
+}
+
+fn awaited_settled_value(actual: &str, path: &str) -> RuntimeError {
+    RuntimeError::AwaitedSettledValue {
+        actual: actual.to_string(),
+        path: if path.is_empty() {
+            String::new()
+        } else {
+            format!(" at `{path}`")
+        },
+    }
+}
+
+/// Re-indexes a per-element template shape into the flattened comprehension
+/// batch: leaf indexes shift by the leaves settled before this element, value
+/// indexes by the packed values before it.
+fn offset_aggregate_await_shape(
+    shape: &CompiledAggregateAwaitShape,
+    leaf_offset: usize,
+    value_offset: usize,
+) -> CompiledAggregateAwaitShape {
+    match shape {
+        CompiledAggregateAwaitShape::BatchLeaf(index) => {
+            CompiledAggregateAwaitShape::BatchLeaf(index + leaf_offset)
+        }
+        CompiledAggregateAwaitShape::Value(index) => {
+            CompiledAggregateAwaitShape::Value(index + value_offset)
+        }
+        CompiledAggregateAwaitShape::Tuple(values) => CompiledAggregateAwaitShape::Tuple(
+            values
+                .iter()
+                .map(|value| offset_aggregate_await_shape(value, leaf_offset, value_offset))
+                .collect(),
+        ),
+        CompiledAggregateAwaitShape::List(values) => CompiledAggregateAwaitShape::List(
+            values
+                .iter()
+                .map(|value| offset_aggregate_await_shape(value, leaf_offset, value_offset))
+                .collect(),
+        ),
+        CompiledAggregateAwaitShape::Record { keys, values } => {
+            CompiledAggregateAwaitShape::Record {
+                keys: *keys,
+                values: values
+                    .iter()
+                    .map(|value| offset_aggregate_await_shape(value, leaf_offset, value_offset))
+                    .collect(),
+            }
         }
     }
 }

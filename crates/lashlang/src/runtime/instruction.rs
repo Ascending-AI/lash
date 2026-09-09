@@ -310,6 +310,11 @@ pub(crate) enum Instruction {
     },
     AwaitPending,
     ResourceOperationBatch(usize),
+    /// Pops the list a comprehension built - one packed tuple of receiver and
+    /// argument values per element - and settles every element's operation
+    /// leaves as one host batch. The operand indexes the per-element template
+    /// in `resource_operation_batches`.
+    ResourceOperationComprehensionBatch(usize),
     StartProcess {
         process: usize,
         keys: usize,
@@ -529,7 +534,10 @@ impl Instruction {
             Instruction::PendingTool { .. }
             | Instruction::AwaitArray { .. }
             | Instruction::AwaitPending
-            | Instruction::ResourceOperationBatch(_) => InstructionProfileTag::ResourceCall,
+            | Instruction::ResourceOperationBatch(_)
+            | Instruction::ResourceOperationComprehensionBatch(_) => {
+                InstructionProfileTag::ResourceCall
+            }
             Instruction::StartProcess { .. } => InstructionProfileTag::StartProcess,
             Instruction::AwaitHandle
             | Instruction::AwaitHandleUnwrap

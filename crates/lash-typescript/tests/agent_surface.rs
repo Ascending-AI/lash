@@ -1629,7 +1629,7 @@ fn lashlang_aggregates_still_select_in_input_order() {
 
 /// Settlement order is consumed inside a single `perform` and never persisted.
 /// Snapshot v7 is independently required by the substrate-minted error brands;
-/// the aggregate rule still does not move the VM ABI.
+/// pending-call and comprehension instructions separately advance the VM ABI.
 #[test]
 fn settlement_order_does_not_reach_the_continuation_format() {
     assert_eq!(
@@ -1639,8 +1639,8 @@ fn settlement_order_does_not_reach_the_continuation_format() {
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
-        "lashlang-vm-abi-v7",
-        "the compiled-batch selection rule moved the VM ABI"
+        "lashlang-vm-abi-v8",
+        "the comprehension batch instruction advances the shared VM ABI"
     );
 }
 

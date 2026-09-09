@@ -50,11 +50,20 @@ impl ExecutionHost for TestHost {
                     lashlang::ResourceOperationBatchResult::settled_in_input_order(results),
                 ))
             }
-            AbilityOp::StartProcess(start) => self
-                .call_tool(&start.process_name, &start.args)
-                .await
-                .map(AbilityResult::Value),
-            AbilityOp::Await(handle) => Ok(AbilityResult::Value(handle)),
+            AbilityOp::StartProcess(start) => {
+                let value = self.call_tool(&start.process_name, &start.args).await?;
+                let mut handle = Record::new();
+                handle.insert("__handle__".to_string(), value);
+                Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
+            }
+            AbilityOp::Await(handle) => {
+                let value = handle
+                    .as_record()
+                    .and_then(|record| record.get("__handle__"))
+                    .cloned()
+                    .ok_or_else(|| ExecutionHostError::new("expected process handle"))?;
+                Ok(AbilityResult::Value(value))
+            }
             AbilityOp::Print(value) => {
                 self.observations.lock_recover().push(value);
                 Ok(AbilityResult::Unit)

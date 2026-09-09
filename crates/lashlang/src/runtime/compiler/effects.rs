@@ -214,6 +214,15 @@ impl Compiler {
         aggregate_unwrap: bool,
         forced_site: Option<LashlangExecutionSite>,
     ) -> bool {
+        if let Expr::ListComprehension { element, clauses } = handle {
+            return self.compile_comprehension_await_expr(
+                handle,
+                element,
+                clauses,
+                aggregate_unwrap,
+                forced_site,
+            );
+        }
         let Some(leaf_count) = aggregate_await_shape_leaf_count(handle) else {
             return false;
         };
@@ -239,6 +248,67 @@ impl Compiler {
         });
         let instruction = self.code.len();
         self.code.push(Instruction::ResourceOperationBatch(batch));
+        self.mark_instruction_source_span(instruction, handle);
+        self.mark_forced_lashlang_execution_site(instruction, forced_site);
+        true
+    }
+
+    /// `await [m.op({ id: x })? for x in xs]` fans out like the literal list:
+    /// the loop evaluates each element's receivers and arguments into one
+    /// packed tuple (no operation runs yet), and a single batch instruction
+    /// settles every element together once the loop has finished. The element
+    /// is compiled with the literal aggregate's shape compiler, so `?` per leaf
+    /// and pure values inside the element behave exactly as they do in the
+    /// literal form. `[await m.op(x)? for x in xs]` is untouched and stays
+    /// sequential.
+    fn compile_comprehension_await_expr(
+        &mut self,
+        handle: &Expr,
+        element: &Expr,
+        clauses: &[ListComprehensionClause],
+        aggregate_unwrap: bool,
+        forced_site: Option<LashlangExecutionSite>,
+    ) -> bool {
+        let Some(leaf_count) = aggregate_await_leaf_count(element) else {
+            return false;
+        };
+        if leaf_count == 0 {
+            return false;
+        }
+
+        let mut leaves = Vec::with_capacity(leaf_count);
+        let mut stack_value_count = 0;
+        let mut shape = None;
+        self.compile_list_comprehension_with(
+            &mut |compiler| {
+                let compiled = compiler.compile_aggregate_await_shape(
+                    element,
+                    &mut leaves,
+                    &mut stack_value_count,
+                );
+                compiler
+                    .code
+                    .push(Instruction::BuildTuple(stack_value_count));
+                compiler.emit_isolation();
+                shape = Some(compiled);
+            },
+            clauses,
+        );
+        let Some(shape) = shape else {
+            unreachable!("comprehension element body compiles exactly once")
+        };
+        let selects_by_settlement_order =
+            self.dialect == CompilationDialect::Typescript && leaves.iter().any(|leaf| leaf.unwrap);
+        let batch = self.push_resource_operation_batch(CompiledResourceOperationBatch {
+            leaves: leaves.into_boxed_slice(),
+            shape,
+            stack_value_count,
+            aggregate_unwrap,
+            first_settled_rejection: selects_by_settlement_order,
+        });
+        let instruction = self.code.len();
+        self.code
+            .push(Instruction::ResourceOperationComprehensionBatch(batch));
         self.mark_instruction_source_span(instruction, handle);
         self.mark_forced_lashlang_execution_site(instruction, forced_site);
         true

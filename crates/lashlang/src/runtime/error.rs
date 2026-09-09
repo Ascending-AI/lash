@@ -440,6 +440,15 @@ pub enum RuntimeError {
     /// Aggregate-await bytecode received an invalid record shape.
     #[error("aggregate await record shape is invalid")]
     InvalidAggregateAwaitRecordShape,
+    /// `await` reached a value that is already settled instead of a handle.
+    #[error(
+        "`await` reached a settled {actual}{path}, not a handle; await the tool call itself (`await m.op({{ id: x }})?`), a literal list/record of calls (`await [m.a({{}})?, m.b({{}})?]`), or a comprehension of calls (`await [m.op({{ id: x }})? for x in xs]`) - values produced by `?` or an earlier `await` are already settled"
+    )]
+    AwaitedSettledValue { actual: String, path: String },
+    /// Comprehension-batch bytecode received an element that is not the packed
+    /// tuple its template expects.
+    #[error("resource operation comprehension element shape is invalid")]
+    InvalidResourceComprehensionElement,
     /// Execution attempted to pop a value from an empty VM stack.
     #[error("vm stack underflow")]
     VmStackUnderflow,
@@ -585,6 +594,8 @@ impl RuntimeError {
             Self::AggregateAwaitLeafOutOfRange => ErrorTaxonomy::Catchable,
             Self::AggregateAwaitValueOutOfRange => ErrorTaxonomy::Catchable,
             Self::InvalidAggregateAwaitRecordShape => ErrorTaxonomy::Catchable,
+            Self::AwaitedSettledValue { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidResourceComprehensionElement => ErrorTaxonomy::Catchable,
             Self::VmStackUnderflow => ErrorTaxonomy::Catchable,
             Self::MissingLoopState => ErrorTaxonomy::Catchable,
             Self::ContextDependentIntrinsicMisdispatch { .. } => ErrorTaxonomy::Catchable,
@@ -714,6 +725,8 @@ impl RuntimeError {
             Self::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",
             Self::AggregateAwaitValueOutOfRange => "AggregateAwaitValueOutOfRange",
             Self::InvalidAggregateAwaitRecordShape => "InvalidAggregateAwaitRecordShape",
+            Self::AwaitedSettledValue { .. } => "AwaitedSettledValue",
+            Self::InvalidResourceComprehensionElement => "InvalidResourceComprehensionElement",
             Self::VmStackUnderflow => "VmStackUnderflow",
             Self::MissingLoopState => "MissingLoopState",
             Self::ContextDependentIntrinsicMisdispatch { .. } => {
@@ -1021,6 +1034,11 @@ mod tests {
             RuntimeError::AggregateAwaitLeafOutOfRange,
             RuntimeError::AggregateAwaitValueOutOfRange,
             RuntimeError::InvalidAggregateAwaitRecordShape,
+            RuntimeError::AwaitedSettledValue {
+                actual: "record".into(),
+                path: " at `[0]`".into(),
+            },
+            RuntimeError::InvalidResourceComprehensionElement,
             RuntimeError::VmStackUnderflow,
             RuntimeError::MissingLoopState,
             RuntimeError::ContextDependentIntrinsicMisdispatch {
@@ -1334,6 +1352,12 @@ mod tests {
                 RuntimeError::InvalidAggregateAwaitRecordShape => {
                     "aggregate await record shape is invalid"
                 }
+                RuntimeError::AwaitedSettledValue { .. } => {
+                    "`await` reached a settled record at `[0]`, not a handle; await the tool call itself (`await m.op({ id: x })?`), a literal list/record of calls (`await [m.a({})?, m.b({})?]`), or a comprehension of calls (`await [m.op({ id: x })? for x in xs]`) - values produced by `?` or an earlier `await` are already settled"
+                }
+                RuntimeError::InvalidResourceComprehensionElement => {
+                    "resource operation comprehension element shape is invalid"
+                }
                 RuntimeError::VmStackUnderflow => "vm stack underflow",
                 RuntimeError::MissingLoopState => "missing loop state",
                 RuntimeError::ContextDependentIntrinsicMisdispatch { .. } => {
@@ -1352,7 +1376,7 @@ mod tests {
     /// Every guest-facing code, in declaration order. The list is the pin's
     /// completeness half: `expected_code` forces each variant to declare one,
     /// this forces each declared one to be exercised.
-    const RUNTIME_ERROR_CODES: [&str; 116] = [
+    const RUNTIME_ERROR_CODES: [&str; 118] = [
         "FrameDepthExceeded",
         "FunctionIndexOverflow",
         "NonFunctionCall",
@@ -1464,6 +1488,8 @@ mod tests {
         "AggregateAwaitLeafOutOfRange",
         "AggregateAwaitValueOutOfRange",
         "InvalidAggregateAwaitRecordShape",
+        "AwaitedSettledValue",
+        "InvalidResourceComprehensionElement",
         "VmStackUnderflow",
         "MissingLoopState",
         "ContextDependentIntrinsicMisdispatch",
@@ -1596,6 +1622,10 @@ mod tests {
             RuntimeError::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",
             RuntimeError::AggregateAwaitValueOutOfRange => "AggregateAwaitValueOutOfRange",
             RuntimeError::InvalidAggregateAwaitRecordShape => "InvalidAggregateAwaitRecordShape",
+            RuntimeError::AwaitedSettledValue { .. } => "AwaitedSettledValue",
+            RuntimeError::InvalidResourceComprehensionElement => {
+                "InvalidResourceComprehensionElement"
+            }
             RuntimeError::VmStackUnderflow => "VmStackUnderflow",
             RuntimeError::MissingLoopState => "MissingLoopState",
             RuntimeError::ContextDependentIntrinsicMisdispatch { .. } => {

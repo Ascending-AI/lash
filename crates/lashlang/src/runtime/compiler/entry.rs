@@ -803,6 +803,23 @@ impl Compiler {
         element: &Expr,
         clauses: &[ListComprehensionClause],
     ) {
+        self.compile_list_comprehension_with(
+            &mut |compiler| {
+                compiler.compile_expr(element);
+                compiler.emit_isolation();
+            },
+            clauses,
+        );
+    }
+
+    /// Compiles the comprehension loop around a caller-supplied element body.
+    /// The body runs exactly once at the innermost clause and must leave one
+    /// value on the stack, which the loop appends to the list it is building.
+    pub(super) fn compile_list_comprehension_with(
+        &mut self,
+        element: &mut dyn FnMut(&mut Self),
+        clauses: &[ListComprehensionClause],
+    ) {
         self.code.push(Instruction::BuildList(0));
         self.compile_list_comprehension_clause(element, clauses, 0);
         self.clear_const_slots();
@@ -810,13 +827,12 @@ impl Compiler {
 
     fn compile_list_comprehension_clause(
         &mut self,
-        element: &Expr,
+        element: &mut dyn FnMut(&mut Self),
         clauses: &[ListComprehensionClause],
         index: usize,
     ) {
         let Some(clause) = clauses.get(index) else {
-            self.compile_expr(element);
-            self.emit_isolation();
+            element(self);
             self.code.push(Instruction::ListAppend);
             return;
         };
@@ -839,7 +855,7 @@ impl Compiler {
         &mut self,
         binding: &str,
         iterable: &Expr,
-        element: &Expr,
+        element: &mut dyn FnMut(&mut Self),
         clauses: &[ListComprehensionClause],
         next_clause: usize,
     ) {
@@ -869,7 +885,7 @@ impl Compiler {
 
     fn compile_list_comprehension_for_body(
         &mut self,
-        element: &Expr,
+        element: &mut dyn FnMut(&mut Self),
         clauses: &[ListComprehensionClause],
         next_clause: usize,
         binding: usize,
