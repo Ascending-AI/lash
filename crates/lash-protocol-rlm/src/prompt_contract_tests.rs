@@ -78,10 +78,11 @@ fn prompt_diet_sizes_and_capability_gates() {
                 on.chars().count()
             );
             assert!(
-                size <= if typescript { 5000 } else { 6500 },
+                size <= if typescript { 3100 } else { 6000 },
                 "{size}: {off}"
             );
             assert!(on.len() > off.len());
+            assert!(on.chars().count() <= if typescript { 7200 } else { 12200 });
             for forbidden in [
                 "defineProcess",
                 "waitSignal",
@@ -456,6 +457,53 @@ fn tool_signatures_cover_every_operation_parameter_and_return_shape() {
         if typescript {
             assert_eq!(docs.matches("declare namespace lookup").count(), 1);
             assert!(docs.contains("optional_limit?: number"));
+        }
+    }
+}
+
+#[test]
+fn typescript_capabilities_gate_in_both_assembled_channels() {
+    for native in [false, true] {
+        for mask in 0..16 {
+            let abilities = lashlang::LashlangAbilities {
+                processes: mask & 1 != 0,
+                sleep: mask & 2 != 0,
+                process_signals: mask & 4 != 0,
+                triggers: mask & 8 != 0,
+            };
+            let dialect =
+                crate::dialect::typescript::TypescriptDialect::prompt_only(LashlangSurface {
+                    abilities,
+                    ..Default::default()
+                });
+            let prompt = system(&dialect, native, false);
+            for (needle, enabled) in [
+                ("defineProcess", abilities.processes),
+                ("### Processes", abilities.processes),
+                ("await sleep(ms)", abilities.sleep),
+                (
+                    "waitSignal",
+                    abilities.processes && abilities.process_signals,
+                ),
+                ("registerTrigger", abilities.processes && abilities.triggers),
+            ] {
+                assert_eq!(
+                    prompt.contains(needle),
+                    enabled,
+                    "mask={mask}, native={native}, {needle}"
+                );
+            }
+            // These Lashlang-only syntaxes must never enter TypeScript copy,
+            // even when their host-side feature flags are enabled.
+            for needle in [
+                "@label",
+                "Type {",
+                "### Type literals",
+                "sleep for",
+                "wait_signal",
+            ] {
+                assert!(!prompt.contains(needle), "{needle}: {prompt}");
+            }
         }
     }
 }
