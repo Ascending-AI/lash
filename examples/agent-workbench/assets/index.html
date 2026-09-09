@@ -4774,11 +4774,9 @@
     }
     // END WORKBENCH_REMOTE_STREAM_RECOVERY
 
-    // BEGIN WORKBENCH_STOP_TURN
-    // Stop (after-step) lets the running step finish and commit; Abort
-    // (immediate) cancels now. Lash ships no escalation timer, so the
-    // "escalate after N seconds" policy is host code right here: a Stop that
-    // is still pending after STOP_ESCALATION_MS is upgraded to an Abort.
+    // Lash ships no escalation timer, so the "escalate after N seconds"
+    // policy is host code right here: a Stop that is still pending after
+    // STOP_ESCALATION_MS is upgraded to an Abort.
     const STOP_ESCALATION_MS = 20000;
     let stopEscalationTimer = 0;
     const abortButton = document.getElementById("abort");
@@ -4788,20 +4786,25 @@
       stopButton.textContent = "stop after step";
       stopButton.disabled = false;
     }
+    function armStopEscalation(mode) {
+      if (mode === "abort") { clearStopEscalation(); return; }
+      if (stopEscalationTimer) return;
+      stopButton.textContent = "stopping after step…";
+      stopButton.disabled = true;
+      stopEscalationTimer = setTimeout(() => {
+        if (!busy) return;
+        renderNote("step still running after " + (STOP_ESCALATION_MS / 1000) + "s · escalating to abort");
+        stopTurn("abort");
+      }, STOP_ESCALATION_MS);
+    }
+    // BEGIN WORKBENCH_STOP_TURN
+    // Stop (after-step) lets the running step finish and commit; Abort
+    // (immediate) cancels now. The escalation policy above decides when a
+    // pending Stop becomes an Abort.
     function stopTurn(mode) {
       mode = mode === "abort" ? "abort" : "stop";
-      if (mode === "abort") {
-        if (controller) controller.abort();
-        clearStopEscalation();
-      } else if (!stopEscalationTimer) {
-        stopButton.textContent = "stopping after step…";
-        stopButton.disabled = true;
-        stopEscalationTimer = setTimeout(() => {
-          if (!busy) return;
-          renderNote("step still running after " + (STOP_ESCALATION_MS / 1000) + "s · escalating to abort");
-          stopTurn("abort");
-        }, STOP_ESCALATION_MS);
-      }
+      if (mode === "abort" && controller) controller.abort();
+      armStopEscalation(mode);
       fetch("/api/turn/cancel?mode=" + mode, { method: "POST" })
         .then(async response => {
           if (!response.ok) throw new Error("stop request failed (" + response.status + ")");
