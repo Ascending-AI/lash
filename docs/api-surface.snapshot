@@ -3309,6 +3309,8 @@ lash::plugins::PluginError::ClockBeforeUnixEpoch::clock
 lash::plugins::PluginError::ClockBeforeUnixEpoch::epoch_ms
 lash::plugins::PluginError::InvalidProcessWakeIdentity
 lash::plugins::PluginError::InvalidProcessWakeIdentity::wake_id
+lash::plugins::PluginError::InvalidToolDiscovery
+lash::plugins::PluginError::InvalidToolDiscovery::operation
 lash::plugins::PluginError::Invoke
 lash::plugins::PluginError::Invoke::0
 lash::plugins::PluginError::MissingRecordedSessionConfig
@@ -3935,6 +3937,11 @@ lash::plugins::SpillPolicy
 lash::plugins::SpillPolicy::dir
 lash::plugins::SpillPolicy::max_age
 lash::plugins::SpillPolicy::max_bytes
+lash::plugins::StandardProtocolConfig
+lash::plugins::StandardProtocolConfig::discovery
+lash::plugins::StandardProtocolPluginFactory
+lash::plugins::StandardProtocolPluginFactory::new
+lash::plugins::StandardProtocolPluginFactory::with_config
 lash::plugins::StaticPluginFactory
 lash::plugins::StaticPluginFactory::new
 lash::plugins::SubagentSessionContext
@@ -3956,6 +3963,7 @@ lash::plugins::ToolCatalog::callable_tools
 lash::plugins::ToolCatalog::from_tool_definitions
 lash::plugins::ToolCatalog::from_tools
 lash::plugins::ToolCatalog::has_callable_tool
+lash::plugins::ToolCatalog::inline_tools
 lash::plugins::ToolCatalog::model_tool_specs
 lash::plugins::ToolCatalog::resolve_contract
 lash::plugins::ToolCatalog::tool_names
@@ -7570,6 +7578,7 @@ lash::rlm::RlmProtocolPluginConfig
 lash::rlm::RlmProtocolPluginConfig::builder
 lash::rlm::RlmProtocolPluginConfig::channel
 lash::rlm::RlmProtocolPluginConfig::continue_as_soft_warn_tokens
+lash::rlm::RlmProtocolPluginConfig::discovery
 lash::rlm::RlmProtocolPluginConfig::instruction_limit
 lash::rlm::RlmProtocolPluginConfig::lashlang_abilities
 lash::rlm::RlmProtocolPluginConfig::lashlang_language_features
@@ -7578,6 +7587,7 @@ lash::rlm::RlmProtocolPluginConfig::memory_limit
 lash::rlm::RlmProtocolPluginConfig::prompt_features
 lash::rlm::RlmProtocolPluginConfig::wall_clock
 lash::rlm::RlmProtocolPluginConfig::with_channel
+lash::rlm::RlmProtocolPluginConfig::with_discovery
 lash::rlm::RlmProtocolPluginConfig::with_lashlang_abilities
 lash::rlm::RlmProtocolPluginConfig::with_lashlang_language_features
 lash::rlm::RlmProtocolPluginConfigBuilder
@@ -9207,6 +9217,8 @@ lash::tools::ToolDefinitionBindingExt
 lash::tools::ToolDefinitionBindingExt::with_tool_binding
 lash::tools::ToolDirectCompletionClient
 lash::tools::ToolDirectCompletionClient::complete
+lash::tools::ToolDiscovery
+lash::tools::ToolDiscovery::operation
 lash::tools::ToolDispatchClient
 lash::tools::ToolDispatchClient::batch
 lash::tools::ToolDispatchClient::callable_tool_manifest
@@ -9414,6 +9426,7 @@ lash::tools::ToolManifest::bindings
 lash::tools::ToolManifest::compact_contract
 lash::tools::ToolManifest::description
 lash::tools::ToolManifest::id
+lash::tools::ToolManifest::inline
 lash::tools::ToolManifest::name
 lash::tools::ToolManifest::retry_policy
 lash::tools::ToolManifestBindingExt

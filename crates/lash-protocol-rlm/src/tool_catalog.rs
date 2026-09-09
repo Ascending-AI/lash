@@ -1170,6 +1170,7 @@ pub(crate) fn validate_discovery(
     if let Some(discovery) = discovery
         && !tools.iter().any(|tool| {
             tool.inline
+                && tool.activation != ToolActivation::Internal
                 && dialect.tool_call_path(tool).ok().as_deref()
                     == Some(discovery.operation.as_str())
         })
@@ -1186,7 +1187,6 @@ pub(crate) fn with_discovery_sentence(
     discovery: Option<&lash_core::ToolDiscovery>,
     dialect: &dyn crate::dialect::RlmDialect,
 ) -> String {
-    execution = execution.replace(" Use discovery if available.", "");
     if let Some(discovery) = discovery {
         let suffix = if dialect.language_id() == "lashlang" {
             "?"

@@ -117,9 +117,11 @@ fn validate_discovery(
     discovery: Option<&lash_core::ToolDiscovery>,
 ) -> Result<(), PluginError> {
     if let Some(discovery) = discovery
-        && !tools
-            .iter()
-            .any(|tool| tool.inline && tool.name == discovery.operation)
+        && !tools.iter().any(|tool| {
+            tool.inline
+                && tool.activation != lash_core::ToolActivation::Internal
+                && tool.name == discovery.operation
+        })
     {
         return Err(PluginError::InvalidToolDiscovery {
             operation: discovery.operation.clone(),
