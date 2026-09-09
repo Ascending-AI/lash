@@ -792,6 +792,8 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_in_both_dialects
                     origin: Some("test-host".to_string()),
                     reason: Some("user pressed Stop".to_string()),
                     undelivered: lash_sansio::TurnCancelDisposition::Defer,
+                    mode: lash_sansio::TurnCancelMode::Immediate,
+                    honoured_after_step: None,
                 };
                 machine.record_cancellation_evidence(cancellation_evidence.clone());
                 let mut stopped_response = exec_response(

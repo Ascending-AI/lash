@@ -359,11 +359,21 @@ impl AwaitEventRegistry {
     ) -> Result<(), RuntimeError> {
         let gate_key =
             self.derive_key(&terminal_key.scope, AwaitEventWaitIdentity::TurnCancelGate)?;
-        for key_id in [&gate_key.key_id, &terminal_key.key_id] {
+        let escalation_key = self.derive_key(
+            &terminal_key.scope,
+            AwaitEventWaitIdentity::TurnCancelEscalation,
+        )?;
+        for key_id in [
+            &gate_key.key_id,
+            &escalation_key.key_id,
+            &terminal_key.key_id,
+        ] {
             let Some(entry) = state.entries.remove(key_id) else {
                 continue;
             };
             let Some(terminal) = entry.terminal else {
+                // An escalation nobody wrote is a bare waiter slot the
+                // finished turn no longer needs.
                 continue;
             };
             if state

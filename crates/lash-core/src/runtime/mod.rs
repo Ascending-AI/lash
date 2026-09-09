@@ -278,9 +278,9 @@ pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
 use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_with_clock};
 pub use turn_control::{
     TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelDisposition,
-    TurnCancelInputOutcome, TurnCancelOriginHint, TurnCancelOutcome, TurnCancelReceipt,
-    TurnCancelRequest, TurnCancelRequestRecord, TurnCancellationEvidence, TurnTerminal,
-    TurnWorkDriver,
+    TurnCancelInputOutcome, TurnCancelMode, TurnCancelOriginHint, TurnCancelOutcome,
+    TurnCancelReceipt, TurnCancelRequest, TurnCancelRequestRecord, TurnCancellationEvidence,
+    TurnTerminal, TurnWorkDriver,
 };
 pub(crate) use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{

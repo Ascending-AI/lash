@@ -3564,6 +3564,7 @@ fn turn_cancel_record_from_rows(
             origin,
             reason,
             undelivered: turn_cancel_disposition_from_wire(&disposition)?,
+            mode: lash_core::facade_support::TurnCancelMode::Immediate,
         },
         outcome: (!affected_inputs.is_empty())
             .then_some(lash_core::TurnCancelInputOutcome { affected_inputs }),

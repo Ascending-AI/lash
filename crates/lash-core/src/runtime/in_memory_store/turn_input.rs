@@ -81,13 +81,18 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         self.ensure_session_not_deleted(&request.address.session_id)?;
         let _transaction = self.write_transaction.lock_recover();
         let mut requests = self.turn_cancel_requests.lock_recover();
-        Ok(requests
+        let record = requests
             .entry(request.address.turn_id.clone())
             .or_insert_with(|| crate::TurnCancelRequestRecord {
-                request,
+                request: request.clone(),
                 outcome: None,
-            })
-            .clone())
+            });
+        // First writer wins, except that a stronger mode escalates the durable
+        // request; the repair outcome accumulated so far stays attached.
+        if request.mode.is_stronger_than(record.request.mode) {
+            record.request = request;
+        }
+        Ok(record.clone())
     }
 
     async fn turn_cancel_request(

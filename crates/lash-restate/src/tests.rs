@@ -7268,12 +7268,19 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn peek_event<'run>(
         &'run self,
-        _address: RestateDurableWaitAddress,
+        address: RestateDurableWaitAddress,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
     {
-        Box::pin(async { Ok(None) })
+        // A peek sees exactly what this context already terminalized: a
+        // resolved promise reads back, an unresolved one reads as pending.
+        let resolution = self
+            .durable_events
+            .lock_recover()
+            .get(&address.workflow_key)
+            .cloned();
+        Box::pin(async move { Ok(resolution) })
     }
 
     fn await_process_terminal<'run>(

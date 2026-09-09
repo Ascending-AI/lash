@@ -18,7 +18,9 @@ use lash_core::runtime::{
     PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
     QueuedWorkClaim, TurnInputAcceptanceReceipt, TurnInputClaim, TurnInputIngress,
 };
-use lash_core::{LiveReplayStoreError, SessionObservationEvent, facade_support::LiveReplayGap};
+use lash_core::{
+    LiveReplayStoreError, SessionObservationEvent, TurnCancelMode, facade_support::LiveReplayGap,
+};
 use lash_remote_protocol::{
     RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
     RemoteSessionObservationEvent,
@@ -736,12 +738,45 @@ impl LashSession {
         reason: Option<String>,
         undelivered: lash_core::facade_support::TurnCancelDisposition,
     ) -> Result<lash_core::facade_support::TurnCancelReceipt> {
+        self.request_turn_cancel_with_mode(
+            turn_id,
+            request_id,
+            origin,
+            reason,
+            undelivered,
+            TurnCancelMode::Immediate,
+        )
+        .await
+    }
+
+    /// Request cancellation of exactly one turn in this session, choosing
+    /// both the undelivered-input disposition and when the stop is honoured.
+    ///
+    /// [`TurnCancelMode::Immediate`] fires the turn's cooperative token and
+    /// backtracks uncommitted work to the last checkpoint.
+    /// [`TurnCancelMode::AfterStep`] lets the current protocol iteration run
+    /// to its step boundary (response streamed, tool calls completed,
+    /// checkpoint committed) and stops there; nothing backtracks. An immediate
+    /// request on a turn that already holds an after-step request escalates
+    /// it and reports [`TurnCancelOutcome::Escalated`](lash_core::facade_support::TurnCancelOutcome::Escalated);
+    /// a same-or-weaker request reports `AlreadyRequested`. No timer escalates
+    /// on Lash's behalf; that is host policy.
+    pub async fn request_turn_cancel_with_mode(
+        &self,
+        turn_id: &str,
+        request_id: impl Into<String>,
+        origin: Option<String>,
+        reason: Option<String>,
+        undelivered: lash_core::facade_support::TurnCancelDisposition,
+        mode: TurnCancelMode,
+    ) -> Result<lash_core::facade_support::TurnCancelReceipt> {
         let mut request = lash_core::facade_support::TurnCancelRequest::new(
             lash_core::facade_support::TurnAddress::new(self.session_id(), turn_id),
             request_id,
             origin,
         )
-        .undelivered(undelivered);
+        .undelivered(undelivered)
+        .mode(mode);
         request.reason = reason;
         lash_core::facade_support::TurnWorkDriver::new(self.effect_host())
             .request_cancel(request)
@@ -772,6 +807,25 @@ impl LashSession {
     /// Cancel active process-local turns with an opaque host-defined origin.
     pub fn cancel_running_turns_with_origin(&self, origin: Option<String>) -> usize {
         self.turn_cancels.cancel_all(origin)
+    }
+
+    /// Stop active process-local turns in the given mode and report how many
+    /// were signalled. [`TurnCancelMode::Immediate`] is
+    /// [`cancel_running_turns`](Self::cancel_running_turns);
+    /// [`TurnCancelMode::AfterStep`] never fires a token: each turn finishes
+    /// its current protocol iteration and stops at that step boundary.
+    pub fn cancel_running_turns_with_mode(&self, mode: TurnCancelMode) -> usize {
+        self.cancel_running_turns_with_origin_and_mode(None, mode)
+    }
+
+    /// [`cancel_running_turns_with_mode`](Self::cancel_running_turns_with_mode)
+    /// with an opaque host-defined origin recorded on the evidence.
+    pub fn cancel_running_turns_with_origin_and_mode(
+        &self,
+        origin: Option<String>,
+        mode: TurnCancelMode,
+    ) -> usize {
+        self.turn_cancels.cancel_all_with_mode(origin, mode)
     }
 
     /// Returns the session administration facade.

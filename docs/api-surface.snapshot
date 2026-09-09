@@ -16,6 +16,7 @@ lash::AwaitEventWaitIdentity::ProcessSignal::process_id
 lash::AwaitEventWaitIdentity::ProcessSignal::signal_name
 lash::AwaitEventWaitIdentity::ToolCompletion
 lash::AwaitEventWaitIdentity::ToolCompletion::tool_call_id
+lash::AwaitEventWaitIdentity::TurnCancelEscalation
 lash::AwaitEventWaitIdentity::TurnCancelGate
 lash::AwaitEventWaitIdentity::TurnTerminal
 lash::AwaitEventWaitIdentity::is_turn_control
@@ -253,7 +254,9 @@ lash::LashSession::cancel_pending_turn_input_suffix
 lash::LashSession::cancel_pending_turn_inputs
 lash::LashSession::cancel_queued_work_batch
 lash::LashSession::cancel_running_turns
+lash::LashSession::cancel_running_turns_with_mode
 lash::LashSession::cancel_running_turns_with_origin
+lash::LashSession::cancel_running_turns_with_origin_and_mode
 lash::LashSession::close
 lash::LashSession::effect_host
 lash::LashSession::enqueue
@@ -270,6 +273,7 @@ lash::LashSession::refresh_background_graph
 lash::LashSession::remote_turn_input_applications
 lash::LashSession::request_turn_cancel
 lash::LashSession::request_turn_cancel_with_disposition
+lash::LashSession::request_turn_cancel_with_mode
 lash::LashSession::revoke_durable_waits
 lash::LashSession::session_id
 lash::LashSession::set_turn_phase_probe
@@ -717,12 +721,20 @@ lash::TurnCancelInputOutcome
 lash::TurnCancelInputOutcome::affected_inputs
 lash::TurnCancelInputOutcome::is_empty
 lash::TurnCancelInputOutcome::len
+lash::TurnCancelMode
+lash::TurnCancelMode::AfterStep
+lash::TurnCancelMode::Immediate
+lash::TurnCancelMode::is_immediate
+lash::TurnCancelMode::is_stronger_than
 lash::TurnCancelOriginHint
+lash::TurnCancelOriginHint::request_after_step
 lash::TurnCancelOriginHint::set
 lash::TurnCancelOutcome
 lash::TurnCancelOutcome::AlreadyRequested
 lash::TurnCancelOutcome::AlreadyRequested::0
 lash::TurnCancelOutcome::CompletionWonRace
+lash::TurnCancelOutcome::Escalated
+lash::TurnCancelOutcome::Escalated::0
 lash::TurnCancelOutcome::Requested
 lash::TurnCancelOutcome::Requested::0
 lash::TurnCancelOutcome::UnknownOrRevoked
@@ -731,6 +743,7 @@ lash::TurnCancelReceipt::outcome
 lash::TurnCancelReceipt::record
 lash::TurnCancelRequest
 lash::TurnCancelRequest::address
+lash::TurnCancelRequest::mode
 lash::TurnCancelRequest::new
 lash::TurnCancelRequest::origin
 lash::TurnCancelRequest::reason
@@ -741,7 +754,9 @@ lash::TurnCancelRequestRecord
 lash::TurnCancelRequestRecord::outcome
 lash::TurnCancelRequestRecord::request
 lash::TurnCancellationEvidence
+lash::TurnCancellationEvidence::honoured_after_step
 lash::TurnCancellationEvidence::internal
+lash::TurnCancellationEvidence::mode
 lash::TurnCancellationEvidence::origin
 lash::TurnCancellationEvidence::reason
 lash::TurnCancellationEvidence::request_id
@@ -4325,7 +4340,9 @@ lash::prelude::LashSession::cancel_pending_turn_input_suffix
 lash::prelude::LashSession::cancel_pending_turn_inputs
 lash::prelude::LashSession::cancel_queued_work_batch
 lash::prelude::LashSession::cancel_running_turns
+lash::prelude::LashSession::cancel_running_turns_with_mode
 lash::prelude::LashSession::cancel_running_turns_with_origin
+lash::prelude::LashSession::cancel_running_turns_with_origin_and_mode
 lash::prelude::LashSession::close
 lash::prelude::LashSession::effect_host
 lash::prelude::LashSession::enqueue
@@ -4342,6 +4359,7 @@ lash::prelude::LashSession::refresh_background_graph
 lash::prelude::LashSession::remote_turn_input_applications
 lash::prelude::LashSession::request_turn_cancel
 lash::prelude::LashSession::request_turn_cancel_with_disposition
+lash::prelude::LashSession::request_turn_cancel_with_mode
 lash::prelude::LashSession::revoke_durable_waits
 lash::prelude::LashSession::session_id
 lash::prelude::LashSession::set_turn_phase_probe

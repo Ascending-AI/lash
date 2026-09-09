@@ -267,6 +267,18 @@ impl RuntimeTurnDriver<'_> {
                         .await;
                     }
                 }
+                // FIG-635: the step boundary. The checkpoint commit above is
+                // the last act of the protocol iteration it closes (response
+                // streamed, tools completed, work committed), and the machine
+                // has already advanced its counter, so the closed iteration
+                // is one behind. A machine that finished on this checkpoint
+                // seals the gate at commit instead.
+                if !machine.is_done()
+                    && let Some(closed_iteration) = machine.protocol_iteration().checked_sub(1)
+                {
+                    self.observe_step_boundary_cancel(machine, closed_iteration, event_tx, cancel)
+                        .await?;
+                }
             }
             Err(err) => {
                 if let Some(claim) = self.pending_checkpoint_turn_input_claim.take()
@@ -281,6 +293,62 @@ impl RuntimeTurnDriver<'_> {
                     .await?;
             }
         }
+        Ok(())
+    }
+
+    /// Observe the cancellation gate at the step boundary that closed
+    /// `closed_iteration` (`turn_cancel.after_step.{n}`), identically on the
+    /// native and the controller-owned binding.
+    ///
+    /// An after-step request found here is honoured without the cooperative
+    /// token: nothing is in flight, the checkpoint is committed, so the turn
+    /// simply finishes cancelled. An immediate request found here on the
+    /// native binding fires the token and lets the run observe it exactly as
+    /// the live watcher would have; on a controller-owned journal it finishes
+    /// here, between journal commands, like the after-LLM gate.
+    async fn observe_step_boundary_cancel(
+        &mut self,
+        machine: &mut TurnMachine,
+        closed_iteration: usize,
+        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        cancel: &CancellationToken,
+    ) -> Result<(), RuntimeError> {
+        let effect_host = Arc::clone(&self.host.core.control.effect_host);
+        let binding = effect_host
+            .turn_control_binding(&self.scoped_effect_controller)
+            .await?;
+        let (resolver, peek_controller): (&dyn AwaitEventResolver, &dyn RuntimeEffectController) =
+            match &binding {
+                crate::TurnControlBinding::HostOwned { resolver, peek } => {
+                    (*resolver, peek.controller())
+                }
+                crate::TurnControlBinding::RunScoped { resolver, .. } => {
+                    (*resolver, self.scoped_effect_controller.controller())
+                }
+            };
+        // A process-local after-step stop lands on the durable gate before
+        // the journaled peek, so replay sees the gate and never the flag.
+        self.turn_control.resolve_local_after_step(resolver).await?;
+        let pending_cancel = self
+            .turn_control
+            .observe_pending_cancel(
+                peek_controller,
+                crate::runtime::turn_control::TurnCancelPeekIdentity::AfterStep {
+                    protocol_iteration: closed_iteration,
+                },
+            )
+            .await?;
+        let Some(evidence) = pending_cancel else {
+            return Ok(());
+        };
+        if evidence.mode.is_immediate() && !self.observes_durable_cancel_after_llm {
+            cancel.cancel();
+            return Ok(());
+        }
+        send_session_event(event_tx, SessionStreamEvent::Done).await;
+        machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
+            evidence,
+        }));
         Ok(())
     }
 

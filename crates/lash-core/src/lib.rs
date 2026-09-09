@@ -455,6 +455,7 @@ pub mod facade_support {
     pub use crate::runtime::TurnCancelAffectedInput;
     pub use crate::runtime::TurnCancelDisposition;
     pub use crate::runtime::TurnCancelInputOutcome;
+    pub use crate::runtime::TurnCancelMode;
     pub use crate::runtime::TurnCancelOutcome;
     pub use crate::runtime::TurnCancelReceipt;
     pub use crate::runtime::TurnCancelRequest;
@@ -1163,16 +1164,16 @@ pub use runtime::{
     SessionStoreFactory, SessionSummary, SessionWorkTarget, StoreEffectGroupDrain,
     TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch, ToolIntentOutcomeSink,
     ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity, TurnActivityId,
-    TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelOriginHint,
-    TurnCancelRequestRecord, TurnContext, TurnControlBinding, TurnControlParticipation, TurnEvent,
-    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
-    TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData,
-    TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, WaitKind, WaitState,
-    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
-    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
-    WatchedRegistry, WorkCadencePolicy, WorkerProcessWork, WorkerSlotKind, WorkerSlotPermit,
-    WorkerSlotSupplier, WorkerSweepPolicy,
+    TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelMode,
+    TurnCancelOriginHint, TurnCancelRequestRecord, TurnContext, TurnControlBinding,
+    TurnControlParticipation, TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput,
+    TurnFailureSettlement, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
+    TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
+    TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim, TurnInputState,
+    UnclaimedTurnInputs, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
+    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerProcessWork,
+    WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
 };
 pub(crate) use runtime::{
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, QueuedWorkEnqueueOutcome,

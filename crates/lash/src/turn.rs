@@ -14,7 +14,8 @@ use crate::support::{
 use futures_util::Stream;
 use lash_core::facade_support::{
     RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps,
-    SelectedQueuedWorkDrainError as CoreSelectedQueuedWorkDrainError, TurnContextFacadeOps,
+    SelectedQueuedWorkDrainError as CoreSelectedQueuedWorkDrainError, TurnCancelMode,
+    TurnContextFacadeOps,
 };
 
 pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverity};
@@ -161,10 +162,28 @@ impl TurnCancelRegistry {
     }
 
     pub(crate) fn cancel_all(&self, origin: Option<String>) -> usize {
+        self.cancel_all_with_mode(origin, TurnCancelMode::Immediate)
+    }
+
+    /// Signal every registered turn. `Immediate` fires the cooperative token;
+    /// `AfterStep` leaves the token alone and flags the shared origin hint so
+    /// each turn stops at its next step boundary.
+    pub(crate) fn cancel_all_with_mode(
+        &self,
+        origin: Option<String>,
+        mode: TurnCancelMode,
+    ) -> usize {
         let inner = self.inner.lock_recover();
         for registered in inner.active.values() {
-            registered.origin_hint.set(origin.clone());
-            registered.token.cancel();
+            match mode {
+                TurnCancelMode::Immediate => {
+                    registered.origin_hint.set(origin.clone());
+                    registered.token.cancel();
+                }
+                TurnCancelMode::AfterStep => {
+                    registered.origin_hint.request_after_step(origin.clone())
+                }
+            }
         }
         inner.active.len()
     }
