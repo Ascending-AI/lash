@@ -297,14 +297,12 @@ impl Compiler {
         let Some(shape) = shape else {
             unreachable!("comprehension element body compiles exactly once")
         };
-        let selects_by_settlement_order =
-            self.dialect == CompilationDialect::Typescript && leaves.iter().any(|leaf| leaf.unwrap);
         let batch = self.push_resource_operation_batch(CompiledResourceOperationBatch {
             leaves: leaves.into_boxed_slice(),
             shape,
             stack_value_count,
             aggregate_unwrap,
-            first_settled_rejection: selects_by_settlement_order,
+            first_settled_rejection: false,
         });
         let instruction = self.code.len();
         self.code
@@ -321,6 +319,38 @@ impl Compiler {
         stack_value_count: &mut usize,
     ) -> CompiledAggregateAwaitShape {
         match expr {
+            Expr::ListComprehension { element, clauses } => {
+                let mut element_leaves = Vec::new();
+                let mut element_value_count = 0;
+                let mut element_shape = None;
+                self.compile_list_comprehension_with(
+                    &mut |compiler| {
+                        element_shape = Some(compiler.compile_aggregate_await_shape(
+                            element,
+                            &mut element_leaves,
+                            &mut element_value_count,
+                        ));
+                        compiler
+                            .code
+                            .push(Instruction::BuildTuple(element_value_count));
+                        compiler.emit_isolation();
+                    },
+                    clauses,
+                );
+                let stack_index = *stack_value_count;
+                *stack_value_count += 1;
+                CompiledAggregateAwaitShape::Comprehension {
+                    stack_index,
+                    template: Box::new(CompiledResourceOperationBatch {
+                        leaves: element_leaves.into_boxed_slice(),
+                        shape: element_shape.expect("comprehension body compiles once"),
+                        stack_value_count: element_value_count,
+                        aggregate_unwrap: false,
+                        first_settled_rejection: false,
+                    }),
+                }
+            }
+
             Expr::ReceiverCall {
                 receiver,
                 operation,
@@ -812,6 +842,7 @@ fn aggregate_await_shape_leaf_count(expr: &Expr) -> Option<usize> {
 
 fn aggregate_await_leaf_count(expr: &Expr) -> Option<usize> {
     match expr {
+        Expr::ListComprehension { element, .. } => aggregate_await_leaf_count(element),
         Expr::ReceiverCall { .. } => Some(1),
         Expr::ResultUnwrap(inner) if matches!(inner.as_ref(), Expr::ReceiverCall { .. }) => Some(1),
         Expr::Tuple(items) => items.iter().try_fold(0usize, |count, item| {

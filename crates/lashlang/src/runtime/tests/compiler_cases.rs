@@ -2306,3 +2306,54 @@ fn awaiting_a_handle_record_shape_is_not_rejected_as_settled() {
             .expect("handle shape should link");
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn nested_comprehension_aggregates_match_literal_expansion() {
+    for (nested, literal) in [
+        (
+            r#"finish await { orders: [tools.echo({ value: x })? for x in [1,2]] }"#,
+            r#"finish await { orders: [tools.echo({ value: 1 })?, tools.echo({ value: 2 })?] }"#,
+        ),
+        (
+            r#"finish await [([ { orders: [tools.echo({ value: x })? for x in [1,2]] } ], tools.echo({ value: 3 })?)]"#,
+            r#"finish await [([ { orders: [tools.echo({ value: 1 })?, tools.echo({ value: 2 })?] } ], tools.echo({ value: 3 })?)]"#,
+        ),
+        (
+            r#"rows = [[1,2], [], [3]]; finish await [[tools.echo({ value: x })? for x in row] for row in rows]"#,
+            r#"finish await [[tools.echo({ value: 1 })?, tools.echo({ value: 2 })?], [], [tools.echo({ value: 3 })?]]"#,
+        ),
+        (
+            r#"finish await { before: tools.echo({ value: 0 })?, orders: [tools.echo({ value: x })? for x in []], after: tools.echo({ value: 3 })? }"#,
+            r#"finish await { before: tools.echo({ value: 0 })?, orders: [], after: tools.echo({ value: 3 })? }"#,
+        ),
+    ] {
+        let nested_host = ComprehensionBatchHost::default();
+        let literal_host = ComprehensionBatchHost::default();
+        let expected = comprehension_finish(&literal_host, literal).await;
+        assert_eq!(comprehension_finish(&nested_host, nested).await, expected);
+        assert_eq!(nested_host.batches(), literal_host.batches());
+        assert_eq!(nested_host.batches().len(), 1);
+        assert_eq!(nested_host.singles.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn nested_comprehension_rejections_follow_written_order_after_settlement() {
+    let host = ComprehensionBatchHost::default();
+    let compiled = comprehension_compile(
+        r#"finish await { orders: [[tools.err({ value: x })? for x in row] for row in [["first", "second"]]], last: tools.echo({ value: "last" })? }"#,
+    );
+    let error = execute_compiled(&compiled, &mut State::new(), &host)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("first"), "{error}");
+    assert_eq!(
+        host.batches(),
+        vec![vec![
+            "err:first".to_string(),
+            "err:second".to_string(),
+            "echo:last".to_string()
+        ]]
+    );
+    assert_eq!(host.singles.load(Ordering::SeqCst), 0);
+}

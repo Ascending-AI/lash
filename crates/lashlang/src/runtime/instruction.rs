@@ -173,6 +173,11 @@ pub(crate) struct CompiledResourceOperationBatchLeaf {
 
 #[derive(Clone)]
 pub(crate) enum CompiledAggregateAwaitShape {
+    /// A list of packed element values evaluated by a comprehension loop.
+    Comprehension {
+        stack_index: usize,
+        template: Box<CompiledResourceOperationBatch>,
+    },
     BatchLeaf(usize),
     Value(usize),
     Tuple(Box<[CompiledAggregateAwaitShape]>),

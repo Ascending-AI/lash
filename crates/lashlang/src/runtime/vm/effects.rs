@@ -307,7 +307,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let batch = self.chunk.resource_operation_batches[batch].clone();
         let start = self.stack_drain_start(batch.stack_value_count)?;
         let values = self.stack.drain(start..).collect::<Vec<_>>();
-        self.resolve_batch_spec(&batch, values).await
+        self.resolve_captured_batch(&batch, &values).await
     }
 
     /// Settles a comprehension of operation calls as one batch. The loop left a
@@ -321,48 +321,43 @@ impl<H: ExecutionHost> Vm<'_, H> {
         batch: usize,
     ) -> Result<(), RuntimeError> {
         let template = self.chunk.resource_operation_batches[batch].clone();
-        let Value::List(elements) = self.pop_stack()? else {
-            return Err(RuntimeError::InvalidResourceComprehensionElement);
+        let elements = self.pop_stack()?;
+        let batch = CompiledResourceOperationBatch {
+            aggregate_unwrap: template.aggregate_unwrap,
+            first_settled_rejection: false,
+            shape: CompiledAggregateAwaitShape::Comprehension {
+                stack_index: 0,
+                template: Box::new(template),
+            },
+            stack_value_count: 1,
+            leaves: Box::new([]),
         };
-        let mut values = Vec::with_capacity(elements.len() * template.stack_value_count);
-        let mut leaves = Vec::with_capacity(elements.len() * template.leaves.len());
-        let mut shapes = Vec::with_capacity(elements.len());
-        for element in elements.iter() {
-            let Value::Tuple(packed) = element else {
-                return Err(RuntimeError::InvalidResourceComprehensionElement);
-            };
-            if packed.len() != template.stack_value_count {
-                return Err(RuntimeError::InvalidResourceComprehensionElement);
-            }
-            let value_offset = values.len();
-            let leaf_offset = leaves.len();
-            values.extend(packed.iter().cloned());
-            leaves.extend(
-                template
-                    .leaves
-                    .iter()
-                    .map(|leaf| CompiledResourceOperationBatchLeaf {
-                        receiver_stack_index: leaf.receiver_stack_index + value_offset,
-                        ..leaf.clone()
-                    }),
-            );
-            shapes.push(offset_aggregate_await_shape(
-                &template.shape,
-                leaf_offset,
-                value_offset,
-            ));
-        }
+        self.resolve_captured_batch(&batch, &[elements]).await
+    }
+
+    async fn resolve_captured_batch(
+        &mut self,
+        template: &CompiledResourceOperationBatch,
+        captured: &[Value],
+    ) -> Result<(), RuntimeError> {
+        let mut leaves = Vec::new();
+        let mut values = Vec::new();
+        let shape = expand_aggregate_await_shape(
+            &template.shape,
+            template,
+            captured,
+            &mut leaves,
+            &mut values,
+        )?;
         let batch = CompiledResourceOperationBatch {
             leaves: leaves.into_boxed_slice(),
-            shape: CompiledAggregateAwaitShape::List(shapes.into_boxed_slice()),
+            shape,
             stack_value_count: values.len(),
             aggregate_unwrap: template.aggregate_unwrap,
             first_settled_rejection: template.first_settled_rejection,
         };
         if batch.leaves.is_empty() {
-            // Nothing to settle: an empty comprehension is an empty list, and
-            // the host is never asked to run a batch of zero operations.
-            let mut value = Value::List(Vec::new().into());
+            let mut value = build_aggregate_await_shape(&batch.shape, &values, &[], self)?;
             if batch.aggregate_unwrap {
                 value = unwrap_tool_result(value)?;
             }
@@ -649,43 +644,87 @@ fn awaited_settled_value(actual: &str, path: &str) -> RuntimeError {
     }
 }
 
-/// Re-indexes a per-element template shape into the flattened comprehension
-/// batch: leaf indexes shift by the leaves settled before this element, value
-/// indexes by the packed values before it.
-fn offset_aggregate_await_shape(
+/// Expand captured comprehension lists recursively, preserving source traversal
+/// order for both the host batch and its rejection policy. Each element uses
+/// its own packed receiver/argument values; no operation executes here.
+fn expand_aggregate_await_shape(
     shape: &CompiledAggregateAwaitShape,
-    leaf_offset: usize,
-    value_offset: usize,
-) -> CompiledAggregateAwaitShape {
-    match shape {
+    template: &CompiledResourceOperationBatch,
+    captured: &[Value],
+    leaves: &mut Vec<CompiledResourceOperationBatchLeaf>,
+    values: &mut Vec<Value>,
+) -> Result<CompiledAggregateAwaitShape, RuntimeError> {
+    Ok(match shape {
+        CompiledAggregateAwaitShape::Comprehension {
+            stack_index,
+            template,
+        } => {
+            let Some(Value::List(elements)) = captured.get(*stack_index) else {
+                return Err(RuntimeError::InvalidResourceComprehensionElement);
+            };
+            let mut shapes = Vec::with_capacity(elements.len());
+            for element in elements.iter() {
+                let Value::Tuple(packed) = element else {
+                    return Err(RuntimeError::InvalidResourceComprehensionElement);
+                };
+                if packed.len() != template.stack_value_count {
+                    return Err(RuntimeError::InvalidResourceComprehensionElement);
+                }
+                shapes.push(expand_aggregate_await_shape(
+                    &template.shape,
+                    template,
+                    packed,
+                    leaves,
+                    values,
+                )?);
+            }
+            CompiledAggregateAwaitShape::List(shapes.into_boxed_slice())
+        }
         CompiledAggregateAwaitShape::BatchLeaf(index) => {
-            CompiledAggregateAwaitShape::BatchLeaf(index + leaf_offset)
+            let leaf = &template.leaves[*index];
+            let start = leaf.receiver_stack_index;
+            let packed = captured
+                .get(start..start + leaf.argc + 1)
+                .ok_or(RuntimeError::ResourceBatchArgumentOutOfRange)?;
+            let index = leaves.len();
+            leaves.push(CompiledResourceOperationBatchLeaf {
+                receiver_stack_index: values.len(),
+                ..leaf.clone()
+            });
+            values.extend_from_slice(packed);
+            CompiledAggregateAwaitShape::BatchLeaf(index)
         }
         CompiledAggregateAwaitShape::Value(index) => {
-            CompiledAggregateAwaitShape::Value(index + value_offset)
+            let value = captured
+                .get(*index)
+                .ok_or(RuntimeError::AggregateAwaitValueOutOfRange)?;
+            let index = values.len();
+            values.push(value.clone());
+            CompiledAggregateAwaitShape::Value(index)
         }
-        CompiledAggregateAwaitShape::Tuple(values) => CompiledAggregateAwaitShape::Tuple(
-            values
+        CompiledAggregateAwaitShape::Tuple(items) => CompiledAggregateAwaitShape::Tuple(
+            items
                 .iter()
-                .map(|value| offset_aggregate_await_shape(value, leaf_offset, value_offset))
-                .collect(),
+                .map(|item| expand_aggregate_await_shape(item, template, captured, leaves, values))
+                .collect::<Result<_, _>>()?,
         ),
-        CompiledAggregateAwaitShape::List(values) => CompiledAggregateAwaitShape::List(
-            values
+        CompiledAggregateAwaitShape::List(items) => CompiledAggregateAwaitShape::List(
+            items
                 .iter()
-                .map(|value| offset_aggregate_await_shape(value, leaf_offset, value_offset))
-                .collect(),
+                .map(|item| expand_aggregate_await_shape(item, template, captured, leaves, values))
+                .collect::<Result<_, _>>()?,
         ),
-        CompiledAggregateAwaitShape::Record { keys, values } => {
-            CompiledAggregateAwaitShape::Record {
-                keys: *keys,
-                values: values
-                    .iter()
-                    .map(|value| offset_aggregate_await_shape(value, leaf_offset, value_offset))
-                    .collect(),
-            }
-        }
-    }
+        CompiledAggregateAwaitShape::Record {
+            keys,
+            values: items,
+        } => CompiledAggregateAwaitShape::Record {
+            keys: *keys,
+            values: items
+                .iter()
+                .map(|item| expand_aggregate_await_shape(item, template, captured, leaves, values))
+                .collect::<Result<_, _>>()?,
+        },
+    })
 }
 
 fn build_aggregate_await_shape<H: ExecutionHost>(
@@ -695,6 +734,10 @@ fn build_aggregate_await_shape<H: ExecutionHost>(
     vm: &Vm<'_, H>,
 ) -> Result<Value, RuntimeError> {
     match shape {
+        CompiledAggregateAwaitShape::Comprehension { .. } => {
+            Err(RuntimeError::InvalidResourceComprehensionElement)
+        }
+
         CompiledAggregateAwaitShape::BatchLeaf(index) => leaf_values
             .get(*index)
             .cloned()
