@@ -262,6 +262,7 @@ pub use process_worker::{
     ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
     ProcessDrainReport, ProcessExecutionConcurrencyError, ProcessRecoveryAttemptOutcome,
     ProcessRecoveryOperation, ProcessWorkerFault, WorkerProcessWork,
+    trigger_delivery_reconcile_scope,
 };
 pub use queued_drain_policy::default_queued_drain_policy;
 pub use queued_drain_policy::{

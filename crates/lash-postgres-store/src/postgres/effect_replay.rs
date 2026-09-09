@@ -29,7 +29,9 @@ use lash_core::facade_support::effect_replay_driver::{
 
 use lash_core::{GroupExecutors, StoreEffectGroupDrain};
 
-use crate::await_event::{PostgresAwaitEventBackend, postgres_await_events};
+use crate::await_event::{
+    PostgresAwaitEventBackend, lock_scope, postgres_await_events, scope_is_retired,
+};
 
 const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::postgres();
 
@@ -229,6 +231,15 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         request: &EffectClaimRequest,
     ) -> Result<EffectClaimObservation, RuntimeEffectControllerError> {
         let mut tx = self.pool.begin().await.map_err(effect_store_error)?;
+        // Only session-free scopes can carry a retirement tombstone, so only
+        // they take the scope lock retirement writes it under; a session scope
+        // has nothing here to race with.
+        if fence_session_free_scope(&mut tx, request.session_id.as_deref(), &request.scope_id)
+            .await?
+        {
+            tx.commit().await.map_err(effect_store_error)?;
+            return Ok(EffectClaimObservation::ScopeRetired);
+        }
         // The server's transaction clock is the authoritative lease instant:
         // one stable value for every comparison and derived expiry below.
         let now_ms = postgres_transaction_epoch_ms(&mut tx)
@@ -377,6 +388,15 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         &self,
         record: &EffectGroupRecord,
     ) -> Result<EffectGroupRecord, RuntimeEffectControllerError> {
+        // One transaction so the retirement fence and the insert are read and
+        // written under the scope lock (N4); it still holds no child-row lock,
+        // so the N2 lock order against `finalize` is unchanged.
+        let mut tx = self.pool.begin().await.map_err(effect_store_error)?;
+        if fence_session_free_scope(&mut tx, record.session_id.as_deref(), &record.scope_id).await?
+        {
+            tx.commit().await.map_err(effect_store_error)?;
+            return Err(effect_replay_driver::scope_retired(&record.scope_id));
+        }
         let inserted = sqlx::query(
             "INSERT INTO lash_runtime_effect_group (
                 group_key, scope_id, session_id, wake, loser_disposition,
@@ -394,10 +414,11 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         .bind(record.loser_disposition.column())
         .bind(record.children as i64)
         .bind(record.created_at_ms as i64)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(effect_store_error)?;
         if let Some(row) = inserted {
+            tx.commit().await.map_err(effect_store_error)?;
             return stored_group_record(row);
         }
         // The conflict path: some earlier open owns this key, and its row — not
@@ -409,10 +430,11 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
              WHERE group_key = $1",
         )
         .bind(&record.group_key)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(effect_store_error)?
         .ok_or_else(|| missing_group_row(&record.group_key))?;
+        tx.commit().await.map_err(effect_store_error)?;
         stored_group_record(existing)
     }
 
@@ -539,24 +561,56 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
                 error.to_string(),
             )
         };
-        let (children_sql, groups_sql, key) = match retirement {
+        let (children_sql, groups_sql, key, fenced_scope) = match retirement {
             lash_core::EffectJournalRetirement::Session { session_id } => (
                 "DELETE FROM lash_runtime_effect_replay WHERE session_id = $1",
                 "DELETE FROM lash_runtime_effect_group WHERE session_id = $1",
                 session_id.clone(),
+                None,
             ),
-            lash_core::EffectJournalRetirement::Process { process_id } => {
-                let identity = ExecutionScope::process(process_id.clone())
-                    .journal_identity()
-                    .expect("process scopes always form durable journal identities");
+            lash_core::EffectJournalRetirement::Process { .. }
+            | lash_core::EffectJournalRetirement::RuntimeOperation { .. } => {
+                let scope = retirement
+                    .retired_scope()
+                    .expect("scope-exact retirements name their scope");
+                let identity = scope.journal_identity().expect(
+                    "process and runtime-operation scopes always form durable journal identities",
+                );
                 (
                     "DELETE FROM lash_runtime_effect_replay WHERE scope_id = $1",
                     "DELETE FROM lash_runtime_effect_group WHERE scope_id = $1",
                     identity.key().to_string(),
+                    Some(scope),
                 )
             }
         };
         let mut tx = self.pool.begin().await.map_err(retirement_error)?;
+        // Scope-exact retirement (N4): tombstone first, under the scope lock
+        // every admission path takes, then the rows; the promise rows go in
+        // the same transaction so the fence and the deletions land together.
+        if let Some(scope) = fenced_scope.as_ref() {
+            lock_scope(&mut tx, &key).await.map_err(retirement_error)?;
+            let scope_json = serde_json::to_string(scope).map_err(|err| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                    err.to_string(),
+                )
+            })?;
+            sqlx::query(
+                "INSERT INTO lash_effect_scope_retirements (scope_id, retired_at_ms)
+                 VALUES ($1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT)
+                 ON CONFLICT (scope_id) DO NOTHING",
+            )
+            .bind(&key)
+            .execute(&mut *tx)
+            .await
+            .map_err(retirement_error)?;
+            sqlx::query("DELETE FROM lash_await_event_waits WHERE scope_json = $1")
+                .bind(&scope_json)
+                .execute(&mut *tx)
+                .await
+                .map_err(retirement_error)?;
+        }
         let children = sqlx::query(children_sql)
             .bind(&key)
             .execute(&mut *tx)
@@ -852,6 +906,23 @@ fn missing_group_row(group_key: &str) -> RuntimeEffectControllerError {
         }
         .to_string(),
     )
+}
+
+/// Take the scope lock and read the retirement fence for a session-free scope.
+/// Session scopes are never scope-retired and take no lock here, exactly as
+/// their promise atoms take the session lock instead.
+async fn fence_session_free_scope(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: Option<&str>,
+    scope_id: &str,
+) -> Result<bool, RuntimeEffectControllerError> {
+    if session_id.is_some() {
+        return Ok(false);
+    }
+    lock_scope(tx, scope_id).await.map_err(effect_store_error)?;
+    scope_is_retired(&mut **tx, scope_id)
+        .await
+        .map_err(|err| effect_store_message(err.to_string()))
 }
 
 fn effect_store_error(err: sqlx::Error) -> RuntimeEffectControllerError {

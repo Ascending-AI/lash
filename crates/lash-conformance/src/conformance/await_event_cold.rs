@@ -8,7 +8,7 @@ use lash_core::testing::conformance_support::ActiveTurnControl;
 
 /// Number of named Layer-A vector groups executed by
 /// [`effect_host_await_events_cold_instance`].
-pub const COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT: usize = 8;
+pub const COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT: usize = 9;
 
 /// Run the durable multi-host AwaitEvent suite.
 ///
@@ -31,6 +31,7 @@ where
     cold_key_stability(&make, &prefix).await;
     cold_auth_tamper_matrix(&make, &prefix).await;
     cold_revocation_survives_reopen(&make, &prefix).await;
+    cold_scope_retirement_survives_reopen(&make, &prefix).await;
     cold_cancel_sweep_excludes_turn_control(&make, &prefix).await;
     cold_terminal_attach_both_orders(&make, &prefix).await;
 }
@@ -334,6 +335,67 @@ where
         .await
         .expect_err("reopened host must reject mint after revocation");
     assert_eq!(mint_error.code.as_str(), "await_event_unknown_or_revoked");
+}
+
+/// A process scope's retirement is a durable fence, not a resident memory:
+/// hosts that never saw the retirement refuse to resolve, read, mint, or admit
+/// an effect under the retired scope (FIG-2499, FIG-2500).
+async fn cold_scope_retirement_survives_reopen<F>(make: &F, prefix: &str)
+where
+    F: Fn() -> Arc<dyn EffectHost>,
+{
+    let process_id = format!("{prefix}-retired-process");
+    let scope = ExecutionScope::process(process_id.clone());
+    let key = make()
+        .await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion(format!("{prefix}-retired-process-call")),
+        )
+        .await
+        .expect("pre-retirement key");
+    make()
+        .retire_effect_journal(crate::EffectJournalRetirement::process(process_id))
+        .await
+        .expect("host A retires the process scope");
+    assert_eq!(
+        make()
+            .resolve_await_event(&key, Resolution::Cancelled)
+            .await
+            .expect("host B sees retirement"),
+        ResolveOutcome::UnknownOrRevoked
+    );
+    let error = make()
+        .peek_await_event(&key)
+        .await
+        .expect_err("host C sees the durable scope fence");
+    assert_eq!(error.code.as_str(), "await_event_unknown_or_revoked");
+    let mint_error = make()
+        .await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion(format!("{prefix}-post-retirement-call")),
+        )
+        .await
+        .expect_err("reopened host must reject mint after retirement");
+    assert_eq!(mint_error.code.as_str(), "await_event_unknown_or_revoked");
+    let host = make();
+    let admission = host
+        .scoped(scope)
+        .expect("a retired scope still binds a controller")
+        .controller()
+        .execute_effect(
+            super::effect_host::exec_code_conformance_envelope(
+                &format!("{prefix}-post-retirement-effect"),
+                "post-retirement-envelope",
+            ),
+            RuntimeEffectLocalExecutor::testing(|_| async {
+                Ok(super::effect_host::replay_conformance_exec_outcome(
+                    "never-admitted",
+                ))
+            }),
+        )
+        .await
+        .expect_err("reopened host must refuse admission under a retired scope");
+    assert_eq!(admission.code, crate::RuntimeErrorCode::EffectScopeRetired);
 }
 
 async fn cold_cancel_sweep_excludes_turn_control<F>(make: &F, prefix: &str)

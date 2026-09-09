@@ -494,6 +494,7 @@ pub mod facade_support {
     pub use crate::runtime::registry_transitions;
     #[doc(hidden)]
     pub use crate::runtime::release_process_execution_permit_while;
+    pub use crate::runtime::trigger_delivery_reconcile_scope;
     /// Whether this build records the runtime-tuning OpenTelemetry metrics.
     #[doc(hidden)]
     pub const RUNTIME_TUNING_METRICS_ENABLED: bool = cfg!(feature = "otel-trace");

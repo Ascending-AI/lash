@@ -1331,9 +1331,14 @@ lash::durability::EffectJournalIdentity::session_id
 lash::durability::EffectJournalRetirement
 lash::durability::EffectJournalRetirement::Process
 lash::durability::EffectJournalRetirement::Process::process_id
+lash::durability::EffectJournalRetirement::RuntimeOperation
+lash::durability::EffectJournalRetirement::RuntimeOperation::operation_id
 lash::durability::EffectJournalRetirement::Session
 lash::durability::EffectJournalRetirement::Session::session_id
+lash::durability::EffectJournalRetirement::for_scope
 lash::durability::EffectJournalRetirement::process
+lash::durability::EffectJournalRetirement::retired_scope
+lash::durability::EffectJournalRetirement::runtime_operation
 lash::durability::EffectJournalRetirement::session
 lash::durability::LeaseTimings
 lash::durability::LeaseTimings::from_ttl
@@ -7715,6 +7720,7 @@ lash::runtime::AwaitEventResolver::cancel_await_events_for_session
 lash::runtime::AwaitEventResolver::peek_await_event
 lash::runtime::AwaitEventResolver::prepare_completion_key
 lash::runtime::AwaitEventResolver::resolve_await_event
+lash::runtime::AwaitEventResolver::retire_await_events_for_scope
 lash::runtime::AwaitEventResolver::revoke_await_events_for_session
 lash::runtime::AwaitEventResolver::wait_out_crashed_lane_holder
 lash::runtime::CheckpointClaimSet
@@ -8267,6 +8273,7 @@ lash::runtime::RuntimeErrorCode
 lash::runtime::RuntimeErrorCode::AttachmentSourcePolicyDenied
 lash::runtime::RuntimeErrorCode::AwaitEventCancelUnsupported
 lash::runtime::RuntimeErrorCode::AwaitEventKeySign
+lash::runtime::RuntimeErrorCode::AwaitEventScopeNotRetirable
 lash::runtime::RuntimeErrorCode::AwaitEventUnknownOrRevoked
 lash::runtime::RuntimeErrorCode::AwaitEventUnsupported
 lash::runtime::RuntimeErrorCode::CancelStartGateUnavailable
@@ -8277,6 +8284,7 @@ lash::runtime::RuntimeErrorCode::DurableEffectLiveProtocolExtension
 lash::runtime::RuntimeErrorCode::EffectGroupUnsupported
 lash::runtime::RuntimeErrorCode::EffectJournalRetirementUnsupported
 lash::runtime::RuntimeErrorCode::EffectPanicked
+lash::runtime::RuntimeErrorCode::EffectScopeRetired
 lash::runtime::RuntimeErrorCode::EmptyAgentFrameRun
 lash::runtime::RuntimeErrorCode::ExecutionScopeTurnIdMismatch
 lash::runtime::RuntimeErrorCode::ExecutionStateCaptureFailed

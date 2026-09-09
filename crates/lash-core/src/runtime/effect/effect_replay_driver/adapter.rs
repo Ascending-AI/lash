@@ -143,6 +143,15 @@ impl<T: StoreReplayAdapter> AwaitEventResolver for T {
             .cancel_await_events_for_session(session_id)
             .await
     }
+
+    async fn retire_await_events_for_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        self.replay_driver()
+            .retire_await_events_for_scope(scope)
+            .await
+    }
 }
 
 #[async_trait]

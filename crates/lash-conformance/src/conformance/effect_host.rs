@@ -182,6 +182,7 @@ where
     effect_host_await_event_duplicate_resolution_is_terminal(make()).await;
     effect_host_await_event_cancel_and_timeout_are_terminal(make()).await;
     effect_host_await_event_revokes_session_scope(make()).await;
+    effect_host_await_event_retires_non_session_scopes(make()).await;
     effect_host_await_event_session_cancel_resolves_outstanding_waits(make()).await;
     effect_host_await_event_rejects_tampered_keys(make()).await;
 }
@@ -693,6 +694,80 @@ pub async fn effect_host_retires_process_journal(host: &dyn EffectHost) {
     );
 }
 
+/// Prove that a runtime-operation scope's journal retires by exact identity
+/// (FIG-2500): the retired operation's rows go, a sibling operation's rows and
+/// their replay answers stay, and the retired scope is fenced against a
+/// late admission.
+pub async fn effect_host_retires_runtime_operation_journal(host: &dyn EffectHost) {
+    let suffix = uuid::Uuid::new_v4().simple();
+    let retired_id = format!("retired-journal-op-{suffix}");
+    let in_flight_id = format!("in-flight-journal-op-{suffix}");
+    for (operation_id, effect_id) in [
+        (&retired_id, "retired-op-journal"),
+        (&in_flight_id, "in-flight-op-journal"),
+    ] {
+        host.scoped(ExecutionScope::runtime_operation(operation_id.clone()))
+            .expect("runtime-operation scope")
+            .controller()
+            .execute_effect(
+                exec_code_conformance_envelope(effect_id, "op-envelope"),
+                RuntimeEffectLocalExecutor::testing(|_| async {
+                    Ok(replay_conformance_exec_outcome(
+                        "recorded-before-retirement",
+                    ))
+                }),
+            )
+            .await
+            .expect("record runtime-operation journal row before retirement");
+    }
+
+    let deleted = host
+        .retire_effect_journal(crate::EffectJournalRetirement::runtime_operation(
+            retired_id.clone(),
+        ))
+        .await
+        .expect("retire runtime-operation effect journal");
+    assert_eq!(
+        deleted, 1,
+        "runtime-operation retirement must delete the exact canonical operation scope"
+    );
+
+    let admission = host
+        .scoped(ExecutionScope::runtime_operation(retired_id))
+        .expect("retired scope still binds a controller")
+        .controller()
+        .execute_effect(
+            exec_code_conformance_envelope("retired-op-journal", "op-envelope"),
+            RuntimeEffectLocalExecutor::testing(|_| async {
+                Ok(replay_conformance_exec_outcome("never-admitted"))
+            }),
+        )
+        .await
+        .expect_err("a retired runtime-operation scope admits nothing");
+    assert_eq!(admission.code, crate::RuntimeErrorCode::EffectScopeRetired);
+
+    let replayed = host
+        .scoped(ExecutionScope::runtime_operation(in_flight_id))
+        .expect("in-flight scope")
+        .controller()
+        .execute_effect(
+            exec_code_conformance_envelope("in-flight-op-journal", "op-envelope"),
+            RuntimeEffectLocalExecutor::testing(|_| async {
+                Ok(replay_conformance_exec_outcome("executed-again"))
+            }),
+        )
+        .await
+        .expect("the in-flight operation still replays");
+    let RuntimeEffectOutcome::ExecCode { result } = replayed else {
+        panic!("the in-flight operation must return an exec-code outcome");
+    };
+    assert_eq!(
+        result.expect("in-flight exec result").terminal_finish,
+        Some(serde_json::json!("recorded-before-retirement")),
+        "a sibling operation's journal answers from its recorded row"
+    );
+}
+
 /// Assert that a durable effect controller surfaces the same structural replay
 /// mismatch detail as the shared canonical-envelope validator.
 pub async fn effect_controller_replay_mismatch_diagnostics<F>(make: F, mismatch_code: &str)
@@ -1034,6 +1109,102 @@ async fn effect_host_await_event_revokes_session_scope(host: Arc<dyn EffectHost>
     assert_eq!(err.code.as_str(), "await_event_unknown_or_revoked");
 }
 
+/// Process and runtime-operation promises carry no session to revoke; they
+/// retire with their scope through the journal lever, and the fence that
+/// retirement leaves refuses every later mint, resolve, peek, and await while
+/// a sibling scope's terminal keeps answering (FIG-2499). Session scopes are
+/// refused by the scope lever: their promises die with their session.
+async fn effect_host_await_event_retires_non_session_scopes(host: Arc<dyn EffectHost>) {
+    let suffix = uuid::Uuid::new_v4().simple();
+    let retired_op = format!("await-event-retired-op-{suffix}");
+    let retired_scope = ExecutionScope::runtime_operation(retired_op.clone());
+    let survivor_process = format!("await-event-surviving-process-{suffix}");
+    let survivor_scope = ExecutionScope::process(survivor_process.clone());
+    let retired_key = host
+        .await_event_key(
+            &retired_scope,
+            AwaitEventWaitIdentity::tool_completion("call-retired"),
+        )
+        .await
+        .expect("runtime-operation key");
+    let survivor_key = host
+        .await_event_key(
+            &survivor_scope,
+            AwaitEventWaitIdentity::tool_completion("call-survivor"),
+        )
+        .await
+        .expect("process key");
+    assert_eq!(
+        host.resolve_await_event(&survivor_key, Resolution::Ok(serde_json::json!("kept")))
+            .await
+            .expect("resolve the surviving process key"),
+        ResolveOutcome::Accepted
+    );
+
+    host.retire_effect_journal(crate::EffectJournalRetirement::runtime_operation(
+        retired_op.clone(),
+    ))
+    .await
+    .expect("retire the runtime-operation scope");
+
+    assert_eq!(
+        host.resolve_await_event(&retired_key, Resolution::Ok(serde_json::json!("late")))
+            .await
+            .expect("resolve retired key"),
+        ResolveOutcome::UnknownOrRevoked
+    );
+    let err = host
+        .peek_await_event(&retired_key)
+        .await
+        .expect_err("retired key must not peek");
+    assert_eq!(err.code.as_str(), "await_event_unknown_or_revoked");
+    let err = host
+        .await_await_event(
+            &retired_key,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("retired key must not await");
+    assert_eq!(err.code.as_str(), "await_event_unknown_or_revoked");
+    let mint_err = host
+        .await_event_key(
+            &retired_scope,
+            AwaitEventWaitIdentity::tool_completion("call-after-retirement"),
+        )
+        .await
+        .expect_err("a retired scope mints nothing");
+    assert_eq!(mint_err.code.as_str(), "await_event_unknown_or_revoked");
+
+    assert_eq!(
+        host.peek_await_event(&survivor_key)
+            .await
+            .expect("the surviving process terminal still reads"),
+        Some(Resolution::Ok(serde_json::json!("kept"))),
+        "retiring one scope must not touch a sibling scope's terminal"
+    );
+
+    host.retire_effect_journal(crate::EffectJournalRetirement::process(survivor_process))
+        .await
+        .expect("retire the process scope through the same lever");
+    assert_eq!(
+        host.resolve_await_event(&survivor_key, Resolution::Cancelled)
+            .await
+            .expect("resolve retired process key"),
+        ResolveOutcome::UnknownOrRevoked
+    );
+
+    let session_scope = durable_turn_scope(
+        format!("await-event-scope-lever-session-{suffix}"),
+        "turn-scope-lever",
+    );
+    let err = host
+        .retire_await_events_for_scope(&session_scope)
+        .await
+        .expect_err("session scopes retire through their session, never the scope lever");
+    assert_eq!(err.code.as_str(), "await_event_scope_not_retirable");
+}
+
 /// The standalone wait-revocation lever: cancelling a session's durable waits
 /// resolves every *outstanding* wait with [`Resolution::Cancelled`] (waiters
 /// never hang; late resolves observe the terminal) while leaving the session
@@ -1304,7 +1475,7 @@ where
     invocation.end();
 }
 
-fn exec_code_conformance_envelope(effect_id: &str, code: &str) -> RuntimeEffectEnvelope {
+pub(super) fn exec_code_conformance_envelope(effect_id: &str, code: &str) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeInvocation::effect(
             RuntimeScope::for_turn("journaled-session", "journaled-turn", 7, 0),
@@ -1928,7 +2099,7 @@ fn replay_conformance_tool_attempt_outcome(
     }
 }
 
-fn replay_conformance_exec_outcome(effect_id: &str) -> RuntimeEffectOutcome {
+pub(super) fn replay_conformance_exec_outcome(effect_id: &str) -> RuntimeEffectOutcome {
     RuntimeEffectOutcome::ExecCode {
         result: Box::new(Ok(crate::ExecResponse {
             observations: Vec::new(),

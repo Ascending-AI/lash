@@ -115,6 +115,13 @@ impl AwaitEventResolver for NativeEffectHost {
             .cancel_await_events_for_session(session_id)
             .await
     }
+
+    async fn retire_await_events_for_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        self.controller.retire_await_events_for_scope(scope).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -140,10 +147,21 @@ impl EffectHost for NativeEffectHost {
         )?))
     }
 
+    /// The in-memory host keeps no effect journal, so no journal rows are ever
+    /// deleted here (the count is always 0). A scope-exact retirement still
+    /// performs the promise half: the scope's in-process promises are dropped
+    /// and the scope is fenced, mirroring what the durable hosts do in one
+    /// transaction. Session retirements stay a no-op: session promises are
+    /// revoked through the session lever the host already calls.
     async fn retire_effect_journal(
         &self,
-        _retirement: EffectJournalRetirement,
+        retirement: EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
+        if let Some(scope) = retirement.retired_scope() {
+            self.controller
+                .retire_await_events_for_scope(&scope)
+                .await?;
+        }
         Ok(0)
     }
 }

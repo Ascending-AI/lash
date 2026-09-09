@@ -1243,7 +1243,7 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 16"));
+    assert!(message.contains("supports schema version 17"));
     assert!(message.contains("database reports version 8"));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version"
@@ -1271,7 +1271,7 @@ async fn sqlite_effect_controller_rejects_retained_generation_15_schema_before_s
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 16"));
+    assert!(message.contains("supports schema version 17"));
     assert!(message.contains("database reports version 15"));
 }
 
@@ -2385,6 +2385,7 @@ async fn sqlite_effect_host_retires_session_journal_rows() {
 
     lash_conformance::effect_host_retires_session_journal(&host).await;
     lash_conformance::effect_host_retires_process_journal(&host).await;
+    lash_conformance::effect_host_retires_runtime_operation_journal(&host).await;
 
     let conn = rusqlite::Connection::open(path).expect("open effect journal for row count");
     let retained: i64 = conn
@@ -2402,7 +2403,19 @@ async fn sqlite_effect_host_retires_session_journal_rows() {
             |row| row.get(0),
         )
         .expect("count retained process journal rows");
-    assert_eq!(process_retained, 0);
+    assert_eq!(
+        process_retained, 1,
+        "only the in-flight runtime operation's row survives among session-free scopes"
+    );
+    let fences: i64 = conn
+        .query_row("SELECT COUNT(*) FROM effect_scope_retirements", [], |row| {
+            row.get(0)
+        })
+        .expect("count scope fences");
+    assert_eq!(
+        fences, 2,
+        "the process and the retired runtime operation each leave one permanent fence"
+    );
 }
 
 #[tokio::test]

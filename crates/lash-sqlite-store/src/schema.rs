@@ -979,6 +979,14 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
     session_id      TEXT PRIMARY KEY,
     revoked_at_ms   INTEGER NOT NULL
 );
+
+-- Permanent by design: process and runtime-operation ids are single-use, so a
+-- retired scope's fence must outlive every retention pass and every restart.
+-- Keyed by the scope's journal identity, the same key its effect rows carry.
+CREATE TABLE IF NOT EXISTS effect_scope_retirements (
+    scope_id        TEXT PRIMARY KEY,
+    retired_at_ms   INTEGER NOT NULL
+);
 ";
 
 // Version 6 keys session-owned effects by the permanent session id and removes
@@ -1026,7 +1034,12 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // effect journals are rejected rather than migrated.
 // Version 16 merges the two journaled exec dispatch ledgers. Pre-16 effect
 // databases are rejected at open; there is no compatibility decoder.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 16;
+// Version 17 adds the permanent `effect_scope_retirements` fence (FIG-2499,
+// FIG-2500): retiring a process or runtime-operation scope deletes its effect
+// children, groups, and await-event promises in one transaction and leaves a
+// tombstone every admission path refuses. Pre-17 effect databases are
+// rejected at open; there is no migration arm.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 17;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

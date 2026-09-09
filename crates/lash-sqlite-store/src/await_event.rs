@@ -63,6 +63,14 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
             .map_err(store_error)
     }
 
+    async fn scope_is_retired(&self, scope_id: &str) -> Result<bool, RuntimeError> {
+        let scope_id = scope_id.to_string();
+        self.conn
+            .call(move |connection| scope_is_retired(connection, &scope_id))
+            .await
+            .map_err(store_error)
+    }
+
     async fn ensure_pending(
         &self,
         key_id: &str,
@@ -74,9 +82,7 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         let now = now_ms as i64;
         self.conn
             .write(move |tx| {
-                if let Some(session_id) = identity.session_id.as_deref()
-                    && session_is_revoked(tx, session_id)?
-                {
+                if identity_is_fenced(tx, &identity)? {
                     return Ok(false);
                 }
                 match select_wait_row(tx, &key_id)? {
@@ -118,9 +124,7 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         let now = now_ms as i64;
         self.conn
             .write(move |tx| {
-                if let Some(session_id) = identity.session_id.as_deref()
-                    && session_is_revoked(tx, session_id)?
-                {
+                if identity_is_fenced(tx, &identity)? {
                     return Ok(TerminalCas::UnknownOrRevoked);
                 }
                 match select_wait_row(tx, &key_id)? {
@@ -179,10 +183,7 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         self.conn
             .call(move |connection| {
                 let tx = connection.transaction()?;
-                let revoked = match identity.session_id.as_deref() {
-                    Some(session_id) => session_is_revoked(&tx, session_id)?,
-                    None => false,
-                };
+                let revoked = identity_is_fenced(&tx, &identity)?;
                 let stored = select_wait_row(&tx, &key_id)?;
                 tx.commit()?;
                 if revoked {
@@ -289,6 +290,35 @@ fn select_wait_row(
             },
         )
         .optional()
+}
+
+/// Whether either durable fence refuses `identity`: the owning session's
+/// revocation tombstone, or the scope's retirement tombstone. Session-free
+/// scopes have only the latter; session scopes are never scope-retired, but
+/// reading one primary-key row keeps the two fences one predicate.
+fn identity_is_fenced(
+    connection: &rusqlite::Connection,
+    identity: &AwaitEventRowIdentity,
+) -> rusqlite::Result<bool> {
+    if let Some(session_id) = identity.session_id.as_deref()
+        && session_is_revoked(connection, session_id)?
+    {
+        return Ok(true);
+    }
+    scope_is_retired(connection, &identity.scope_id)
+}
+
+pub(crate) fn scope_is_retired(
+    connection: &rusqlite::Connection,
+    scope_id: &str,
+) -> rusqlite::Result<bool> {
+    connection.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM effect_scope_retirements WHERE scope_id = ?1
+         )",
+        params![scope_id],
+        |row| row.get(0),
+    )
 }
 
 fn session_is_revoked(

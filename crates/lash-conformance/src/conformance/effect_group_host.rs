@@ -165,6 +165,131 @@ where
         .expect("the reading host closes the group");
 }
 
+/// The durable-tier retirement law (FIG-2500): retiring a runtime-operation
+/// scope removes its groups and children together and fences the scope, while
+/// an in-flight operation's group is untouched and a second host still reads
+/// the ranks it recorded.
+///
+/// Returns the retired and in-flight scopes' journal identity keys so a store's
+/// own test can count, behind the contract, the group, child, and fence rows
+/// each scope is left with.
+pub async fn effect_group_runtime_operation_retirement_is_atomic<F>(make: F) -> (String, String)
+where
+    F: Fn(Option<Arc<dyn GroupExecutors>>) -> Host,
+{
+    let make = || make(Some(suite_executors() as Arc<dyn GroupExecutors>));
+    let prefix = format!("group-op-retirement-{}", uuid::Uuid::new_v4().simple());
+    let host = make();
+
+    let retired_scope = scope(&prefix, "retired");
+    let retired = host
+        .scoped(retired_scope.clone())
+        .expect("the finished operation's scope binds");
+    let retired_key = group_key(&prefix, "retired");
+    let mut finished = open(
+        &retired,
+        &retired_key,
+        2,
+        GroupWakePolicy::All,
+        RUN,
+        vec![settles(0), settles(1)],
+    )
+    .await;
+    next(&retired, &mut finished)
+        .await
+        .expect("the finished operation settles its first child");
+    next(&retired, &mut finished)
+        .await
+        .expect("the finished operation settles its second child");
+    close(&retired, finished, RUN)
+        .await
+        .expect("the finished operation closes its group");
+
+    let in_flight_scope = scope(&prefix, "in-flight");
+    let in_flight = host
+        .scoped(in_flight_scope.clone())
+        .expect("the in-flight operation's scope binds");
+    let in_flight_key = group_key(&prefix, "in-flight");
+    let mut open_handle = open(
+        &in_flight,
+        &in_flight_key,
+        2,
+        GroupWakePolicy::First,
+        LoserPolicy::Cancel,
+        vec![settles(0), never()],
+    )
+    .await;
+    let first = next(&in_flight, &mut open_handle)
+        .await
+        .expect("the in-flight operation settles its first child");
+    assert_eq!(first.position, 0);
+
+    let deleted = host
+        .retire_effect_journal(crate::EffectJournalRetirement::runtime_operation(format!(
+            "{prefix}-retired"
+        )))
+        .await
+        .expect("the finished operation retires");
+    assert_eq!(
+        deleted, 2,
+        "retirement reports the finished operation's child rows and nothing else"
+    );
+
+    let reader = make();
+    let refusal = reader
+        .scoped(retired_scope.clone())
+        .expect("a retired scope still binds a controller")
+        .controller()
+        .open_effect_group(staged(
+            group(&retired_key, 2, GroupWakePolicy::All, RUN),
+            vec![settles(0), settles(1)],
+        ))
+        .await
+        .expect_err("a retired scope never reopens its group");
+    assert_eq!(
+        refusal.code,
+        crate::RuntimeErrorCode::EffectScopeRetired,
+        "the refusal names the scope fence, not a missing group"
+    );
+
+    let resumed = reader
+        .scoped(in_flight_scope.clone())
+        .expect("the in-flight scope binds on the reading host");
+    let mut reopened = resumed
+        .controller()
+        .open_effect_group(staged(
+            group(
+                &in_flight_key,
+                2,
+                GroupWakePolicy::First,
+                LoserPolicy::Cancel,
+            ),
+            vec![settles(0), never()],
+        ))
+        .await
+        .expect("the in-flight operation reopens on a second host");
+    let settlement = next(&resumed, &mut reopened)
+        .await
+        .expect("the in-flight operation's recorded rank is still there");
+    assert_eq!(settlement.position, 0);
+    assert_eq!(settlement.sequence, 1);
+    close(&resumed, reopened, LoserPolicy::Cancel)
+        .await
+        .expect("the reading host closes the in-flight group");
+    close(&in_flight, open_handle, LoserPolicy::Cancel)
+        .await
+        .expect("the opening host closes the in-flight group");
+
+    let key_of = |scope: &ExecutionScope| {
+        scope
+            .journal_identity()
+            .expect("runtime-operation scopes form durable journal identities")
+            .key()
+            .to_string()
+    };
+    (key_of(&retired_scope), key_of(&in_flight_scope))
+}
+
 // =============================================================================
 // The laws
 // =============================================================================

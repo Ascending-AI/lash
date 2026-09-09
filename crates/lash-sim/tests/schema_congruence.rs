@@ -216,6 +216,7 @@ const TABLE_REGISTRY: &[TablePair] = &[
         "lash_await_event_revoked_sessions",
     ),
     pair("await_event_waits", "lash_await_event_waits"),
+    pair("effect_scope_retirements", "lash_effect_scope_retirements"),
     pair("blobs", "lash_blobs"),
     pair("checkpoint_blob_refs", "lash_checkpoint_blob_refs"),
     pair("deleted_sessions", "lash_deleted_sessions"),

@@ -282,10 +282,19 @@ impl EffectJournalIdentity {
     }
 }
 
+/// One retirement request against the durable effect journal.
+///
+/// `Session` names a family of scopes (every turn, drain, and delete scope the
+/// session owns); `Process` and `RuntimeOperation` each name one exact
+/// non-session scope. Retiring an exact scope deletes its effect children, its
+/// groups, and its await-event promise rows in one transaction and leaves a
+/// permanent scope-retirement tombstone behind, so the scope can never be
+/// re-admitted — not by a late redrive, not after a restart.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EffectJournalRetirement {
     Session { session_id: String },
     Process { process_id: String },
+    RuntimeOperation { operation_id: String },
 }
 
 impl EffectJournalRetirement {
@@ -302,6 +311,44 @@ impl EffectJournalRetirement {
     pub fn process(process_id: impl Into<String>) -> Self {
         Self::Process {
             process_id: process_id.into(),
+        }
+    }
+
+    /// Constructs a runtime-operation retirement request for effect-host implementors removing
+    /// every durable effect journal entry and await-event promise a terminal runtime operation
+    /// owns.
+    pub fn runtime_operation(operation_id: impl Into<String>) -> Self {
+        Self::RuntimeOperation {
+            operation_id: operation_id.into(),
+        }
+    }
+
+    /// The exact scope this retirement fences, or `None` for a session-wide
+    /// family. The scope-retirement tombstone is keyed by this scope's journal
+    /// identity, which is why the two non-session variants and their
+    /// [`ExecutionScope`] twins must never drift apart.
+    pub fn retired_scope(&self) -> Option<ExecutionScope> {
+        match self {
+            Self::Session { .. } => None,
+            Self::Process { process_id } => Some(ExecutionScope::process(process_id.clone())),
+            Self::RuntimeOperation { operation_id } => {
+                Some(ExecutionScope::runtime_operation(operation_id.clone()))
+            }
+        }
+    }
+
+    /// The retirement that fences exactly `scope`, or `None` for a
+    /// session-bearing scope, which is retired as a family through
+    /// [`EffectJournalRetirement::session`].
+    pub fn for_scope(scope: &ExecutionScope) -> Option<Self> {
+        match scope {
+            ExecutionScope::Process { process_id } => Some(Self::process(process_id.clone())),
+            ExecutionScope::RuntimeOperation { operation_id } => {
+                Some(Self::runtime_operation(operation_id.clone()))
+            }
+            ExecutionScope::Turn { .. }
+            | ExecutionScope::QueueDrain { .. }
+            | ExecutionScope::SessionDelete { .. } => None,
         }
     }
 }
@@ -1373,6 +1420,37 @@ pub trait AwaitEventResolver: Send + Sync {
             "this effect boundary does not support cancelling durable waits",
         ))
     }
+
+    /// Drop every promise of the terminal non-session `scope` and fence the
+    /// scope permanently: later mints, resolves, peeks, and waits under it
+    /// report `await_event_unknown_or_revoked`, including after a restart on
+    /// durable hosts. Session-bearing scopes are refused with
+    /// `await_event_scope_not_retirable`; they are revoked as a family through
+    /// [`revoke_await_events_for_session`](Self::revoke_await_events_for_session).
+    ///
+    /// This is the promise half of [`EffectHost::retire_effect_journal`]: a
+    /// durable host performs both halves in one transaction there and answers
+    /// this lever from the same code path.
+    async fn retire_await_events_for_scope(
+        &self,
+        _scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        Err(RuntimeError::new(
+            crate::RuntimeErrorCode::AwaitEventUnsupported,
+            "this effect boundary does not support retiring await-event scopes",
+        ))
+    }
+}
+
+/// Refuse a session-bearing scope on the scope-retirement lever.
+pub fn await_event_scope_not_retirable(scope: &ExecutionScope) -> RuntimeError {
+    RuntimeError::new(
+        crate::RuntimeErrorCode::AwaitEventScopeNotRetirable,
+        format!(
+            "await-event scope retirement covers process and runtime-operation scopes only; scope `{}` belongs to a session and is revoked through session revocation",
+            scope.id()
+        ),
+    )
 }
 
 /// Deployment-level factory for scoped effect controllers.

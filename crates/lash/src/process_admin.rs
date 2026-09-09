@@ -607,25 +607,38 @@ impl Processes {
                 process.status.is_retired() && process.updated_at_ms < cutoff_epoch_ms
             })
         {
-            if let Err(err) = self
-                .core
-                .env
-                .core
-                .control
-                .effect_host
-                .retire_effect_journal(lash_core::EffectJournalRetirement::process(
+            // The process journal and the worker's trigger-delivery reconcile
+            // scope for the same process: that runtime operation exists only
+            // to admit this process, so nothing can replay it once the row is
+            // gone (FIG-2500). Both retirements also retire the scopes'
+            // await-event promises and leave the permanent fence (FIG-2499).
+            let reconcile_scope =
+                lash_core::facade_support::trigger_delivery_reconcile_scope(&process.id);
+            let retirements = [
+                Some(lash_core::EffectJournalRetirement::process(
                     process.id.clone(),
-                ))
-                .await
-            {
-                tracing::warn!(
-                    failure_stage = "retire_process_effect_journal",
-                    cutoff_epoch_ms,
-                    process_id = %process.id,
-                    error = %err,
-                    "process retention failed"
-                );
-                return Err(err.into());
+                )),
+                lash_core::EffectJournalRetirement::for_scope(&reconcile_scope),
+            ];
+            for retirement in retirements.into_iter().flatten() {
+                if let Err(err) = self
+                    .core
+                    .env
+                    .core
+                    .control
+                    .effect_host
+                    .retire_effect_journal(retirement)
+                    .await
+                {
+                    tracing::warn!(
+                        failure_stage = "retire_process_effect_journal",
+                        cutoff_epoch_ms,
+                        process_id = %process.id,
+                        error = %err,
+                        "process retention failed"
+                    );
+                    return Err(err.into());
+                }
             }
         }
         let mut report = match registry

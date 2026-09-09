@@ -30,7 +30,7 @@ use lash_core::{
 };
 
 use super::*;
-use crate::await_event::{SqliteAwaitEventBackend, sqlite_await_events};
+use crate::await_event::{SqliteAwaitEventBackend, scope_is_retired, sqlite_await_events};
 
 const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::sqlite();
 
@@ -376,6 +376,12 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         let clock = Arc::clone(&self.clock);
         self.conn
             .write(move |tx| {
+                // The retirement fence is read under the same `BEGIN IMMEDIATE`
+                // lock retirement writes it under, so a claim can never slip
+                // between a scope's tombstone and its row deletions.
+                if scope_is_retired(tx, &request.scope_id)? {
+                    return Ok(EffectClaimObservation::ScopeRetired);
+                }
                 let row = select_effect_row(tx, &request.scope_id, &request.replay_key)?;
                 // Queueing and writer admission must not consume the new lease.
                 let now_ms = clock.timestamp_ms();
@@ -537,8 +543,12 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         record: &EffectGroupRecord,
     ) -> Result<EffectGroupRecord, RuntimeEffectControllerError> {
         let record = record.clone();
+        let scope_id = record.scope_id.clone();
         self.conn
             .write(move |tx| {
+                if scope_is_retired(tx, &record.scope_id)? {
+                    return Ok(None);
+                }
                 // `DO NOTHING` rather than an upsert: reopening a group must not
                 // reset `next_seq`, which would re-seat recorded children at
                 // ranks a caller has already consumed.
@@ -559,10 +569,11 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                         record.created_at_ms as i64,
                     ],
                 )?;
-                select_group_record(tx, &record.group_key)
+                select_group_record(tx, &record.group_key).map(Some)
             })
             .await
-            .map_err(effect_sqlite_error)
+            .map_err(effect_sqlite_error)?
+            .ok_or_else(|| effect_replay_driver::scope_retired(&scope_id))
     }
 
     /// Reads the group row without writing one, so a drain reads the declared
@@ -724,11 +735,17 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
     ///
     /// The reported count stays the children, which is what this method has
     /// always reported and what a caller prunes against.
+    ///
+    /// A scope-exact retirement (N4) additionally deletes the scope's
+    /// await-event promise rows and writes its permanent retirement tombstone
+    /// in the same `BEGIN IMMEDIATE` transaction, so the fence and the deletions
+    /// become visible together.
     async fn retire_journal(
         &self,
         retirement: &EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
         let retirement = retirement.clone();
+        let now_ms = self.clock.timestamp_ms();
         let deleted = self
             .conn
             .write(move |tx| match retirement {
@@ -743,10 +760,22 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                     )?;
                     Ok(deleted)
                 }
-                EffectJournalRetirement::Process { process_id } => {
-                    let identity = ExecutionScope::process(process_id)
+                EffectJournalRetirement::Process { .. }
+                | EffectJournalRetirement::RuntimeOperation { .. } => {
+                    let scope = retirement
+                        .retired_scope()
+                        .expect("scope-exact retirements name their scope");
+                    let identity = scope
                         .journal_identity()
-                        .expect("process scopes always form durable journal identities");
+                        .expect("process and runtime-operation scopes always form durable journal identities");
+                    let scope_json = serde_json::to_string(&scope)
+                        .expect("execution scopes serialize infallibly");
+                    tx.execute(
+                        "INSERT INTO effect_scope_retirements (scope_id, retired_at_ms)
+                         VALUES (?1, ?2)
+                         ON CONFLICT(scope_id) DO NOTHING",
+                        params![identity.key(), now_ms as i64],
+                    )?;
                     let deleted = tx.execute(
                         "DELETE FROM runtime_effect_replay WHERE scope_id = ?1",
                         params![identity.key()],
@@ -754,6 +783,10 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                     tx.execute(
                         "DELETE FROM runtime_effect_group WHERE scope_id = ?1",
                         params![identity.key()],
+                    )?;
+                    tx.execute(
+                        "DELETE FROM await_event_waits WHERE scope_json = ?1",
+                        params![scope_json],
                     )?;
                     Ok(deleted)
                 }

@@ -517,8 +517,10 @@ impl SessionAdmin {
             lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
         ));
         let receipt = runtime
-            .run_plugin_command(name, args, Some(session_id), operation_scope)
-            .await?;
+            .run_plugin_command(name, args, Some(session_id), operation_scope.clone())
+            .await;
+        retire_facade_operation_scope(&runtime.effect_host(), &operation_scope).await?;
+        let receipt = receipt?;
         self.record_plugin_operation_observations(&receipt.events, &receipt.pending_turn_inputs);
         self.runtime.publish_from(&runtime);
         Ok(receipt)
@@ -537,9 +539,10 @@ impl SessionAdmin {
             "{session_id}:plugin_task:{name}:{}",
             lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
         );
+        let operation_scope = lash_core::ExecutionScope::runtime_operation(scope_id);
         let scoped_effect_controller = runtime
             .effect_host()
-            .scoped_static(lash_core::ExecutionScope::runtime_operation(scope_id))
+            .scoped_static(operation_scope.clone())
             .map_err(EmbedError::Runtime)?
             .ok_or_else(|| {
                 EmbedError::Plugin(lash_core::PluginError::Session(
@@ -554,7 +557,9 @@ impl SessionAdmin {
                 scoped_effect_controller,
                 cancellation_token,
             )
-            .await?;
+            .await;
+        retire_facade_operation_scope(&runtime.effect_host(), &operation_scope).await?;
+        let receipt = receipt?;
         self.record_plugin_operation_observations(&receipt.events, &receipt.pending_turn_inputs);
         self.runtime.publish_from(&runtime);
         Ok(receipt)
@@ -1334,6 +1339,27 @@ impl SessionStateAdmin {
             .compact_context(instructions, scoped_effect_controller)
             .await
     }
+}
+
+/// Retire a runtime-operation scope the facade minted for exactly one plugin
+/// operation. The scope id carries a fresh UUID no caller ever sees, so once
+/// the operation's receipt is back (or its failure is) nothing can replay
+/// under it: its effect journal, groups, and await-event promises are
+/// unreachable and go in one transaction, and the scope fence keeps a late
+/// worker from reopening it (FIG-2499, FIG-2500). Caller-supplied scopes are
+/// never handed here — they stay the caller's to retire.
+async fn retire_facade_operation_scope(
+    effect_host: &Arc<dyn lash_core::EffectHost>,
+    operation_scope: &lash_core::ExecutionScope,
+) -> Result<()> {
+    let Some(retirement) = lash_core::EffectJournalRetirement::for_scope(operation_scope) else {
+        return Ok(());
+    };
+    effect_host
+        .retire_effect_journal(retirement)
+        .await
+        .map(|_| ())
+        .map_err(EmbedError::Runtime)
 }
 
 #[derive(Clone)]

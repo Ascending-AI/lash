@@ -8,11 +8,11 @@ use lash_conformance::{
     StoreContractHandles, StoreContractOp, StoreContractScenario, sample_store_contract_operations,
 };
 use lash_core::{
-    AttachmentCreateMeta, AttachmentStore, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    MediaType, ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessOriginator,
-    Resolution, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimeScope,
-    SessionScope, TestLocalProcessRegistry, TriggerCommand, TriggerInputBinding,
+    AttachmentCreateMeta, AttachmentStore, AwaitEventWaitIdentity, EffectHost,
+    EffectJournalRetirement, ExecutionScope, MediaType, ProcessExecutionEnvRef, ProcessIdentity,
+    ProcessInput, ProcessOriginator, Resolution, RuntimeEffectCommand, RuntimeEffectEnvelope,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
+    RuntimeScope, SessionScope, TestLocalProcessRegistry, TriggerCommand, TriggerInputBinding,
     TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
     WakeDeliveryDisposition, facade_support::InMemoryAttachmentStore,
     facade_support::InMemoryTriggerStore,
@@ -64,15 +64,41 @@ const ALL_SURFACE_OPERATION_KINDS: &[&str] = &[
 #[serde(tag = "surface", content = "operation", rename_all = "snake_case")]
 enum SurfaceOperation {
     StoreContract(StoreContractOp),
-    TriggerRegister { key: u8 },
-    TriggerDisable { key: u8 },
-    TriggerOccurrence { key: u8 },
-    TriggerOccurrenceNullSource { key: u8 },
-    ProcessSignalZero { negative: bool },
-    EffectRecord { key: u8, duration_ms: u8 },
+    TriggerRegister {
+        key: u8,
+    },
+    TriggerDisable {
+        key: u8,
+    },
+    TriggerOccurrence {
+        key: u8,
+    },
+    TriggerOccurrenceNullSource {
+        key: u8,
+    },
+    ProcessSignalZero {
+        negative: bool,
+    },
+    EffectRecord {
+        key: u8,
+        duration_ms: u8,
+    },
     ToolIntentBatch,
-    AwaitResolve { key: u8 },
+    AwaitResolve {
+        key: u8,
+    },
     AwaitRevokeSession,
+    /// Journal one effect and one resolved promise under a runtime-operation
+    /// scope: the rows only `RetireRuntimeOperation` can reclaim (FIG-2499,
+    /// FIG-2500).
+    RuntimeOperationRecord {
+        key: u8,
+    },
+    /// Retire one runtime-operation scope: effect rows, groups, and promise
+    /// rows in one transaction plus the permanent fence.
+    RetireRuntimeOperation {
+        key: u8,
+    },
 }
 
 impl SurfaceOperation {
@@ -110,6 +136,8 @@ impl SurfaceOperation {
             Self::ToolIntentBatch => "tool_intent_batch",
             Self::AwaitResolve { .. } => "await_resolve",
             Self::AwaitRevokeSession => "await_revoke_session",
+            Self::RuntimeOperationRecord { .. } => "runtime_operation_record",
+            Self::RetireRuntimeOperation { .. } => "retire_runtime_operation",
         }
     }
 }
@@ -306,8 +334,12 @@ impl lash_core::RuntimeEffectController for LiteralFrameController {
     }
 }
 
+fn surface_operation_id(key: u8) -> String {
+    format!("surface-op-{key}")
+}
+
 fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
-    let contract = sample_store_contract_operations(seed, OPS_PER_CASE - 8);
+    let contract = sample_store_contract_operations(seed, OPS_PER_CASE - 11);
     let mut operations = vec![
         SurfaceOperation::TriggerRegister { key: 0 },
         SurfaceOperation::TriggerOccurrence { key: 0 },
@@ -320,8 +352,15 @@ fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
     ];
     for (index, operation) in contract.into_iter().enumerate() {
         operations.push(SurfaceOperation::StoreContract(operation));
+        if index == 3 {
+            operations.push(SurfaceOperation::RuntimeOperationRecord { key: 0 });
+            operations.push(SurfaceOperation::RuntimeOperationRecord { key: 1 });
+        }
         if index == 5 {
             operations.push(SurfaceOperation::TriggerDisable { key: 0 });
+        }
+        if index == 14 {
+            operations.push(SurfaceOperation::RetireRuntimeOperation { key: 0 });
         }
         if index == 11 {
             operations.push(SurfaceOperation::AwaitRevokeSession);
@@ -1007,6 +1046,55 @@ impl SurfaceRunner {
                 .revoke_await_events_for_session(SURFACE_SESSION)
                 .await
                 .map_err(|error| error.to_string()),
+            SurfaceOperation::RuntimeOperationRecord { key } => {
+                let scope = ExecutionScope::runtime_operation(surface_operation_id(*key));
+                let replay_key = format!("surface-op-effect-{key}");
+                let envelope = RuntimeEffectEnvelope::new(
+                    RuntimeInvocation::effect(
+                        RuntimeScope::for_turn(SURFACE_SESSION, SURFACE_TURN, 1, 0),
+                        &replay_key,
+                        RuntimeEffectKind::Sleep,
+                        &replay_key,
+                    ),
+                    RuntimeEffectCommand::Sleep { duration_ms: 1 },
+                );
+                self.effect_host
+                    .scoped(scope.clone())
+                    .map_err(|error| error.to_string())?
+                    .controller()
+                    .execute_effect(
+                        envelope,
+                        RuntimeEffectLocalExecutor::testing(|_| async {
+                            Ok(RuntimeEffectOutcome::Sleep)
+                        }),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let await_key = self
+                    .effect_host
+                    .await_event_key(
+                        &scope,
+                        AwaitEventWaitIdentity::tool_completion(format!("surface-op-call-{key}")),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                self.effect_host
+                    .resolve_await_event(
+                        &await_key,
+                        Resolution::Ok(serde_json::json!({"operation": key})),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok(())
+            }
+            SurfaceOperation::RetireRuntimeOperation { key } => self
+                .effect_host
+                .retire_effect_journal(EffectJournalRetirement::runtime_operation(
+                    surface_operation_id(*key),
+                ))
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string()),
         }
     }
 
@@ -1586,6 +1674,13 @@ fn read_sqlite_await(connection: &rusqlite::Connection) -> Vec<serde_json::Value
     rows.extend(sqlite_simple_json_rows(connection, "SELECT session_id FROM await_event_revoked_sessions ORDER BY session_id", |row| {
         Ok(serde_json::json!({"kind": "revoked_session", "session_id": row.get::<_, String>(0)?}))
     }));
+    rows.extend(sqlite_simple_json_rows(
+        connection,
+        "SELECT scope_id FROM effect_scope_retirements ORDER BY scope_id",
+        |row| {
+            Ok(serde_json::json!({"kind": "retired_scope", "scope_id": row.get::<_, String>(0)?}))
+        },
+    ));
     rows
 }
 
@@ -1806,6 +1901,16 @@ async fn read_postgres_await(pool: &PgPool) -> Vec<serde_json::Value> {
     rows.extend(revoked.into_iter().map(
         |session_id| serde_json::json!({"kind": "revoked_session", "session_id": session_id}),
     ));
+    let retired: Vec<String> =
+        sqlx::query_scalar("SELECT scope_id FROM lash_effect_scope_retirements ORDER BY scope_id")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    rows.extend(
+        retired
+            .into_iter()
+            .map(|scope_id| serde_json::json!({"kind": "retired_scope", "scope_id": scope_id})),
+    );
     rows
 }
 

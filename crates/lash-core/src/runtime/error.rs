@@ -92,6 +92,8 @@ pub enum RuntimeErrorCode {
     CancelStartGateUnavailable,
     EffectGroupUnsupported,
     EffectJournalRetirementUnsupported,
+    EffectScopeRetired,
+    AwaitEventScopeNotRetirable,
     InvalidAwaitEventSessionId,
     InvalidAwaitEventWaitIdentity,
     InvalidTurnCancelRequest,
@@ -543,6 +545,8 @@ impl RuntimeErrorCode {
             Self::CancelStartGateUnavailable => "cancel_start_gate_unavailable",
             Self::EffectGroupUnsupported => "effect_group_unsupported",
             Self::EffectJournalRetirementUnsupported => "effect_journal_retirement_unsupported",
+            Self::EffectScopeRetired => "effect_scope_retired",
+            Self::AwaitEventScopeNotRetirable => "await_event_scope_not_retirable",
             Self::InvalidAwaitEventSessionId => "invalid_await_event_session_id",
             Self::InvalidAwaitEventWaitIdentity => "invalid_await_event_wait_identity",
             Self::InvalidTurnCancelRequest => "invalid_turn_cancel_request",
@@ -772,6 +776,8 @@ impl RuntimeErrorCode {
                 | Self::AwaitEventUnsupported
                 | Self::EffectGroupUnsupported
                 | Self::EffectJournalRetirementUnsupported
+                | Self::EffectScopeRetired
+                | Self::AwaitEventScopeNotRetirable
                 | Self::InvalidAwaitEventSessionId
                 | Self::InvalidAwaitEventWaitIdentity
                 | Self::InvalidTurnCancelRequest
@@ -917,6 +923,8 @@ impl RuntimeErrorCode {
             "cancel_start_gate_unavailable" => Self::CancelStartGateUnavailable,
             "effect_group_unsupported" => Self::EffectGroupUnsupported,
             "effect_journal_retirement_unsupported" => Self::EffectJournalRetirementUnsupported,
+            "effect_scope_retired" => Self::EffectScopeRetired,
+            "await_event_scope_not_retirable" => Self::AwaitEventScopeNotRetirable,
             "invalid_await_event_session_id" => Self::InvalidAwaitEventSessionId,
             "invalid_await_event_wait_identity" => Self::InvalidAwaitEventWaitIdentity,
             "invalid_turn_cancel_request" => Self::InvalidTurnCancelRequest,
@@ -1313,6 +1321,8 @@ mod tests {
             | RuntimeErrorCode::AwaitEventUnsupported
             | RuntimeErrorCode::EffectGroupUnsupported
             | RuntimeErrorCode::EffectJournalRetirementUnsupported
+            | RuntimeErrorCode::EffectScopeRetired
+            | RuntimeErrorCode::AwaitEventScopeNotRetirable
             | RuntimeErrorCode::InvalidAwaitEventSessionId
             | RuntimeErrorCode::InvalidAwaitEventWaitIdentity
             | RuntimeErrorCode::InvalidTurnCancelRequest
@@ -1471,6 +1481,8 @@ mod tests {
             RuntimeErrorCode::CancelStartGateUnavailable,
             RuntimeErrorCode::EffectGroupUnsupported,
             RuntimeErrorCode::EffectJournalRetirementUnsupported,
+            RuntimeErrorCode::EffectScopeRetired,
+            RuntimeErrorCode::AwaitEventScopeNotRetirable,
             RuntimeErrorCode::InvalidAwaitEventSessionId,
             RuntimeErrorCode::InvalidAwaitEventWaitIdentity,
             RuntimeErrorCode::InvalidTurnCancelRequest,
