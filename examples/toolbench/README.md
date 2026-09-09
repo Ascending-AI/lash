@@ -253,8 +253,10 @@ be compared with that baseline to measure round-by-round growth.
 
 The RLM host explicitly disables image/type-literal/decomposition prompt
 features, label annotations, processes, sleep, process signals and triggers,
-and disables continuation soft warnings. This matches the benchmark's host
-capabilities in every cell/native cohort.
+and disables continuation soft warnings. This removes what the current
+renderer gates; the `control.continue_as` catalogue entry and the lashlang
+label/process/sleep teaching are gated separately by FIG-2750 (#1172) and
+still appear on renderers before that change.
 
 One-task `kv-read` smoke on `z-ai/glm-5.3-flash`, medium reasoning, paired all
 channels and both dialects, one repetition, concurrency 8 (2026-09-09):
