@@ -501,8 +501,17 @@ where
     };
     match first_of_gate_race(&*guarded, &*escalation).await? {
         GateRaceWinner::Guarded => {
-            let value = guarded.await?;
-            retire_turn_cancel_gate(context, session_id, escalation_gate).await?;
+            // The escalation entry is retired whichever way the guarded wait
+            // settles: it only ever exists on the deferred branch, so no
+            // journal written before the mode existed can reach this
+            // retirement, and a failing guarded wait would otherwise leave the
+            // index holding an entry for a wait that is gone. The success path
+            // keeps the deployed order — guarded value first, then the
+            // retirement — byte for byte.
+            let value = guarded.await;
+            let retirement = retire_turn_cancel_gate(context, session_id, escalation_gate).await;
+            let value = value?;
+            retirement?;
             Ok(RestateTurnCancelRaceOutcome::Completed(value))
         }
         GateRaceWinner::Gate => {

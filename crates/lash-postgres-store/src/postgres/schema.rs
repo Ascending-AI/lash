@@ -481,10 +481,9 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         introduced_relations: &["idx_lash_processes_updated"],
         statements: &[PROCESS_UPDATED_INDEX_DDL],
     },
-    // Component 64 changes durable identity bytes from SHA-256 to BLAKE3.
-    // Every valid component-63 store has the pending-observer-intents table,
-    // so this refusal-only row classifies the hard cutover as divergent before
-    // any source-shape matching or migration DDL can advance its stamp.
+    // Component 64 changes durable identity bytes from SHA-256 to BLAKE3. Every
+    // valid component-63 store has the pending-observer-intents table, so this
+    // refusal-only row classifies the cutover as divergent before any DDL runs.
     SchemaMigration {
         from: 63,
         to: 80,
@@ -528,11 +527,10 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         introduced_relations: &["lash_runtime_turn_commits", "idx_lash_processes_updated"],
         statements: &[],
     },
-    // Component 61 removes graph-node `seq` and its index. The global retired-
-    // column preflight below refuses every published pre-61 graph shape before
-    // any migration DDL runs. A component-60 store also necessarily carries the
-    // index, so this immediate declaration classifies both retired artifacts.
-    // It is refusal-only: it never runs DDL or advances the stamp.
+    // Component 61 removes graph-node `seq` and its index. The global
+    // retired-column preflight below refuses every published pre-61 graph shape
+    // before any DDL runs, and a component-60 store necessarily carries the index,
+    // so this declaration classifies both retired artifacts, running no DDL.
     SchemaMigration {
         from: 60,
         to: 80,
@@ -558,9 +556,8 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             PROCESS_UPDATED_INDEX_DDL,
         ],
     },
-    // Component 59 persists the cancellation request and its applied input
-    // outcome together so a resumed host can recover payloads without a
-    // second queue read.
+    // Component 59 persists the cancellation request and its applied input outcome
+    // together so a resumed host recovers payloads without a second queue read.
     SchemaMigration {
         from: 58,
         to: 80,
@@ -580,9 +577,8 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         ],
     },
     // Component 58 adds nullable session-enumeration metadata and its catalog
-    // ordering index. New writes always populate the metadata; migrated legacy
-    // rows retain NULL where no source evidence exists, and enumeration renders
-    // the documented legacy sentinel values.
+    // ordering index. New writes always populate it; migrated legacy rows retain
+    // NULL where no evidence exists and enumerate as documented sentinel values.
     SchemaMigration {
         from: 57,
         to: 80,
@@ -611,9 +607,8 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             PROCESS_UPDATED_INDEX_DDL,
         ],
     },
-    // Component 57 adds the indexed manifest -> component edge projection used
-    // by session-owner blob reclaim. The two root indexes make every liveness
-    // arm an indexed NOT EXISTS predicate.
+    // Component 57 adds the indexed manifest -> component edge projection used by
+    // session-owner blob reclaim; its two root indexes index every liveness arm.
     SchemaMigration {
         from: 56,
         to: 80,
@@ -694,9 +689,8 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         ],
     },
     // The 55 generation adds one index and nothing else: the drain's
-    // unsettled-children read, which layer 2.5 deferred (FIG-1564) and the
-    // drain (FIG-1536) makes a hot path. No table, no column, no guard — so the
-    // source shape a 54 store must present is the current one.
+    // unsettled-children read, deferred by layer 2.5 (FIG-1564) and made a hot
+    // path by the drain (FIG-1536). No table, column, or guard moves with it.
     SchemaMigration {
         from: 54,
         to: 80,
@@ -740,9 +734,8 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             PROCESS_UPDATED_INDEX_DDL,
         ],
     },
-    // A 53 store takes both later generations at once: the 54 effect-group
-    // journal (one new table, its two indexes, two nullable columns on
-    // `lash_runtime_effect_replay`) and the 55 drain index over them.
+    // A 53 store takes both later generations at once: the 54 effect-group journal
+    // (one table, two indexes, two nullable columns) and the 55 drain index.
     SchemaMigration {
         from: 53,
         to: 80,

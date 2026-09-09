@@ -536,6 +536,35 @@ async fn gate_resolutions_carry_the_request_mode_into_the_wake() {
     }
 }
 
+// Drift pin (prelude 21): `RestateTurnCancelWake` is one declaration feeding
+// the index's journaled awakeable payload and the parked waiter's decode, so a
+// one-character rename would stay self-consistent while every journal written
+// before it silently stopped matching. Spell each wire literal by hand.
+#[test]
+fn turn_cancel_wake_wire_values_match_the_journaled_awakeable_encoding() {
+    for (wake, literal) in [
+        (RestateTurnCancelWake::TurnCancelled, "turn_cancelled"),
+        (
+            RestateTurnCancelWake::TurnCancelDeferred,
+            "turn_cancel_deferred",
+        ),
+        (RestateTurnCancelWake::SessionRevoked, "session_revoked"),
+    ] {
+        let encoded = serde_json::to_value(wake).expect("serialize a turn-cancel wake");
+        assert_eq!(
+            encoded,
+            serde_json::Value::String(literal.to_string()),
+            "{wake:?} must journal the literal `{literal}`"
+        );
+        assert_eq!(
+            serde_json::from_value::<RestateTurnCancelWake>(encoded)
+                .expect("decode a journaled turn-cancel wake"),
+            wake,
+            "a journaled `{literal}` must decode back to {wake:?}"
+        );
+    }
+}
+
 fn deferred_wake_signal() -> serde_json::Value {
     serde_json::to_value(RestateTurnCancelWake::TurnCancelDeferred)
         .expect("serialize a deferred turn-cancel wake")
