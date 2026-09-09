@@ -76,12 +76,11 @@ pub(crate) fn grade(
         failures.push("cost_limit".to_string());
     }
     if evidence.standard {
-        if evidence.submit_count > 1
-            && (evidence.submit_values.len() != evidence.submit_count
-                || evidence
-                    .submit_values
-                    .iter()
-                    .any(|v| v.is_none() || v != &evidence.finish_value))
+        if evidence.submit_values.len() > 1
+            && evidence
+                .submit_values
+                .iter()
+                .any(|value| value.as_ref() != evidence.finish_value.as_ref())
         {
             failures.push("conflicting submits".to_string());
         } else if evidence.submit_count == 0 {
@@ -190,10 +189,8 @@ mod tests {
         let task = fixture();
         let mut evidence = passing_evidence();
         evidence.standard = true;
-        for count in [0, 2] {
-            evidence.submit_count = count;
-            assert!(!grade(&task, &task.expected_world, &evidence, 0.10).passed);
-        }
+        evidence.submit_count = 0;
+        assert!(!grade(&task, &task.expected_world, &evidence, 0.10).passed);
         evidence.submit_count = 2;
         evidence.submit_values = vec![Some(json!("saved")); 2];
         assert!(grade(&task, &task.expected_world, &evidence, 0.10).passed);
@@ -205,6 +202,32 @@ mod tests {
             Some("conflicting submits")
         );
         evidence.submit_count = 1;
+        evidence.submit_values = vec![Some(json!("saved"))];
         assert!(grade(&task, &task.expected_world, &evidence, 0.10).passed);
+    }
+
+    #[test]
+    fn malformed_submits_are_metrics_and_do_not_conflict_with_valid_submit() {
+        let task = fixture();
+        let mut evidence = passing_evidence();
+        evidence.standard = true;
+        evidence.submit_count = 2;
+        evidence.submit_values = vec![Some(json!("saved"))];
+        assert!(grade(&task, &task.expected_world, &evidence, 0.10).passed);
+    }
+
+    #[test]
+    fn two_well_formed_differing_values_still_fail() {
+        let task = fixture();
+        let mut evidence = passing_evidence();
+        evidence.standard = true;
+        evidence.submit_count = 2;
+        evidence.submit_values = vec![Some(json!("saved")), Some(json!("other"))];
+        assert_eq!(
+            grade(&task, &task.expected_world, &evidence, 0.10)
+                .failure_reason
+                .as_deref(),
+            Some("conflicting submits")
+        );
     }
 }

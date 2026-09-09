@@ -309,11 +309,15 @@ async fn main() -> Result<()> {
                 executions: evidence.executions, expected_tool_call_count: task.tool_calls, cost_unknown: usage.cost.is_none(), max_task_cost_usd: args.max_task_cost_usd, turn_wall_limit_secs: args.turn_wall_limit_secs,
                 provider_calls: evidence.attempts.len(), system_prompt_tokens_first_call: evidence.attempts.first().and_then(|r| r["prompt_tokens_total"].as_u64()),
                 rounds: evidence.rounds, iterations: evidence.iterations, tool_call_count: evidence.tool_call_count,
-                submit_count: evidence.submit_count, submit_values: evidence.submit_values, retries: evidence.retries, provider_attempts: evidence.attempts.len(), turn_outcome: evidence.turn_outcome, error: evidence.error, failed_exec_iterations: evidence.failed_execution_errors.len(),
+                submit_count: evidence.submit_count, submit_values: evidence.submit_values.clone(), retries: evidence.retries, provider_attempts: evidence.attempts.len(), turn_outcome: evidence.turn_outcome, error: evidence.error, failed_exec_iterations: evidence.failed_execution_errors.len(),
                 finish_value: evidence.finish_value, seed: task.seed.clone(),
                 checker: format!("{}; cost <= ${:.6} (n/a if unknown); {} s harness deadline{}", task.checker_description(), args.max_task_cost_usd, args.turn_wall_limit_secs, if item.channel == ChannelSelection::Standard { "; identical submit values" } else { "" }), usage,
             };
             let mut row = serde_json::to_value(&result)?;
+            row["malformed_submits"] = evidence
+                .submit_count
+                .saturating_sub(evidence.submit_values.len())
+                .into();
             row.as_object_mut().expect("result object").extend(serde_json::json!({"kind":"task_result","pack":task.pack(),"task":task.id,"route":"openrouter","repetition":item.run,"success":result.passed,"grade":{"passed":result.passed,"failure_reason":result.failure_reason}}).as_object().expect("metadata object").clone());
             write_row(&mut file, &provider_log::redact(row, api_key))?;
             file.flush()?;

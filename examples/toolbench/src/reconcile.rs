@@ -60,6 +60,18 @@ fn counts(comparisons: &[Value]) -> (usize, usize, usize) {
     (mismatches, unavailable, informational)
 }
 
+fn interrupted(row: &Value, data: &Value) -> bool {
+    row["outcome"] == "interrupted" || (row["raw_usage"].is_null() && data["cancelled"] == true)
+}
+
+fn gated_counts(row: &Value, data: &Value, comparisons: &[Value]) -> (usize, usize, usize) {
+    if interrupted(row, data) {
+        (0, 0, 0)
+    } else {
+        counts(comparisons)
+    }
+}
+
 fn sample(rows: Vec<Value>) -> Result<Vec<Value>> {
     let mut groups = BTreeMap::<_, Vec<Value>>::new();
     for row in rows {
@@ -122,6 +134,7 @@ pub(crate) async fn run(path: &Path, key: &str) -> Result<()> {
     );
     let mut mismatches = 0;
     let mut unavailable = 0;
+    let mut interrupted_rows = 0;
     let mut normalized_mismatch = 0;
     let mut queries = 0;
     for row in &selected {
@@ -164,12 +177,17 @@ pub(crate) async fn run(path: &Path, key: &str) -> Result<()> {
             json!({"error":{"message":"attempt has no provider_response_id"}})
         };
         let comparisons = diff(row, &response["data"]);
-        let (bad, missing, informational) = counts(&comparisons);
+        let is_interrupted = interrupted(row, &response["data"]);
+        let (bad, missing, informational) = gated_counts(row, &response["data"], &comparisons);
+        let generation_cost = response["data"]["total_cost"].clone();
+        if is_interrupted {
+            interrupted_rows += 1;
+        }
         normalized_mismatch += informational;
         mismatches += bad;
         unavailable += missing;
         let evidence = crate::provider_log::redact(
-            json!({"kind":"reconcile","model":row["model"],"channel":row["channel"],"dialect":row["dialect"],"task":row["task"],"repetition":row["repetition"],"round":row["round"],"provider_response_id":id,"comparisons":comparisons,"generation":response,"mismatches":bad,"unavailable":missing,"normalized_mismatch":informational}),
+            json!({"kind":"reconcile","model":row["model"],"channel":row["channel"],"dialect":row["dialect"],"task":row["task"],"repetition":row["repetition"],"round":row["round"],"provider_response_id":id,"comparisons":comparisons,"generation":response,"generation_cost":generation_cost,"interrupted":is_interrupted,"mismatches":bad,"unavailable":missing,"normalized_mismatch":informational}),
             key,
         );
         writeln!(output, "{evidence}")?;
@@ -201,13 +219,19 @@ pub(crate) async fn run(path: &Path, key: &str) -> Result<()> {
         }
         writeln!(
             report,
+            "\n| Interrupted | Generation cost |\n|---|---:|\n| {} | {} |\n",
+            is_interrupted, generation_cost
+        )
+        .unwrap();
+        writeln!(
+            report,
             "\ncache_discount: {}; fetch error: {}\n",
             response["data"]["cache_discount"], evidence["generation"]["error"]
         )
         .unwrap();
     }
     let counts = format!(
-        "Sampled {} rows; queried {queries}; mismatching fields {mismatches}; unavailable native/cost fields {unavailable}; normalized_mismatch (informational) {normalized_mismatch}.\n",
+        "Sampled {} rows; queried {queries}; mismatching fields {mismatches}; unavailable native/cost fields {unavailable}; interrupted {interrupted_rows} (non-gating, generation cost shown per row); normalized_mismatch (informational) {normalized_mismatch}.\n",
         selected.len()
     );
     report.insert_str(0, &format!("{counts}\n"));
@@ -277,5 +301,14 @@ mod tests {
                 .len(),
             30
         );
+    }
+
+    #[test]
+    fn cancelled_interrupted_attempt_does_not_gate_reconciliation() {
+        let row = json!({"outcome":"interrupted","raw_usage":null});
+        let data = json!({"cancelled":true,"total_cost":0.0123});
+        let comparisons = diff(&row, &data);
+        assert!(interrupted(&row, &data));
+        assert_eq!(gated_counts(&row, &data, &comparisons), (0, 0, 0));
     }
 }

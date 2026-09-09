@@ -59,10 +59,10 @@ ordinary underscore-separated tool names.
 Standard adds `submit`, requiring `{"value": <any JSON>}`. Its handler records
 the value and returns `ToolControl::Finish`, so no later model output is needed
 or graded. Submits are counted before argument/ID validation; their values are
-recorded in `submit_values`. Malformed arguments are tracked internally and
-never count as identical valid submissions. Identical
-repeated values count as one submission for grading. Differing values or malformed
-duplicates fail with `conflicting submits`; the first executed value is graded.
+recorded in `submit_values`, while malformed arguments are recorded in
+`malformed_submits`. Malformed submits are metrics only, so a malformed call
+followed by a valid submit does not conflict; two differing well-formed values
+fail with `conflicting submits`, and the first executed value is graded.
 
 The common grader checks the finish matchers (including Numeric), exact world
 equality, and task completion with a finish value.
@@ -320,9 +320,12 @@ least 30 attempts, balanced across the model/channel/dialect groups present
 in the input (or all attempts when fewer than 30 exist), and queries the [OpenRouter generation endpoint](https://openrouter.ai/docs/api/api-reference/generations/get-generation).
 Both `tokens_prompt`/`tokens_completion` and their `native_tokens_*` counterparts
 are compared, without silently replacing differently tokenized counters.
-Native token tolerance is exact; cost tolerance is 0.000001 USD. Missing IDs,
-unavailable native/cost evidence, native prompt/completion/cached/reasoning
-mismatches and cost mismatches beyond that tolerance produce a nonzero exit.
+Native token tolerance is exact; cost tolerance is 0.000001 USD. Interrupted
+attempts, including cancelled generations with missing local usage, are
+reported in an `interrupted` bucket with the generation cost and do not gate
+exit; missing IDs, unavailable native/cost evidence, native
+prompt/completion/cached/reasoning mismatches and cost mismatches beyond that
+tolerance produce a nonzero exit for completed attempts.
 Normalized `tokens_prompt`/`tokens_completion` differences are informational:
 `normalized_mismatch` counts differing normalized fields per JSONL row, and
 the Markdown report shows their per-field column and total count. They never

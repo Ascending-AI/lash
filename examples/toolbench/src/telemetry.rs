@@ -8,6 +8,7 @@ pub(crate) struct Telemetry {
     pub(crate) capture: crate::provider_log::Capture,
     submit_values: Mutex<Vec<Option<Value>>>,
     submit_calls: std::sync::atomic::AtomicUsize,
+    malformed_submits: std::sync::atomic::AtomicUsize,
 }
 #[async_trait::async_trait]
 impl TurnActivitySink for Telemetry {
@@ -24,7 +25,14 @@ impl Telemetry {
         self.submit_calls.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    #[cfg(test)]
+    pub(crate) fn malformed_submits(&self) -> usize {
+        self.malformed_submits
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     fn record_submits(&self, parts: &[lash::direct::LlmOutputPart]) {
+        let mut malformed = 0;
         let values = parts
             .iter()
             .filter_map(|part| {
@@ -35,18 +43,27 @@ impl Telemetry {
                 } = part
                     && tool_name == "submit"
                 {
-                    Some(
-                        serde_json::from_str::<Value>(input_json)
-                            .ok()
-                            .and_then(|args| args.get("value").cloned()),
-                    )
+                    match serde_json::from_str::<Value>(input_json)
+                        .ok()
+                        .and_then(|args| args.as_object()?.get("value").cloned())
+                    {
+                        Some(value) => Some(Some(value)),
+                        None => {
+                            malformed += 1;
+                            None
+                        }
+                    }
                 } else {
                     None
                 }
             })
             .collect::<Vec<_>>();
-        self.submit_calls
-            .fetch_add(values.len(), std::sync::atomic::Ordering::Relaxed);
+        self.submit_calls.fetch_add(
+            values.len() + malformed,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        self.malformed_submits
+            .fetch_add(malformed, std::sync::atomic::Ordering::Relaxed);
         self.submit_values
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -375,15 +392,26 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_submit_is_counted_before_argument_or_id_validation() {
+    fn malformed_then_well_formed_submit_is_counted_and_only_the_value_is_recorded() {
         let telemetry = Telemetry::default();
-        let call = lash::direct::LlmOutputPart::ToolCall {
-            call_id: "duplicate".into(),
+        let malformed = lash::direct::LlmOutputPart::ToolCall {
+            call_id: "malformed".into(),
             tool_name: "submit".into(),
             input_json: "{}".into(),
             replay: None,
         };
-        telemetry.record_submits(&[call.clone(), call]);
+        let valid = lash::direct::LlmOutputPart::ToolCall {
+            call_id: "valid".into(),
+            tool_name: "submit".into(),
+            input_json: r#"{"value":"saved"}"#.into(),
+            replay: None,
+        };
+        telemetry.record_submits(&[malformed, valid]);
         assert_eq!(telemetry.submit_count(), 2);
+        assert_eq!(telemetry.malformed_submits(), 1);
+        assert_eq!(
+            telemetry.submit_values(),
+            vec![Some(serde_json::json!("saved"))]
+        );
     }
 }
