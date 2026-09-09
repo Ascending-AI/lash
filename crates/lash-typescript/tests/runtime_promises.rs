@@ -1,6 +1,6 @@
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    ResourceOperationBatchResult, ResourceOperationResult, State, Value,
+    ResourceOperationBatchResult, ResourceOperationResult, State,
 };
 
 struct Host;

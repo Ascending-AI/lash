@@ -89,6 +89,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 values.extend(call[2..].iter().cloned());
                 shape.push(CompiledAggregateAwaitShape::BatchLeaf(index));
             } else {
+                if matches!(item, Value::Record(record) if super::super::is_process_handle(record))
+                {
+                    return Err(RuntimeError::PendingTool {
+                        problem:
+                            "await process handles separately before aggregating their results"
+                                .into(),
+                    });
+                }
                 shape.push(CompiledAggregateAwaitShape::Value(values.len()));
                 values.push(if settle {
                     success(item.clone())

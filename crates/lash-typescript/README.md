@@ -62,9 +62,11 @@ process only after all enclosing `finally` blocks execute; an uncaught throw
 fails it. Dynamic process definitions and targets reject with dedicated
 `TS_PROCESS_*` diagnostics.
 
-`Promise.all` and `Promise.allSettled` aggregate top-level tool promises and
-already-resolved values through the shared batch machine. Nested tool promises,
-non-array iterables, and process/timer promises are named rejections in v1.
+`Promise.all` and `Promise.allSettled` evaluate any array-valued expression and
+aggregate its pending tool handles and already-settled values through the shared
+batch machine. Unawaited tool calls create handles; abandoning one at cell end
+is a typed runtime error. Non-array values and awaiting a settled value also
+fail loudly. Await process/timer promises separately before aggregating results.
 `Promise.all` rejects with the reason of the leaf that settled first, and
 `Promise.allSettled` keeps its results in input order, both as ECMA specifies.
 The host records the order its leaves settled in as part of the journaled batch

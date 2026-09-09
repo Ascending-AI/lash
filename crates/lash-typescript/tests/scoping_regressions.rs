@@ -366,12 +366,12 @@ fn dead_process_handle_names_do_not_change_await_lowering() {
         { const handle = start(worker); }
         { const handle = 5; finish(await handle); }
     "#;
-    assert_eq!(
-        lash_typescript::parse(source)
-            .expect_err("awaiting a settled value must reject")
-            .code,
-        lash_typescript::DiagnosticCode::AwaitUnsupported
-    );
+    let program = lash_typescript::parse(source).expect("runtime handle classification");
+    fn has_runtime_await(expr: &lashlang::Expr) -> bool {
+        matches!(expr, lashlang::Expr::BuiltinCall { name, .. } if name.as_str() == "__typescript_await_pending")
+            || expr.children().any(has_runtime_await)
+    }
+    assert!(has_runtime_await(&program.main));
 }
 
 #[test]

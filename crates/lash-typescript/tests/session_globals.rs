@@ -53,12 +53,8 @@ fn a_restored_process_handle_is_awaitable_from_a_later_cell() {
         .expect("a restored live process handle must remain awaitable");
 
     let ordinary_environment = environment(["handle"]);
-    let error = lash_typescript::link("finish(await handle);", &ordinary_environment)
-        .expect_err("an ordinary ambient value must not become awaitable");
-    assert!(
-        error.to_string().contains("TS_AWAIT_UNSUPPORTED"),
-        "{error}"
-    );
+    lash_typescript::link("finish(await handle);", &ordinary_environment)
+        .expect("the VM checks whether an ambient value is a pending handle");
 }
 
 #[test]
