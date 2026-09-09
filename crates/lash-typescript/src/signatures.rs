@@ -309,7 +309,11 @@ pub fn render_tool_signature(
             render_type(&input),
             render_type(&output)
         );
-        if segments.iter().all(|segment| !is_reserved_word(segment)) {
+        // `get` and `set` are contextual accessor words, legal function names.
+        if segments
+            .iter()
+            .all(|segment| !is_reserved_word(segment) || matches!(*segment, "get" | "set"))
+        {
             let mut declaration = format!("function {operation}{signature};");
             // Only the outermost wrapper may carry `declare`: a nested one is
             // already inside an ambient context, and `declare namespace a {

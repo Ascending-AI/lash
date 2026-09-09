@@ -258,7 +258,7 @@ fn execution_section_distinguishes_foreground_finish_from_process_finish() {
     let section =
         rlm_execution_section_for_host_environment(RlmPromptFeatures::default(), &surface);
 
-    assert!(section.contains("`finish value` ends the turn"));
+    assert!(section.contains("`finish <expr>` ends the turn"));
     assert!(section.contains("`finish value` / `fail value` complete the run"));
     assert!(!section.contains("cell-only"));
 }

@@ -283,9 +283,9 @@ mod catalogue_tests {
     fn finish_finalization_prompt_defaults_to_natural_guidance() {
         let prompt = rlm_finalization_prompt(&RlmTermination::default());
 
-        assert!(prompt.contains("prose-only response immediately ends the turn"));
-        assert!(prompt.contains("If any work remains, do not write prose-only"));
-        assert!(prompt.contains("without `finish` is progress"));
+        assert!(prompt.contains("prose alone ends this turn as the final answer"));
+        assert!(prompt.contains("write prose only when no work remains"));
+        assert!(prompt.contains("otherwise perform the next step in a block"));
     }
 
     #[test]
@@ -296,21 +296,21 @@ mod catalogue_tests {
 
         assert!(prompt.contains("finish <value>"));
         assert!(prompt.contains("REQUIRED OUTPUT"));
-        assert!(prompt.contains("Every non-terminal response must contain"));
-        assert!(prompt.contains("Prose-only does not end the turn"));
-        assert!(prompt.contains("commentary/status only"));
+        assert!(prompt.contains("Every response performs its next step in a block"));
+        assert!(prompt.contains("prose alone never ends this turn"));
+        assert!(prompt.contains("Never announce an action without the block that performs it"));
     }
 
     #[test]
     fn natural_finalization_prompt_allows_direct_prose() {
         let prompt = rlm_finalization_prompt(&RlmTermination::Natural);
 
-        assert!(prompt.contains("Finish with prose"));
-        assert!(prompt.contains("prose-only response immediately ends the turn"));
+        assert!(prompt.contains("Natural termination:"));
+        assert!(prompt.contains("prose alone ends this turn as the final answer"));
         assert!(prompt.contains("finish <value>"));
-        assert!(prompt.contains("Every message before the final answer"));
-        assert!(prompt.contains("Unaccompanied prose is final-answer-only"));
-        assert!(prompt.contains("Example multi-step natural turn"));
+        assert!(prompt.contains("write prose only when no work remains"));
+        assert!(prompt.contains("otherwise perform the next step in a block"));
+        assert!(prompt.contains("inside the program to return a computed value"));
     }
 }
 

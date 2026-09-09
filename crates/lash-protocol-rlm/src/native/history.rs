@@ -599,3 +599,47 @@ fn append_decode_failure(messages: &mut Vec<LlmMessage>, error: super::transport
         ),
     ));
 }
+
+#[cfg(test)]
+mod finalization_contract {
+    use super::*;
+    #[test]
+    fn every_native_round_has_one_finalization_policy() {
+        for typescript in [false, true] {
+            let surface = lash_lashlang_runtime::LashlangSurface::default();
+            let dialect: Box<dyn RlmDialect> = if typescript {
+                Box::new(crate::dialect::typescript::TypescriptDialect::prompt_only(
+                    surface,
+                ))
+            } else {
+                Box::new(crate::dialect::lashlang::LashlangDialect::prompt_only(
+                    surface,
+                ))
+            };
+            for protocol_iteration in [1, 2, 8] {
+                let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+                    images: false,
+                    dialect: dialect.as_ref(),
+                    events: &[],
+                    turn_messages: &Default::default(),
+                    turn_causes: &[],
+                    max_output_chars: 1000,
+                    protocol_iteration,
+                    finalization: "finish-policy",
+                    required_output: None,
+                    final_answer_format: None,
+                    budget_suffix: None,
+                    bound_variables: "",
+                });
+                let text = format!("{messages:?}");
+                assert_eq!(text.matches("=== FINALIZATION ===").count(), 1);
+                assert_eq!(text.matches("finish-policy").count(), 1);
+                assert!(text.contains(if typescript {
+                    "HistoryItem[]"
+                } else {
+                    "list[HistoryItem]"
+                }));
+            }
+        }
+    }
+}

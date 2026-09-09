@@ -194,7 +194,7 @@ impl TypescriptDialect {
                         "declare function {}_{}(input: {}): Promise<{}>; // await {}.{}(input)\n{}",
                         operation.alias,
                         operation.operation,
-                        typescript_type(operation.input),
+                        typescript_type(operation.input).replace("Record<string, never>", "{}"),
                         typescript_type(operation.output),
                         operation.alias,
                         operation.operation,
@@ -400,11 +400,18 @@ impl RlmDialect for TypescriptDialect {
             .surface
             .host_environment(tool_catalog)
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let durable = typescript_process_prompt(&environment.abilities);
+        let mut process_abilities = environment.abilities.clone();
+        process_abilities.sleep = false;
+        let durable = typescript_process_prompt(&process_abilities);
         let durable = if durable.is_empty() {
             durable
         } else {
-            format!("\n{durable}")
+            format!("\n\n### Processes\n\n{durable}")
+        };
+        let sleep = if environment.abilities.sleep {
+            "\n\n`await sleep(ms)` pauses the program."
+        } else {
+            ""
         };
         let host_api = format!(
             r#"Top-level bindings persist across executions. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result.
@@ -413,7 +420,7 @@ impl RlmDialect for TypescriptDialect {
 
 ### Host API
 
-`console.log(value)` shows output in the next step; `finish(value)` ends the turn. A failed tool call throws an `Error` whose `cause` is `{{ code, details }}`.{durable}"#
+`console.log(value)` shows output in the next step; `finish(value)` ends the turn. A failed tool call throws an `Error` whose `cause` is `{{ code, details }}`.{sleep}{durable}"#
         );
         let example =
             "### Example cell\n\n<typescript>\nconst total = 1 + 2;\nfinish(total);\n</typescript>";
@@ -669,7 +676,10 @@ mod tests {
             !section.contains("defineProcess"),
             "disabled processes stay hidden"
         );
-        assert!(section.contains("Promise.allSettled"), "{section}");
+        assert!(
+            !section.contains("Promise.allSettled"),
+            "fan-out needs no teaching: {section}"
+        );
         assert!(!section.contains("### v1 guardrails"));
         assert!(!section.contains("### Deterministic standard library"));
         assert!(section.contains("`Date` (UTC)"));
@@ -1107,15 +1117,23 @@ mod tests {
             .split_once("### Tools")
             .expect("a catalog with tools renders a Tools section")
             .1;
-        tools
-            .split("\n### ")
-            .next()
-            .unwrap()
-            .lines()
-            .map(str::trim)
-            .filter(|line| line.starts_with("declare "))
-            .map(str::to_string)
-            .collect()
+        let mut root = None;
+        let mut declarations = Vec::new();
+        for line in tools.split("\n### ").next().unwrap().lines().map(str::trim) {
+            if line.starts_with("declare namespace ") && line.ends_with('{') {
+                root = Some(line.to_string());
+            } else if line == "}" {
+                root = None;
+            } else if line.starts_with("declare ") {
+                declarations.push(line.to_string());
+            } else if line.starts_with("function ") || line.starts_with("namespace ") {
+                declarations.push(format!(
+                    "{} {line} }}",
+                    root.as_ref().expect("function's namespace")
+                ));
+            }
+        }
+        declarations
     }
 
     /// The call path a rendered declaration advertises.
