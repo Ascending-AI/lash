@@ -38,7 +38,7 @@ pub(crate) fn rlm_prompt_tool_docs(
     if !features.type_literals {
         vocabulary.type_literal_hint = "";
     }
-    tool_catalog
+    let entries = tool_catalog
         .tools
         .iter()
         .filter(|tool| tool.manifest.activation != ToolActivation::Internal)
@@ -63,13 +63,16 @@ pub(crate) fn rlm_prompt_tool_docs(
             compact.description = vocabulary.render_tool_prose(&compact.description);
             render_doc_field_prose(vocabulary, &mut compact.parameters);
             render_doc_field_prose(vocabulary, &mut compact.return_fields);
+            compact.parameters.retain(has_field_description);
+            compact.return_fields.retain(has_field_description);
             let markdown = compact.render_markdown();
             if dialect.renders_tool_catalogue_inline() {
                 let signature = lash_typescript::render_tool_signature(
                     &call_path,
                     contract.input_schema.canonical(),
                     Some(contract.output_schema.canonical()),
-                );
+                )
+                .replace("input: Record<string, never>", "input: {}");
                 let notes = markdown
                     .lines()
                     .skip(1)
@@ -85,8 +88,61 @@ pub(crate) fn rlm_prompt_tool_docs(
                 ))
             }
         })
-        .collect::<Vec<_>>()
-        .join("\n\n")
+        .collect::<Vec<_>>();
+    if dialect.renders_tool_catalogue_inline() {
+        group_typescript_namespaces(entries)
+    } else {
+        entries.join("\n\n")
+    }
+}
+
+fn has_field_description(row: &serde_json::Value) -> bool {
+    row.get("description")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|description| !description.trim().is_empty())
+}
+
+fn group_typescript_namespaces(entries: Vec<String>) -> String {
+    let mut namespaces = std::collections::BTreeMap::<String, Vec<String>>::new();
+    let mut other = Vec::new();
+    for entry in entries {
+        let Some((notes, declaration)) = entry.split_once("declare namespace ") else {
+            other.push(entry);
+            continue;
+        };
+        let Some((namespace, body)) = declaration.split_once(" { ") else {
+            other.push(entry);
+            continue;
+        };
+        let body = body
+            .strip_suffix(" }")
+            .expect("namespace renderer closes the declaration");
+        namespaces
+            .entry(namespace.to_string())
+            .or_default()
+            .push(format!(
+                "{}{}",
+                notes.trim_end(),
+                if notes.trim().is_empty() {
+                    body.to_string()
+                } else {
+                    format!("\n{body}")
+                }
+            ));
+    }
+    for (namespace, entries) in namespaces {
+        if entries.len() == 1 {
+            let entry = &entries[0];
+            let (notes, body) = entry.rsplit_once("\n").unwrap_or(("", entry));
+            other.push(format!(
+                "{notes}\ndeclare namespace {namespace} {{ {body} }}"
+            ));
+        } else {
+            let body = entries.join("\n");
+            other.push(format!("declare namespace {namespace} {{\n{body}\n}}"));
+        }
+    }
+    other.join("\n\n")
 }
 
 /// Resolve the dialect tokens in one rendered doc row's `description`.

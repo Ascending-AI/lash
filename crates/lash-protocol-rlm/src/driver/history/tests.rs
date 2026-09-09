@@ -570,6 +570,7 @@ fn history_teaching_follows_indexable_entries() {
             bound_variables: "",
         });
         let tail = observation_text(messages.last().unwrap());
+        assert_eq!(tail.matches("=== FINALIZATION ===").count(), 1);
         assert!(tail.contains("`history`: `list[HistoryItem]`, read-only, 1 entry"));
         assert_eq!(tail.contains("type HistoryItem ="), structured);
         assert!(!tail.contains("truncated"));

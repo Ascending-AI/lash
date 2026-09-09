@@ -46,21 +46,7 @@ use serde_json::Value;
 #[cfg(test)]
 use lash_core::{ToolCall, ToolContract, ToolManifest, ToolProvider};
 
-const STANDARD_EXECUTION_SECTION: &str = r#"Use direct tool calls.
-
-- Use `batch` (up to 25 calls) for two or more independent tool calls. Serialize calls when later arguments depend on earlier results.
-- For direct conversational requests that need no tools, respond in prose only.
-
-Example — two independent tool calls in one `batch` call:
-
-```json
-{
-  "tool_calls": [
-    { "tool": "<first_tool>", "parameters": { "arg": "value" } },
-    { "tool": "<second_tool>", "parameters": { "arg": "value" } }
-  ]
-}
-```"#;
+const STANDARD_EXECUTION_SECTION: &str = "Call tools directly with their declared JSON arguments. Use `batch` for two or more independent calls (up to 25); make dependent calls after their inputs return. Check each batch result’s success flag before using its value. Answer in prose only when no tool is needed.";
 
 const BATCH_MAX_TOOL_CALLS: usize = 25;
 const STANDARD_PROTOCOL_PLUGIN_ID: &str = "standard_protocol";
@@ -793,8 +779,8 @@ mod tests {
                 "standard prompt should not mention removed tool `{removed_tool}`"
             );
         }
-        assert!(STANDARD_EXECUTION_SECTION.contains("<first_tool>"));
-        assert!(STANDARD_EXECUTION_SECTION.contains("<second_tool>"));
+        assert!(STANDARD_EXECUTION_SECTION.contains("declared JSON arguments"));
+        assert!(STANDARD_EXECUTION_SECTION.contains("Check each batch result’s success flag"));
     }
 
     #[test]

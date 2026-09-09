@@ -17,9 +17,13 @@ pub(crate) fn execution_section(
             .find("\n### ")
             .map(|offset| start + 4 + offset)
             .unwrap_or(text.len());
-        text.replace_range(start..end, "### Tool transport\n\nCall `execute_code` once with a JSON object containing only the string `code`. Put the complete program in `code`. Host operations and `finish` run inside that program.\n");
+        text.replace_range(start..end, "### Tool transport\n\nEach response makes one `execute_code` call with `{\"code\": \"<complete program>\"}`. Tool calls and `finish` run inside the program; prose before the call is commentary.\n");
     }
     text = text
+        .replace(
+            "a paired `<typescript>` block",
+            "the `execute_code` program",
+        )
         .replace("a paired `<lashlang>` block", "the `execute_code` program")
         .replace("across `<lashlang>` blocks", "across programs");
     if let Some(start) = text.find("### Example cell")
@@ -54,7 +58,8 @@ pub(super) fn transport_copy(original: &str, dialect: &dyn RlmDialect) -> String
         .replace("Lashlang block", "`execute_code` call")
         .replace("TypeScript block", "`execute_code` call")
         .replace("a <lashlang> block", "an `execute_code` call")
-        .replace("the block", "the code call")
+        .replace("in a block", "in an `execute_code` call")
+        .replace("the block", "the `execute_code` call")
         .replace("no block", "no code call")
         .replace("A block without", "A program without")
         .replace(

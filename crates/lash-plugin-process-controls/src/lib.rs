@@ -132,7 +132,7 @@ pub fn process_list_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:list_process_handles",
         "list_process_handles",
-        "List process runs visible to this session, including `shell.start` runs, with process id, descriptor, optional definition name, and lifecycle status. Filters are optional; the default returns running runs.",
+        "List process runs visible to this session, including `shell.start` runs, with process id, descriptor, optional definition name, and lifecycle status. Filters are optional; the default returns running runs. Empty arguments select running runs; `definition` selects runs of a definition and `status: \"any\"` includes visible run history.",
         serde_json::json!({
             "type": "object",
             "properties": {

@@ -272,7 +272,7 @@ pub fn default_prompt_template() -> PromptTemplate {
     ])
 }
 
-pub const MAIN_AGENT_INTRO: &str = "You are an AI coding assistant piloting the lash harness.";
+pub const MAIN_AGENT_INTRO: &str = "You are an assistant operating the lash harness.";
 
 /// Core guidance delivered in the `## Guidance` section. Rendered
 /// through [`render_core_guidance`] rather than inlined as a `const`
@@ -281,9 +281,9 @@ pub const MAIN_AGENT_INTRO: &str = "You are an AI coding assistant piloting the 
 /// depend on being able to talk to a user only make sense when that
 /// channel exists.
 const CORE_GUIDANCE_BASE: &[&str] = &[
-    "- Be concise. Avoid filler, hedging, and performative tone.",
-    "- Do not restate a conclusion you already stated. Once a fix location is identified, act on it in the same turn.",
-    "- Prefer the simplest correct solution over cleverness or unnecessary abstraction.",
+    "- Be concise; no filler, hedging, or performative tone.",
+    "- Act as soon as the next step is clear; do not restate conclusions.",
+    "- Prefer the simplest correct solution.",
 ];
 
 const CORE_GUIDANCE_INTERACTIVE_ONLY: &str =

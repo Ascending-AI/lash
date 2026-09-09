@@ -115,19 +115,18 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
             "tool_choice": "auto",
             "tools": [{
                 "function": {
-                    "description": "Execute up to 25 independent tool calls concurrently. Calls start in parallel; ordering is not guaranteed. Calls past index 25 are rejected.",
+                    "description": "Run 1-25 independent tool calls concurrently. Execution order is not guaranteed; results return in input order, each with a success flag and result or error. Do not nest batch calls.",
                     "name": "batch",
                     "parameters": {
                         "additionalProperties": false,
                         "properties": {
                             "tool_calls": {
-                                "description": "Array of 1-25 objects like { tool: \"<tool_name>\", parameters: { <arg>: \"<value>\" } }. Use only for independent calls. Do not include another batch call. More than 25 calls is rejected as a tool error.",
+                                "description": "1-25 objects { tool, parameters }; each tool must be exposed and parameters must match its schema.",
                                 "items": {
                                     "additionalProperties": false,
                                     "properties": {
                                         "parameters": {
                                             "additionalProperties": true,
-                                            "properties": {},
                                             "type": "object"
                                         },
                                         "tool": { "type": "string" }

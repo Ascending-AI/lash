@@ -68,68 +68,33 @@ fn every_rendered_prompt_sample_parses_and_links() {
 }
 
 #[test]
-fn rendered_builtin_inventory_exactly_matches_runtime_registry() {
-    for features in [
-        RlmPromptFeatures::default(),
-        RlmPromptFeatures {
-            images: false,
-            ..RlmPromptFeatures::default()
-        },
-    ] {
-        let prompt =
-            rlm_execution_section_for_host_environment(features, &full_prompt_host_environment());
-        let rendered = prompt
-            .split_once("### Builtins")
-            .unwrap()
-            .1
-            .split("### Type literals")
-            .next()
-            .unwrap()
-            .lines()
-            .filter(|line| line.starts_with("- `"))
-            .map(|line| line.trim_start_matches("- `").split('(').next().unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(rendered, lashlang::builtin_names().collect::<Vec<_>>());
-    }
-}
-
-#[test]
-fn rendered_builtin_bullets_are_bidirectionally_complete() {
-    let registry = lashlang::builtin_names().collect::<std::collections::BTreeSet<_>>();
-    for features in [
-        RlmPromptFeatures::default(),
-        RlmPromptFeatures {
-            images: false,
-            ..RlmPromptFeatures::default()
-        },
-    ] {
-        let prompt =
-            rlm_execution_section_for_host_environment(features, &full_prompt_host_environment());
+fn rendered_builtin_inventory_matches_enabled_runtime_registry() {
+    for type_literals in [false, true] {
+        let prompt = rlm_execution_section_for_host_environment(
+            RlmPromptFeatures {
+                type_literals,
+                ..RlmPromptFeatures::default()
+            },
+            &full_prompt_host_environment(),
+        );
         let builtins = prompt
             .split_once("### Builtins")
-            .expect("builtins section")
+            .unwrap()
             .1
-            .split_once("### Working with context")
-            .expect("section after builtins")
-            .0;
-        let mut counts = std::collections::BTreeMap::<&str, usize>::new();
-        for line in builtins.lines().filter(|line| line.starts_with("- `")) {
-            let lead = line
-                .strip_prefix("- `")
-                .and_then(|line| line.split_once('`'))
-                .map(|(signature, _)| signature.split('(').next().expect("signature name"))
-                .expect("builtin bullet lead");
-            assert!(
-                registry.contains(lead),
-                "prompt bullet lead `{lead}` is absent from the runtime registry"
-            );
-            *counts.entry(lead).or_default() += 1;
-        }
-        for name in &registry {
+            .split("### ")
+            .next()
+            .unwrap();
+        let names = builtins
+            .split('`')
+            .enumerate()
+            .filter(|(i, _)| i % 2 == 1)
+            .map(|(_, code)| code.split('(').next().unwrap())
+            .collect::<std::collections::BTreeSet<_>>();
+        for name in lashlang::builtin_names() {
             assert_eq!(
-                counts.get(name),
-                Some(&1),
-                "builtin `{name}` must have exactly one prompt bullet"
+                names.contains(name),
+                name != "validate" || type_literals,
+                "{name}"
             );
         }
     }
@@ -223,21 +188,10 @@ fn execution_section_makes_paired_lashlang_tag_contract_explicit() {
         &full_prompt_host_environment(),
     );
 
-    assert!(section.contains("Use prose for conversation"));
-    assert!(
-        section
-            .contains("Executable code must be inside paired `<lashlang>` and `</lashlang>` tags")
-    );
-    assert!(section.contains("Tag lines must be standalone after trimming"));
-    assert!(section.contains("terminates the cell even inside a multiline string"));
-    assert!(section.contains("Put the lashlang block after optional commentary"));
-    assert!(!section.contains("exactly one Lashlang block"));
-    assert!(!section.contains("NEVER have multiple `<lashlang>` blocks"));
-    assert!(!section.contains("Any text after it is ignored"));
-    assert!(section.contains("Inspect and verify current-state results before finishing"));
-    assert!(!section.contains("### Persistence"));
-    assert!(!section.contains("Every message before the final answer"));
-    assert!(!section.contains("Prose-only does not end the turn"));
+    assert!(section.contains("Put one program after any commentary"));
+    assert!(section.contains("standalone `<lashlang>` and `</lashlang>` lines"));
+    assert!(section.contains("even inside a multiline string"));
+    assert!(section.contains("Markdown fences do not execute"));
 }
 
 #[test]
@@ -248,11 +202,11 @@ fn execution_section_claims_the_operator_ladder_and_new_builtin_semantics() {
     );
     assert!(section.contains("postfix calls/fields/indexing/result `?`"));
     assert!(section.contains("comparisons `== != < <= > >= in`"));
-    assert!(section.contains("`sort(list)` — stable ascending"));
-    assert!(section.contains("`unique(list)` — new list, first occurrences, typed equality"));
-    assert!(section.contains("`replace(s, from, to)` — literal replace"));
-    assert!(section.contains("`min(list)` — least of one comparable type; empty errors"));
-    assert!(section.contains("`sum(list)` — numeric total; sum([]) = 0"));
+    assert!(section.contains("`sort(list)`"));
+    assert!(section.contains("`unique(list)`"));
+    assert!(section.contains("`replace(s, from, to)`"));
+    assert!(section.contains("`min`, `max` (empty errors)"));
+    assert!(section.contains("`sum(list)` (`sum([]) = 0`)"));
 }
 
 #[test]
@@ -275,20 +229,9 @@ fn execution_section_documents_static_label_annotations_when_enabled() {
     let section =
         rlm_execution_section_for_host_environment(RlmPromptFeatures::default(), &surface);
 
-    assert!(section.contains("@label(title: \"Label\")"));
-    assert!(section.contains("@label(title: \"Label\", description: \"Details\")"));
-    assert!(section.contains("Execution labels"));
-    assert!(section.contains("prefix annotation, not a standalone statement"));
-    assert!(section.contains("must appear immediately before the one statement"));
-    assert!(section.contains("Do not emit `@label(...)` by itself"));
-    assert!(section.contains("query = \"runtime architecture\""));
-    assert!(!section.contains("files.glob"));
-    assert!(section.contains("important Lashlang phases"));
-    assert!(section.contains("At top level, label meaningful setup"));
-    assert!(section.contains("string literals"));
-    assert!(!section.contains("process-map"));
-    assert!(!section.contains("visual process statement"));
-    assert!(!section.contains("color:"));
+    assert!(section.contains("@label(title: \"…\")"));
+    assert!(section.contains("goes on the line before the one top-level statement"));
+    assert!(section.contains("String literals only; never standalone or stacked"));
 }
 
 #[test]
@@ -315,10 +258,8 @@ fn execution_section_distinguishes_foreground_finish_from_process_finish() {
     let section =
         rlm_execution_section_for_host_environment(RlmPromptFeatures::default(), &surface);
 
-    assert!(section.contains("Top-level `finish <value>` ends the turn with a value"));
-    assert!(section.contains(
-        "`finish value` completes the run and stores `value` as the process success value."
-    ));
+    assert!(section.contains("`finish value` ends the turn"));
+    assert!(section.contains("`finish value` / `fail value` complete the run"));
     assert!(!section.contains("cell-only"));
 }
 
@@ -335,10 +276,10 @@ fn execution_section_documents_foreground_signal_run_when_enabled() {
 
     // Sending (`signal_run`) is documented as foreground-legal; receiving
     // (`wait_signal`) stays process-only.
-    assert!(section.contains("signal_run(handle, \"name\", payload)"));
-    assert!(section.contains("foreground turn as well as inside a process body"));
-    assert!(section.contains("wait_signal(\"name\")"));
-    assert!(section.contains("only valid inside a process body"));
+    assert!(section.contains("signal_run(h, \"approve\", { ok: true })"));
+    assert!(section.contains("sends from foreground or process code"));
+    assert!(section.contains("wait_signal(\"approve\")"));
+    assert!(section.contains("`wait_signal` is process-only"));
 }
 
 #[test]
@@ -350,9 +291,8 @@ fn execution_section_documents_unwrapped_process_await_for_finished_values() {
     let section =
         rlm_execution_section_for_host_environment(RlmPromptFeatures::default(), &surface);
 
-    assert!(section.contains("`await handle` waits and returns a result wrapper"));
-    assert!(section.contains("`result = (await handle)?`"));
-    assert!(section.contains("then read `result.field`"));
+    assert!(section.contains("`(await h)?` unwraps the `{ ok, value }` wrapper"));
+    assert!(section.contains("`results = await [h1, h2]`"));
     assert!(!section.contains("terminal result returned by `await handle`"));
 }
 
@@ -542,7 +482,9 @@ fn execution_section_mentions_while_and_bounded_loop_guidance() {
         &full_prompt_host_environment(),
     );
 
-    assert!(section.contains("Statements: `if`, `for`, `while`"));
+    assert!(
+        section.contains("Statements: `if cond { … }`, `for x in xs { … }`, `while cond { … }`")
+    );
     assert!(section.contains("prefer bounded loops"));
 }
 

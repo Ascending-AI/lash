@@ -1,4 +1,3 @@
-
 use crate::dialect::RlmDialect;
 use crate::native::prompt::execution_section;
 use lash_lashlang_runtime::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
@@ -54,7 +53,7 @@ fn system(dialect: &dyn RlmDialect, native: bool, enabled: bool) -> String {
     };
     if !dialect.renders_tool_catalogue_inline() {
         execution.push_str(&format!(
-            "\n\n### Tools\n\nAwait these documented operations:\n\n{}",
+            "\n\n### Tools\n\nCall the operations below with their declared argument records.\n\n{}",
             crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect, features)
         ));
     }
@@ -79,7 +78,7 @@ fn prompt_diet_sizes_and_capability_gates() {
                 on.chars().count()
             );
             assert!(
-                size <= if typescript { 6000 } else { 7000 },
+                size <= if typescript { 5000 } else { 6500 },
                 "{size}: {off}"
             );
             assert!(on.len() > off.len());
@@ -146,9 +145,9 @@ fn dialect_execution_headings_have_a_body_in_both_channels() {
                 );
             }
             let transport = if native {
-                "Call `execute_code` once"
+                "Each response makes one `execute_code` call"
             } else {
-                "paired"
+                "standalone"
             };
             assert!(prompt.split_once(heading).unwrap().1.contains(transport));
         }
@@ -195,9 +194,12 @@ fn labels_without_processes_render_a_complete_sentence() {
     let prompt = system(&dialect, false, true);
     let labels = prompt
         .lines()
-        .find(|line| line.starts_with("- Execution labels:"))
+        .find(|line| line.starts_with("- `@label"))
         .unwrap();
-    assert!(labels.contains("At top level, label meaningful setup, resource calls, submissions, branches, and loops."), "{labels}");
+    assert!(
+        labels.contains("setup, tool calls, submissions, branches, loops."),
+        "{labels}"
+    );
     assert!(!labels.contains(",s"), "{labels}");
     assert!(!labels.contains("process"), "{labels}");
 }
@@ -290,5 +292,170 @@ fn removed_guardrails_still_have_repair_hints() {
             .to_string();
         let hint = error.split_once("hint:").expect("repair hint").1;
         assert!(hint.contains(repair), "{source}: {error}");
+    }
+}
+
+#[test]
+fn prompt_section_order_and_termination_have_one_owner() {
+    for typescript in [false, true] {
+        for native in [false, true] {
+            let dialect = dialect(typescript, false);
+            let prompt = system(dialect.as_ref(), native, false);
+            let headings = prompt
+                .lines()
+                .filter(|line| line.starts_with('#') && !line.starts_with("### `await "))
+                .collect::<Vec<_>>();
+            let transport = if native {
+                "### Tool transport"
+            } else {
+                "### Response shape"
+            };
+            let expected = if typescript {
+                vec![
+                    "## TypeScript execution",
+                    transport,
+                    if native {
+                        "### Example execute_code call"
+                    } else {
+                        "### Example cell"
+                    },
+                    "### Host API",
+                    "### Tools",
+                    "## Guidance",
+                ]
+            } else {
+                vec![
+                    "## Lashlang execution",
+                    "### `print` vs `finish`",
+                    transport,
+                    "### Language",
+                    "### Builtins",
+                    "### Working with context",
+                    "### Tools",
+                    "## Guidance",
+                ]
+            };
+            assert_eq!(
+                headings, expected,
+                "typescript={typescript} native={native}"
+            );
+            assert_eq!(
+                prompt.matches("only those listed under **Tools**").count(),
+                1
+            );
+            assert_eq!(prompt.matches("ends the turn").count(), 1);
+            for termination in [
+                lash_rlm_types::RlmTermination::Natural,
+                lash_rlm_types::RlmTermination::FinishRequired { schema: None },
+            ] {
+                let policy = dialect.finalization_copy(&termination);
+                assert!(!policy.contains("standalone"));
+                assert!(!policy.contains("only those listed"));
+                assert!(!policy.contains("Return exactly"));
+            }
+        }
+    }
+}
+
+#[test]
+fn each_lashlang_capability_gates_its_own_vocabulary() {
+    for native in [false, true] {
+        for capability in 0..8 {
+            for enabled in [false, true] {
+                let mut features = crate::protocol::RlmPromptFeatures {
+                    images: false,
+                    type_literals: false,
+                    decomposition: false,
+                };
+                let mut surface = LashlangSurface::default();
+                let needles: &[&str] = match capability {
+                    0 => {
+                        features.images = enabled;
+                        &["Images:", "Image", "image.size"]
+                    }
+                    1 => {
+                        features.type_literals = enabled;
+                        &["### Type literals", "validate(value, Type", "email: str?"]
+                    }
+                    2 => {
+                        surface.language_features.label_annotations = enabled;
+                        &["@label", "never standalone or stacked"]
+                    }
+                    3 => {
+                        features.decomposition = enabled;
+                        &["continuation tool", "nothing is inherited"]
+                    }
+                    4 => {
+                        surface.abilities.processes = enabled;
+                        &["process name", "Inside a process:", "cancel h"]
+                    }
+                    5 => {
+                        surface.abilities.sleep = enabled;
+                        &["sleep for", "sleep until", "deadlines: RFC3339"]
+                    }
+                    6 => {
+                        surface.abilities.processes = true;
+                        surface.abilities.process_signals = enabled;
+                        &["signals {", "wait_signal", "signal_run"]
+                    }
+                    _ => {
+                        surface.abilities.processes = true;
+                        surface.abilities.triggers = enabled;
+                        &["Triggers:", "trigger.event", "triggers.register"]
+                    }
+                };
+                let dialect = crate::dialect::lashlang::LashlangDialect::prompt_only(surface);
+                let text = if native {
+                    execution_section(&dialect, features, &catalog())
+                } else {
+                    dialect
+                        .render_execution_section(features, &catalog())
+                        .unwrap()
+                };
+                for needle in needles {
+                    if !enabled {
+                        assert!(
+                            !text.contains(needle),
+                            "off capability={capability} needle={needle}: {text}"
+                        );
+                    }
+                }
+                assert_eq!(
+                    text.contains(needles[0]),
+                    enabled,
+                    "capability={capability}: {text}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn tool_signatures_cover_every_operation_parameter_and_return_shape() {
+    use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(["first", "second"].map(|operation| lash_core::ToolDefinition::raw(operation, operation, format!("Description for {operation}"), serde_json::json!({"type":"object","properties":{"required_id":{"type":"string"},"optional_limit":{"type":"integer"}},"required":["required_id"],"additionalProperties":false}), serde_json::json!({"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false})).with_tool_binding(ToolBinding::new(["lookup"], operation))).to_vec());
+    for typescript in [false, true] {
+        let dialect = dialect(typescript, false);
+        let docs = crate::tool_catalog::rlm_prompt_tool_docs(
+            &catalog,
+            dialect.as_ref(),
+            Default::default(),
+        );
+        for operation in ["first", "second"] {
+            assert!(docs.contains(&format!("Description for {operation}")));
+            assert!(
+                docs.contains(&format!("{operation}(input:"))
+                    || docs.contains(&format!("lookup.{operation}({{"))
+            );
+        }
+        for needle in ["required_id", "optional_limit", "answer"] {
+            assert_eq!(docs.matches(needle).count(), 2, "{docs}");
+        }
+        assert!(!docs.contains("Parameters:"));
+        assert!(!docs.contains("Return fields:"));
+        if typescript {
+            assert_eq!(docs.matches("declare namespace lookup").count(), 1);
+            assert!(docs.contains("optional_limit?: number"));
+        }
     }
 }

@@ -28,6 +28,7 @@ pub(super) struct RlmHistoryRenderInput<'a> {
 
 #[derive(Clone, Copy)]
 pub(super) struct CurrentIterationMessageInput<'a> {
+    pub(super) history_type: &'static str,
     pub(super) images: bool,
     pub(super) history_len: usize,
     pub(super) history_has_structure: bool,
@@ -77,6 +78,11 @@ pub(super) fn build_rlm_history_messages_from_turn(
     append_current_iteration_message(
         &mut messages,
         CurrentIterationMessageInput {
+            history_type: if input.dialect.language_id() == "typescript" {
+                "HistoryItem[]"
+            } else {
+                "list[HistoryItem]"
+            },
             images: input.images,
             history_len,
             history_has_structure,
@@ -346,7 +352,8 @@ fn append_current_iteration_message(
     current_prompt.push_str("\n\n\n=== BOUND VARIABLES ===\n\n");
     let _ = write!(
         current_prompt,
-        "- `history`: `list[HistoryItem]`, read-only, {} {}",
+        "- `history`: `{}`, read-only, {} {}",
+        input.history_type,
         input.history_len,
         if input.history_len == 1 {
             "entry"

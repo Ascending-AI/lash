@@ -38,7 +38,9 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     if !dialect.renders_tool_catalogue_inline() && !tool_docs.trim().is_empty() {
         prompt_contributions.push(PromptContribution::execution(
             "Tools",
-            format!("Await these documented operations:\n\n{tool_docs}"),
+            format!(
+                "Call the operations below with their declared argument records.\n\n{tool_docs}"
+            ),
         ));
     }
     prompt_contributions.extend(input.extra_prompt_contributions);

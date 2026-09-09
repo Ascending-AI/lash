@@ -191,13 +191,18 @@ impl TypescriptDialect {
                 .iter()
                 .map(|operation| {
                     format!(
-                        "declare function {}_{}(input: {}): Promise<{}>; // await {}.{}(input)",
+                        "declare function {}_{}(input: {}): Promise<{}>; // await {}.{}(input)\n{}",
                         operation.alias,
                         operation.operation,
                         typescript_type(operation.input),
                         typescript_type(operation.output),
                         operation.alias,
-                        operation.operation
+                        operation.operation,
+                        crate::protocol::prompt::host_operation_description(
+                            &operation.alias,
+                            &operation.operation
+                        )
+                        .unwrap_or("")
                     )
                 })
                 .collect::<Vec<_>>()
@@ -278,11 +283,7 @@ Literal target; inputs match run parameters."#);
         }
     }
     if abilities.sleep {
-        lines.push(if abilities.processes {
-            "declare function sleep(ms: number): Promise<void>; // cell or run"
-        } else {
-            "declare function sleep(ms: number): Promise<void>; // cell"
-        });
+        lines.push("`await sleep(ms)` pauses the program.");
     }
     let prompt = lines.join("\n");
     if abilities.process_signals {
@@ -390,7 +391,7 @@ impl RlmDialect for TypescriptDialect {
             String::new()
         } else {
             format!(
-                "\n\n### Tools\n\nEvery call requires `await` and returns the declared `Promise<T>`:\n\n{tools}"
+                "\n\n### Tools\n\nCall each tool with one object matching its declared input: `await module.op({{ id: value }})`; empty inputs take `{{}}`. These declarations describe the host; do not execute them.\n\n{tools}"
             )
         };
         let host_surface = self.render_host_surface_section(tool_catalog)?;
@@ -406,21 +407,18 @@ impl RlmDialect for TypescriptDialect {
             format!("\n{durable}")
         };
         let host_api = format!(
-            r#"Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
+            r#"Top-level bindings persist across executions. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result.
 
-Standard `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp`, `URL` are supported.
+`Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes, generators and `Promise.race` are not supported.
 
 ### Host API
 
-`console.log/warn/error/info/debug(...values)` and `print(value)` inspect values; `finish(value)` ends the turn.{durable}
-`Promise.all`/`Promise.allSettled` accept tool promises and resolved values; all leaves settle before `all` reports the first-settled rejection.
-
-A failed tool call rejects with an `Error`: `message` is the host text, `name` is `EffectError` (`RuntimeError` for runtime faults), and `cause` carries `{{ code, details }}`. An `allSettled` rejection uses that same error. Errors in `finish` or tool arguments become `{{ name, message, cause }}`."#
+`console.log(value)` shows output in the next step; `finish(value)` ends the turn. A failed tool call throws an `Error` whose `cause` is `{{ code, details }}`.{durable}"#
         );
         let example =
             "### Example cell\n\n<typescript>\nconst total = 1 + 2;\nfinish(total);\n</typescript>";
         Ok(format!(
-            "{response_shape}\n{example}\n\n{host_api}\n\n{tools}{host_surface}"
+            "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under **Tools**.\n\n{response_shape}\n{example}\n\n{host_api}\n\n{tools}{host_surface}"
         ))
     }
 
@@ -430,7 +428,7 @@ A failed tool call rejects with an `Error`: `message` is the host text, `name` i
                 self.finish_required_finalization(schema.is_some())
             }
             lash_rlm_types::RlmTermination::Natural => {
-                "Continue with one paired `<typescript>...</typescript>` block, or finish with prose and no block. A call to `finish(value)` returns a computed final value.".to_string()
+                "Natural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step in a block, and call `finish(value)` inside the program to return a computed value.".to_string()
             }
         }
     }
