@@ -64,6 +64,7 @@ impl RlmRuntimeState {
             deferred_tool_resolver,
             execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
             execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+            channel: crate::plugin::RlmChannel::Cell,
         };
         let dialect: Arc<dyn RlmDialect> = Arc::new(crate::dialect::LashlangDialect::new(
             lash_lashlang_runtime::LashlangSurface::default(),

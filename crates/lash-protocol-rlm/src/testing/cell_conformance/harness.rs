@@ -13,8 +13,8 @@ use lash_core::ExecRequest;
 use lash_lashlang_runtime::LashlangSurface;
 
 use crate::executor::{
-    ParkedCellEvidence, RlmExecutionState, RlmLashlangExecutionTraceConfig, SourceDialect,
-    execute_code_with_dialect_and_bounds, execute_parked_cell_for_tests,
+    ParkedCellEvidence, RlmExecutionState, RlmLashlangExecutionTraceConfig, RlmSourceContext,
+    SourceDialect, execute_code_with_dialect_and_bounds, execute_parked_cell_for_tests,
 };
 use crate::projection::{ProjectionRegistry, RlmProjectedBindings, flow_to_json_value};
 
@@ -122,7 +122,7 @@ impl Session {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
-                dialect,
+                RlmSourceContext::cell(dialect),
             )
             .await
         });

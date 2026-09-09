@@ -32,6 +32,7 @@ impl TypescriptDialect {
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         }
     }
@@ -521,6 +522,7 @@ mod tests {
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         );
         assert_eq!(dialect.language_id(), "typescript");
@@ -578,6 +580,7 @@ mod tests {
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         );
         let section = dialect
@@ -638,6 +641,7 @@ mod tests {
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         );
         let tool = lash_core::ToolDefinition::raw(
@@ -687,6 +691,7 @@ mod tests {
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         );
         let prompt = dialect
@@ -725,6 +730,7 @@ mod tests {
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         );
         let prompt = dialect
@@ -785,6 +791,7 @@ mod tests {
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         );
         let prompt = dialect
@@ -921,6 +928,7 @@ mod tests {
                         execution_trace_config:
                             crate::executor::RlmLashlangExecutionTraceConfig::default(),
                         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                        channel: crate::plugin::RlmChannel::Cell,
                     },
                 );
                 let mut session = dialect.create_session().expect("typescript session");
