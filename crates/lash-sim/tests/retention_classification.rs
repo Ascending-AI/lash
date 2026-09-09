@@ -232,21 +232,46 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         // Host receipts lack a safe terminal gate (FIG-1956 / FIG-653).
         KnownGap { issue: "FIG-1956" },
     ),
-    // Session/process journals retire; RuntimeOperation scopes are FIG-2500.
-    ("runtime_effect_replay", KnownGap { issue: "FIG-2500" }),
-    ("runtime_effect_group", KnownGap { issue: "FIG-2500" }),
+    // Session and process retirement select by owner; runtime-operation scopes
+    // retire through `EffectJournalRetirement::RuntimeOperation` once their
+    // receipt is back (facade plugin operations) or their process is pruned
+    // (trigger-delivery reconcile), groups and children in one transaction.
+    (
+        "runtime_effect_replay",
+        LifecycleOwned {
+            scope: "session, process, or runtime-operation retirement",
+        },
+    ),
+    (
+        "runtime_effect_group",
+        LifecycleOwned {
+            scope: "session, process, or runtime-operation retirement",
+        },
+    ),
     (
         "await_event_meta",
         PermanentlyExempt {
             reason: "singleton signing secret keeps issued promise keys valid across reopen",
         },
     ),
-    // Session revocation exists; process/operation-owned promises are FIG-2499.
-    ("await_event_waits", KnownGap { issue: "FIG-2499" }),
+    // Session promises die with session revocation; process and
+    // runtime-operation promises die with their scope's journal retirement.
+    (
+        "await_event_waits",
+        LifecycleOwned {
+            scope: "session revocation or process/runtime-operation retirement",
+        },
+    ),
     (
         "await_event_revoked_sessions",
         PermanentlyExempt {
             reason: "single-use session identity and permanent promise-key revocation",
+        },
+    ),
+    (
+        "effect_scope_retirements",
+        PermanentlyExempt {
+            reason: "scope fences: a runtime-operation fence is permanent; a process fence lasts until the host registers the id again (ADR 0049)",
         },
     ),
 ];
@@ -295,7 +320,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 41, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 42, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

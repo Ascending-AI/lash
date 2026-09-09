@@ -73,6 +73,11 @@ pub struct AwaitEventVocabulary {
 pub struct AwaitEventRowIdentity {
     /// Canonical JSON of the key's [`ExecutionScope`].
     pub scope_json: String,
+    /// The scope's durable journal identity key — the key its effect journal
+    /// rows and its scope-retirement tombstone are filed under. Not a row
+    /// column: the promise row records `scope_json`, and this key is how a
+    /// backend asks whether the scope has been retired.
+    pub scope_id: String,
     /// Canonical JSON of the key's [`AwaitEventWaitIdentity`].
     pub wait_json: String,
     /// Owning session, when the scope has one. `NULL` rows are session-free.
@@ -180,12 +185,23 @@ pub trait AwaitEventBackend: Send + Sync {
     /// is no row to race with.
     async fn session_is_revoked(&self, session_id: &str) -> Result<bool, RuntimeError>;
 
+    /// Whether the scope filed under `scope_id` carries a durable retirement
+    /// tombstone.
+    ///
+    /// The non-session twin of [`session_is_revoked`](Self::session_is_revoked):
+    /// read at key minting for process and runtime-operation scopes, and by
+    /// every row atom below before it honors an identity. A tombstone is
+    /// written by scope retirement in the same transaction that deletes the
+    /// scope's promise rows and effect journal, and it never goes away.
+    async fn scope_is_retired(&self, scope_id: &str) -> Result<bool, RuntimeError>;
+
     /// Materialize the promise row so a waiter is durably registered.
     ///
-    /// Atomically: reject (`false`) when the owning session is tombstoned or a
-    /// row with a different identity already owns `key_id`; otherwise insert a
-    /// terminal-free row if none exists and accept (`true`). An existing
-    /// matching row — pending or resolved — is accepted unchanged.
+    /// Atomically: reject (`false`) when the owning session is tombstoned, the
+    /// scope is retired, or a row with a different identity already owns
+    /// `key_id`; otherwise insert a terminal-free row if none exists and accept
+    /// (`true`). An existing matching row — pending or resolved — is accepted
+    /// unchanged.
     async fn ensure_pending(
         &self,
         key_id: &str,
@@ -195,8 +211,8 @@ pub trait AwaitEventBackend: Send + Sync {
 
     /// Compare-and-store `terminal_json` as the promise's first terminal.
     ///
-    /// Atomically: reject when the owning session is tombstoned or a row with a
-    /// different identity owns `key_id`; write and report
+    /// Atomically: reject when the owning session is tombstoned, the scope is
+    /// retired, or a row with a different identity owns `key_id`; write and report
     /// [`TerminalCas::Stored`] when no row exists or the matching row has no
     /// terminal; otherwise report the existing terminal without writing.
     async fn store_terminal(
@@ -282,10 +298,18 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
         let key_id = promise_semantics::derive_key_id(scope, &wait)?;
-        if let Some(session_id) = scope.session_id()
-            && self.backend.session_is_revoked(session_id).await?
-        {
-            return Err(unknown_or_revoked());
+        match scope.session_id() {
+            Some(session_id) => {
+                if self.backend.session_is_revoked(session_id).await? {
+                    return Err(unknown_or_revoked());
+                }
+            }
+            None => {
+                let identity = scope.journal_identity()?;
+                if self.backend.scope_is_retired(identity.key()).await? {
+                    return Err(unknown_or_revoked());
+                }
+            }
         }
         let signature = self.signature(scope, &wait, &key_id)?;
         Ok(AwaitEventKey {
@@ -488,6 +512,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
     fn row_identity(&self, key: &AwaitEventKey) -> Result<AwaitEventRowIdentity, RuntimeError> {
         Ok(AwaitEventRowIdentity {
             scope_json: serde_json::to_string(&key.scope).map_err(|err| self.encode_error(&err))?,
+            scope_id: key.scope.journal_identity()?.key().to_string(),
             wait_json: serde_json::to_string(&key.wait).map_err(|err| self.encode_error(&err))?,
             session_id: key.scope.session_id().map(ToOwned::to_owned),
             turn_control: key.wait.is_turn_control(),
@@ -625,6 +650,7 @@ mod tests {
     struct MemoryBackend {
         rows: Arc<Mutex<HashMap<String, MemoryRow>>>,
         revoked: Arc<Mutex<Vec<String>>>,
+        retired_scopes: Arc<Mutex<Vec<String>>>,
         inspections: Arc<AtomicUsize>,
     }
 
@@ -636,6 +662,27 @@ mod tests {
                     .iter()
                     .any(|revoked| revoked == session_id)
             })
+        }
+
+        fn fenced(&self, identity: &AwaitEventRowIdentity) -> bool {
+            self.revoked_session(identity.session_id.as_deref())
+                || self
+                    .retired_scopes
+                    .lock_recover()
+                    .iter()
+                    .any(|retired| retired == &identity.scope_id)
+        }
+
+        fn retire_scope(&self, scope: &ExecutionScope) {
+            let scope_id = scope
+                .journal_identity()
+                .expect("test scopes form journal identities")
+                .key()
+                .to_string();
+            self.rows
+                .lock_recover()
+                .retain(|_, row| row.identity.scope_id != scope_id);
+            self.retired_scopes.lock_recover().push(scope_id);
         }
     }
 
@@ -655,13 +702,21 @@ mod tests {
             Ok(self.revoked_session(Some(session_id)))
         }
 
+        async fn scope_is_retired(&self, scope_id: &str) -> Result<bool, RuntimeError> {
+            Ok(self
+                .retired_scopes
+                .lock_recover()
+                .iter()
+                .any(|retired| retired == scope_id))
+        }
+
         async fn ensure_pending(
             &self,
             key_id: &str,
             identity: &AwaitEventRowIdentity,
             _now_ms: u64,
         ) -> Result<bool, RuntimeError> {
-            if self.revoked_session(identity.session_id.as_deref()) {
+            if self.fenced(identity) {
                 return Ok(false);
             }
             let mut rows = self.rows.lock_recover();
@@ -687,7 +742,7 @@ mod tests {
             terminal_json: &str,
             _now_ms: u64,
         ) -> Result<TerminalCas, RuntimeError> {
-            if self.revoked_session(identity.session_id.as_deref()) {
+            if self.fenced(identity) {
                 return Ok(TerminalCas::UnknownOrRevoked);
             }
             let mut rows = self.rows.lock_recover();
@@ -722,7 +777,7 @@ mod tests {
             identity: &AwaitEventRowIdentity,
         ) -> Result<PersistedPromise, RuntimeError> {
             self.inspections.fetch_add(1, Ordering::Relaxed);
-            if self.revoked_session(identity.session_id.as_deref()) {
+            if self.fenced(identity) {
                 return Ok(PersistedPromise::UnknownOrRevoked);
             }
             let rows = self.rows.lock_recover();
@@ -976,6 +1031,32 @@ mod tests {
         ] {
             assert_eq!(error.code.as_str(), "invalid_await_event_session_id");
         }
+    }
+
+    #[tokio::test]
+    async fn a_retired_scope_fences_mint_resolve_and_peek() {
+        let coordinator = coordinator();
+        let scope = ExecutionScope::process("retired-process");
+        let key = coordinator
+            .key_for(&scope, AwaitEventWaitIdentity::tool_completion("call"))
+            .await
+            .expect("mint key before retirement");
+        coordinator.backend.retire_scope(&scope);
+
+        assert_eq!(
+            coordinator
+                .resolve(&key, Resolution::Cancelled)
+                .await
+                .expect("resolve against the fence"),
+            ResolveOutcome::UnknownOrRevoked
+        );
+        let error = coordinator.peek(&key).await.expect_err("peek is fenced");
+        assert_eq!(error.code.as_str(), "await_event_unknown_or_revoked");
+        let error = coordinator
+            .key_for(&scope, AwaitEventWaitIdentity::tool_completion("later"))
+            .await
+            .expect_err("mint is fenced");
+        assert_eq!(error.code.as_str(), "await_event_unknown_or_revoked");
     }
 
     #[tokio::test]

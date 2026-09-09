@@ -128,6 +128,16 @@ CREATE TABLE lash_durable_read_fixture.lash_deleted_sessions (
 
 
 --
+-- Name: lash_effect_scope_retirements; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_effect_scope_retirements (
+    scope_id text NOT NULL,
+    retired_at_ms bigint NOT NULL
+);
+
+
+--
 -- Name: lash_fork_lineage; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -806,6 +816,12 @@ INSERT INTO lash_durable_read_fixture.lash_deleted_sessions VALUES ('durable-rea
 
 
 --
+-- Data for Name: lash_effect_scope_retirements; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_fork_lineage; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -947,7 +963,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 79);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 80);
 
 
 --
@@ -1127,6 +1143,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_checkpoint_blob_refs
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_deleted_sessions
     ADD CONSTRAINT lash_deleted_sessions_pkey PRIMARY KEY (session_id);
+
+
+--
+-- Name: lash_effect_scope_retirements lash_effect_scope_retirements_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_effect_scope_retirements
+    ADD CONSTRAINT lash_effect_scope_retirements_pkey PRIMARY KEY (scope_id);
 
 
 --

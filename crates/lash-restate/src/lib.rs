@@ -93,9 +93,10 @@ pub use durable_wait::{
     LashDurableWaitIndex, LashDurableWaitIndexClient, LashDurableWaitIndexImpl,
     LashDurableWaitWorkflow, LashDurableWaitWorkflowClient, LashDurableWaitWorkflowImpl,
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitAwakeableRequest,
-    RestateDurableWaitClassification, RestateDurableWaitIndexRequest,
-    RestateDurableWaitRegistration, RestateDurableWaitResolveRequest, RestateDurableWaitScope,
-    RestateDurableWaitSettleRequest, ServeLashDurableWaitIndex, ServeLashDurableWaitWorkflow,
+    RestateDurableWaitClassification, RestateDurableWaitEffectRequest,
+    RestateDurableWaitGroupRequest, RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
+    RestateDurableWaitResolveRequest, RestateDurableWaitScope, RestateDurableWaitSettleRequest,
+    ServeLashDurableWaitIndex, ServeLashDurableWaitWorkflow,
 };
 pub use effect_group::{
     EffectGroupAdmissionRequest, EffectGroupAdmissionResponse, EffectGroupAdoptRequest,

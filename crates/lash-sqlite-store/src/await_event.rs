@@ -16,6 +16,7 @@ use lash_core::{RuntimeError, RuntimeErrorCode};
 use rusqlite::{OptionalExtension, params};
 
 use crate::conn::SqliteConnection;
+use crate::scope_fence::{FenceLocations, RegistryAttachment};
 
 /// The SQLite promise coordinator: one shared state machine over
 /// [`SqliteAwaitEventBackend`].
@@ -32,11 +33,12 @@ const VOCABULARY: AwaitEventVocabulary = AwaitEventVocabulary {
 /// Build the SQLite await-event coordinator over `conn`.
 pub(crate) fn sqlite_await_events(
     conn: SqliteConnection,
+    registry: Arc<RegistryAttachment>,
     signing_secret: Vec<u8>,
     clock: Arc<dyn lash_core::Clock>,
 ) -> SqliteAwaitEvents {
     AwaitEventCoordinator::new(
-        SqliteAwaitEventBackend { conn },
+        SqliteAwaitEventBackend { conn, registry },
         signing_secret.into(),
         clock,
     )
@@ -47,6 +49,17 @@ pub(crate) fn sqlite_await_events(
 #[derive(Clone)]
 pub struct SqliteAwaitEventBackend {
     conn: SqliteConnection,
+    /// The bound process registry whose file holds process-scope fences.
+    registry: Arc<RegistryAttachment>,
+}
+
+impl SqliteAwaitEventBackend {
+    async fn fence_locations(&self) -> Result<FenceLocations, RuntimeError> {
+        self.registry
+            .ensure_attached(&self.conn)
+            .await
+            .map_err(store_error)
+    }
 }
 
 #[async_trait::async_trait]
@@ -63,6 +76,15 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
             .map_err(store_error)
     }
 
+    async fn scope_is_retired(&self, scope_id: &str) -> Result<bool, RuntimeError> {
+        let scope_id = scope_id.to_string();
+        let fences = self.fence_locations().await?;
+        self.conn
+            .call(move |connection| fences.is_fenced(connection, &scope_id))
+            .await
+            .map_err(store_error)
+    }
+
     async fn ensure_pending(
         &self,
         key_id: &str,
@@ -72,11 +94,10 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         let key_id = key_id.to_string();
         let identity = identity.clone();
         let now = now_ms as i64;
+        let fences = self.fence_locations().await?;
         self.conn
             .write(move |tx| {
-                if let Some(session_id) = identity.session_id.as_deref()
-                    && session_is_revoked(tx, session_id)?
-                {
+                if identity_is_fenced(tx, fences, &identity)? {
                     return Ok(false);
                 }
                 match select_wait_row(tx, &key_id)? {
@@ -116,11 +137,10 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         let identity = identity.clone();
         let proposed_json = terminal_json.to_string();
         let now = now_ms as i64;
+        let fences = self.fence_locations().await?;
         self.conn
             .write(move |tx| {
-                if let Some(session_id) = identity.session_id.as_deref()
-                    && session_is_revoked(tx, session_id)?
-                {
+                if identity_is_fenced(tx, fences, &identity)? {
                     return Ok(TerminalCas::UnknownOrRevoked);
                 }
                 match select_wait_row(tx, &key_id)? {
@@ -176,13 +196,11 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
     ) -> Result<PersistedPromise, RuntimeError> {
         let key_id = key_id.to_string();
         let identity = identity.clone();
+        let fences = self.fence_locations().await?;
         self.conn
             .call(move |connection| {
                 let tx = connection.transaction()?;
-                let revoked = match identity.session_id.as_deref() {
-                    Some(session_id) => session_is_revoked(&tx, session_id)?,
-                    None => false,
-                };
+                let revoked = identity_is_fenced(&tx, fences, &identity)?;
                 let stored = select_wait_row(&tx, &key_id)?;
                 tx.commit()?;
                 if revoked {
@@ -289,6 +307,23 @@ fn select_wait_row(
             },
         )
         .optional()
+}
+
+/// Whether either durable fence refuses `identity`: the owning session's
+/// revocation tombstone, or the scope's retirement tombstone. Session-free
+/// scopes have only the latter; session scopes are never scope-retired, but
+/// reading one primary-key row keeps the two fences one predicate.
+fn identity_is_fenced(
+    connection: &rusqlite::Connection,
+    fences: FenceLocations,
+    identity: &AwaitEventRowIdentity,
+) -> rusqlite::Result<bool> {
+    if let Some(session_id) = identity.session_id.as_deref()
+        && session_is_revoked(connection, session_id)?
+    {
+        return Ok(true);
+    }
+    fences.is_fenced(connection, &identity.scope_id)
 }
 
 fn session_is_revoked(

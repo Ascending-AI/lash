@@ -282,10 +282,54 @@ impl EffectJournalIdentity {
     }
 }
 
+/// Who proves that a scope-exact retirement can no longer be reached.
+///
+/// Retirement deletes journal rows and fences the scope forever, so it must
+/// rest on proven unreachability (ADR 0049 reclaim model). There are exactly
+/// two proofs, and the caller names which one it holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EffectRetirementGate {
+    /// The scope's owner is terminal by the owner's own record: the process
+    /// registry pruned the row, so no redrive can ever run under the scope
+    /// again. The store deletes whatever is journaled, in-flight rows
+    /// included — a finalizer that arrives later is refused by the fence.
+    OwnerTerminal,
+    /// The store itself must witness that nothing is live: no effect row is
+    /// still `in_progress` under the scope (grouped children draining after a
+    /// run-to-completion close count). A live scope is left untouched and the
+    /// retirement reports `effect_scope_not_quiescent`, so the caller retries
+    /// once the work settles.
+    WhenQuiescent,
+}
+
+/// One retirement request against the durable effect journal.
+///
+/// `Session` names a family of scopes (every turn, drain, and delete scope the
+/// session owns); `Process` and `RuntimeOperation` each name one exact
+/// non-session scope. Retiring an exact scope deletes its effect children, its
+/// groups, and its await-event promise rows in one transaction and leaves a
+/// scope-retirement fence behind, so the scope can never be re-admitted — not
+/// by a late redrive, not after a restart. A process fence lasts until the
+/// same process id is registered again (ADR 0049); a runtime-operation fence
+/// is permanent.
+///
+/// Every scope-exact retirement carries an [`EffectRetirementGate`]: the
+/// constructors build the owner-terminal form, and
+/// [`when_quiescent`](Self::when_quiescent) asks the store to prove
+/// unreachability instead.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EffectJournalRetirement {
-    Session { session_id: String },
-    Process { process_id: String },
+    Session {
+        session_id: String,
+    },
+    Process {
+        process_id: String,
+        gate: EffectRetirementGate,
+    },
+    RuntimeOperation {
+        operation_id: String,
+        gate: EffectRetirementGate,
+    },
 }
 
 impl EffectJournalRetirement {
@@ -298,10 +342,81 @@ impl EffectJournalRetirement {
     }
 
     /// Constructs a process-wide retirement request for effect-host implementors removing every
-    /// durable effect journal entry owned by a terminal process.
+    /// durable effect journal entry owned by a terminal process. The gate is
+    /// [`EffectRetirementGate::OwnerTerminal`]: the process registry's prune is
+    /// the proof, so in-flight rows go too.
     pub fn process(process_id: impl Into<String>) -> Self {
         Self::Process {
             process_id: process_id.into(),
+            gate: EffectRetirementGate::OwnerTerminal,
+        }
+    }
+
+    /// Constructs a runtime-operation retirement request for effect-host implementors removing
+    /// every durable effect journal entry and await-event promise a terminal runtime operation
+    /// owns. The gate is [`EffectRetirementGate::OwnerTerminal`]; a caller that
+    /// holds no such proof asks for [`when_quiescent`](Self::when_quiescent).
+    pub fn runtime_operation(operation_id: impl Into<String>) -> Self {
+        Self::RuntimeOperation {
+            operation_id: operation_id.into(),
+            gate: EffectRetirementGate::OwnerTerminal,
+        }
+    }
+
+    /// Gate this scope-exact retirement on the store's own quiescence proof:
+    /// it succeeds only when no effect is still in progress under the scope,
+    /// and otherwise fails with `effect_scope_not_quiescent` without deleting
+    /// or fencing anything. A session-wide retirement is returned unchanged.
+    #[must_use]
+    pub fn when_quiescent(self) -> Self {
+        match self {
+            Self::Session { .. } => self,
+            Self::Process { process_id, .. } => Self::Process {
+                process_id,
+                gate: EffectRetirementGate::WhenQuiescent,
+            },
+            Self::RuntimeOperation { operation_id, .. } => Self::RuntimeOperation {
+                operation_id,
+                gate: EffectRetirementGate::WhenQuiescent,
+            },
+        }
+    }
+
+    /// The proof this scope-exact retirement rests on, or `None` for a
+    /// session-wide family, which is always owner-terminal by construction.
+    pub fn gate(&self) -> Option<EffectRetirementGate> {
+        match self {
+            Self::Session { .. } => None,
+            Self::Process { gate, .. } | Self::RuntimeOperation { gate, .. } => Some(*gate),
+        }
+    }
+
+    /// The exact scope this retirement fences, or `None` for a session-wide
+    /// family. The scope-retirement fence is keyed by this scope's journal
+    /// identity, which is why the two non-session variants and their
+    /// [`ExecutionScope`] twins must never drift apart.
+    pub fn retired_scope(&self) -> Option<ExecutionScope> {
+        match self {
+            Self::Session { .. } => None,
+            Self::Process { process_id, .. } => Some(ExecutionScope::process(process_id.clone())),
+            Self::RuntimeOperation { operation_id, .. } => {
+                Some(ExecutionScope::runtime_operation(operation_id.clone()))
+            }
+        }
+    }
+
+    /// The retirement that fences exactly `scope`, or `None` for a
+    /// session-bearing scope, which is retired as a family through
+    /// [`EffectJournalRetirement::session`].
+    pub fn for_scope(scope: &ExecutionScope) -> Option<Self> {
+        match scope {
+            ExecutionScope::Process { process_id } => Some(Self::process(process_id.clone())),
+            ExecutionScope::RuntimeOperation { operation_id } => {
+                Some(Self::runtime_operation(operation_id.clone()))
+            }
+            ExecutionScope::Turn { .. }
+            | ExecutionScope::QueueDrain { .. }
+            | ExecutionScope::SessionDelete { .. } => None,
         }
     }
 }
@@ -428,9 +543,24 @@ pub enum ResolveOutcome {
     UnknownOrRevoked,
 }
 
+/// A controller built for one scope that can build itself for another: what
+/// an engine-side controller that must know the scope of every effect it runs
+/// hands to [`ScopedEffectController::owned`], so the runtime's rescoping (a
+/// turn under a process, a child under its parent) keeps the scope exact.
+pub trait ScopeBoundController: RuntimeEffectController {
+    /// This controller, bound to `scope` instead; it lives as long as this one does.
+    fn for_scope<'a>(&self, scope: ExecutionScope) -> Arc<dyn ScopeBoundController + 'a>
+    where
+        Self: 'a;
+}
+
 pub(super) enum ScopedEffectControllerInner<'run> {
     Borrowed(&'run dyn RuntimeEffectController),
     Shared(Arc<dyn RuntimeEffectController>),
+    /// A controller built for this scope alone and living no longer than the
+    /// borrow it wraps: an engine-side controller that records the scope's
+    /// executing effects under the scope (FIG-2499).
+    Owned(Arc<dyn ScopeBoundController + 'run>),
 }
 
 impl Clone for ScopedEffectControllerInner<'_> {
@@ -438,6 +568,7 @@ impl Clone for ScopedEffectControllerInner<'_> {
         match self {
             Self::Borrowed(controller) => Self::Borrowed(*controller),
             Self::Shared(controller) => Self::Shared(Arc::clone(controller)),
+            Self::Owned(controller) => Self::Owned(Arc::clone(controller)),
         }
     }
 }
@@ -476,11 +607,26 @@ impl<'run> ScopedEffectController<'run> {
         })
     }
 
+    /// Validates a scope and binds a controller built for that scope and bounded by the borrow it
+    /// wraps, for effect-host implementors whose engine-side controller must know the scope of
+    /// every effect it runs.
+    pub fn owned(
+        controller: Arc<dyn ScopeBoundController + 'run>,
+        scope: ExecutionScope,
+    ) -> Result<Self, RuntimeError> {
+        scope.validate()?;
+        Ok(Self {
+            controller: ScopedEffectControllerInner::Owned(controller),
+            scope,
+        })
+    }
+
     /// Exposes controller to effect-host implementors while scoping and journaling durable effects.
     pub fn controller(&self) -> &dyn RuntimeEffectController {
         match &self.controller {
             ScopedEffectControllerInner::Borrowed(controller) => *controller,
             ScopedEffectControllerInner::Shared(controller) => controller.as_ref(),
+            ScopedEffectControllerInner::Owned(controller) => controller.as_ref(),
         }
     }
 
@@ -521,7 +667,9 @@ impl<'run> ScopedEffectController<'run> {
     pub(crate) fn owned_controller(&self) -> Option<Arc<dyn RuntimeEffectController>> {
         match &self.controller {
             ScopedEffectControllerInner::Shared(controller) => Some(Arc::clone(controller)),
-            ScopedEffectControllerInner::Borrowed(_) => None,
+            ScopedEffectControllerInner::Borrowed(_) | ScopedEffectControllerInner::Owned(_) => {
+                None
+            }
         }
     }
 }
@@ -1373,6 +1521,79 @@ pub trait AwaitEventResolver: Send + Sync {
             "this effect boundary does not support cancelling durable waits",
         ))
     }
+
+    /// Drop every promise of the terminal non-session `scope` and fence the
+    /// scope permanently: later mints, resolves, peeks, and waits under it
+    /// report `await_event_unknown_or_revoked`, including after a restart on
+    /// durable hosts. Session-bearing scopes are refused with
+    /// `await_event_scope_not_retirable`; they are revoked as a family through
+    /// [`revoke_await_events_for_session`](Self::revoke_await_events_for_session).
+    ///
+    /// This is the promise half of [`EffectHost::retire_effect_journal`]: a
+    /// durable host performs both halves in one transaction there and answers
+    /// this lever from the same code path.
+    async fn retire_await_events_for_scope(
+        &self,
+        _scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        Err(RuntimeError::new(
+            crate::RuntimeErrorCode::AwaitEventUnsupported,
+            "this effect boundary does not support retiring await-event scopes",
+        ))
+    }
+
+    /// [`retire_await_events_for_scope`](Self::retire_await_events_for_scope)
+    /// only when no waiter is parked on a promise under `scope`, answering
+    /// whether it retired: `Ok(false)` leaves the scope untouched and unfenced.
+    /// The proof and the fence must land under one lock. Resolvers that prove
+    /// quiescence elsewhere (a durable journal reads its wait rows in the
+    /// retirement transaction) retire unconditionally here and answer `true`.
+    async fn retire_await_events_for_scope_if_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        self.retire_await_events_for_scope(scope)
+            .await
+            .map(|()| true)
+    }
+
+    /// Lift the fence
+    /// [`retire_await_events_for_scope`](Self::retire_await_events_for_scope)
+    /// left on a non-session `scope`, because its owner is registered again.
+    /// Resolvers that never fence have nothing to lift and answer `Ok`.
+    async fn reinstate_await_event_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        if scope.session_id().is_some() {
+            return Err(await_event_scope_not_retirable(scope));
+        }
+        Ok(())
+    }
+
+    /// Whether `scope` is fenced by a scope-exact retirement this resolver
+    /// holds. Every admission path that runs effects for a scope consults it
+    /// before executing, so a retired scope is refused even where no journal
+    /// claim exists to refuse it (the in-process host). Resolvers whose
+    /// journal already refuses retired scopes at claim time may answer
+    /// `false`.
+    async fn await_event_scope_is_retired(
+        &self,
+        _scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        Ok(false)
+    }
+}
+
+/// Refuse a session-bearing scope on the scope-retirement lever.
+pub fn await_event_scope_not_retirable(scope: &ExecutionScope) -> RuntimeError {
+    RuntimeError::new(
+        crate::RuntimeErrorCode::AwaitEventScopeNotRetirable,
+        format!(
+            "await-event scope retirement covers process and runtime-operation scopes only; scope `{}` belongs to a session and is revoked through session revocation",
+            scope.id()
+        ),
+    )
 }
 
 /// Deployment-level factory for scoped effect controllers.
@@ -1453,6 +1674,46 @@ pub trait EffectHost: AwaitEventResolver {
             "this effect host does not implement effect-journal retirement",
         ))
     }
+
+    /// Lift the scope-retirement fence of `scope` because its owner is being
+    /// registered again: a pruned process id that a host re-registers starts
+    /// its new incarnation unfenced, with the empty journal the prune left
+    /// (ADR 0049). The fence row alone is removed; nothing is re-created.
+    /// Session-bearing scopes are refused with
+    /// `await_event_scope_not_retirable`, exactly as the scope lever refuses
+    /// to retire them. A host that never fences (it does not implement
+    /// scope-exact retirement) has nothing to lift and answers `Ok`.
+    async fn reinstate_effect_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
+        if scope.session_id().is_some() {
+            return Err(await_event_scope_not_retirable(scope));
+        }
+        Ok(())
+    }
+
+    /// The SQLite database file holding this host's effect journal, when the
+    /// journal lives in a file of its own that a session-store factory
+    /// attaches for the retention sweep (ADR 0067). A host whose journal
+    /// shares the store's database, keeps it in memory, or has no durable
+    /// journal answers `None`.
+    fn effect_scope_fence_database(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+
+    /// Bind the process registry that owns the process-scope fence
+    /// (ADR 0049). Called by [`ProcessRegistrar::bind_effect_host`]
+    /// (crate::ProcessRegistrar::bind_effect_host); idempotent.
+    ///
+    /// A host with a durable journal of its own in a file beside the
+    /// registry's attaches [`ProcessRegistryBinding::fence_database`]
+    /// (crate::ProcessRegistryBinding::fence_database) and reads and writes
+    /// process-scope fences there, so registration's commit point and
+    /// retirement's commit point are the same file. A host whose fence is a
+    /// cache (the Restate durable-wait index) keeps
+    /// [`ProcessRegistryBinding::registrations`]
+    /// (crate::ProcessRegistryBinding::registrations) and treats a fence
+    /// on a registered process scope as stale. A host that never fences
+    /// ignores the binding.
+    fn bind_process_registry(&self, _binding: crate::ProcessRegistryBinding) {}
 }
 
 /// Boundary for nondeterministic runtime work.

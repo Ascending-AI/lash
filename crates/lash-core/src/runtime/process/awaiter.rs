@@ -109,6 +109,10 @@ impl super::registry::ProcessRegistrar for WatchedProcessRegistry {
         Ok(record)
     }
 
+    fn bind_effect_host(&self, effect_host: &Arc<dyn crate::EffectHost>) {
+        self.inner.bind_effect_host(effect_host);
+    }
+
     async fn set_external_ref(
         &self,
         process_id: &str,

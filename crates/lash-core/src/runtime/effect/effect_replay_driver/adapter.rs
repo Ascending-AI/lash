@@ -37,7 +37,17 @@ pub trait StoreReplayAdapter: Send + Sync {
 /// Marks a store's deployment-level host: the type that mints scoped
 /// controllers. Gets [`EffectHost`] for free.
 #[doc(hidden)]
-pub trait StoreReplayHost: StoreReplayAdapter {}
+pub trait StoreReplayHost: StoreReplayAdapter {
+    /// See [`EffectHost::effect_scope_fence_database`]: the journal file a
+    /// session-store factory attaches for the retention sweep, when the
+    /// journal lives in a file of its own.
+    fn effect_scope_fence_database(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+
+    /// See [`EffectHost::bind_process_registry`].
+    fn bind_process_registry(&self, _binding: crate::ProcessRegistryBinding) {}
+}
 
 /// Marks a store's scoped controller and names the scope it executes against.
 /// Gets [`RuntimeEffectController`] for free.
@@ -143,6 +153,15 @@ impl<T: StoreReplayAdapter> AwaitEventResolver for T {
             .cancel_await_events_for_session(session_id)
             .await
     }
+
+    async fn retire_await_events_for_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        self.replay_driver()
+            .retire_await_events_for_scope(scope)
+            .await
+    }
 }
 
 #[async_trait]
@@ -202,6 +221,18 @@ impl<T: StoreReplayHost> EffectHost for T {
         retirement: EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
         self.replay_driver().retire_effect_journal(retirement).await
+    }
+
+    async fn reinstate_effect_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
+        self.replay_driver().reinstate_effect_scope(scope).await
+    }
+
+    fn effect_scope_fence_database(&self) -> Option<std::path::PathBuf> {
+        StoreReplayHost::effect_scope_fence_database(self)
+    }
+
+    fn bind_process_registry(&self, binding: crate::ProcessRegistryBinding) {
+        StoreReplayHost::bind_process_registry(self, binding);
     }
 }
 

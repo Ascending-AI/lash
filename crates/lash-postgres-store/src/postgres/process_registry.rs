@@ -274,6 +274,21 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
         .execute(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
+        // The owner is back: lift the scope fence a prune left in the journal,
+        // in this same transaction, so a registration that fails keeps the id
+        // fenced (ADR 0049). The scope lock serializes this against a
+        // concurrent retirement of the same scope.
+        let fence_key = lash_core::ExecutionScope::process(record.id.as_str())
+            .journal_identity()
+            .map_err(|error| PluginError::Session(error.to_string()))?;
+        crate::await_event::lock_scope(&mut tx, fence_key.key())
+            .await
+            .map_err(plugin_sqlx_error)?;
+        sqlx::query("DELETE FROM lash_effect_scope_retirements WHERE scope_id = $1")
+            .bind(fence_key.key())
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
         let process_id = record.id.clone();
         for session_id in observers {
             sqlx::query(
@@ -300,7 +315,28 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
             .await?;
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
+        // Hosts whose fence is not this journal's table (a process-local or
+        // engine-held fence) are lifted now that the row is durable; the call
+        // is idempotent for this journal's own host.
+        self.scope_fence_hosts
+            .reinstate_process_scope(&record.id)
+            .await?;
         Ok(record)
+    }
+
+    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+        // The fence shares this registry's database and its registration
+        // transaction; a host reaches it through its own connection, so no
+        // file is handed over, only the registration truth.
+        self.scope_fence_hosts.bind(
+            effect_host,
+            lash_core::ProcessRegistryBinding {
+                fence_database: None,
+                registrations: Arc::new(PostgresRegistrationProbe {
+                    pool: self.pool.clone(),
+                }),
+            },
+        );
     }
 
     async fn set_external_ref(
@@ -1423,6 +1459,15 @@ impl lash_core::ProcessRetention for PostgresProcessRegistry {
     ) -> Result<ProcessPruneReport, PluginError> {
         prune_api::prune_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
     }
+
+    async fn prunable_terminal_processes(
+        &self,
+        cutoff_epoch_ms: u64,
+        filter: Option<lash_core::ProcessListFilter>,
+        watermark: lash_core::ProjectionWatermark,
+    ) -> Result<Vec<String>, PluginError> {
+        prune_api::prunable_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
+    }
 }
 
 impl lash_core::ProcessClockRebind for PostgresProcessRegistry {
@@ -1453,5 +1498,23 @@ impl lash_core::ProcessRegistryTestSupport for PostgresProcessRegistry {
         .map_err(plugin_sqlx_error)?
         .map(|value| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
         .transpose()
+    }
+}
+
+/// This registry's registration truth for a bound effect host (ADR 0049).
+struct PostgresRegistrationProbe {
+    pool: sqlx::PgPool,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ProcessRegistrationProbe for PostgresRegistrationProbe {
+    async fn process_is_registered(&self, process_id: &str) -> Result<bool, PluginError> {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM lash_processes WHERE process_id = $1)",
+        )
+        .bind(process_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)
     }
 }

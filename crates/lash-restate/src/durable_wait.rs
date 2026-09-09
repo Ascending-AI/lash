@@ -72,11 +72,17 @@ pub(crate) fn restate_unknown_or_revoked() -> RuntimeError {
     )
 }
 const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
-pub(crate) const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 4;
+pub(crate) const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 5;
 const DURABLE_WAIT_INDEX_EPOCH_KEY: &str = "wait-index/v2/identity-epoch";
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
 const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";
 const DURABLE_WAIT_INDEX_RESOLUTION_PREFIX: &str = "wait-index/v2/resolution/";
+/// An effect executing under the scope inside a handler, keyed by replay
+/// key: recorded at start, cleared at completion (FIG-2499 quiescence).
+const DURABLE_WAIT_INDEX_EFFECT_PREFIX: &str = "wait-index/v2/effect/";
+/// An effect group opened under the scope, keyed by group key; cleared once
+/// the group's index reports no unsettled child.
+const DURABLE_WAIT_INDEX_GROUP_PREFIX: &str = "wait-index/v2/group/";
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RestateDurableWaitAddress {
     pub workflow_key: String,
@@ -89,10 +95,7 @@ impl RestateDurableWaitAddress {
     pub fn for_key(key: &AwaitEventKey) -> Self {
         Self {
             workflow_key: format!("{:x}", Sha256::digest(key.key_id.as_bytes())),
-            scope: match key.scope.session_id() {
-                Some(session_id) => RestateDurableWaitScope::Session(session_id.to_string()),
-                None => RestateDurableWaitScope::Unscoped,
-            },
+            scope: RestateDurableWaitScope::for_scope(&key.scope),
             classification: if key.wait.is_turn_control() {
                 RestateDurableWaitClassification::TurnControl
             } else {
@@ -107,19 +110,45 @@ impl RestateDurableWaitAddress {
     }
 }
 
+/// Which `LashDurableWaitIndex` object owns a wait: the session's object for
+/// a session-bearing scope, or the object of the exact non-session scope
+/// (a process or runtime operation, keyed by its journal identity). One
+/// object per scope is what lets a scope-exact retirement revoke every wait
+/// the scope owns and fence later mints in one keyed handler, exactly as a
+/// session's object does for session revocation (FIG-2499).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RestateDurableWaitScope {
     Session(String),
-    Unscoped,
+    Scope(String),
 }
 
 impl RestateDurableWaitScope {
-    pub fn index_key(&self, workflow_key: &str) -> String {
-        match self {
-            Self::Session(session_id) => session_id.clone(),
-            Self::Unscoped => format!("unscoped:{workflow_key}"),
+    /// The index scope of an execution scope. Validated scopes always form a
+    /// journal identity; a scope that does not still gets a stable key from
+    /// its identity fields so no address can collide with a real scope.
+    pub fn for_scope(scope: &ExecutionScope) -> Self {
+        match scope.session_id() {
+            Some(session_id) => Self::Session(session_id.to_string()),
+            None => Self::Scope(
+                scope
+                    .journal_identity()
+                    .map(|identity| identity.key().to_string())
+                    .unwrap_or_else(|_| format!("invalid:{}", scope.id())),
+            ),
         }
     }
+
+    pub fn index_key(&self, _workflow_key: &str) -> String {
+        match self {
+            Self::Session(session_id) => session_id.clone(),
+            Self::Scope(scope_key) => format!("scope:{scope_key}"),
+        }
+    }
+}
+
+/// The `LashDurableWaitIndex` object key that owns every wait of `scope`.
+pub(crate) fn durable_wait_index_key_for_scope(scope: &ExecutionScope) -> String {
+    RestateDurableWaitScope::for_scope(scope).index_key("")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -164,6 +193,18 @@ pub struct RestateDurableWaitIndexRequest {
 pub struct RestateDurableWaitSettleRequest {
     pub key: AwaitEventKey,
     pub resolution: Resolution,
+}
+
+/// One executing effect under a scope's index (FIG-2499).
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct RestateDurableWaitEffectRequest {
+    pub replay_key: String,
+}
+
+/// One effect group opened under a scope's index (FIG-2499).
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct RestateDurableWaitGroupRequest {
+    pub group_key: String,
 }
 
 /// One turn-cancel gate entry: the awakeable the index resolves when this
@@ -464,6 +505,28 @@ pub trait LashDurableWaitIndex {
     ) -> HandlerResult<Json<()>>;
     async fn cancel_all() -> HandlerResult<Json<()>>;
     async fn revoke_all() -> HandlerResult<Json<()>>;
+    /// [`revoke_all`](Self::revoke_all) only when no durable wait or awakeable
+    /// under this index is still unresolved, answering whether it revoked.
+    /// Object serialization makes the proof and the revocation one step.
+    async fn revoke_all_if_quiescent(request: Json<()>) -> HandlerResult<Json<bool>>;
+    /// Lift a revocation because the scope's owner is registered again: a
+    /// pruned process id the host reuses (ADR 0049). State stays cleared; only
+    /// the fence goes.
+    async fn reinstate() -> HandlerResult<Json<()>>;
+    /// Record an effect starting under this scope inside a handler, answering
+    /// whether the scope admits it (`false` once revoked). While recorded,
+    /// the scope is not quiescent (FIG-2499).
+    async fn begin_effect(
+        request: Json<RestateDurableWaitEffectRequest>,
+    ) -> HandlerResult<Json<bool>>;
+    /// Clear the record [`begin_effect`](Self::begin_effect) made.
+    async fn end_effect(request: Json<RestateDurableWaitEffectRequest>) -> HandlerResult<Json<()>>;
+    /// Record an effect group opened under this scope, answering whether the
+    /// scope admits it (`false` once revoked). The scope is not quiescent
+    /// while the group's index still reports an unsettled child.
+    async fn record_group(
+        request: Json<RestateDurableWaitGroupRequest>,
+    ) -> HandlerResult<Json<bool>>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -677,6 +740,79 @@ fn mirror_resolve_outcome(
     ctx.set(&durable_wait_index_resolution_key(address), Json(terminal));
 }
 
+/// Revoke the index: fence it, revoke its awakeables, and cancel its waits.
+/// With `only_if_quiescent`, an unresolved wait or a live awakeable leaves
+/// the index untouched and answers `false`.
+async fn revoke_index(
+    ctx: &ObjectContext<'_>,
+    only_if_quiescent: bool,
+) -> HandlerResult<Json<bool>> {
+    let mut metadata = load_durable_wait_index_metadata(ctx).await?;
+    let waits = load_indexed_waits(ctx).await?;
+    if only_if_quiescent
+        && (!waits.is_empty()
+            || !metadata.awakeables.is_empty()
+            || !scope_effects_and_groups_are_quiescent(ctx).await?)
+    {
+        return Ok(Json(false));
+    }
+    let awakeables = std::mem::take(&mut metadata.awakeables);
+    metadata.revoked = true;
+    ctx.clear_all();
+    ctx.set(
+        DURABLE_WAIT_INDEX_EPOCH_KEY,
+        Json(DURABLE_WAIT_INDEX_IDENTITY_EPOCH),
+    );
+    ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
+    for entry in awakeables {
+        revoke_durable_wait_awakeable(ctx, &entry);
+    }
+    resolve_indexed_waits(ctx, waits, false).await?;
+    Ok(Json(true))
+}
+
+/// Whether nothing recorded by `begin_effect` or `record_group` is still
+/// live: no executing effect, and every recorded group's index reports no
+/// unsettled child. A group found settled is forgotten here, so a caller
+/// that never closed it does not fence its scope forever.
+async fn scope_effects_and_groups_are_quiescent(
+    ctx: &ObjectContext<'_>,
+) -> Result<bool, TerminalError> {
+    let keys = ctx.get_keys().await?;
+    if keys
+        .iter()
+        .any(|state_key| state_key.starts_with(DURABLE_WAIT_INDEX_EFFECT_PREFIX))
+    {
+        return Ok(false);
+    }
+    let mut live = false;
+    for (state_key, group_key) in keys.iter().filter_map(|state_key| {
+        state_key
+            .strip_prefix(DURABLE_WAIT_INDEX_GROUP_PREFIX)
+            .map(|group_key| (state_key, group_key))
+    }) {
+        let Json(unsettled) = ctx
+            .object_client::<crate::effect_group::EffectGroupIndexClient>(group_key.to_string())
+            .unsettled_children()
+            .call()
+            .await?;
+        if unsettled > 0 {
+            live = true;
+        } else {
+            ctx.clear(state_key);
+        }
+    }
+    Ok(!live)
+}
+
+fn durable_wait_index_effect_key(replay_key: &str) -> String {
+    format!("{DURABLE_WAIT_INDEX_EFFECT_PREFIX}{replay_key}")
+}
+
+fn durable_wait_index_group_key(group_key: &str) -> String {
+    format!("{DURABLE_WAIT_INDEX_GROUP_PREFIX}{group_key}")
+}
+
 pub(crate) fn split_cancellable_waits(
     waits: Vec<AwaitEventKey>,
 ) -> (Vec<AwaitEventKey>, Vec<AwaitEventKey>) {
@@ -853,20 +989,66 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
     }
 
     async fn revoke_all(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
-        let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
-        let waits = load_indexed_waits(&ctx).await?;
-        let awakeables = std::mem::take(&mut metadata.awakeables);
-        metadata.revoked = true;
-        ctx.clear_all();
-        ctx.set(
-            DURABLE_WAIT_INDEX_EPOCH_KEY,
-            Json(DURABLE_WAIT_INDEX_IDENTITY_EPOCH),
-        );
-        ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
-        for entry in awakeables {
-            revoke_durable_wait_awakeable(&ctx, &entry);
-        }
-        resolve_indexed_waits(&ctx, waits, false).await?;
+        revoke_index(&ctx, false).await?;
         Ok(Json(()))
+    }
+
+    async fn revoke_all_if_quiescent(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(()): Json<()>,
+    ) -> HandlerResult<Json<bool>> {
+        revoke_index(&ctx, true).await
+    }
+
+    async fn reinstate(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
+        let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
+        if metadata.revoked {
+            metadata.revoked = false;
+            ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
+        }
+        Ok(Json(()))
+    }
+
+    async fn begin_effect(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RestateDurableWaitEffectRequest>,
+    ) -> HandlerResult<Json<bool>> {
+        let metadata = load_durable_wait_index_metadata(&ctx).await?;
+        if metadata.revoked {
+            return Ok(Json(false));
+        }
+        ctx.set(
+            &durable_wait_index_effect_key(&request.replay_key),
+            Json(true),
+        );
+        Ok(Json(true))
+    }
+
+    async fn end_effect(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RestateDurableWaitEffectRequest>,
+    ) -> HandlerResult<Json<()>> {
+        let _metadata = load_durable_wait_index_metadata(&ctx).await?;
+        ctx.clear(&durable_wait_index_effect_key(&request.replay_key));
+        Ok(Json(()))
+    }
+
+    async fn record_group(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RestateDurableWaitGroupRequest>,
+    ) -> HandlerResult<Json<bool>> {
+        let metadata = load_durable_wait_index_metadata(&ctx).await?;
+        if metadata.revoked {
+            return Ok(Json(false));
+        }
+        ctx.set(
+            &durable_wait_index_group_key(&request.group_key),
+            Json(true),
+        );
+        Ok(Json(true))
     }
 }

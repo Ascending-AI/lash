@@ -29,7 +29,8 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::durable_wait::{
     LashDurableWaitIndexClient, LashDurableWaitWorkflowClient, RestateDurableWaitAddress,
-    RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest, RestateTurnCancelGate,
+    RestateDurableWaitAwaitRequest, RestateDurableWaitEffectRequest,
+    RestateDurableWaitGroupRequest, RestateDurableWaitResolveRequest, RestateTurnCancelGate,
     RestateTurnCancelRaceOutcome, RestateTurnCancelWake, durable_wait_index_object_key,
     register_turn_cancel_gate, retire_turn_cancel_gate,
 };
@@ -449,6 +450,46 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         'ctx: 'run,
     {
         Box::pin(async { Ok(false) })
+    }
+
+    /// Record an effect starting under the non-session scope whose index is
+    /// `index_key`, answering whether the scope admits it (FIG-2499). A
+    /// context without a durable-wait index admits everything and records
+    /// nothing.
+    fn scope_effect_begin<'run>(
+        &'run self,
+        _index_key: String,
+        _replay_key: String,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async { Ok(true) })
+    }
+
+    /// Clear the record [`scope_effect_begin`](Self::scope_effect_begin) made.
+    fn scope_effect_end<'run>(
+        &'run self,
+        _index_key: String,
+        _replay_key: String,
+    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Record an effect group opened under the non-session scope whose index
+    /// is `index_key`, answering whether the scope admits it (FIG-2499).
+    fn scope_group_record<'run>(
+        &'run self,
+        _index_key: String,
+        _group_key: String,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async { Ok(true) })
     }
 
     fn effect_group_probe<'run>(
@@ -1101,6 +1142,60 @@ macro_rules! impl_restate_controller_context {
                     Box::pin(async move {
                         let Json(revoked) = call.await?;
                         Ok(revoked)
+                    })
+                }
+
+                fn scope_effect_begin<'run>(
+                    &'run self,
+                    index_key: String,
+                    replay_key: String,
+                ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    let call = self
+                        .object_client::<LashDurableWaitIndexClient>(index_key)
+                        .begin_effect(Json(RestateDurableWaitEffectRequest { replay_key }))
+                        .call();
+                    Box::pin(async move {
+                        let Json(admitted) = call.await?;
+                        Ok(admitted)
+                    })
+                }
+
+                fn scope_effect_end<'run>(
+                    &'run self,
+                    index_key: String,
+                    replay_key: String,
+                ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    let call = self
+                        .object_client::<LashDurableWaitIndexClient>(index_key)
+                        .end_effect(Json(RestateDurableWaitEffectRequest { replay_key }))
+                        .call();
+                    Box::pin(async move {
+                        let Json(()) = call.await?;
+                        Ok(())
+                    })
+                }
+
+                fn scope_group_record<'run>(
+                    &'run self,
+                    index_key: String,
+                    group_key: String,
+                ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    let call = self
+                        .object_client::<LashDurableWaitIndexClient>(index_key)
+                        .record_group(Json(RestateDurableWaitGroupRequest { group_key }))
+                        .call();
+                    Box::pin(async move {
+                        let Json(admitted) = call.await?;
+                        Ok(admitted)
                     })
                 }
 

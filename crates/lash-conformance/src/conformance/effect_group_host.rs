@@ -75,6 +75,7 @@ where
     the_capability_flag_and_the_group_surface_agree(&make, &prefix).await;
     duplicate_replay_keys_are_refused_before_a_host_sees_them(&make, &prefix).await;
     the_first_settlement_wakes_the_caller_while_the_loser_still_runs(&make, &prefix).await;
+    a_scope_with_a_live_group_child_is_not_quiescent(&make, &prefix).await;
     settlement_n_is_stable_across_re_reads(&make, &prefix).await;
     every_child_is_delivered_once_in_rank_order(&make, &prefix).await;
     awaiting_past_the_last_child_is_refused(&make, &prefix).await;
@@ -163,6 +164,240 @@ where
     close(&resumed, reopened, LoserPolicy::Cancel)
         .await
         .expect("the reading host closes the group");
+}
+
+/// The durable-tier retirement law (FIG-2500): retiring a runtime-operation
+/// scope removes its groups and children together and fences the scope, while
+/// an in-flight operation's group is untouched and a second host still reads
+/// the ranks it recorded.
+///
+/// Returns the retired and in-flight scopes' journal identity keys so a store's
+/// own test can count, behind the contract, the group, child, and fence rows
+/// each scope is left with.
+pub async fn effect_group_runtime_operation_retirement_is_atomic<F>(make: F) -> (String, String)
+where
+    F: Fn(Option<Arc<dyn GroupExecutors>>) -> Host,
+{
+    let make = || make(Some(suite_executors() as Arc<dyn GroupExecutors>));
+    let prefix = format!("group-op-retirement-{}", uuid::Uuid::new_v4().simple());
+    let host = make();
+
+    let retired_scope = scope(&prefix, "retired");
+    let retired = host
+        .scoped(retired_scope.clone())
+        .expect("the finished operation's scope binds");
+    let retired_key = group_key(&prefix, "retired");
+    let mut finished = open(
+        &retired,
+        &retired_key,
+        2,
+        GroupWakePolicy::All,
+        RUN,
+        vec![settles(0), settles(1)],
+    )
+    .await;
+    next(&retired, &mut finished)
+        .await
+        .expect("the finished operation settles its first child");
+    next(&retired, &mut finished)
+        .await
+        .expect("the finished operation settles its second child");
+    close(&retired, finished, RUN)
+        .await
+        .expect("the finished operation closes its group");
+
+    let in_flight_scope = scope(&prefix, "in-flight");
+    let in_flight = host
+        .scoped(in_flight_scope.clone())
+        .expect("the in-flight operation's scope binds");
+    let in_flight_key = group_key(&prefix, "in-flight");
+    let mut open_handle = open(
+        &in_flight,
+        &in_flight_key,
+        2,
+        GroupWakePolicy::First,
+        LoserPolicy::Cancel,
+        vec![settles(0), never()],
+    )
+    .await;
+    let first = next(&in_flight, &mut open_handle)
+        .await
+        .expect("the in-flight operation settles its first child");
+    assert_eq!(first.position, 0);
+
+    let deleted = host
+        .retire_effect_journal(crate::EffectJournalRetirement::runtime_operation(format!(
+            "{prefix}-retired"
+        )))
+        .await
+        .expect("the finished operation retires");
+    assert_eq!(
+        deleted, 2,
+        "retirement reports the finished operation's child rows and nothing else"
+    );
+
+    let reader = make();
+    let refusal = reader
+        .scoped(retired_scope.clone())
+        .expect("a retired scope still binds a controller")
+        .controller()
+        .open_effect_group(staged(
+            group(&retired_key, 2, GroupWakePolicy::All, RUN),
+            vec![settles(0), settles(1)],
+        ))
+        .await
+        .expect_err("a retired scope never reopens its group");
+    assert_eq!(
+        refusal.code,
+        crate::RuntimeErrorCode::EffectScopeRetired,
+        "the refusal names the scope fence, not a missing group"
+    );
+
+    let resumed = reader
+        .scoped(in_flight_scope.clone())
+        .expect("the in-flight scope binds on the reading host");
+    let mut reopened = resumed
+        .controller()
+        .open_effect_group(staged(
+            group(
+                &in_flight_key,
+                2,
+                GroupWakePolicy::First,
+                LoserPolicy::Cancel,
+            ),
+            vec![settles(0), never()],
+        ))
+        .await
+        .expect("the in-flight operation reopens on a second host");
+    let settlement = next(&resumed, &mut reopened)
+        .await
+        .expect("the in-flight operation's recorded rank is still there");
+    assert_eq!(settlement.position, 0);
+    assert_eq!(settlement.sequence, 1);
+    close(&resumed, reopened, LoserPolicy::Cancel)
+        .await
+        .expect("the reading host closes the in-flight group");
+    close(&in_flight, open_handle, LoserPolicy::Cancel)
+        .await
+        .expect("the opening host closes the in-flight group");
+
+    let key_of = |scope: &ExecutionScope| {
+        scope
+            .journal_identity()
+            .expect("runtime-operation scopes form durable journal identities")
+            .key()
+            .to_string()
+    };
+    (key_of(&retired_scope), key_of(&in_flight_scope))
+}
+
+/// A quiescence-gated retirement (`when_quiescent`) refuses a scope whose
+/// run-to-completion loser is still draining, fences nothing, and succeeds
+/// once the drain has settled — after which the scope is fenced like any
+/// other retirement (FIG-2499 fix round 1). Returns the scope's journal key
+/// so a store suite can count its rows and fence.
+pub async fn effect_group_quiescent_retirement_waits_for_live_children<F>(make: F) -> String
+where
+    F: Fn(Option<Arc<dyn GroupExecutors>>) -> Host,
+{
+    let make = || make(Some(suite_executors() as Arc<dyn GroupExecutors>));
+    let prefix = format!(
+        "group-quiescent-retirement-{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    let host = make();
+
+    let live_scope = scope(&prefix, "live");
+    let live = host
+        .scoped(live_scope.clone())
+        .expect("the live operation's scope binds");
+    let live_key = group_key(&prefix, "live");
+    let (draining, gate) = gated(1);
+    let mut handle = open(
+        &live,
+        &live_key,
+        2,
+        GroupWakePolicy::First,
+        RUN,
+        vec![settles(0), draining],
+    )
+    .await;
+    let first = next(&live, &mut handle)
+        .await
+        .expect("the live operation settles its first child");
+    assert_eq!(first.position, 0);
+    close(&live, handle, RUN)
+        .await
+        .expect("the live operation closes its group; the loser drains to completion");
+    gate.wait_until_waiting().await;
+
+    let operation_id = format!("{prefix}-live");
+    let refusal = host
+        .retire_effect_journal(
+            crate::EffectJournalRetirement::runtime_operation(operation_id.clone())
+                .when_quiescent(),
+        )
+        .await
+        .expect_err("a draining child keeps the scope live");
+    assert_eq!(
+        refusal.code,
+        crate::RuntimeErrorCode::EffectScopeNotQuiescent,
+        "the refusal names quiescence, not a missing scope"
+    );
+    host.await_event_key(
+        &live_scope,
+        crate::AwaitEventWaitIdentity::tool_completion(format!("{prefix}-still-mints")),
+    )
+    .await
+    .expect("a refused retirement fences nothing: the scope still mints");
+
+    gate.release();
+    until(|| gate.finished() == 1).await;
+    // The drain journals the loser's terminal after its executor returns;
+    // the gate's counter fires before that write lands, so the retirement
+    // is retried until the store proves the scope quiescent.
+    let deleted = tokio::time::timeout(AWAIT_BUDGET, async {
+        loop {
+            match host
+                .retire_effect_journal(
+                    crate::EffectJournalRetirement::runtime_operation(operation_id.clone())
+                        .when_quiescent(),
+                )
+                .await
+            {
+                Ok(deleted) => break deleted,
+                Err(err) if err.code == crate::RuntimeErrorCode::EffectScopeNotQuiescent => {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                Err(err) => panic!("quiescent retirement failed: {err}"),
+            }
+        }
+    })
+    .await
+    .expect("the scope becomes quiescent once its drain settles");
+    assert_eq!(
+        deleted, 2,
+        "the quiescent retirement reports both settled children"
+    );
+
+    let reader = make();
+    let refusal = reader
+        .scoped(live_scope.clone())
+        .expect("a retired scope still binds a controller")
+        .controller()
+        .open_effect_group(staged(
+            group(&live_key, 2, GroupWakePolicy::First, RUN),
+            vec![settles(0), settles(1)],
+        ))
+        .await
+        .expect_err("a retired scope never reopens its group");
+    assert_eq!(refusal.code, crate::RuntimeErrorCode::EffectScopeRetired);
+
+    live_scope
+        .journal_identity()
+        .expect("runtime-operation scopes form durable journal identities")
+        .key()
+        .to_string()
 }
 
 // =============================================================================
@@ -578,6 +813,59 @@ async fn the_first_settlement_wakes_the_caller_while_the_loser_still_runs<F: Fn(
         "the caller resumed on the winner, so the loser cannot have completed"
     );
     close(&scoped, handle, RUN).await.expect("the group closes");
+}
+
+/// A scope whose open group still has a live child is not quiescent:
+/// `WhenQuiescent` refuses it with `effect_scope_not_quiescent` while the
+/// child runs, leaves the scope unfenced, and retires it once every child
+/// has settled and the group is closed (FIG-2499 fix round 3, ruling 4).
+async fn a_scope_with_a_live_group_child_is_not_quiescent<F: Fn() -> Host>(make: &F, prefix: &str) {
+    let host = make();
+    let scope = scope(prefix, "live-child");
+    let scoped = host.scoped(scope.clone()).expect("a scope binds");
+    let key = group_key(prefix, "live-child");
+    let (slow, child) = gated(0);
+    let mut handle = open(&scoped, &key, 1, GroupWakePolicy::All, RUN, vec![slow]).await;
+    child.wait_until_waiting().await;
+
+    let refused = host
+        .retire_effect_journal(
+            crate::EffectJournalRetirement::for_scope(&scope)
+                .expect("runtime operations are retirable")
+                .when_quiescent(),
+        )
+        .await
+        .expect_err("a live group child is not quiescent");
+    assert_eq!(refused.code.as_str(), "effect_scope_not_quiescent");
+    host.await_event_key(
+        &scope,
+        AwaitEventWaitIdentity::tool_completion("still-open"),
+    )
+    .await
+    .expect("the refused retirement left the scope unfenced");
+
+    child.release();
+    let settlement = next(&scoped, &mut handle)
+        .await
+        .expect("the released child settles");
+    assert_eq!(settlement.position, 0);
+    close(&scoped, handle, RUN).await.expect("the group closes");
+
+    host.retire_effect_journal(
+        crate::EffectJournalRetirement::for_scope(&scope)
+            .expect("runtime operations are retirable")
+            .when_quiescent(),
+    )
+    .await
+    .expect("the scope is quiescent once its children have settled");
+    let fenced = host
+        .await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion("after-retirement"),
+        )
+        .await
+        .expect_err("the retired scope mints nothing");
+    assert_eq!(fenced.code.as_str(), "await_event_unknown_or_revoked");
 }
 
 /// The settlement at rank `n` is a record, not a race: reading it again — as a

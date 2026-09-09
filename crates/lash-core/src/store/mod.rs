@@ -69,7 +69,11 @@ pub use queued_work::{
     TurnWorkClaimSelection,
 };
 pub use realization::commit_runtime_state_verified;
-pub use retention::{RetentionBound, RetentionReport};
+pub use retention::{
+    FACADE_PLUGIN_COMMAND_OPERATION_TAG, FACADE_PLUGIN_TASK_OPERATION_TAG, FacadePluginOperation,
+    PLUGIN_OPERATION_STATE_RECEIPT_KEY, RetentionBound, RetentionReport,
+    is_facade_minted_operation_id, mint_facade_operation_id, plugin_operation_receipt_storage_key,
+};
 pub use runtime_commit::{
     AppendRequestIdentity, RuntimeCommit, RuntimeCommitReceipt, RuntimeTurnCommitStamp,
     RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SemanticBoundaryOperation,

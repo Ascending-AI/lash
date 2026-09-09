@@ -86,6 +86,54 @@ async fn sqlite_journals_a_cancelled_child_as_its_terminal() {
     .await;
 }
 
+/// Retiring a runtime-operation scope removes its group and child rows in one
+/// transaction and leaves the fence, while an in-flight operation keeps every
+/// row (FIG-2500).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_retires_a_runtime_operation_journal_atomically() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("runtime-operation-retirement.db");
+    let (retired, in_flight) =
+        lash_conformance::effect_group_runtime_operation_retirement_is_atomic(|executors| {
+            Arc::new(host(&path, executors)) as Arc<dyn EffectHost>
+        })
+        .await;
+    let conn = rusqlite::Connection::open(&path).expect("open the effect journal");
+    let count = |sql: &str, scope_id: &str| -> i64 {
+        conn.query_row(sql, [scope_id], |row| row.get(0))
+            .expect("count journal rows")
+    };
+    let groups = "SELECT COUNT(*) FROM runtime_effect_group WHERE scope_id = ?1";
+    let children = "SELECT COUNT(*) FROM runtime_effect_replay WHERE scope_id = ?1";
+    let fences = "SELECT COUNT(*) FROM effect_scope_retirements WHERE scope_id = ?1";
+    assert_eq!(
+        count(groups, &retired),
+        0,
+        "retired scope keeps no group row"
+    );
+    assert_eq!(
+        count(children, &retired),
+        0,
+        "retired scope keeps no child row"
+    );
+    assert_eq!(count(fences, &retired), 1, "retired scope leaves one fence");
+    assert_eq!(
+        count(groups, &in_flight),
+        1,
+        "in-flight scope keeps its group"
+    );
+    assert_eq!(
+        count(children, &in_flight),
+        2,
+        "in-flight scope keeps its children"
+    );
+    assert_eq!(
+        count(fences, &in_flight),
+        0,
+        "in-flight scope is not fenced"
+    );
+}
+
 /// Two threads registering different resolvers on one host: exactly one wins,
 /// and the losers are refused rather than silently dropped (FIG-1578).
 ///
@@ -166,5 +214,36 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
     assert!(
         wired_view.controller().supports_effect_groups(),
         "the winner's registration stands whatever the losers did"
+    );
+}
+
+/// A quiescence-gated retirement leaves a draining scope's rows alone and
+/// fences nothing; once the drain settles it removes the rows and leaves the
+/// fence (FIG-2499 fix round 1).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_quiescent_retirement_waits_for_the_drain() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("quiescent-retirement.db");
+    let scope_id =
+        lash_conformance::effect_group_quiescent_retirement_waits_for_live_children(|executors| {
+            Arc::new(host(&path, executors)) as Arc<dyn EffectHost>
+        })
+        .await;
+    let conn = rusqlite::Connection::open(&path).expect("open the effect journal");
+    let count = |sql: &str| -> i64 {
+        conn.query_row(sql, [&scope_id], |row| row.get(0))
+            .expect("count journal rows")
+    };
+    assert_eq!(
+        count("SELECT COUNT(*) FROM runtime_effect_replay WHERE scope_id = ?1"),
+        0
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) FROM runtime_effect_group WHERE scope_id = ?1"),
+        0
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) FROM effect_scope_retirements WHERE scope_id = ?1"),
+        1
     );
 }

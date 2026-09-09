@@ -200,6 +200,113 @@ fn decode_call_frame(frame: &[u8]) -> Option<RestateCallFrame> {
     })
 }
 
+/// One command the deployed handler journaled: its frame, and the completion
+/// id a timer or call answers on.
+#[derive(Clone, Debug)]
+pub(super) struct RecordedCommand {
+    pub message_type: u16,
+    pub frame: Bytes,
+    pub completion_id: Option<u32>,
+    /// The called service and handler, for a `CallCommand`.
+    pub call: Option<(String, String)>,
+}
+
+/// Every command frame (`0x04xx`) in `output`, in journal order.
+pub(super) fn restate_recorded_commands(output: &[u8]) -> Option<Vec<RecordedCommand>> {
+    let mut cursor = 0;
+    let mut commands = Vec::new();
+    while cursor < output.len() {
+        let header = u64::from_be_bytes(output.get(cursor..cursor + 8)?.try_into().ok()?);
+        let message_type = (header >> 48) as u16;
+        let payload_len = usize::try_from(header & 0x0000_FFFF_FFFF_FFFF).ok()?;
+        let frame_end = cursor.checked_add(8 + payload_len)?;
+        let frame = output.get(cursor..frame_end)?;
+        if (0x0400..0x0500).contains(&message_type) {
+            let (completion_id, call) = match message_type {
+                0x040C => (
+                    Some(u32::try_from(protobuf_varint_field(frame.get(8..)?, 11)?).ok()?),
+                    None,
+                ),
+                0x040D => {
+                    let call = decode_call_frame(frame)?;
+                    (
+                        Some(call.result_completion_id),
+                        Some((call.service, call.handler)),
+                    )
+                }
+                _ => (None, None),
+            };
+            commands.push(RecordedCommand {
+                message_type,
+                frame: Bytes::copy_from_slice(frame),
+                completion_id,
+                call,
+            });
+        }
+        cursor = frame_end;
+    }
+    Some(commands)
+}
+
+/// FIG-2499: replay every command the deployed handler journaled across
+/// `outputs`, in order, completing the timers and calls `complete` answers
+/// (`Some(value)` fires a timer or answers a call with `value`; `None` leaves
+/// it pending). Handler journals are their own contract, so frames are
+/// spliced verbatim.
+pub(super) fn encode_recorded_commands_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    outputs: &[&[u8]],
+    complete: impl Fn(&RecordedCommand) -> Option<serde_json::Value>,
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let mut commands = Vec::new();
+    for output in outputs {
+        commands.extend(
+            restate_recorded_commands(output)
+                .ok_or_else(|| TerminalError::new("recorded output omitted a valid frame"))?,
+        );
+    }
+    let known_entries = u32::try_from(1 + commands.len())
+        .map_err(|_| TerminalError::new("too many commands in recorded replay fixture"))?;
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, known_entries));
+    body.extend_from_slice(&encode_input_command(&input));
+    for command in &commands {
+        body.extend_from_slice(&command.frame);
+    }
+    for command in &commands {
+        let (Some(completion_id), Some(value)) = (command.completion_id, complete(command)) else {
+            continue;
+        };
+        match command.message_type {
+            0x040C => body.extend_from_slice(&encode_sleep_completion(completion_id)),
+            0x040D => {
+                let value = serde_json::to_vec(&value).map_err(TerminalError::from_error)?;
+                body.extend_from_slice(&encode_call_completion(completion_id, &value));
+            }
+            _ => {}
+        }
+    }
+    Ok(body.freeze())
+}
+
+/// The answer a scope's `LashDurableWaitIndex` gives the handler-side effect
+/// recording (FIG-2499): admitted, or cleared. `None` for any other call.
+pub(super) fn durable_wait_index_call_response(
+    service: &str,
+    handler: &str,
+) -> Option<serde_json::Value> {
+    if service != "LashDurableWaitIndex" {
+        return None;
+    }
+    match handler {
+        "begin_effect" | "record_group" => Some(serde_json::Value::Bool(true)),
+        "end_effect" => Some(serde_json::Value::Null),
+        _ => None,
+    }
+}
+
 pub(super) fn restate_call_frames(input: &[u8]) -> Option<Vec<RestateCallFrame>> {
     let mut cursor = 0;
     let mut calls = Vec::new();
@@ -305,51 +412,6 @@ pub(super) fn restate_completed_promise(
             let json = protobuf_len_field(completion_value, 1)?;
             serde_json::from_slice(json).ok()
         })
-}
-
-/// FIG-779: redrive an invocation whose journal already contains the exact
-/// `SleepCommand` emitted by its suspended attempt, but no timer completion.
-pub(super) fn encode_pending_sleep_replay<T: serde::Serialize>(
-    workflow_key: &str,
-    input: &T,
-    suspended_output: &[u8],
-) -> Result<Bytes, TerminalError> {
-    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
-    let sleep_command = restate_message_frame(suspended_output, 0x040C)
-        .ok_or_else(|| TerminalError::new("suspended attempt omitted its SleepCommand"))?;
-    let mut body = BytesMut::new();
-    body.extend_from_slice(&encode_start_message(workflow_key, 2));
-    body.extend_from_slice(&encode_input_command(&input));
-    body.extend_from_slice(sleep_command);
-    Ok(body.freeze())
-}
-
-/// FIG-788: redrive a prior attempt's exact sleep command with its completion
-/// appended, preserving every command byte emitted by the deployed code.
-pub(super) fn encode_completed_captured_sleep_replay<T: serde::Serialize>(
-    workflow_key: &str,
-    input: &T,
-    suspended_output: &[u8],
-) -> Result<Bytes, TerminalError> {
-    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
-    let sleep_command = restate_message_frame(suspended_output, 0x040C)
-        .ok_or_else(|| TerminalError::new("suspended attempt omitted its SleepCommand"))?;
-    let completion_id = u32::try_from(
-        protobuf_varint_field(
-            sleep_command
-                .get(8..)
-                .ok_or_else(|| TerminalError::new("sleep command omitted its frame payload"))?,
-            11,
-        )
-        .ok_or_else(|| TerminalError::new("sleep command omitted its completion id"))?,
-    )
-    .map_err(|_| TerminalError::new("sleep command completion id exceeded u32"))?;
-    let mut body = BytesMut::new();
-    body.extend_from_slice(&encode_start_message(workflow_key, 3));
-    body.extend_from_slice(&encode_input_command(&input));
-    body.extend_from_slice(sleep_command);
-    body.extend_from_slice(&encode_sleep_completion(completion_id));
-    Ok(body.freeze())
 }
 
 /// FIG-1631: redrive a turn-cancel gate that parked on its timer.
@@ -560,59 +622,6 @@ pub(super) fn encode_process_terminal_delivery_replay<T: serde::Serialize>(
     body.extend_from_slice(segment_finished);
     body.extend_from_slice(terminal_call);
     body.extend_from_slice(&encode_call_completion(completion_id, &completion));
-    Ok(body.freeze())
-}
-
-/// FIG-811: splice an effectful ordinal segment's complete deployed prefix:
-/// the captured sleep and its completion followed by the captured terminal
-/// delivery and its completion.
-pub(super) fn encode_effectful_process_terminal_replay<T: serde::Serialize>(
-    workflow_key: &str,
-    input: &T,
-    effect_suspension: &[u8],
-    terminal_delivery_suspension: &[u8],
-) -> Result<Bytes, TerminalError> {
-    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
-    let sleep_command = restate_message_frame(effect_suspension, 0x040C)
-        .ok_or_else(|| TerminalError::new("effectful attempt omitted its SleepCommand"))?;
-    let sleep_completion_id = u32::try_from(
-        protobuf_varint_field(
-            sleep_command
-                .get(8..)
-                .ok_or_else(|| TerminalError::new("sleep command omitted its frame payload"))?,
-            11,
-        )
-        .ok_or_else(|| TerminalError::new("sleep command omitted its completion id"))?,
-    )
-    .map_err(|_| TerminalError::new("sleep command completion id exceeded u32"))?;
-    let segment_finished = restate_message_frame(terminal_delivery_suspension, 0x040B)
-        .ok_or_else(|| TerminalError::new("terminal attempt omitted CompletePromiseCommand"))?;
-    let terminal_call = restate_message_frame(terminal_delivery_suspension, 0x040D)
-        .ok_or_else(|| TerminalError::new("terminal attempt omitted CallCommand"))?;
-    let call_completion_id = u32::try_from(
-        protobuf_varint_field(
-            terminal_call
-                .get(8..)
-                .ok_or_else(|| TerminalError::new("terminal call omitted its frame payload"))?,
-            11,
-        )
-        .ok_or_else(|| TerminalError::new("terminal call omitted its completion id"))?,
-    )
-    .map_err(|_| TerminalError::new("terminal call completion id exceeded u32"))?;
-    let call_completion =
-        serde_json::to_vec(&serde_json::Value::Null).map_err(TerminalError::from_error)?;
-
-    let mut body = BytesMut::new();
-    body.extend_from_slice(&encode_start_message(workflow_key, 5));
-    body.extend_from_slice(&encode_input_command(&input));
-    body.extend_from_slice(sleep_command);
-    body.extend_from_slice(&encode_sleep_completion(sleep_completion_id));
-    body.extend_from_slice(segment_finished);
-    body.extend_from_slice(terminal_call);
-    body.extend_from_slice(&encode_call_completion(
-        call_completion_id,
-        &call_completion,
-    ));
     Ok(body.freeze())
 }
 
@@ -948,6 +957,26 @@ async fn invoke_process_workflow_endpoint_unbounded<T: serde::Serialize>(
                     .map_err(|err| {
                         TerminalError::new(format!("workflow run completion failed: {err}"))
                     })?;
+            }
+            if message_type == 0x040D {
+                // The process scope's index answers the handler's effect
+                // recording (FIG-2499); every other call stays pending.
+                let call = decode_call_frame(&output[decoded..frame_end])
+                    .ok_or_else(|| TerminalError::new("invalid call command frame"))?;
+                if let Some(response) =
+                    durable_wait_index_call_response(&call.service, &call.handler)
+                {
+                    let response =
+                        serde_json::to_vec(&response).map_err(TerminalError::from_error)?;
+                    input_sender
+                        .as_mut()
+                        .expect("workflow input remains open until the end message")
+                        .send_data(encode_call_completion(call.result_completion_id, &response))
+                        .await
+                        .map_err(|err| {
+                            TerminalError::new(format!("index call completion failed: {err}"))
+                        })?;
+                }
             }
             if message_type == 0x0003 {
                 drop(input_sender.take());

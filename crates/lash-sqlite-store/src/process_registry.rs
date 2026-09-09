@@ -19,6 +19,7 @@ mod tool_intent_submission;
 mod wake_delivery;
 mod worklist;
 
+use support::process_scope_fence_key;
 use support::process_status_label;
 pub(crate) use support::{ProcessEventAppendArm, ProcessEventWriteAuthorization, tx_outcome};
 use wake_delivery::{load_wake_delivery_conn, update_wake_delivery_state, wake_delivery_report};
@@ -339,6 +340,16 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                         ],
                     )
                     .map_err(process_sqlite_error)?;
+                    // The owner is back: lift the scope fence a prune left in
+                    // this file, in this same single-file transaction, so the
+                    // process row and the fence's absence become durable
+                    // together and a registration that fails keeps the id
+                    // fenced (ADR 0049).
+                    tx.execute(
+                        "DELETE FROM effect_scope_retirements WHERE scope_id = ?1",
+                        params![process_scope_fence_key(&record.id)?],
+                    )
+                    .map_err(process_sqlite_error)?;
                     let mut record = record;
                     let process_id = record.id.clone();
                     for session_id in &observers {
@@ -365,7 +376,26 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
             })
             .await
             .map_err(process_sqlite_error)??;
+        // Hosts whose fence is not in this file (a fence written into a
+        // journal before it attached this registry, or an engine-held one)
+        // are lifted now that the row is durable; the call is idempotent for
+        // a host that keeps its process-scope fences here.
+        self.scope_fence_hosts
+            .reinstate_process_scope(&record.id)
+            .await?;
         Ok(record)
+    }
+
+    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+        self.scope_fence_hosts.bind(
+            effect_host,
+            lash_core::ProcessRegistryBinding {
+                fence_database: self.path.clone(),
+                registrations: Arc::new(support::SqliteRegistrationProbe {
+                    conn: self.conn.clone(),
+                }),
+            },
+        );
     }
 
     async fn set_external_ref(
@@ -1494,45 +1524,6 @@ impl lash_core::ProcessWakeOutbox for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 }
-#[async_trait::async_trait]
-impl lash_core::ProcessRetention for SqliteProcessRegistry {
-    async fn compact_process_tombstones(
-        &self,
-        cutoff_epoch_ms: u64,
-        watermark: lash_core::ProjectionWatermark,
-        trigger_store: Option<&dyn lash_core::TriggerStore>,
-    ) -> Result<usize, lash_core::PluginError> {
-        let max_change_seq = crate::process_registry_change::max_change_sequence(watermark);
-        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        let outstanding_trigger_delivery_process_ids = match trigger_store {
-            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
-            None => Vec::new(),
-        };
-        self.conn
-            .write_flow(move |tx| {
-                Ok(tx_outcome(
-                    crate::process_registry_change::compact_process_tombstones_conn(
-                        tx,
-                        cutoff_epoch_ms,
-                        max_change_seq,
-                        &outstanding_trigger_delivery_process_ids,
-                    ),
-                ))
-            })
-            .await
-            .map_err(process_sqlite_error)?
-    }
-
-    async fn prune_terminal_processes(
-        &self,
-        cutoff_epoch_ms: u64,
-        filter: Option<ProcessListFilter>,
-        watermark: lash_core::ProjectionWatermark,
-    ) -> Result<ProcessPruneReport, lash_core::PluginError> {
-        prune_api::prune_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
-    }
-}
-
 impl lash_core::ProcessClockRebind for SqliteProcessRegistry {
     fn with_runtime_clock(
         &self,
@@ -1543,6 +1534,8 @@ impl lash_core::ProcessClockRebind for SqliteProcessRegistry {
             clock,
             process_session_store_root: self.process_session_store_root.clone(),
             wake_delivery_config: self.wake_delivery_config,
+            scope_fence_hosts: self.scope_fence_hosts.clone(),
+            path: self.path.clone(),
         }))
     }
 }

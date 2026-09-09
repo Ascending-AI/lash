@@ -1284,6 +1284,22 @@ impl LashCoreBuilder {
         });
         let env = env_builder.build();
         let process_registry = env.process_registry.as_ref().cloned();
+        // Registration owns the scope fence (ADR 0049): the registry lifts the
+        // effect host's fence for a re-registered process id inside its own
+        // registration write, on every registration path.
+        if let Some(process_registry) = process_registry.as_ref() {
+            process_registry.bind_effect_host(&env.core.control.effect_host);
+        }
+        // The retained-evidence sweep owns deferred scope retirement (ADR
+        // 0067): a store whose journal lives in the host's own file learns
+        // where that file is here.
+        for store_factory in self
+            .store_factory
+            .iter()
+            .chain(self.child_store_factory.iter())
+        {
+            store_factory.bind_effect_host(&env.core.control.effect_host);
+        }
         let process_port = Self::resolve_process_work(
             &process_work_source,
             default_plugin_host.as_ref(),

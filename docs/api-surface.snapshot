@@ -1319,8 +1319,11 @@ lash::durability::DurableProcessWorkerConfig::with_turn_phase_probe_slot
 lash::durability::DurableProcessWorkerConfig::with_worker_slot_supplier
 lash::durability::EffectHost
 lash::durability::EffectHost::await_event_resolver
+lash::durability::EffectHost::bind_process_registry
+lash::durability::EffectHost::effect_scope_fence_database
 lash::durability::EffectHost::prepare_tool_intent
 lash::durability::EffectHost::record_tool_intent_outcome
+lash::durability::EffectHost::reinstate_effect_scope
 lash::durability::EffectHost::retire_effect_journal
 lash::durability::EffectHost::scoped
 lash::durability::EffectHost::scoped_static
@@ -1330,11 +1333,23 @@ lash::durability::EffectJournalIdentity::key
 lash::durability::EffectJournalIdentity::session_id
 lash::durability::EffectJournalRetirement
 lash::durability::EffectJournalRetirement::Process
+lash::durability::EffectJournalRetirement::Process::gate
 lash::durability::EffectJournalRetirement::Process::process_id
+lash::durability::EffectJournalRetirement::RuntimeOperation
+lash::durability::EffectJournalRetirement::RuntimeOperation::gate
+lash::durability::EffectJournalRetirement::RuntimeOperation::operation_id
 lash::durability::EffectJournalRetirement::Session
 lash::durability::EffectJournalRetirement::Session::session_id
+lash::durability::EffectJournalRetirement::for_scope
+lash::durability::EffectJournalRetirement::gate
 lash::durability::EffectJournalRetirement::process
+lash::durability::EffectJournalRetirement::retired_scope
+lash::durability::EffectJournalRetirement::runtime_operation
 lash::durability::EffectJournalRetirement::session
+lash::durability::EffectJournalRetirement::when_quiescent
+lash::durability::EffectRetirementGate
+lash::durability::EffectRetirementGate::OwnerTerminal
+lash::durability::EffectRetirementGate::WhenQuiescent
 lash::durability::LeaseTimings
 lash::durability::LeaseTimings::from_ttl
 lash::durability::LeaseTimings::new
@@ -2285,6 +2300,7 @@ lash::persistence::RetentionReport
 lash::persistence::RetentionReport::removed_attachment_root_count
 lash::persistence::RetentionReport::removed_receipt_count
 lash::persistence::RetentionReport::removed_usage_delta_count
+lash::persistence::RetentionReport::retired_effect_scope_count
 lash::persistence::RuntimeCheckpointComponents
 lash::persistence::RuntimeCheckpointComponents::complete_refs_for_testing
 lash::persistence::RuntimeCommit
@@ -2708,6 +2724,7 @@ lash::persistence::SessionStoreCreateRequest::policy
 lash::persistence::SessionStoreCreateRequest::relation
 lash::persistence::SessionStoreCreateRequest::session_id
 lash::persistence::SessionStoreFactory
+lash::persistence::SessionStoreFactory::bind_effect_host
 lash::persistence::SessionStoreFactory::create_store
 lash::persistence::SessionStoreFactory::delete_session
 lash::persistence::SessionStoreFactory::fork_at
@@ -5207,6 +5224,7 @@ lash::process::ProcessRef::incarnation
 lash::process::ProcessRef::new
 lash::process::ProcessRef::process_id
 lash::process::ProcessRegistrar
+lash::process::ProcessRegistrar::bind_effect_host
 lash::process::ProcessRegistrar::register_process
 lash::process::ProcessRegistrar::register_process_with_observers
 lash::process::ProcessRegistrar::set_external_ref
@@ -5233,6 +5251,7 @@ lash::process::ProcessRegistryTestSupport
 lash::process::ProcessRegistryTestSupport::wake_allocation_floor_for_testing
 lash::process::ProcessRetention
 lash::process::ProcessRetention::compact_process_tombstones
+lash::process::ProcessRetention::prunable_terminal_processes
 lash::process::ProcessRetention::prune_terminal_processes
 lash::process::ProcessRuntimeHost
 lash::process::ProcessRuntimeHost::process_registry
@@ -7712,10 +7731,14 @@ lash::runtime::AwaitEventResolver
 lash::runtime::AwaitEventResolver::acquire_queued_lane
 lash::runtime::AwaitEventResolver::await_await_event
 lash::runtime::AwaitEventResolver::await_event_key
+lash::runtime::AwaitEventResolver::await_event_scope_is_retired
 lash::runtime::AwaitEventResolver::cancel_await_events_for_session
 lash::runtime::AwaitEventResolver::peek_await_event
 lash::runtime::AwaitEventResolver::prepare_completion_key
+lash::runtime::AwaitEventResolver::reinstate_await_event_scope
 lash::runtime::AwaitEventResolver::resolve_await_event
+lash::runtime::AwaitEventResolver::retire_await_events_for_scope
+lash::runtime::AwaitEventResolver::retire_await_events_for_scope_if_quiescent
 lash::runtime::AwaitEventResolver::revoke_await_events_for_session
 lash::runtime::AwaitEventResolver::wait_out_crashed_lane_holder
 lash::runtime::CheckpointClaimSet
@@ -8268,6 +8291,7 @@ lash::runtime::RuntimeErrorCode
 lash::runtime::RuntimeErrorCode::AttachmentSourcePolicyDenied
 lash::runtime::RuntimeErrorCode::AwaitEventCancelUnsupported
 lash::runtime::RuntimeErrorCode::AwaitEventKeySign
+lash::runtime::RuntimeErrorCode::AwaitEventScopeNotRetirable
 lash::runtime::RuntimeErrorCode::AwaitEventUnknownOrRevoked
 lash::runtime::RuntimeErrorCode::AwaitEventUnsupported
 lash::runtime::RuntimeErrorCode::CancelStartGateUnavailable
@@ -8278,6 +8302,8 @@ lash::runtime::RuntimeErrorCode::DurableEffectLiveProtocolExtension
 lash::runtime::RuntimeErrorCode::EffectGroupUnsupported
 lash::runtime::RuntimeErrorCode::EffectJournalRetirementUnsupported
 lash::runtime::RuntimeErrorCode::EffectPanicked
+lash::runtime::RuntimeErrorCode::EffectScopeNotQuiescent
+lash::runtime::RuntimeErrorCode::EffectScopeRetired
 lash::runtime::RuntimeErrorCode::EmptyAgentFrameRun
 lash::runtime::RuntimeErrorCode::ExecutionScopeTurnIdMismatch
 lash::runtime::RuntimeErrorCode::ExecutionStateCaptureFailed
@@ -8531,6 +8557,7 @@ lash::runtime::RuntimeTurnPhaseProbeSlot::set_for_session
 lash::runtime::ScopedEffectController
 lash::runtime::ScopedEffectController::borrowed
 lash::runtime::ScopedEffectController::controller
+lash::runtime::ScopedEffectController::owned
 lash::runtime::ScopedEffectController::scope_id
 lash::runtime::ScopedEffectController::shared
 lash::runtime::ScopedEffectController::turn_id

@@ -152,6 +152,34 @@ impl AwaitEventResolver for NativeRuntimeEffectController {
     async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
         self.await_events.cancel_session(session_id)
     }
+
+    async fn retire_await_events_for_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        self.await_events.retire_scope(scope)
+    }
+
+    async fn retire_await_events_for_scope_if_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        self.await_events.retire_scope_if_quiescent(scope)
+    }
+
+    async fn reinstate_await_event_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        self.await_events.reinstate_scope(scope)
+    }
+
+    async fn await_event_scope_is_retired(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        self.await_events.scope_is_retired(scope)
+    }
 }
 
 #[async_trait::async_trait]

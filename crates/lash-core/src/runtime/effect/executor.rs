@@ -22,11 +22,12 @@ mod trigger;
 pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
-    ExecutionScope, ExternalCompletionError, QueuedLaneAcquisition, QueuedLaneAttempt,
-    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome,
-    RuntimeEffectController, RuntimeEffectFailureDisposition, ScopedEffectController,
-    SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
-    TurnControlBinding, TurnControlParticipation,
+    EffectRetirementGate, ExecutionScope, ExternalCompletionError, QueuedLaneAcquisition,
+    QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
+    ResolveOutcome, RuntimeEffectController, RuntimeEffectFailureDisposition, ScopeBoundController,
+    ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
+    ToolIntentSubmissionGuard, TurnControlBinding, TurnControlParticipation,
+    await_event_scope_not_retirable,
 };
 pub(crate) use control::{
     EffectControllerTaskRequest, EffectTaskController, RuntimeEffectControllerHandle,

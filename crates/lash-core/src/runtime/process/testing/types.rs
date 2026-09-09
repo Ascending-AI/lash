@@ -40,6 +40,7 @@ pub struct TestLocalProcessRegistry {
     pub(super) worklist_page_error_plan: Arc<Mutex<WorklistPageErrorPlan>>,
     pub(super) worklist_page_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
     pub(super) clock: Arc<dyn crate::Clock>,
+    pub(super) scope_fence_hosts: super::super::ProcessScopeFenceHosts,
 }
 
 /// Concrete in-memory registry rows exposed to raw differential readers.
