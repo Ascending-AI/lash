@@ -170,6 +170,21 @@ impl RlmRuntimeState {
             .map_err(|err| SessionError::Protocol(err.to_string()))
     }
 
+    /// Rebuild projected bindings — and, where the view carries one, the
+    /// execution state — from the restore view.
+    ///
+    /// A restore on the frame this state already holds is idempotent
+    /// (FIG-2521). The runtime restores the current frame after a follow-on
+    /// failure, a reopen-seed receipt replay and an append rollback, each
+    /// replaying seed events this state has already applied: the projected
+    /// bindings are always rebuilt from the view, so a seed the view replays
+    /// is re-bound rather than rejected, and a binding installed by an append
+    /// that never persisted is dropped. The execution state is replaced by the
+    /// view's snapshot whenever the view carries one; a same-frame view with
+    /// no snapshot (the resident body is discarded after every commit) keeps
+    /// the live execution, which is then the only resident copy of the
+    /// committed state, and seed and globals events replay onto it as
+    /// defaults. A frame change always starts from a fresh session.
     pub(crate) async fn restore_runtime_session_state(
         &self,
         state: lash_core::plugin::ProtocolSessionRestoreView,
@@ -181,16 +196,17 @@ impl RlmRuntimeState {
             .current_frame_node_id
             .as_ref()
             .map(ToString::to_string);
-        if *active_agent_frame_id != current_frame_node_id {
-            *execution = self.dialect.create_session()?;
-            *self.session_projected_bindings.lock().await = RlmProjectedBindings::new();
-            *active_agent_frame_id = current_frame_node_id;
-        }
-        let protected_names = self.protected_projected_binding_names().await;
-        if let Some(snapshot) = state.execution_state.map_err(|error| SessionError::Store {
+        let snapshot = state.execution_state.map_err(|error| SessionError::Store {
             context: "failed to hydrate RLM execution-state components".to_string(),
             source: error,
-        })? {
+        })?;
+        if *active_agent_frame_id != current_frame_node_id || snapshot.is_some() {
+            *execution = self.dialect.create_session()?;
+            *active_agent_frame_id = current_frame_node_id;
+        }
+        *self.session_projected_bindings.lock().await = RlmProjectedBindings::new();
+        let protected_names = self.protected_projected_binding_names().await;
+        if let Some(snapshot) = snapshot {
             execution.restore_execution_state(&snapshot)?;
             execution.prune_protected_globals(&protected_names)?;
         }
@@ -865,6 +881,128 @@ mod tests {
                                     language `typescript` is pinned"
                     ),
                     "{inactive:?}"
+                );
+            });
+    }
+
+    /// A restore view for `frame` whose active history carries one RLM seed
+    /// event per label, each binding `projected_<label>`.
+    fn seed_restore_view(
+        frame: &str,
+        labels: &[&str],
+    ) -> lash_core::plugin::ProtocolSessionRestoreView {
+        lash_core::plugin::ProtocolSessionRestoreView {
+            current_frame_node_id: Some(lash_core::FrameNodeId::new(frame)),
+            execution_state: Ok(None),
+            active_events: labels
+                .iter()
+                .flat_map(|label| projected_seed_nodes(label))
+                .map(|node| match node {
+                    lash_core::SessionAppendNode::ProtocolEvent { event, .. } => {
+                        SessionHistoryRecord::Protocol(event)
+                    }
+                    other => panic!("seed nodes are protocol events: {other:?}"),
+                })
+                .collect(),
+        }
+    }
+
+    fn projected_seed_nodes(label: &str) -> Vec<lash_core::SessionAppendNode> {
+        let mut seed = crate::projection::RlmSeed::default();
+        seed.projected.push(
+            format!("projected_{label}"),
+            lash_rlm_types::RlmProjectedSeedEntry::Materialized(serde_json::json!({
+                "value": label
+            })),
+        );
+        crate::projection::rlm_seed_initial_nodes(seed)
+    }
+
+    fn projected_binding_names(contributions: &[lash_core::PromptContribution]) -> Vec<String> {
+        let rendered = format!("{contributions:?}");
+        ["projected_seed", "projected_discarded"]
+            .into_iter()
+            .filter(|name| rendered.contains(name))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// FIG-2521: restoring the frame the state already holds is idempotent.
+    ///
+    /// The runtime restores the protocol session on the current frame after a
+    /// follow-on failure, a reopen-seed receipt replay and an append rollback.
+    /// Each replays the frame's seed events into a state that already bound
+    /// them; the projected seed must be re-bound from the view, never rejected
+    /// as a duplicate.
+    #[test]
+    fn same_frame_restore_rebinds_an_already_bound_projected_seed() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                let state = RlmRuntimeState::new_lashlang_for_tests().expect("state");
+                state
+                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
+                    .await
+                    .expect("first restore binds the seed");
+                let first = state.projected_binding_prompt_contributions().await;
+                assert_eq!(projected_binding_names(&first), ["projected_seed"]);
+
+                state
+                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
+                    .await
+                    .expect("a same-frame restore re-binds the seed it already holds");
+                let second = state.projected_binding_prompt_contributions().await;
+                assert_eq!(
+                    format!("{second:?}"),
+                    format!("{first:?}"),
+                    "a same-frame restore rebuilds exactly the view's bindings"
+                );
+                assert_eq!(
+                    projected_binding_names(&second),
+                    ["projected_seed"],
+                    "the seed is bound once, never twice"
+                );
+            });
+    }
+
+    /// FIG-2521: a same-frame restore replaces the live bindings with the
+    /// view's, so a binding appended but never persisted (an append rolled
+    /// back on commit failure) does not survive into the next prompt.
+    #[test]
+    fn same_frame_restore_drops_bindings_absent_from_the_restore_view() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                let state = RlmRuntimeState::new_lashlang_for_tests().expect("state");
+                state
+                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
+                    .await
+                    .expect("restore binds the durable seed");
+                let durable = state.projected_binding_prompt_contributions().await;
+
+                state
+                    .append_session_nodes(&projected_seed_nodes("discarded"))
+                    .await
+                    .expect("the append binds the pending seed");
+                let pending = state.projected_binding_prompt_contributions().await;
+                assert_eq!(
+                    projected_binding_names(&pending),
+                    ["projected_seed", "projected_discarded"]
+                );
+
+                state
+                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
+                    .await
+                    .expect("rolling back to the durable view on the same frame succeeds");
+                let rolled_back = state.projected_binding_prompt_contributions().await;
+                assert_eq!(
+                    format!("{rolled_back:?}"),
+                    format!("{durable:?}"),
+                    "the rolled-back append's binding must not survive the restore"
                 );
             });
     }
