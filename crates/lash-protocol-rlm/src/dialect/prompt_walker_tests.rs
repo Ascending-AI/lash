@@ -227,7 +227,11 @@ fn assembled_prompt_fragments_with_projection(
 
     fragments.push((
         "tool docs",
-        crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect, true),
+        crate::tool_catalog::rlm_prompt_tool_docs(
+            &catalog,
+            dialect,
+            crate::protocol::RlmPromptFeatures::default(),
+        ),
     ));
 
     // The deferred-tool advertisement, which is prose a *lower* crate composes
@@ -321,6 +325,7 @@ fn assembled_prompt_fragments_with_projection(
             Some(&usage),
             Some(1_000),
             vocabulary,
+            true,
         ) {
             fragments.push(("budget suffix", suffix));
         }
@@ -580,10 +585,8 @@ fn composed_typescript_prompt_has_no_markdown_fences() {
         if name == "execution section" {
             assert!(fragment.contains("type cron_Tick ="));
             assert!(fragment.contains("cron.Schedule(input:"));
-            assert!(
-                fragment.find("TypeScript execution.").unwrap()
-                    < fragment.find("### Response shape").unwrap()
-            );
+            // Response shape opens execution directly; no redundant language sentence.
+            assert!(fragment.starts_with("### Response shape"));
         }
         assert!(
             !fragment.contains("```"),

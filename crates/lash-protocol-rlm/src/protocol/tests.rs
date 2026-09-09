@@ -564,7 +564,7 @@ fn execution_section_documents_list_comprehensions() {
     );
 
     assert!(section.contains("[expr for x in xs if cond]"));
-    assert!(section.contains("multiple for/if clauses run left-to-right"));
+    assert!(section.contains("multiple for/if clauses execute left-to-right"));
     assert!(section.contains("Bindings are local"));
     assert!(!section.contains("Do not use comprehensions"));
 }

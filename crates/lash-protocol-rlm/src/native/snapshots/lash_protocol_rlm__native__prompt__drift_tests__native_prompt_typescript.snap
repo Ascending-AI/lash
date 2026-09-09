@@ -2,8 +2,6 @@
 source: crates/lash-protocol-rlm/src/native/prompt.rs
 expression: native
 ---
-TypeScript execution.
-
 ### Tool transport
 
 Call `execute_code` once with a JSON object containing only the string `code`. Put the complete program in `code`. Host operations and `finish` run inside that program.
@@ -19,7 +17,7 @@ Standard `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`,
 ### Host API
 
 `console.log/warn/error/info/debug(...values)` and `print(value)` inspect values; `finish(value)` ends the turn.
-declare function sleep(ms: number): Promise<void>; // cell or run
+declare function sleep(ms: number): Promise<void>; // cell
 `Promise.all`/`Promise.allSettled` accept tool promises and resolved values; all leaves settle before `all` reports the first-settled rejection.
 
 A failed tool call rejects with an `Error`: `message` is the host text, `name` is `EffectError` (`RuntimeError` for runtime faults), and `cause` carries `{ code, details }`. An `allSettled` rejection uses that same error. Errors in `finish` or tool arguments become `{ name, message, cause }`.

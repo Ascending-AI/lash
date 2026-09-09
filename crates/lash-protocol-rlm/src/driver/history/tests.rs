@@ -83,6 +83,7 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMess
         lash_lashlang_runtime::LashlangSurface::default(),
     );
     render_history_messages(&RlmHistoryRenderInput {
+        images: true,
         dialect: &dialect,
         events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -555,6 +556,7 @@ fn history_teaching_follows_indexable_entries() {
         (vec![step_event("print 1")], true),
     ] {
         let messages = super::build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            images: true,
             dialect: &dialect,
             events: &events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),

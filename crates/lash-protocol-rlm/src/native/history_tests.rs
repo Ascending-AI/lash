@@ -40,6 +40,7 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<LlmMessage> {
     );
     let turn_messages = lash_core::facade_support::MessageSequence::default();
     render_history_messages(&RlmHistoryRenderInput {
+        images: true,
         dialect: &dialect,
         events,
         turn_messages: &turn_messages,
@@ -165,5 +166,41 @@ fn corrupt_envelopes_degrade_individually_after_reload() {
         let rendered = serde_json::to_string(&messages).unwrap();
         assert!(rendered.contains("degraded binding"));
         assert!(rendered.contains("native_transport"));
+    }
+}
+
+#[test]
+fn second_round_history_teaches_images_only_when_enabled() {
+    for images in [false, true] {
+        let dialect = crate::dialect::lashlang_test_dialect();
+        let events = pair(step("previous", None, false));
+        let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            images,
+            dialect: &dialect,
+            events: &events,
+            turn_messages: &lash_core::facade_support::MessageSequence::default(),
+            turn_causes: &[],
+            max_output_chars: 1000,
+            protocol_iteration: 2,
+            finalization: "finish",
+            required_output: None,
+            final_answer_format: None,
+            budget_suffix: None,
+            bound_variables: "",
+        });
+        let tail = messages
+            .last()
+            .unwrap()
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(tail.contains("type HistoryItem ="), "{tail}");
+        assert_eq!(tail.contains("HistoryImage"), images, "{tail}");
+        assert_eq!(tail.contains("images?"), images, "{tail}");
     }
 }

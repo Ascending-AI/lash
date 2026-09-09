@@ -110,7 +110,7 @@ fn typescript_type(ty: &lashlang::TypeExpr) -> String {
         }
         lashlang::TypeExpr::Ref(name) => typescript_type_name(name),
         lashlang::TypeExpr::Process { input, output, .. } => format!(
-            "ProcessDefinition<{}, {}>",
+            "Process<{}, {}>",
             typescript_type(input),
             typescript_type(output)
         ),
@@ -259,16 +259,16 @@ impl TypescriptDialect {
 pub(crate) fn typescript_process_prompt(abilities: &lashlang::LashlangAbilities) -> String {
     let mut lines = Vec::new();
     if abilities.processes {
-        lines.push(r#"interface Process { readonly name: string }
+        lines.push(r#"interface Process<Input = unknown, Output = unknown> { readonly name: string }
 declare function defineProcess(c: {name: string; run: Function; signals?: Record<string, null>}): Process;
 declare function start(p: Process, args?: Record<string, unknown>): Promise<unknown> & {id: string};
-declare function wake(value: unknown): void; // progress
-Use top-level const, literal name, async run; start keys match run parameter names. In run, return succeeds after finally; throw fails."#);
+declare function wake(value: unknown): void;
+Use top-level const, literal name, async run; start keys match run parameter names. Return succeeds after finally; throw fails."#);
         if abilities.process_signals {
             lines.push(
                 r#"declare function waitSignal(name: string): Promise<unknown>;
 declare function wake(handle: {id: string}, signal: string, payload: unknown): void;
-Use signals: {go: null}; waitSignal is run-only."#,
+Signals: {go: null}; waitSignal is run-only."#,
             );
         }
         if abilities.triggers {
@@ -277,7 +277,11 @@ Literal target; inputs match run parameters."#);
         }
     }
     if abilities.sleep {
-        lines.push("declare function sleep(ms: number): Promise<void>; // cell or run");
+        lines.push(if abilities.processes {
+            "declare function sleep(ms: number): Promise<void>; // cell or run"
+        } else {
+            "declare function sleep(ms: number): Promise<void>; // cell"
+        });
     }
     let prompt = lines.join("\n");
     if abilities.process_signals {
@@ -290,6 +294,10 @@ Literal target; inputs match run parameters."#);
 impl RlmDialect for TypescriptDialect {
     fn language_id(&self) -> &'static str {
         LANGUAGE_ID
+    }
+
+    fn renders_tool_catalogue_inline(&self) -> bool {
+        true
     }
 
     fn prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
@@ -376,8 +384,7 @@ impl RlmDialect for TypescriptDialect {
         features: crate::protocol::RlmPromptFeatures,
         tool_catalog: &lash_core::ToolCatalog,
     ) -> Result<String, SessionError> {
-        let tools =
-            crate::tool_catalog::rlm_prompt_tool_docs(tool_catalog, self, features.decomposition);
+        let tools = crate::tool_catalog::rlm_prompt_tool_docs(tool_catalog, self, features);
         let tools = if tools.is_empty() {
             String::new()
         } else {
@@ -392,6 +399,11 @@ impl RlmDialect for TypescriptDialect {
             .host_environment(tool_catalog)
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
         let durable = typescript_process_prompt(&environment.abilities);
+        let durable = if durable.is_empty() {
+            durable
+        } else {
+            format!("\n{durable}")
+        };
         let host_api = format!(
             r#"Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
 
@@ -399,8 +411,7 @@ Standard `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`,
 
 ### Host API
 
-`console.log/warn/error/info/debug(...values)` and `print(value)` inspect values; `finish(value)` ends the turn.
-{durable}
+`console.log/warn/error/info/debug(...values)` and `print(value)` inspect values; `finish(value)` ends the turn.{durable}
 `Promise.all`/`Promise.allSettled` accept tool promises and resolved values; all leaves settle before `all` reports the first-settled rejection.
 
 A failed tool call rejects with an `Error`: `message` is the host text, `name` is `EffectError` (`RuntimeError` for runtime faults), and `cause` carries `{{ code, details }}`. An `allSettled` rejection uses that same error. Errors in `finish` or tool arguments become `{{ name, message, cause }}`."#
@@ -408,7 +419,7 @@ A failed tool call rejects with an `Error`: `message` is the host text, `name` i
         let example =
             "### Example cell\n\n<typescript>\nconst total = 1 + 2;\nfinish(total);\n</typescript>";
         Ok(format!(
-            "TypeScript execution.\n\n{response_shape}\n{example}\n\n{host_api}\n\n{tools}{host_surface}"
+            "{response_shape}\n{example}\n\n{host_api}\n\n{tools}{host_surface}"
         ))
     }
 
@@ -605,6 +616,12 @@ mod tests {
             "the reader's own primitive name, not `trigger.register`: {section}"
         );
         assert!(section.contains("triggers.list"), "{section}");
+        assert!(
+            section.contains("interface Process<Input = unknown, Output = unknown>"),
+            "{section}"
+        );
+        assert!(section.contains("Process<"), "{section}");
+        assert!(!section.contains("ProcessDefinition"), "{section}");
         // And none of it may arrive in Lashlang's type syntax (ADR 0063).
         for leak in ["list[", "-> str", ": str`", "float`", "trigger.register"] {
             assert!(!section.contains(leak), "`{leak}` leaked: {section}");

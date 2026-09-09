@@ -340,26 +340,7 @@ fn render_language_section(
         push_process_language_bullets(&mut bullets, abilities);
     }
     if language_features.label_annotations {
-        let mut labels = label_annotations_language_bullet();
-        if !abilities.processes {
-            labels = labels
-                .replace(" or process declaration", "")
-                .replace(" or process declarations", "");
-            if let (Some(start), Some(end)) = (
-                labels.find(" Inside a `process`"),
-                labels.find(" Titles/descriptions"),
-            ) {
-                labels.replace_range(start..end, "");
-            }
-        } else {
-            if !abilities.sleep {
-                labels = labels.replace("`sleep`, ", "");
-            }
-            if !abilities.process_signals {
-                labels = labels.replace("`wait_signal`, `signal_run`, ", "");
-            }
-        }
-        bullets.push(labels);
+        bullets.push(label_annotations_language_bullet(abilities));
     }
     if abilities.triggers && abilities.processes {
         bullets.push(trigger_registry_language_bullet());
@@ -391,7 +372,7 @@ fn assignment_language_bullet() -> String {
 }
 
 fn list_comprehension_language_bullet() -> String {
-    r#"- Comprehensions: `[expr for x in xs if cond]`; multiple for/if clauses run left-to-right. Bindings are local. Use loops for mutation, break or continue."#.to_string()
+    r#"- Comprehensions: `[expr for x in xs if cond]`; multiple for/if clauses execute left-to-right. Bindings are local. Use loops for mutation, break or continue."#.to_string()
 }
 
 fn functions_language_bullet() -> String {
@@ -438,8 +419,43 @@ fn push_process_language_bullets(
     }
 }
 
-fn label_annotations_language_bullet() -> String {
-    "- Execution labels: `@label(title: \"Label\")` or `@label(title: \"Label\", description: \"Details\")` names important Lashlang phases and graph steps. It is a prefix annotation, not a standalone statement; it must appear immediately before the one statement or process declaration it labels, e.g. `@label(title: \"Prepare query\")\\nquery = \"runtime architecture\"`. Do not emit `@label(...)` by itself or stack multiple labels before one statement. At top level, label meaningful setup, resource calls, submissions, branches, loops, or process declarations. Inside a `process` body, label durable steps such as awaited module calls, `start`, `sleep`, `wait_signal`, `signal_run`, `wake`, `yield`, `finish`, `fail`, `if`, loops, and setup statements that explain the process. Titles/descriptions must be string literals; do not use variables, interpolation, icons, colors, layout hints, or extra keys.".to_string()
+fn label_annotations_language_bullet(abilities: &lashlang::LashlangAbilities) -> String {
+    let declaration = if abilities.processes {
+        " or process declaration"
+    } else {
+        ""
+    };
+    let targets = if abilities.processes {
+        "branches, loops, or process declarations"
+    } else {
+        "branches, and loops"
+    };
+    let mut process = String::new();
+    if abilities.processes {
+        let mut steps = vec!["awaited module calls", "`start`"];
+        if abilities.sleep {
+            steps.push("`sleep`");
+        }
+        if abilities.process_signals {
+            steps.extend(["`wait_signal`", "`signal_run`"]);
+        }
+        steps.extend([
+            "`wake`",
+            "`yield`",
+            "`finish`",
+            "`fail`",
+            "`if`",
+            "loops",
+            "and setup statements that explain the process",
+        ]);
+        process = format!(
+            " Inside a `process` body, label durable steps such as {}.",
+            steps.join(", ")
+        );
+    }
+    format!(
+        "- Execution labels: `@label(title: \"Label\")` or `@label(title: \"Label\", description: \"Details\")` names important Lashlang phases and graph steps. It is a prefix annotation, not a standalone statement; it must appear immediately before the one statement{declaration} it labels, e.g. `@label(title: \"Prepare query\")\\nquery = \"runtime architecture\"`. Do not emit `@label(...)` by itself or stack multiple labels before one statement. At top level, label meaningful setup, resource calls, submissions, {targets}.{process} Titles/descriptions must be string literals; do not use variables, interpolation, icons, colors, layout hints, or extra keys."
+    )
 }
 
 fn trigger_registry_language_bullet() -> String {
@@ -556,6 +572,9 @@ fn render_decomposition_section(
         "\n\nRead full prior output via `history[N].output[M]`; print the variable or slice you need.",
     );
 
+    if !has_operations || processes || decomposition {
+        section.push('\n');
+    }
     if has_operations && processes {
         section.push_str("\n- Several independent slow operations are needed -> use aggregate await over a record/list of direct module calls plus any pure values you want preserved, putting `?` on each operation leaf that should unwrap.");
     }

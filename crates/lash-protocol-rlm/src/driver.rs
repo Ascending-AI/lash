@@ -107,9 +107,9 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     let tool_docs = crate::tool_catalog::rlm_prompt_tool_docs(
         tool_catalog,
         dialect.as_ref(),
-        config.prompt_features.decomposition,
+        config.prompt_features,
     );
-    if dialect.language_id() != "typescript" && !tool_docs.trim().is_empty() {
+    if !dialect.renders_tool_catalogue_inline() && !tool_docs.trim().is_empty() {
         prompt_contributions.push(PromptContribution::execution(
             "Tools",
             format!("Await these documented operations:\n\n{tool_docs}"),
@@ -123,6 +123,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
                 &dialect,
             ))),
             projector: Arc::new(RlmContextProjector {
+                prompt_features: config.prompt_features,
                 max_output_chars: config.max_output_chars,
                 max_budget_tokens: config.max_budget_tokens,
                 last_prompt_usage: config.last_prompt_usage,
@@ -296,6 +297,7 @@ mod catalogue_tests {
 }
 
 struct RlmContextProjector {
+    prompt_features: crate::protocol::RlmPromptFeatures,
     max_output_chars: usize,
     max_budget_tokens: Option<usize>,
     last_prompt_usage: SharedPromptUsage,
@@ -318,6 +320,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
             guard.as_ref(),
             effective_budget_tokens(self.max_budget_tokens, ctx.config.max_context_tokens),
             vocabulary,
+            self.prompt_features.decomposition,
         );
         let bound_variables_prompt = self.bound_variables_prompt.read_recover().clone();
 
@@ -325,6 +328,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
 
         messages.extend(build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
+                images: self.prompt_features.images,
                 dialect: self.dialect.as_ref(),
                 events: ctx.events,
                 turn_messages: ctx.messages,
@@ -483,6 +487,7 @@ impl RlmContextProjector {
     #[cfg(test)]
     fn format_history(&self, events: &[lash_core::SessionHistoryRecord]) -> String {
         let messages = render_history_messages(&RlmHistoryRenderInput {
+            images: true,
             dialect: self.dialect.as_ref(),
             events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -519,6 +524,7 @@ pub(crate) fn render_conformance_history_message(
     )];
 
     let rendered = render_history_messages(&RlmHistoryRenderInput {
+        images: true,
         dialect: &dialect,
         events: &events,
         turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -635,6 +641,7 @@ mod tests {
     pub(super) fn projector(max_output_chars: usize) -> RlmContextProjector {
         let mut bound_variables_cache = crate::rlm_support::BoundVariableRenderCache::default();
         RlmContextProjector {
+            prompt_features: Default::default(),
             max_output_chars,
             max_budget_tokens: None,
             last_prompt_usage: Arc::new(RwLock::new(None)),
@@ -732,28 +739,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn rlm_projector_renders_a_reachable_threshold_for_a_small_context_window() {
-        let mut projector = projector(1000);
-        projector.max_budget_tokens = Some(100_000);
-        *projector.last_prompt_usage.write_recover() = Some(lash_core::PromptUsage {
-            context_budget_tokens: 40_999,
-            ..Default::default()
-        });
-
-        let request = project_iteration_request_with_generation(
-            &projector,
-            &[],
-            0,
-            "test-model",
-            Default::default(),
-            Some(41_000),
-        );
-        let tail = message_text(request.messages.last().expect("current iteration tail"));
-
-        assert!(tail.contains("frame switch threshold: 40999"));
-        assert!(!tail.contains("frame switch threshold: 100000"));
-    }
+    mod prompt_features;
 
     #[test]
     fn rlm_projector_sends_no_stop_sequence_without_caller_stops() {
@@ -837,6 +823,7 @@ mod tests {
         ];
 
         let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            images: true,
             dialect: projector.dialect.as_ref(),
             events: &events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -901,6 +888,7 @@ mod tests {
         ];
 
         let messages = render_history_messages(&RlmHistoryRenderInput {
+            images: true,
             dialect: projector.dialect.as_ref(),
             events: &events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -991,6 +979,7 @@ mod tests {
         ];
 
         let messages = render_history_messages(&RlmHistoryRenderInput {
+            images: true,
             dialect: projector.dialect.as_ref(),
             events: &events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -1028,6 +1017,7 @@ mod tests {
         ];
 
         let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            images: true,
             dialect: projector.dialect.as_ref(),
             events: &events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -1187,6 +1177,7 @@ mod tests {
         let events = [event];
 
         let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            images: true,
             dialect: projector.dialect.as_ref(),
             events: &events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -1227,6 +1218,7 @@ mod tests {
         let messages = lash_core::facade_support::MessageSequence::from(vec![event_message]);
 
         let rendered = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            images: true,
             dialect: projector.dialect.as_ref(),
             events: &[],
             turn_messages: &messages,
@@ -1289,6 +1281,7 @@ mod tests {
         let events = [event];
 
         let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            images: true,
             dialect: projector.dialect.as_ref(),
             events: &events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -1333,6 +1326,7 @@ mod tests {
         let events = [user_event("u1", "first"), step_event(0, "print 1", "1")];
 
         let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            images: true,
             dialect: projector.dialect.as_ref(),
             events: &events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),
@@ -1475,6 +1469,7 @@ mod tests {
 
         let schema_contract = render_value_schema_contract(&schema);
         let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+            images: true,
             dialect: projector.dialect.as_ref(),
             events: &events,
             turn_messages: &lash_core::facade_support::MessageSequence::default(),

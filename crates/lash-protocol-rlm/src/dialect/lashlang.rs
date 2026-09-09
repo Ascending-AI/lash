@@ -165,7 +165,7 @@ Done. I inspected the value and summarized the result."#.to_string()
              1. Summary of what you accomplished\n\
              2. List of remaining tasks not yet completed\n\
              3. Recommended next steps\n\
-             Do NOT emit a <lashlang> block, invoke module operations, or call finish/control.continue_as."
+             Do NOT emit a <lashlang> block, invoke module operations, or call finish."
         )
     }
 

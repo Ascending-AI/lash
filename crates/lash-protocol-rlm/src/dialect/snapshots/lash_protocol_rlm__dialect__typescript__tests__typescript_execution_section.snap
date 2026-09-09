@@ -2,8 +2,6 @@
 source: crates/lash-protocol-rlm/src/dialect/typescript.rs
 expression: section
 ---
-TypeScript execution.
-
 ### Response shape
 
 Executable code must be inside paired `<typescript>` and `</typescript>` tags. Tag lines must be standalone after trimming; `</typescript>` terminates the cell even inside a multiline string. Markdown fences never execute. Put the TypeScript block after optional commentary. Top-level `finish(value)` ends the turn with a value; **FINALIZATION** defines prose-only versus finish rules.
@@ -22,7 +20,7 @@ Standard `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`,
 ### Host API
 
 `console.log/warn/error/info/debug(...values)` and `print(value)` inspect values; `finish(value)` ends the turn.
-declare function sleep(ms: number): Promise<void>; // cell or run
+declare function sleep(ms: number): Promise<void>; // cell
 `Promise.all`/`Promise.allSettled` accept tool promises and resolved values; all leaves settle before `all` reports the first-settled rejection.
 
 A failed tool call rejects with an `Error`: `message` is the host text, `name` is `EffectError` (`RuntimeError` for runtime faults), and `cause` carries `{ code, details }`. An `allSettled` rejection uses that same error. Errors in `finish` or tool arguments become `{ name, message, cause }`.

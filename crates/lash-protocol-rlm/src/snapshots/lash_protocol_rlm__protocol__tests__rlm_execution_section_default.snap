@@ -25,7 +25,7 @@ Executable code must be inside paired `<lashlang>` and `</lashlang>` tags. Tag l
 - Strings: single/double quotes and triple-quoted multiline forms support `\n`, `\r`, `\t`, escaped quotes and `\\`. Prefix any with `r` for raw text (JSON, patches, shell payloads). Interpolate with `format`, not f-strings.
 - Precedence: postfix calls/fields/indexing/result `?`; unary `-`/`!`/`not`; `* / %`; `+ -`; comparisons `== != < <= > >= in`; `and`/`&&`; `or`/`||`; ternary `? :`. `in` tests list/tuple membership, record keys or substrings; negate with `!(x in y)`, never `not in`. Unsupported pairs error; null haystacks return false.
 - `name = expr` persists across `<lashlang>` blocks. Update paths: `record.field = v`, `record[key] = v`, `list[i] = v`, and nested paths. Record writes insert/replace; lists require existing indices. Record keys stringify; missing reads return null, so `counts[g] = counts[g] + 1` works.
-- Comprehensions: `[expr for x in xs if cond]`; multiple for/if clauses run left-to-right. Bindings are local. Use loops for mutation, break or continue.
+- Comprehensions: `[expr for x in xs if cond]`; multiple for/if clauses execute left-to-right. Bindings are local. Use loops for mutation, break or continue.
 - Pure functions: `fn f(x: type) -> type { body }`; types required; last expression returns; parameters-only scope. Call `f(arg)`; recursion and forward calls work. Arithmetic yields float: use `-> float`, not int. Keep effects outside functions and pass results in.
 - Tools: `await module.op({ field: value })?`; use only names under **Tools**. Bare calls are builtins; UpperCamel host constructors are pure (never await). `?` aborts on failure with sanitized operation metadata.
 - Sleep: pause foreground code or process code with `sleep for "5s"` or `sleep until deadline`. Durations accept milliseconds, `ms`, `s`, `m`, or `h`; deadlines accept RFC3339 text or Unix epoch milliseconds.
@@ -97,6 +97,7 @@ Regex/date operations require host tools.
 Keep large artifacts in variables; show small working state.
 
 Read full prior output via `history[N].output[M]`; print the variable or slice you need.
+
 - Several independent slow operations are needed -> use aggregate await over a record/list of direct module calls plus any pure values you want preserved, putting `?` on each operation leaf that should unwrap.
 - The trace is bloated, stale, or failed attempts dominate -> use an available continuation tool to switch to a fresh AgentFrame with concrete state.
 - See **Tools** for parameters and results.

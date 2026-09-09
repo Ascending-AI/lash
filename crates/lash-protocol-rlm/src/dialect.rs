@@ -435,6 +435,11 @@ impl DialectPromptVocabulary {
 pub(crate) trait RlmDialect: Send + Sync {
     fn language_id(&self) -> &'static str;
 
+    /// Whether execution prose embeds the canonical tool catalogue.
+    fn renders_tool_catalogue_inline(&self) -> bool {
+        false
+    }
+
     /// The words shared prompt fragments use when they name this dialect's
     /// syntax. See [`DialectPromptVocabulary`].
     fn prompt_vocabulary(&self) -> DialectPromptVocabulary;

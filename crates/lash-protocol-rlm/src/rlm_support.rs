@@ -84,6 +84,7 @@ pub fn format_budget_suffix(
         usage,
         max_budget_tokens,
         crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        true,
     )
 }
 
@@ -101,6 +102,7 @@ pub(crate) fn format_budget_suffix_with_vocabulary(
     usage: Option<&PromptUsage>,
     max_budget_tokens: Option<usize>,
     vocabulary: crate::dialect::DialectPromptVocabulary,
+    decomposition: bool,
 ) -> Option<String> {
     let max = max_budget_tokens?;
     let usage = usage?;
@@ -109,8 +111,20 @@ pub(crate) fn format_budget_suffix_with_vocabulary(
         return None;
     }
     let pct = used.saturating_mul(100) / max.max(1);
-    let mut content =
-        format!("Turn: {turn_index} · Tokens: {used} · frame switch threshold: {max} ({pct}%).");
+    let threshold = if decomposition {
+        "frame switch threshold"
+    } else {
+        "context budget"
+    };
+    let mut content = format!("Turn: {turn_index} · Tokens: {used} · {threshold}: {max} ({pct}%).");
+    if !decomposition {
+        if pct >= 60 {
+            content.push_str(
+                "\nBudget tight — finish concisely with the information already available.",
+            );
+        }
+        return Some(content);
+    }
     if pct >= 60 {
         let call = vocabulary.continue_as_call;
         let cell = vocabulary.cell_noun;
@@ -342,8 +356,6 @@ pub(crate) fn render_bound_variables(
     }
     if !registry.definitions.is_empty() {
         lines.push("\nSchema:".to_string());
-    }
-    if !registry.definitions.is_empty() {
         lines.push(String::new());
     }
     for (idx, (name, shape)) in registry.definitions.iter().enumerate() {
@@ -408,14 +420,22 @@ fn flow_value_descriptor_type(value: &FlowValue) -> &'static str {
     }
 }
 
-pub(crate) fn history_item_type_definition() -> Vec<String> {
-    vec![
+pub(crate) fn history_item_type_definition(images: bool) -> Vec<String> {
+    let image_field = if images {
+        ", images?: list[HistoryImage]"
+    } else {
+        ""
+    };
+    let mut lines = vec![
         "type HistoryItem =".to_string(),
         "  | { kind: \"message\", id: str, role: enum[\"user\", \"system\", \"assistant\", \"event\"], content: str, attachments?: list[HistoryAttachment] }".to_string(),
-        "  | { kind: \"lashlang_step\", id: str, protocol_iteration: int, code: str, output: list[str], images?: list[HistoryImage], error?: str | null, final_output?: any | null }".to_string(),
+        format!("  | {{ kind: \"lashlang_step\", id: str, protocol_iteration: int, code: str, output: list[str]{image_field}, error?: str | null, final_output?: any | null }}"),
         "type HistoryAttachment = { id: str, media_type?: str | null, label?: str | null, source: str, reference: str }".to_string(),
-        "type HistoryImage = { id: str, media_type: str, width?: int | null, height?: int | null, bytes: int, label?: str | null }".to_string(),
-    ]
+    ];
+    if images {
+        lines.push("type HistoryImage = { id: str, media_type: str, width?: int | null, height?: int | null, bytes: int, label?: str | null }".to_string());
+    }
+    lines
 }
 
 fn render_row_line(

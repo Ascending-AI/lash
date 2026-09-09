@@ -12,6 +12,7 @@ use crate::dialect::RlmDialect;
 use crate::projection::{decode_rlm_protocol_event, rlm_history_projection};
 
 pub(super) struct RlmHistoryRenderInput<'a> {
+    pub(super) images: bool,
     pub(super) dialect: &'a dyn RlmDialect,
     pub(super) events: &'a [lash_core::SessionHistoryRecord],
     pub(super) turn_messages: &'a lash_core::facade_support::MessageSequence,
@@ -27,6 +28,7 @@ pub(super) struct RlmHistoryRenderInput<'a> {
 
 #[derive(Clone, Copy)]
 pub(super) struct CurrentIterationMessageInput<'a> {
+    pub(super) images: bool,
     pub(super) history_len: usize,
     pub(super) history_has_structure: bool,
     pub(super) protocol_iteration: usize,
@@ -75,6 +77,7 @@ pub(super) fn build_rlm_history_messages_from_turn(
     append_current_iteration_message(
         &mut messages,
         CurrentIterationMessageInput {
+            images: input.images,
             history_len,
             history_has_structure,
             protocol_iteration: input.protocol_iteration,
@@ -353,7 +356,8 @@ fn append_current_iteration_message(
     );
     if input.history_has_structure {
         current_prompt.push_str("\n\nSchema:\n");
-        current_prompt.push_str(&crate::rlm_support::history_item_type_definition().join("\n"));
+        current_prompt
+            .push_str(&crate::rlm_support::history_item_type_definition(input.images).join("\n"));
     }
     if !input.bound_variables.is_empty() {
         current_prompt.push_str("\n\n");

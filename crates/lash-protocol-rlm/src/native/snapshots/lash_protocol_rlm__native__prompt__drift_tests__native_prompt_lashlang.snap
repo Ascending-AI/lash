@@ -24,7 +24,7 @@ Call `execute_code` once with a JSON object containing only the string `code`. P
 - Strings: single/double quotes and triple-quoted multiline forms support `\n`, `\r`, `\t`, escaped quotes and `\\`. Prefix any with `r` for raw text (JSON, patches, shell payloads). Interpolate with `format`, not f-strings.
 - Precedence: postfix calls/fields/indexing/result `?`; unary `-`/`!`/`not`; `* / %`; `+ -`; comparisons `== != < <= > >= in`; `and`/`&&`; `or`/`||`; ternary `? :`. `in` tests list/tuple membership, record keys or substrings; negate with `!(x in y)`, never `not in`. Unsupported pairs error; null haystacks return false.
 - `name = expr` persists across programs. Update paths: `record.field = v`, `record[key] = v`, `list[i] = v`, and nested paths. Record writes insert/replace; lists require existing indices. Record keys stringify; missing reads return null, so `counts[g] = counts[g] + 1` works.
-- Comprehensions: `[expr for x in xs if cond]`; multiple for/if clauses run left-to-right. Bindings are local. Use loops for mutation, break or continue.
+- Comprehensions: `[expr for x in xs if cond]`; multiple for/if clauses execute left-to-right. Bindings are local. Use loops for mutation, break or continue.
 - Pure functions: `fn f(x: type) -> type { body }`; types required; last expression returns; parameters-only scope. Call `f(arg)`; recursion and forward calls work. Arithmetic yields float: use `-> float`, not int. Keep effects outside functions and pass results in.
 - Tools: `await module.op({ field: value })?`; use only names under **Tools**. Bare calls are builtins; UpperCamel host constructors are pure (never await). `?` aborts on failure with sanitized operation metadata.
 - Sleep: pause foreground code with `sleep for "5s"` or `sleep until deadline`. Durations accept milliseconds, `ms`, `s`, `m`, or `h`; deadlines accept RFC3339 text or Unix epoch milliseconds.
@@ -91,6 +91,7 @@ Regex/date operations require host tools.
 Keep large artifacts in variables; show small working state.
 
 Read full prior output via `history[N].output[M]`; print the variable or slice you need.
+
 - The trace is bloated, stale, or failed attempts dominate -> use an available continuation tool to switch to a fresh AgentFrame with concrete state.This turn uses natural termination. Each assistant response must choose exactly one of these shapes:
 
 1. Continue working: include an `execute_code` call. Brief prose may appear before the code call; that prose is commentary/status for the action that follows. A program without `finish` is progress and continues the loop.

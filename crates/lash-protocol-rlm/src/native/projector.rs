@@ -25,9 +25,9 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     let tool_docs = crate::tool_catalog::rlm_prompt_tool_docs(
         tool_catalog,
         dialect.as_ref(),
-        config.prompt_features.decomposition,
+        config.prompt_features,
     );
-    if dialect.language_id() != "typescript" && !tool_docs.trim().is_empty() {
+    if !dialect.renders_tool_catalogue_inline() && !tool_docs.trim().is_empty() {
         prompt_contributions.push(PromptContribution::execution(
             "Tools",
             format!("Await these documented operations:\n\n{tool_docs}"),
@@ -41,6 +41,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
                 &dialect,
             ))),
             projector: Arc::new(NativeContextProjector {
+                prompt_features: config.prompt_features,
                 max_output_chars: config.max_output_chars,
                 max_budget_tokens: config.max_budget_tokens,
                 last_prompt_usage: config.last_prompt_usage,
@@ -69,6 +70,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
 }
 
 struct NativeContextProjector {
+    prompt_features: crate::protocol::RlmPromptFeatures,
     max_output_chars: usize,
     max_budget_tokens: Option<usize>,
     last_prompt_usage: SharedPromptUsage,
@@ -91,12 +93,14 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
             guard.as_ref(),
             effective_budget_tokens(self.max_budget_tokens, ctx.config.max_context_tokens),
             vocabulary,
+            self.prompt_features.decomposition,
         );
         let bound_variables_prompt = self.bound_variables_prompt.read_recover().clone();
 
         let mut messages = Vec::new();
         messages.extend(build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
+                images: self.prompt_features.images,
                 dialect: self.dialect.as_ref(),
                 events: ctx.events,
                 turn_messages: ctx.messages,

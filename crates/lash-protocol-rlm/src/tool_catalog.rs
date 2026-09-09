@@ -32,14 +32,17 @@ pub(crate) fn rlm_tool_catalog(
 pub(crate) fn rlm_prompt_tool_docs(
     tool_catalog: &ToolCatalog,
     dialect: &dyn crate::dialect::RlmDialect,
-    decomposition: bool,
+    features: crate::protocol::RlmPromptFeatures,
 ) -> String {
-    let vocabulary = dialect.prompt_vocabulary();
+    let mut vocabulary = dialect.prompt_vocabulary();
+    if !features.type_literals {
+        vocabulary.type_literal_hint = "";
+    }
     tool_catalog
         .tools
         .iter()
         .filter(|tool| tool.manifest.activation != ToolActivation::Internal)
-        .filter(|tool| decomposition || tool.manifest.name != "continue_as")
+        .filter(|tool| features.decomposition || tool.manifest.name != "continue_as")
         .filter_map(|tool| {
             let contract = tool_catalog.resolve_contract(&tool.manifest.name)?;
             let call_path = dialect
@@ -61,7 +64,7 @@ pub(crate) fn rlm_prompt_tool_docs(
             render_doc_field_prose(vocabulary, &mut compact.parameters);
             render_doc_field_prose(vocabulary, &mut compact.return_fields);
             let markdown = compact.render_markdown();
-            if dialect.language_id() == "typescript" {
+            if dialect.renders_tool_catalogue_inline() {
                 let signature = lash_typescript::render_tool_signature(
                     &call_path,
                     contract.input_schema.canonical(),
@@ -498,7 +501,11 @@ mod tests {
 
         assert!(catalog.has_callable_tool("fetch_url"));
         assert!(catalog.has_callable_tool("read_file"));
-        let docs = rlm_prompt_tool_docs(&catalog, &lashlang_test_dialect(), true);
+        let docs = rlm_prompt_tool_docs(
+            &catalog,
+            &lashlang_test_dialect(),
+            crate::protocol::RlmPromptFeatures::default(),
+        );
         assert!(docs.contains("web.fetch"), "{docs}");
         assert!(docs.contains("files.read"), "{docs}");
         // No legacy catalogue notes or tier filtering.
@@ -695,7 +702,11 @@ mod tests {
             contributions: vec![contribution],
         });
 
-        let docs = rlm_prompt_tool_docs(&catalog, &lashlang_test_dialect(), true);
+        let docs = rlm_prompt_tool_docs(
+            &catalog,
+            &lashlang_test_dialect(),
+            crate::protocol::RlmPromptFeatures::default(),
+        );
         assert!(docs.len() <= 768, "plan.update docs exceeded budget");
         assert!(docs.contains("plan.update("), "{docs}");
         assert!(
@@ -860,13 +871,20 @@ mod tests {
             contributions: vec![ToolCatalogContribution::default()],
         });
 
-        let lashlang = rlm_prompt_tool_docs(&catalog, &lashlang_test_dialect(), true);
+        let lashlang = rlm_prompt_tool_docs(
+            &catalog,
+            &lashlang_test_dialect(),
+            crate::protocol::RlmPromptFeatures::default(),
+        );
         assert!(
             lashlang.contains("or pass a `Type { ... }` literal for nested shapes"),
             "{lashlang}"
         );
-        let typescript =
-            rlm_prompt_tool_docs(&catalog, &crate::dialect::typescript_test_dialect(), true);
+        let typescript = rlm_prompt_tool_docs(
+            &catalog,
+            &crate::dialect::typescript_test_dialect(),
+            crate::protocol::RlmPromptFeatures::default(),
+        );
         assert!(
             typescript.contains("e.g. `{ queries: \"list[str]\" }`."),
             "{typescript}"

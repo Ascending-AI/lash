@@ -196,7 +196,7 @@ mod prompt_diet_tests {
     fn catalog() -> lash_core::ToolCatalog {
         lash_core::ToolCatalog::from_tool_definitions((0..7).map(|index| {
             lash_core::ToolDefinition::raw(format!("tool:probe{index}"), format!("probe{index}"),
-                "Return a STRING containing record-looking text, not a structured record.",
+                "Return a STRING containing record-looking text, not a structured record{{type_literal_hint}}.",
                 serde_json::json!({"type":"object","properties":{"id":{"type":"string","description":"Record identifier"}},"required":["id"]}),
                 serde_json::json!({"type":"string"}))
                 .with_tool_binding(ToolBinding::new(["probe"], format!("op{index}")))
@@ -242,10 +242,10 @@ mod prompt_diet_tests {
                 .render_execution_section(features, &catalog)
                 .unwrap()
         };
-        if dialect.language_id() != "typescript" {
+        if !dialect.renders_tool_catalogue_inline() {
             execution.push_str(&format!(
                 "\n\n### Tools\n\nAwait these documented operations:\n\n{}",
-                crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect, enabled)
+                crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect, features)
             ));
         }
         lash_core::PromptTemplate::default().render(&lash_sansio::PromptContext {
@@ -277,6 +277,7 @@ mod prompt_diet_tests {
                     "Background processes",
                     "wait_signal",
                     "signal_run",
+                    "Type { ... }",
                     "### Type literals",
                     "@label",
                     "Image",
@@ -324,6 +325,7 @@ mod prompt_diet_tests {
             };
             let text = crate::dialect::typescript::typescript_process_prompt(&abilities);
             for (needle, expected) in [
+                ("run", abilities.processes),
                 ("defineProcess", abilities.processes),
                 ("sleep(", abilities.sleep),
                 (
@@ -343,6 +345,61 @@ mod prompt_diet_tests {
     }
 
     #[test]
+    fn labels_without_processes_render_a_complete_sentence() {
+        let surface = LashlangSurface {
+            language_features: lashlang::LashlangLanguageFeatures::default()
+                .with_label_annotations(),
+            ..Default::default()
+        };
+        let dialect = crate::dialect::lashlang::LashlangDialect::prompt_only(surface);
+        let prompt = system(&dialect, false, true);
+        let labels = prompt
+            .lines()
+            .find(|line| line.starts_with("- Execution labels:"))
+            .unwrap();
+        assert!(labels.contains("At top level, label meaningful setup, resource calls, submissions, branches, and loops."), "{labels}");
+        assert!(!labels.contains(",s"), "{labels}");
+        assert!(!labels.contains("process"), "{labels}");
+    }
+
+    #[test]
+    fn toolbench_shaped_prompt_has_no_process_vocabulary() {
+        for typescript in [false, true] {
+            let surface = LashlangSurface {
+                language_features: lashlang::LashlangLanguageFeatures::default()
+                    .with_label_annotations(),
+                ..Default::default()
+            };
+            let dialect: Box<dyn RlmDialect> = if typescript {
+                Box::new(crate::dialect::typescript::TypescriptDialect::prompt_only(
+                    surface,
+                ))
+            } else {
+                Box::new(crate::dialect::lashlang::LashlangDialect::prompt_only(
+                    surface,
+                ))
+            };
+            let prompt = system(dialect.as_ref(), false, true);
+            for forbidden in [",s.", "process", "defineProcess", "waitSignal"] {
+                assert!(!prompt.contains(forbidden), "{forbidden}: {prompt}");
+            }
+            assert!(
+                !prompt
+                    .split(|c: char| !c.is_alphanumeric() && c != '_')
+                    .any(|word| word == "run")
+            );
+            if let Ok(directory) = std::env::var("LASH_PROMPT_CAPTURE_DIR") {
+                std::fs::write(
+                    std::path::Path::new(&directory)
+                        .join(format!("fig2750-fix1-{}.txt", dialect.language_id())),
+                    prompt,
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn continuation_docs_are_short_and_gated() {
         for dialect in [dialect(false, false), dialect(true, false)] {
             let tool =
@@ -350,12 +407,23 @@ mod prompt_diet_tests {
             assert!(tool.manifest().description.chars().count() <= 350);
             let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
             assert!(
-                crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect.as_ref(), false)
-                    .is_empty()
+                crate::tool_catalog::rlm_prompt_tool_docs(
+                    &catalog,
+                    dialect.as_ref(),
+                    crate::protocol::RlmPromptFeatures {
+                        decomposition: false,
+                        ..Default::default()
+                    }
+                )
+                .is_empty()
             );
             assert!(
-                crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect.as_ref(), true)
-                    .contains("Terminal action")
+                crate::tool_catalog::rlm_prompt_tool_docs(
+                    &catalog,
+                    dialect.as_ref(),
+                    crate::protocol::RlmPromptFeatures::default()
+                )
+                .contains("Terminal action")
             );
         }
     }
