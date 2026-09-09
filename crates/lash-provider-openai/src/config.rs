@@ -86,6 +86,22 @@ pub struct OpenAiCompat {
     /// is one the caller relies on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_routing: Option<ProviderRoutingPrefs>,
+    /// How this endpoint recovers the usage of a generation whose stream
+    /// ended before usage was reported (FIG-2765). Absent means the endpoint
+    /// has no such lookup and `Provider::reconcile_usage` answers `None`.
+    /// Explicit, never URL-derived (ADR 0072).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_reconciliation: Option<UsageReconciliation>,
+}
+
+/// Endpoint-specific after-the-fact usage lookup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageReconciliation {
+    /// OpenRouter's `GET {base_url}/generation?id=<generation id>` record,
+    /// which reports native token counts, total cost, and whether the
+    /// generation was cancelled.
+    OpenRouterGeneration,
 }
 
 impl OpenAiCompat {
@@ -110,6 +126,7 @@ impl OpenAiCompat {
             reasoning_format: Some(ReasoningWireFormat::openrouter()),
             cache_session_affinity: Some(true),
             stream_termination: Some(StreamTermination::RequireTerminalEvidence),
+            usage_reconciliation: Some(UsageReconciliation::OpenRouterGeneration),
             ..Self::default()
         }
     }

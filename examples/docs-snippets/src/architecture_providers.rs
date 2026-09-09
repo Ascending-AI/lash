@@ -5,7 +5,7 @@ use std::sync::Arc;
 use lash::direct::ProviderRouteIdentity;
 use lash::provider::{
     LlmRequest, LlmResponse, LlmTransportError, Provider, ProviderComponents, ProviderHandle,
-    ProviderOptions,
+    ProviderOptions, ReconciledUsage,
 };
 
 // docs:start:admission-window
@@ -51,6 +51,12 @@ impl Provider for AdmissionGate {
     // silently skip the inner provider's transport shutdown.
     async fn close(&self) -> Result<(), LlmTransportError> {
         self.inner.close().await
+    }
+    async fn reconcile_usage(
+        &mut self,
+        generation_id: &str,
+    ) -> Result<Option<ReconciledUsage>, LlmTransportError> {
+        self.inner.reconcile_usage(generation_id).await
     }
 
     fn kind(&self) -> &'static str {

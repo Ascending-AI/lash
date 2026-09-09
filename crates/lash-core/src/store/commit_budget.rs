@@ -584,6 +584,7 @@ mod tests {
             source: "u".repeat(BYTE_LIMIT * 2),
             model: "budget-model".to_string(),
             usage: crate::TokenUsage::default(),
+            usage_disposition: Default::default(),
         };
         commit.usage_deltas =
             crate::store::RuntimeUsageDelta::for_operation(&commit.turn_commit.operation, &[usage])
@@ -648,6 +649,7 @@ mod tests {
                 output_tokens: 2,
                 ..crate::TokenUsage::default()
             },
+            usage_disposition: Default::default(),
         };
         let budget = CommitBudget::new(
             CommitBudgetLimit::bounded(BYTE_LIMIT),

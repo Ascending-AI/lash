@@ -186,6 +186,92 @@ impl LashRuntime {
         SessionUsageReport::from_entries_with_saturation(&entries, saturated)
     }
 
+    /// Attempts of finished turns whose usage never arrived after an abort or
+    /// failure and have not been reconciled (ADR 0031). The ledger already
+    /// carries them as unreported rows; this is their attribution.
+    pub fn unreported_usage_attempts(&self) -> &[UnreportedUsageAttempt] {
+        &self.unreported_usage_attempts
+    }
+
+    /// Ask the session's provider for the usage of every registered
+    /// unreported attempt and append one `Reconciled` correction row per
+    /// recovered generation (FIG-2765).
+    ///
+    /// Host-invoked and never on the turn hot path: each lookup is bounded by
+    /// the provider (timeout plus one retry). Rows are append-only; the
+    /// unreported row written at turn end is never rewritten, and
+    /// [`UsageTotals::unreported_attempts`] derives the outstanding hole from
+    /// both. Corrections ride the shared pending ledger and persist at the
+    /// next usage-ledger boundary like live usage does. Attempts the provider
+    /// cannot resolve stay registered and come back as `unresolved`.
+    pub async fn reconcile_unreported_usage(
+        &mut self,
+    ) -> Result<UsageReconciliationReport, SessionError> {
+        let mut report = UsageReconciliationReport::default();
+        if self.unreported_usage_attempts.is_empty() {
+            return Ok(report);
+        }
+        let session_id = self.state.session_id.clone();
+        let policy = self.state.effective_policy().clone();
+        let mut provider = self
+            .host
+            .resolve_session_policy(&session_id, policy)?
+            .binding
+            .provider;
+        let pending = std::mem::take(&mut self.unreported_usage_attempts);
+        for attempt in pending {
+            let Some(generation_id) = attempt.generation_id.as_deref() else {
+                report.unresolved.push(attempt);
+                continue;
+            };
+            match provider.reconcile_usage(generation_id).await {
+                Ok(Some(reconciled)) => {
+                    let crate::llm::types::LlmUsage {
+                        input_tokens,
+                        output_tokens,
+                        cache_read_input_tokens,
+                        cache_write_input_tokens,
+                        reasoning_output_tokens,
+                    } = reconciled.usage;
+                    let usage = TokenUsage {
+                        input_tokens,
+                        output_tokens,
+                        cache_read_input_tokens,
+                        cache_write_input_tokens,
+                        reasoning_output_tokens,
+                    };
+                    session_manager::record_reconciled_usage_shared(
+                        &self.shared_token_ledger,
+                        &attempt.source,
+                        &attempt.model,
+                        &usage,
+                        &attempt.call_id,
+                        attempt.attempt_ordinal,
+                    );
+                    report.reconciled.push(ReconciledUsageAttempt {
+                        attempt,
+                        usage,
+                        provider_usage: reconciled.provider_usage,
+                    });
+                }
+                Ok(None) => report.unresolved.push(attempt),
+                Err(error) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        call_id = %attempt.call_id,
+                        attempt_ordinal = attempt.attempt_ordinal,
+                        generation_id,
+                        error = %error,
+                        "usage reconciliation lookup failed; attempt stays unreported"
+                    );
+                    report.unresolved.push(attempt);
+                }
+            }
+        }
+        self.unreported_usage_attempts = report.unresolved.clone();
+        Ok(report)
+    }
+
     pub async fn await_background_work(&mut self) -> Result<(), SessionError> {
         if self.process_sync_needed.swap(false, Ordering::AcqRel) {
             self.refresh_session_graph_from_store().await?;

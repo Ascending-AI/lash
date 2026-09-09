@@ -163,6 +163,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             cache_write_input_tokens: 3,
             reasoning_output_tokens: 2,
         },
+        usage_disposition: Default::default(),
     };
     let legacy_operation = OperationId::new(
         ExecutionScope::runtime_operation("durable-read-legacy-commit"),

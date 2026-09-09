@@ -18,6 +18,16 @@
 //!   across the whole session, broken down by `source` × `model`. Right for
 //!   dashboards and "session so far."
 //!
+//! Absence is not zero (ADR 0031). A provider call the runtime aborted at an
+//! RLM cell boundary, or that failed mid-stream, may end before the provider
+//! reports usage; it was still billed. Such attempts carry a typed
+//! `usage_disposition` on their attempt record and the ledger gets an
+//! `Unreported` row for them even at zero usage, so
+//! [`UsageTotals::unreported_attempts`] tells a host how many calls the
+//! counters do not cover. `session.reconcile_unreported_usage()` asks the
+//! provider after the fact and appends `Reconciled` correction rows
+//! ([`LedgerUsageDisposition`]) that the totals sum.
+//!
 //! Usage buckets are provider-normalized before they reach these surfaces:
 //! `input_tokens` is uncached ordinary input, `cache_read_input_tokens` is
 //! cached prompt input read from the provider cache, `cache_write_input_tokens`
@@ -33,7 +43,9 @@
 //! [`TurnReport::total_usage`]: crate::TurnReport::total_usage
 
 pub use lash_core::{
-    TokenLedgerEntry, TokenUsage, TokenUsageOverflow, facade_support::SessionUsageReport,
+    LedgerUsageDisposition, TokenLedgerEntry, TokenUsage, TokenUsageOverflow,
+    facade_support::ReconciledUsageAttempt, facade_support::SessionUsageReport,
+    facade_support::UnreportedUsageAttempt, facade_support::UsageReconciliationReport,
     facade_support::UsageReportRow, facade_support::UsageTotals, facade_support::diff_token_ledger,
     facade_support::diff_usage_reports,
 };

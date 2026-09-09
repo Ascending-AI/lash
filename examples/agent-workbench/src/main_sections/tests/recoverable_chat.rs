@@ -1200,6 +1200,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                     cache_write_input_tokens: 2,
                     reasoning_output_tokens: 5,
                 }),
+                usage_disposition: Default::default(),
             },
             lash::remote::llm::RemoteAttemptRecord {
                 ordinal: 2,
@@ -1213,6 +1214,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                 evidence: None,
                 generation_disposition: None,
                 usage: None,
+                usage_disposition: Default::default(),
             },
         ],
     };

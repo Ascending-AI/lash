@@ -6,11 +6,13 @@ impl From<lash_core::TokenLedgerEntry> for RemoteTokenLedgerEntry {
             source,
             model,
             usage,
+            usage_disposition,
         } = value;
         Self {
             source,
             model,
             usage: usage.into(),
+            usage_disposition: usage_disposition.into(),
         }
     }
 }
@@ -21,11 +23,47 @@ impl From<RemoteTokenLedgerEntry> for lash_core::TokenLedgerEntry {
             source,
             model,
             usage,
+            usage_disposition,
         } = value;
         Self {
             source,
             model,
             usage: usage.into(),
+            usage_disposition: usage_disposition.into(),
+        }
+    }
+}
+
+impl From<lash_core::LedgerUsageDisposition> for RemoteLedgerUsageDisposition {
+    fn from(value: lash_core::LedgerUsageDisposition) -> Self {
+        match value {
+            lash_core::LedgerUsageDisposition::Reported => Self::Reported,
+            lash_core::LedgerUsageDisposition::Unreported { attempts } => {
+                Self::Unreported { attempts }
+            }
+            lash_core::LedgerUsageDisposition::Reconciled {
+                call_id,
+                attempt_ordinal,
+            } => Self::Reconciled {
+                call_id,
+                attempt_ordinal,
+            },
+        }
+    }
+}
+
+impl From<RemoteLedgerUsageDisposition> for lash_core::LedgerUsageDisposition {
+    fn from(value: RemoteLedgerUsageDisposition) -> Self {
+        match value {
+            RemoteLedgerUsageDisposition::Reported => Self::Reported,
+            RemoteLedgerUsageDisposition::Unreported { attempts } => Self::Unreported { attempts },
+            RemoteLedgerUsageDisposition::Reconciled {
+                call_id,
+                attempt_ordinal,
+            } => Self::Reconciled {
+                call_id,
+                attempt_ordinal,
+            },
         }
     }
 }

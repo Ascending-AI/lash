@@ -242,6 +242,7 @@ fn usage_entry(slot: u8, value: u8) -> crate::TokenLedgerEntry {
         source: format!("property-usage-source-{}", slot % 3),
         model: format!("property-usage-model-{}", slot % 2),
         usage,
+        usage_disposition: Default::default(),
     }
 }
 

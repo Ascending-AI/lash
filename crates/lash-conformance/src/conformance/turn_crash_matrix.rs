@@ -833,6 +833,15 @@ impl Provider for SeamProvider {
     async fn close(&self) -> Result<(), crate::llm::transport::LlmTransportError> {
         self.inner.close().await
     }
+    async fn reconcile_usage(
+        &mut self,
+        generation_id: &str,
+    ) -> Result<
+        Option<lash_core::provider::ReconciledUsage>,
+        crate::llm::transport::LlmTransportError,
+    > {
+        self.inner.reconcile_usage(generation_id).await
+    }
     fn clone_boxed(&self) -> Box<dyn Provider> {
         Box::new(self.clone())
     }

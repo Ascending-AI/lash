@@ -332,6 +332,7 @@ impl Store {
                     source: row.get(0)?,
                     model: row.get(1)?,
                     usage,
+                    usage_disposition: Default::default(),
                 })
             })
             .map_err(sqlite_error)?;

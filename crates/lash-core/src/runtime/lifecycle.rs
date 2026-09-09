@@ -299,6 +299,7 @@ impl LashRuntime {
             managed_sessions: Arc::new(Mutex::new(HashMap::new())),
             managed_turns: Arc::new(StdMutex::new(HashMap::new())),
             shared_token_ledger: Arc::new(std::sync::Mutex::new(Vec::new())),
+            unreported_usage_attempts: Vec::new(),
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             resident_graph_head_stale: Arc::new(AtomicBool::new(false)),
             turn_phase_probe: None,

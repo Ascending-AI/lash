@@ -46,8 +46,8 @@ pub use session_manager::append_receipt_mixed_usage_envelope_conformance;
 pub use session_manager::append_usage_cancellation_exactly_once_conformance;
 #[cfg(any(test, feature = "testing"))]
 pub use session_manager::{
-    PendingTokenLedgerEntry, StagedTokenLedger, record_token_usage_shared,
-    stage_token_ledger_shared,
+    PendingTokenLedgerEntry, StagedTokenLedger, record_reconciled_usage_shared,
+    record_token_usage_shared, record_unreported_attempts_shared, stage_token_ledger_shared,
 };
 mod session_ops;
 mod session_store_factory_types;
@@ -303,8 +303,9 @@ pub use turn_queue::{
 };
 pub(crate) use turn_queue::{SessionCommandSettlement, SessionCommandSettlementHandle};
 pub use usage::{
-    SessionUsageReport, TokenLedgerEntry, UsageReportRow, UsageTotals, diff_token_ledger,
-    diff_usage_reports,
+    LedgerUsageDisposition, ReconciledUsageAttempt, SessionUsageReport, TokenLedgerEntry,
+    UnreportedUsageAttempt, UsageReconciliationReport, UsageReportRow, UsageTotals,
+    diff_token_ledger, diff_usage_reports,
 };
 use usage::{merge_ledger_entry_saturating, normalize_prompt_usage};
 pub use worker_capacity::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
@@ -1516,6 +1517,11 @@ pub struct LashRuntime {
     /// Materialization resolved protocol facts that must be durable before queued work may
     /// reconstruct this session in another runtime.
     pub(in crate::runtime) materialized_protocol_config_dirty: bool,
+    /// Attempts whose usage never arrived after an abort or failure, not yet
+    /// reconciled (FIG-2765). Runtime-resident: persisted holes live in the
+    /// ledger's unreported rows; this is the attribution a later
+    /// [`LashRuntime::reconcile_unreported_usage`] needs.
+    pub(in crate::runtime) unreported_usage_attempts: Vec<UnreportedUsageAttempt>,
 }
 
 #[cfg(any(test, feature = "testing"))]

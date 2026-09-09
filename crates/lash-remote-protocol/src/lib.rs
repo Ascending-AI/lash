@@ -130,7 +130,10 @@ pub use usage_activity::*;
 // Exact-match negotiation refuses version-52 peers; no tolerant decoding.
 // Window 55: FIG-2505 separates initial instructions from positional runtime
 // feedback and carries host instruction capabilities. Peers must adopt 55.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 55;
+// Window 56: FIG-2765 carries the typed usage disposition on attempt records
+// and token-ledger rows (unreported holes, reconciled corrections) plus the
+// report's unreported/reconciled attempt counts. Peers must adopt 56.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 56;
 
 /// One versioned remote-protocol message.
 ///

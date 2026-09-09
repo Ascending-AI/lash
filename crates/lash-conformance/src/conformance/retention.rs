@@ -23,6 +23,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::SessionStoreFactory>)
             output_tokens: 3,
             ..Default::default()
         },
+        usage_disposition: Default::default(),
     };
     let commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[usage]);
     let receipt = store.commit_runtime_state(commit.clone()).await.unwrap();

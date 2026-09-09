@@ -6,7 +6,7 @@ pub fn merge_token_ledger_entry_checked(
     ledger: &mut Vec<crate::TokenLedgerEntry>,
     entry: crate::TokenLedgerEntry,
 ) -> Result<(), StoreError> {
-    if entry.usage.is_zero() {
+    if entry.usage_disposition.row_is_empty(&entry.usage) {
         return Ok(());
     }
     entry
@@ -17,10 +17,13 @@ pub fn merge_token_ledger_entry_checked(
             model: entry.model.clone(),
             counter: overflow.counter(),
         })?;
-    let Some(existing) = ledger
-        .iter_mut()
-        .find(|existing| existing.source == entry.source && existing.model == entry.model)
-    else {
+    let Some(existing) = ledger.iter_mut().find(|existing| {
+        existing.source == entry.source
+            && existing.model == entry.model
+            && existing
+                .usage_disposition
+                .accumulates_with(&entry.usage_disposition)
+    }) else {
         ledger.push(entry);
         return Ok(());
     };
@@ -28,10 +31,20 @@ pub fn merge_token_ledger_entry_checked(
         .usage
         .checked_add(&entry.usage)
         .map_err(|overflow| StoreError::TokenUsageAccountingOverflow {
-            usage_source: entry.source,
-            model: entry.model,
+            usage_source: entry.source.clone(),
+            model: entry.model.clone(),
             counter: overflow.counter(),
         })?;
+    if existing
+        .usage_disposition
+        .absorb_saturating(&entry.usage_disposition)
+    {
+        return Err(StoreError::TokenUsageAccountingOverflow {
+            usage_source: entry.source,
+            model: entry.model,
+            counter: "unreported_attempts",
+        });
+    }
     existing.usage = merged;
     Ok(())
 }

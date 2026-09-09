@@ -132,6 +132,7 @@ async fn usage_ledger_retry_with_staged_usage_after_head_advance() {
         source: source.into(),
         model: "ledger-model".into(),
         usage: lash_core::TokenUsage::default(),
+        usage_disposition: Default::default(),
     };
     let usage_commit = |state: &RuntimeSessionState, source: &str| {
         let mut commit = commit_state("child-turn", "usage-ledger", state);

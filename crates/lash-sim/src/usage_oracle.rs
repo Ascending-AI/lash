@@ -206,15 +206,27 @@ mod tests {
             "unmutated generated usage must conserve: {}",
             baseline.message
         );
+        // Drop a row that carries usage. Zero-usage rows are legitimate too
+        // (FIG-2765 unreported-attempt holes), but the conservation oracle
+        // sums counters, so only a counted contribution can go missing.
+        let carries_usage = |row: &serde_json::Value| {
+            row.get("usage")
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(|usage| usage.values().any(|value| value.as_i64() != Some(0)))
+        };
         let submitted = trace
             .durable_writes
             .iter_mut()
             .filter_map(|write| write.state.as_mut())
             .filter_map(|state| state.submitted_usage_rows.as_array_mut())
-            .find(|rows| !rows.is_empty())
-            .expect("seed 5 records a checkpoint usage entry");
+            .find(|rows| rows.iter().any(carries_usage))
+            .expect("seed 5 records a checkpoint usage entry with usage");
+        let index = submitted
+            .iter()
+            .position(carries_usage)
+            .expect("a counted usage row");
 
-        submitted.pop();
+        submitted.remove(index);
 
         let verdict = checkpoint_usage_conservation(&trace.durable_writes);
         assert!(!verdict.is_passed(), "dropped usage entry must be red");

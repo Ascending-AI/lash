@@ -1099,6 +1099,7 @@ async fn commit_rejects_usage_delta_bytes_over_budget(store: Arc<dyn RuntimePers
             source: "u".repeat(BYTE_LIMIT * 2),
             model: "budget-model".to_string(),
             usage: TokenUsage::default(),
+            usage_disposition: Default::default(),
         }],
     )
     .expect("identify the oversized usage delta");
@@ -1159,6 +1160,7 @@ async fn commit_with_every_payload_family_inside_budget_succeeds(
             output_tokens: 2,
             ..TokenUsage::default()
         },
+        usage_disposition: Default::default(),
     };
     let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(
         &state,
@@ -1280,6 +1282,7 @@ async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePersistence>) {
             reasoning_output_tokens: 9,
             ..TokenUsage::default()
         },
+        usage_disposition: Default::default(),
     };
     commit_runtime_state_for_test(
         &store,
@@ -1312,6 +1315,7 @@ async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimePersistence>) {
                 input_tokens: i64::MAX,
                 ..TokenUsage::default()
             },
+            usage_disposition: Default::default(),
         },
         TokenLedgerEntry {
             source: "overflow".to_string(),
@@ -1320,6 +1324,7 @@ async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimePersistence>) {
                 input_tokens: 1,
                 ..TokenUsage::default()
             },
+            usage_disposition: Default::default(),
         },
     ];
     commit_runtime_state_for_test(
@@ -1427,6 +1432,7 @@ async fn usage_delta_identity_is_idempotent_across_commits(store: Arc<dyn Runtim
             cache_write_input_tokens: 3,
             reasoning_output_tokens: 2,
         },
+        usage_disposition: Default::default(),
     };
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
@@ -1480,6 +1486,7 @@ async fn usage_ordinal_reuse_with_different_payload_survives_receipt_replay(
             cache_write_input_tokens: 0,
             reasoning_output_tokens: 0,
         },
+        usage_disposition: Default::default(),
     };
     let first_usage = usage(11);
     let later_usage = usage(29);
@@ -3662,6 +3669,7 @@ async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) 
             cache_write_input_tokens: 0,
             reasoning_output_tokens: 5,
         },
+        usage_disposition: Default::default(),
     };
 
     commit_runtime_state_for_test(

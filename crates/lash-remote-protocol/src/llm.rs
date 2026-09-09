@@ -295,6 +295,30 @@ pub struct RemoteAttemptRecord {
     pub generation_disposition: Option<RemoteGenerationReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<RemoteUsage>,
+    /// Whether `usage` was provider-reported or the attempt ended before the
+    /// provider's usage arrived (ADR 0031). Absent means reported.
+    #[serde(
+        default,
+        skip_serializing_if = "RemoteAttemptUsageDisposition::is_reported"
+    )]
+    pub usage_disposition: RemoteAttemptUsageDisposition,
+}
+
+/// Wire mirror of [`lash_core::AttemptUsageDisposition`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteAttemptUsageDisposition {
+    #[default]
+    Reported,
+    UnreportedByProvider,
+    UnreportedAfterAbort,
+    UnreportedAfterFailure,
+}
+
+impl RemoteAttemptUsageDisposition {
+    pub fn is_reported(&self) -> bool {
+        matches!(self, Self::Reported)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

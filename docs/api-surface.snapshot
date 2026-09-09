@@ -201,6 +201,7 @@ lash::LashCore::triggers
 lash::LashCore::turn_work_driver
 lash::LashCore::unpin
 lash::LashCoreBuilder
+lash::LashCoreBuilder::abort_drain_grace
 lash::LashCoreBuilder::advanced
 lash::LashCoreBuilder::attachment_store
 lash::LashCoreBuilder::build
@@ -269,6 +270,7 @@ lash::LashSession::policy_snapshot
 lash::LashSession::queued_turn
 lash::LashSession::queued_work
 lash::LashSession::read_view
+lash::LashSession::reconcile_unreported_usage
 lash::LashSession::refresh_background_graph
 lash::LashSession::remote_turn_input_applications
 lash::LashSession::request_turn_cancel
@@ -281,6 +283,7 @@ lash::LashSession::turn
 lash::LashSession::turn_address
 lash::LashSession::turn_input_applications
 lash::LashSession::turn_scope
+lash::LashSession::unreported_usage_attempts
 lash::LashSession::usage_report
 lash::LlmCallRecord
 lash::LlmCallRecord::attempts
@@ -4295,6 +4298,7 @@ lash::prelude::LashCore::triggers
 lash::prelude::LashCore::turn_work_driver
 lash::prelude::LashCore::unpin
 lash::prelude::LashCoreBuilder
+lash::prelude::LashCoreBuilder::abort_drain_grace
 lash::prelude::LashCoreBuilder::advanced
 lash::prelude::LashCoreBuilder::attachment_store
 lash::prelude::LashCoreBuilder::build
@@ -4363,6 +4367,7 @@ lash::prelude::LashSession::policy_snapshot
 lash::prelude::LashSession::queued_turn
 lash::prelude::LashSession::queued_work
 lash::prelude::LashSession::read_view
+lash::prelude::LashSession::reconcile_unreported_usage
 lash::prelude::LashSession::refresh_background_graph
 lash::prelude::LashSession::remote_turn_input_applications
 lash::prelude::LashSession::request_turn_cancel
@@ -4375,6 +4380,7 @@ lash::prelude::LashSession::turn
 lash::prelude::LashSession::turn_address
 lash::prelude::LashSession::turn_input_applications
 lash::prelude::LashSession::turn_scope
+lash::prelude::LashSession::unreported_usage_attempts
 lash::prelude::LashSession::usage_report
 lash::prelude::ModelLimits
 lash::prelude::ModelLimits::context_window_tokens
@@ -5724,6 +5730,14 @@ lash::provider::AttemptOutcome::Aborted
 lash::provider::AttemptOutcome::Completed
 lash::provider::AttemptOutcome::Failed
 lash::provider::AttemptOutcome::Interrupted
+lash::provider::AttemptUsageDisposition
+lash::provider::AttemptUsageDisposition::Reported
+lash::provider::AttemptUsageDisposition::UnreportedAfterAbort
+lash::provider::AttemptUsageDisposition::UnreportedAfterFailure
+lash::provider::AttemptUsageDisposition::UnreportedByProvider
+lash::provider::AttemptUsageDisposition::for_attempt
+lash::provider::AttemptUsageDisposition::is_reported
+lash::provider::AttemptUsageDisposition::is_unreported_after_interruption
 lash::provider::CacheControlDialect
 lash::provider::CacheControlDialect::Anthropic
 lash::provider::CacheControlDialect::Gemini
@@ -5891,6 +5905,7 @@ lash::provider::Provider::complete
 lash::provider::Provider::generation_retry_guarantee
 lash::provider::Provider::kind
 lash::provider::Provider::options
+lash::provider::Provider::reconcile_usage
 lash::provider::Provider::requires_streaming
 lash::provider::Provider::route_identity
 lash::provider::Provider::serialize_config
@@ -5931,6 +5946,7 @@ lash::provider::ProviderHandle::complete_with_charge_safety
 lash::provider::ProviderHandle::kind
 lash::provider::ProviderHandle::new
 lash::provider::ProviderHandle::options
+lash::provider::ProviderHandle::reconcile_usage
 lash::provider::ProviderHandle::requires_streaming
 lash::provider::ProviderHandle::route_identity
 lash::provider::ProviderHandle::set_options
@@ -6012,6 +6028,9 @@ lash::provider::ReasoningSelection::Effort
 lash::provider::ReasoningSelection::Effort::0
 lash::provider::ReasoningSelection::ProviderDefault
 lash::provider::ReasoningSelection::effort
+lash::provider::ReconciledUsage
+lash::provider::ReconciledUsage::provider_usage
+lash::provider::ReconciledUsage::usage
 lash::provider::RequestTimeout
 lash::provider::RequestTimeout::Disabled
 lash::provider::RequestTimeout::Millis
@@ -6168,6 +6187,7 @@ lash::remote::llm::RemoteAttemptRecord::retry_budget_consumed
 lash::remote::llm::RemoteAttemptRecord::retry_decision
 lash::remote::llm::RemoteAttemptRecord::started_at_ms
 lash::remote::llm::RemoteAttemptRecord::usage
+lash::remote::llm::RemoteAttemptRecord::usage_disposition
 lash::remote::llm::RemoteDiagnostic
 lash::remote::llm::RemoteDiagnostic::code
 lash::remote::llm::RemoteDiagnostic::data
@@ -7355,6 +7375,7 @@ lash::remote::usage::RemoteTokenLedgerEntry
 lash::remote::usage::RemoteTokenLedgerEntry::model
 lash::remote::usage::RemoteTokenLedgerEntry::source
 lash::remote::usage::RemoteTokenLedgerEntry::usage
+lash::remote::usage::RemoteTokenLedgerEntry::usage_disposition
 lash::remote::usage::RemoteTurnActivity
 lash::remote::usage::RemoteTurnActivity::correlation_id
 lash::remote::usage::RemoteTurnActivity::decode_json
@@ -7880,6 +7901,7 @@ lash::runtime::LashRuntime::process_service
 lash::runtime::LashRuntime::protocol_turn_options
 lash::runtime::LashRuntime::query_plugin
 lash::runtime::LashRuntime::read_view
+lash::runtime::LashRuntime::reconcile_unreported_usage
 lash::runtime::LashRuntime::refresh_session_tool_catalog
 lash::runtime::LashRuntime::replace_prompt_slot
 lash::runtime::LashRuntime::restore_execution_state
@@ -7907,6 +7929,7 @@ lash::runtime::LashRuntime::submit_session_command
 lash::runtime::LashRuntime::tool_state
 lash::runtime::LashRuntime::trigger_registrations_by_source_type
 lash::runtime::LashRuntime::unregister_plugin_session
+lash::runtime::LashRuntime::unreported_usage_attempts
 lash::runtime::LashRuntime::update_session_config
 lash::runtime::LashRuntime::usage_report
 lash::runtime::LashRuntime::validate_protocol_turn_extension
@@ -8104,6 +8127,7 @@ lash::runtime::QueuedWorkWakeOutcome::Exhausted
 lash::runtime::QueuedWorkWakeOutcome::Retrying
 lash::runtime::QueuedWorkWakeOutcome::Terminal
 lash::runtime::RuntimeControlConfig
+lash::runtime::RuntimeControlConfig::abort_drain_grace
 lash::runtime::RuntimeControlConfig::effect_host
 lash::runtime::RuntimeControlConfig::lease_timings
 lash::runtime::RuntimeControlConfig::managed_turn_concurrency_limit
@@ -8281,6 +8305,7 @@ lash::runtime::RuntimeEffectReplayMismatchReport::divergent_path_count
 lash::runtime::RuntimeEffectReplayMismatchReport::first_divergent_paths
 lash::runtime::RuntimeEnvironmentBuilder
 lash::runtime::RuntimeEnvironmentBuilder::build
+lash::runtime::RuntimeEnvironmentBuilder::with_abort_drain_grace
 lash::runtime::RuntimeEnvironmentBuilder::with_attachment_store
 lash::runtime::RuntimeEnvironmentBuilder::with_cleared_prompt_slot
 lash::runtime::RuntimeEnvironmentBuilder::with_effect_host
@@ -10528,6 +10553,21 @@ lash::turn::TurnStream::finish
 lash::turn::TurnStream::next_activity
 lash::turn::message_role
 lash::turn::message_text
+lash::usage::LedgerUsageDisposition
+lash::usage::LedgerUsageDisposition::Reconciled
+lash::usage::LedgerUsageDisposition::Reconciled::attempt_ordinal
+lash::usage::LedgerUsageDisposition::Reconciled::call_id
+lash::usage::LedgerUsageDisposition::Reported
+lash::usage::LedgerUsageDisposition::Unreported
+lash::usage::LedgerUsageDisposition::Unreported::attempts
+lash::usage::LedgerUsageDisposition::accumulates_with
+lash::usage::LedgerUsageDisposition::is_reported
+lash::usage::LedgerUsageDisposition::reconciled_attempts
+lash::usage::LedgerUsageDisposition::unreported_attempts
+lash::usage::ReconciledUsageAttempt
+lash::usage::ReconciledUsageAttempt::attempt
+lash::usage::ReconciledUsageAttempt::provider_usage
+lash::usage::ReconciledUsageAttempt::usage
 lash::usage::SessionUsageReport
 lash::usage::SessionUsageReport::by_model
 lash::usage::SessionUsageReport::by_source
@@ -10538,8 +10578,10 @@ lash::usage::SessionUsageReport::saturated
 lash::usage::SessionUsageReport::usage
 lash::usage::TokenLedgerEntry
 lash::usage::TokenLedgerEntry::model
+lash::usage::TokenLedgerEntry::reported
 lash::usage::TokenLedgerEntry::source
 lash::usage::TokenLedgerEntry::usage
+lash::usage::TokenLedgerEntry::usage_disposition
 lash::usage::TokenUsage
 lash::usage::TokenUsage::cache_read_input_tokens
 lash::usage::TokenUsage::cache_write_input_tokens
@@ -10554,12 +10596,23 @@ lash::usage::TokenUsage::reasoning_output_tokens
 lash::usage::TokenUsage::total
 lash::usage::TokenUsageOverflow
 lash::usage::TokenUsageOverflow::counter
+lash::usage::UnreportedUsageAttempt
+lash::usage::UnreportedUsageAttempt::attempt_ordinal
+lash::usage::UnreportedUsageAttempt::call_id
+lash::usage::UnreportedUsageAttempt::generation_id
+lash::usage::UnreportedUsageAttempt::model
+lash::usage::UnreportedUsageAttempt::source
+lash::usage::UsageReconciliationReport
+lash::usage::UsageReconciliationReport::reconciled
+lash::usage::UsageReconciliationReport::unresolved
 lash::usage::UsageReportRow
 lash::usage::UsageReportRow::model
 lash::usage::UsageReportRow::source
 lash::usage::UsageReportRow::usage
 lash::usage::UsageTotals
+lash::usage::UsageTotals::reconciled_attempts
 lash::usage::UsageTotals::total_tokens
+lash::usage::UsageTotals::unreported_attempts
 lash::usage::UsageTotals::usage
 lash::usage::diff_token_ledger
 lash::usage::diff_usage_reports

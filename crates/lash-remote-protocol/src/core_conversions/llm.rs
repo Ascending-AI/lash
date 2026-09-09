@@ -567,6 +567,7 @@ impl From<core_llm::AttemptRecord> for RemoteAttemptRecord {
             evidence,
             generation_disposition,
             usage,
+            usage_disposition,
         } = value;
         Self {
             ordinal,
@@ -580,6 +581,20 @@ impl From<core_llm::AttemptRecord> for RemoteAttemptRecord {
             evidence: evidence.map(Into::into),
             generation_disposition: generation_disposition.map(Into::into),
             usage: usage.map(Into::into),
+            usage_disposition: usage_disposition.into(),
+        }
+    }
+}
+
+impl From<core_llm::AttemptUsageDisposition> for RemoteAttemptUsageDisposition {
+    fn from(value: core_llm::AttemptUsageDisposition) -> Self {
+        match value {
+            core_llm::AttemptUsageDisposition::Reported => Self::Reported,
+            core_llm::AttemptUsageDisposition::UnreportedByProvider => Self::UnreportedByProvider,
+            core_llm::AttemptUsageDisposition::UnreportedAfterAbort => Self::UnreportedAfterAbort,
+            core_llm::AttemptUsageDisposition::UnreportedAfterFailure => {
+                Self::UnreportedAfterFailure
+            }
         }
     }
 }

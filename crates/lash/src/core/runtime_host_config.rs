@@ -55,6 +55,7 @@ impl LashCoreBuilder {
             (self.trace_level.is_some(), "trace_level"),
             (self.trace_context.is_some(), "trace_context"),
             (self.termination.is_some(), "termination"),
+            (self.abort_drain_grace.is_some(), "abort_drain_grace"),
             (self.lease_timings.is_some(), "lease_timings"),
             (self.clock.is_some(), "clock"),
             (
@@ -115,6 +116,9 @@ impl LashCoreBuilder {
         }
         if let Some(termination) = self.termination.take() {
             core.control.termination = termination;
+        }
+        if let Some(abort_drain_grace) = self.abort_drain_grace.take() {
+            core.control.abort_drain_grace = abort_drain_grace;
         }
         if let Some(lease_timings) = self.lease_timings.take() {
             core.control.lease_timings = lease_timings;

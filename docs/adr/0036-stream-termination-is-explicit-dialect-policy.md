@@ -36,3 +36,17 @@ Explicit user cancellation remains `Cancelled`, non-retryable, and distinct from
 This is intentionally breaking for nonconforming OpenAI-compatible embedders. Streams that
 formerly appeared successful at bare EOF now fail. Hosts may opt a known EOF-terminated route
 into `EofTolerated`; doing so is an explicit compatibility contract, not a heuristic fallback.
+
+## Amendment (FIG-2765): abort drain grace and post-hoc reconciliation
+
+A stream the runtime itself aborts at a protocol boundary (the RLM cell mask) is neither
+truncated nor complete: the provider may still deliver its usage frame after the abort.
+How long the aborted stream may drain before the attempt is sealed is host policy,
+`RuntimeControlConfig.abort_drain_grace` (`LashCoreBuilder::abort_drain_grace`, default
+2 s), not a literal in the turn driver. Usage that lands inside the grace stays
+provider-reported on the `Aborted` attempt; usage that does not is sealed as
+`UnreportedAfterAbort` per the ADR 0031 amendment. Providers whose backend can account
+for a cancelled generation after the fact implement `Provider::reconcile_usage`
+(OpenRouter's `GET /generation?id=` when `OpenAiCompat.usage_reconciliation` selects it,
+bounded to one retry and a fixed timeout); the runtime never calls it on its own — the
+host invokes `reconcile_unreported_usage` when it wants the ledger settled.

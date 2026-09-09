@@ -27,6 +27,12 @@ pub(super) fn synthesize_protocol_abort(
         response_metadata: stream_evidence.response_metadata.clone(),
     };
     stream_accumulator.apply_to_response(&mut response);
+    // Usage observed before the abort is a fact; its absence is a typed hole
+    // the ledger must show, never a zero (ADR 0031).
+    let usage = (response.provider_usage.is_some() || response.usage != LlmUsage::default())
+        .then(|| response.usage.clone());
+    let usage_disposition =
+        crate::AttemptUsageDisposition::for_attempt(crate::AttemptOutcome::Aborted, usage.as_ref());
     let call_record = crate::LlmCallRecord {
         call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),
         label: None,
@@ -42,8 +48,8 @@ pub(super) fn synthesize_protocol_abort(
             error: None,
             evidence: Some(execution_evidence),
             generation_disposition: response.generation_disposition,
-            usage: (response.provider_usage.is_some() || response.usage != LlmUsage::default())
-                .then(|| response.usage.clone()),
+            usage,
+            usage_disposition,
         }],
     };
     (response, call_record)

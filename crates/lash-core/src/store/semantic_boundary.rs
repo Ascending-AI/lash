@@ -10,7 +10,7 @@ use super::*;
 
 const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
 const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
-const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
+const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 2;
 
 /// Refuse settlement or evidence content on a semantic-boundary commit.
 ///
@@ -120,9 +120,10 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
 }
 
 /// Compute the versioned canonical request identity for one adopting
-/// operation. Every version-1 encoding hashes the shared request projection
-/// under an operation-owned domain string, so identical bytes for different
-/// operations can never collide into one identity family.
+/// operation. Every encoding hashes the shared request projection under an
+/// operation-owned, version-suffixed domain string, so identical bytes for
+/// different operations (or versions) can never collide into one identity
+/// family.
 pub(super) fn semantic_boundary_request_identity(
     commit: &RuntimeCommit,
     operation: crate::store::SemanticBoundaryOperation,
@@ -140,7 +141,10 @@ pub(super) fn semantic_boundary_request_identity(
         ),
         Operation::UsageLedger => (
             USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION,
-            crate::stable_hash::blake3_hex("lash-usage-ledger-request/v1", encoded.as_bytes()),
+            // v2: staged usage rows carry a `usage_disposition` (FIG-2765),
+            // so a retried usage-ledger commit whose rows gained a hole or a
+            // correction encodes under its own family.
+            crate::stable_hash::blake3_hex("lash-usage-ledger-request/v2", encoded.as_bytes()),
         ),
     })
 }
@@ -186,12 +190,12 @@ mod semantic_boundary_request_identity_tests {
         // UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN=1 cargo test -p lash-core \
         //   semantic_boundary_request_identity_v1_golden_corpus -- --exact
         let rows = [
-            ("record-config", "protocol-materialization"),
-            ("create-session", "child-1"),
-            ("usage-ledger", "child-turn"),
+            ("record-config", "protocol-materialization", 1),
+            ("create-session", "child-1", 1),
+            ("usage-ledger", "child-turn", 2),
         ]
         .into_iter()
-        .map(|(key, boundary)| {
+        .map(|(key, boundary, expected_version)| {
             let commit = boundary_commit(boundary, key);
             let operation =
                 SemanticBoundaryOperation::from_operation_key(key).expect("adopted operation key");
@@ -199,7 +203,10 @@ mod semantic_boundary_request_identity_tests {
                 .expect("encode canonical request");
             let (encoding_version, hash) = semantic_boundary_request_identity(&commit, operation)
                 .expect("hash canonical request");
-            assert_eq!(encoding_version, 1, "every v1 family starts at version 1");
+            assert_eq!(
+                encoding_version, expected_version,
+                "{key} request identity encoding version"
+            );
             format!("{key}={preimage}|{hash}")
         })
         .collect::<Vec<_>>()
@@ -270,6 +277,7 @@ mod semantic_boundary_request_identity_tests {
                     cache_write_input_tokens: 0,
                     reasoning_output_tokens: 0,
                 },
+                usage_disposition: Default::default(),
             }],
         )
         .expect("stage usage");

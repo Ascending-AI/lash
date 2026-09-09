@@ -684,6 +684,7 @@ mod tests {
                         cache_write_input_tokens: 2,
                         reasoning_output_tokens: 4,
                     },
+                    usage_disposition: Default::default(),
                 },
                 crate::TokenLedgerEntry {
                     source: "child".to_string(),
@@ -695,6 +696,7 @@ mod tests {
                         cache_write_input_tokens: 0,
                         reasoning_output_tokens: 2,
                     },
+                    usage_disposition: Default::default(),
                 },
             ],
         );

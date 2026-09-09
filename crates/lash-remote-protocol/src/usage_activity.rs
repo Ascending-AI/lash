@@ -45,6 +45,35 @@ pub struct RemoteTokenLedgerEntry {
     pub source: String,
     pub model: String,
     pub usage: RemoteUsage,
+    /// Whether this row is provider-reported usage, a typed hole left by
+    /// interrupted attempts, or a reconciliation correction. Absent means
+    /// reported, so pre-window-56 rows decode unchanged.
+    #[serde(
+        default,
+        skip_serializing_if = "RemoteLedgerUsageDisposition::is_reported"
+    )]
+    pub usage_disposition: RemoteLedgerUsageDisposition,
+}
+
+/// Wire mirror of [`lash_core::LedgerUsageDisposition`].
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RemoteLedgerUsageDisposition {
+    #[default]
+    Reported,
+    Unreported {
+        attempts: u32,
+    },
+    Reconciled {
+        call_id: String,
+        attempt_ordinal: u32,
+    },
+}
+
+impl RemoteLedgerUsageDisposition {
+    pub fn is_reported(&self) -> bool {
+        matches!(self, Self::Reported)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

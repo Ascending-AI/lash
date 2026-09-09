@@ -616,6 +616,7 @@ fn store_hardening_usage(turn_index: usize) -> lash_core::TokenLedgerEntry {
             cache_write_input_tokens: 4,
             reasoning_output_tokens: 5,
         },
+        usage_disposition: Default::default(),
     }
 }
 

@@ -627,9 +627,20 @@ pub(crate) fn trace_llm_attempts(
                     .map(trace_charge_safety_decision),
                 generation_disposition: attempt.generation_disposition,
                 usage: attempt.usage.as_ref().map(trace_usage_from_llm),
+                usage_disposition: Some(trace_attempt_usage_disposition(attempt.usage_disposition)),
             })
             .collect(),
     )
+}
+
+fn trace_attempt_usage_disposition(disposition: crate::AttemptUsageDisposition) -> String {
+    match disposition {
+        crate::AttemptUsageDisposition::Reported => "reported",
+        crate::AttemptUsageDisposition::UnreportedByProvider => "unreported_by_provider",
+        crate::AttemptUsageDisposition::UnreportedAfterAbort => "unreported_after_abort",
+        crate::AttemptUsageDisposition::UnreportedAfterFailure => "unreported_after_failure",
+    }
+    .to_string()
 }
 
 pub(crate) fn trace_tool_attempt(
@@ -658,6 +669,7 @@ pub(crate) fn trace_tool_attempt(
         charge_safety: None,
         generation_disposition: None,
         usage: None,
+        usage_disposition: None,
     }
 }
 
@@ -931,6 +943,7 @@ mod span_identity_tests {
                     evidence: None,
                     generation_disposition: None,
                     usage: None,
+                    usage_disposition: Default::default(),
                 },
                 crate::AttemptRecord {
                     ordinal: 2,
@@ -944,6 +957,7 @@ mod span_identity_tests {
                     evidence: None,
                     generation_disposition: None,
                     usage: None,
+                    usage_disposition: Default::default(),
                 },
             ],
         };

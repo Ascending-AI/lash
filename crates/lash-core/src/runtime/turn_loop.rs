@@ -462,6 +462,33 @@ pub(in crate::runtime) async fn send_queued_work_started_event(
     .await;
 }
 
+/// The attempts of a finished turn whose usage never arrived after an abort
+/// or failure, in call order, for the unreported ledger row and later
+/// host-invoked reconciliation.
+fn unreported_usage_attempts(
+    llm_calls: &[crate::LlmCallRecord],
+    model: &str,
+) -> Vec<crate::runtime::UnreportedUsageAttempt> {
+    llm_calls
+        .iter()
+        .flat_map(|call| {
+            call.attempts
+                .iter()
+                .filter(|attempt| attempt.usage_disposition.is_unreported_after_interruption())
+                .map(move |attempt| crate::runtime::UnreportedUsageAttempt {
+                    call_id: call.call_id.0.clone(),
+                    attempt_ordinal: attempt.ordinal,
+                    source: "turn".to_string(),
+                    model: model.to_string(),
+                    generation_id: attempt
+                        .evidence
+                        .as_ref()
+                        .and_then(|evidence| evidence.provider_response_id.clone()),
+                })
+        })
+        .collect()
+}
+
 struct TurnFinishInput {
     turn_pipeline: TurnBoundary,
     assembler: TurnAssembler,
@@ -1584,6 +1611,21 @@ impl LashRuntime {
                 &policy.model.id,
                 &assembler.token_usage,
             );
+        }
+        // ADR 0031: an attempt the host aborted or that failed before the
+        // provider's usage arrived was still billed. Write the hole as a typed
+        // unreported row (even at zero usage) and remember the attempt so a
+        // host can reconcile it later; a turn with no interruption and no
+        // usage still writes nothing.
+        let unreported = unreported_usage_attempts(&assembler.llm_calls, &policy.model.id);
+        if !unreported.is_empty() {
+            session_manager::record_unreported_attempts_shared(
+                &self.shared_token_ledger,
+                "turn",
+                &policy.model.id,
+                unreported.len().try_into().unwrap_or(u32::MAX),
+            );
+            self.unreported_usage_attempts.extend(unreported);
         }
 
         // The evidence the executed turn already named travels into the gate,
