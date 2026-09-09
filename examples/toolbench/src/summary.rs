@@ -1,67 +1,32 @@
+use crate::TaskResult;
+pub(crate) use crate::accounting::Usage;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-
-use serde::Serialize;
-use serde_json::Value;
-
-use crate::{ReasoningEffort, TaskResult};
-
-#[derive(Clone, Debug, Default, Serialize)]
-pub(crate) struct Usage {
-    input: u64,
-    output: u64,
-    cache_read: u64,
-    cache_write: u64,
-    pub(crate) cost: Option<f64>,
-}
-impl Usage {
-    pub(crate) fn from_attempts(attempts: &[Value]) -> Self {
-        let mut usage = Self::default();
-        let mut costs = Vec::new();
-        for row in attempts {
-            usage.input += row["tokens"]["input"].as_u64().unwrap_or(0);
-            usage.output += row["tokens"]["output"].as_u64().unwrap_or(0);
-            usage.cache_read += row["tokens"]["cache_read"].as_u64().unwrap_or(0);
-            usage.cache_write += row["tokens"]["cache_write"].as_u64().unwrap_or(0);
-            costs.push(row["cost"].as_f64());
-        }
-        usage.cost = complete_cost(costs.into_iter());
-        usage
-    }
-    fn tokens(&self) -> u64 {
-        // Lash normalizes provider usage into disjoint input/cache buckets.
-        self.input + self.output + self.cache_read + self.cache_write
-    }
-}
-fn complete_cost(costs: impl Iterator<Item = Option<f64>>) -> Option<f64> {
-    let values = costs.collect::<Option<Vec<_>>>()?;
-    Some(values.iter().sum())
-}
 
 #[derive(Debug, Serialize)]
 pub(crate) struct Summary {
     model: String,
     channel: String,
     dialect: String,
-    reasoning_effort: ReasoningEffort,
+    reasoning_effort: crate::ReasoningEffort,
     passed: usize,
     rows: usize,
     rounds: usize,
+    provider_calls: usize,
     retries: usize,
-    executions: usize,
-    failed_exec_iterations: usize,
-    tool_call_count: usize,
-    expected_tool_call_count: usize,
-    matched_tool_call_percent: f64,
     cost_unknown: usize,
     #[serde(flatten)]
     usage: Usage,
     wall_total_s: f64,
     wall_median_s: f64,
-    tokens_per_task: f64,
+    prompt_per_task: Option<f64>,
+    completion_per_task: Option<f64>,
+    reasoning_per_task: Option<f64>,
     cost_per_task: Option<f64>,
+    rounds_per_task: f64,
+    system_prompt_tokens_first_call_mean: Option<f64>,
 }
-
 pub(crate) fn aggregate(results: &[TaskResult]) -> Vec<Summary> {
     let mut cohorts = BTreeMap::<_, Vec<&TaskResult>>::new();
     for row in results {
@@ -75,76 +40,70 @@ pub(crate) fn aggregate(results: &[TaskResult]) -> Vec<Summary> {
         .map(|((model, channel, dialect), rows)| {
             let mut walls = rows
                 .iter()
-                .map(|row| row.wall_ms as f64 / 1000.0)
+                .map(|r| r.wall_ms as f64 / 1000.0)
                 .collect::<Vec<_>>();
             walls.sort_by(f64::total_cmp);
-            let middle = walls.len() / 2;
-            let median = if walls.len().is_multiple_of(2) {
-                (walls[middle - 1] + walls[middle]) / 2.0
+            let n = rows.len();
+            let median = if n.is_multiple_of(2) {
+                (walls[n / 2 - 1] + walls[n / 2]) / 2.0
             } else {
-                walls[middle]
+                walls[n / 2]
             };
-            let usage = Usage {
-                input: rows.iter().map(|row| row.usage.input).sum(),
-                output: rows.iter().map(|row| row.usage.output).sum(),
-                cache_read: rows.iter().map(|row| row.usage.cache_read).sum(),
-                cache_write: rows.iter().map(|row| row.usage.cache_write).sum(),
-                cost: complete_cost(rows.iter().map(|row| row.usage.cost)),
-            };
+            let values = rows
+                .iter()
+                .map(|r| serde_json::to_value(&r.usage).unwrap())
+                .collect::<Vec<_>>();
+            let usage = Usage::from_attempts(&values);
+            let mean = |v: Option<u64>| v.map(|v| v as f64 / n as f64);
             Summary {
                 model: model.clone(),
                 channel: channel.clone(),
                 dialect: dialect.clone(),
                 reasoning_effort: rows[0].reasoning_effort,
-                passed: rows.iter().filter(|row| row.passed).count(),
-                rows: rows.len(),
-                rounds: rows.iter().map(|row| row.rounds).sum(),
-                retries: rows.iter().map(|row| row.retries).sum(),
-                executions: rows.iter().map(|row| row.executions).sum(),
-                failed_exec_iterations: rows.iter().map(|row| row.failed_exec_iterations).sum(),
-                tool_call_count: rows.iter().map(|row| row.tool_call_count).sum(),
-                expected_tool_call_count: rows.iter().map(|row| row.expected_tool_call_count).sum(),
-                matched_tool_call_percent: 100.0
-                    * rows
-                        .iter()
-                        .filter(|row| row.tool_call_count == row.expected_tool_call_count)
-                        .count() as f64
-                    / rows.len() as f64,
-                cost_unknown: rows.iter().filter(|row| row.cost_unknown).count(),
+                passed: rows.iter().filter(|r| r.passed).count(),
+                rows: n,
+                rounds: rows.iter().map(|r| r.rounds).sum(),
+                provider_calls: rows.iter().map(|r| r.provider_calls).sum(),
+                retries: rows.iter().map(|r| r.retries).sum(),
+                cost_unknown: rows.iter().filter(|r| r.cost_unknown).count(),
                 wall_total_s: walls.iter().sum(),
                 wall_median_s: median,
-                tokens_per_task: usage.tokens() as f64 / rows.len() as f64,
-                cost_per_task: usage.cost.map(|cost| cost / rows.len() as f64),
+                prompt_per_task: mean(usage.prompt_tokens_total),
+                completion_per_task: mean(usage.completion_tokens),
+                reasoning_per_task: mean(usage.reasoning_tokens),
+                cost_per_task: usage.cost.map(|v| v / n as f64),
+                rounds_per_task: rows.iter().map(|r| r.rounds).sum::<usize>() as f64 / n as f64,
+                system_prompt_tokens_first_call_mean: mean(
+                    rows.iter().map(|r| r.system_prompt_tokens_first_call).sum(),
+                ),
                 usage,
             }
         })
         .collect()
 }
-
-fn money(value: Option<f64>) -> String {
-    value
-        .map(|value| format!("{value:.6}"))
+fn number<T: std::fmt::Display>(v: Option<T>) -> String {
+    v.map(|v| v.to_string()).unwrap_or_else(|| "n/a".into())
+}
+fn decimal(v: Option<f64>, places: usize) -> String {
+    v.map(|v| format!("{v:.places$}"))
         .unwrap_or_else(|| "n/a".into())
 }
-fn delta(value: Option<f64>, base: Option<f64>) -> String {
-    match (value, base) {
-        (Some(value), Some(base)) if base != 0.0 => {
-            format!("{:+.1}%", (value / base - 1.0) * 100.0)
-        }
+fn delta(v: Option<f64>, b: Option<f64>) -> String {
+    match (v, b) {
+        (Some(v), Some(b)) if b != 0.0 => format!("{:+.1}%", (v / b - 1.0) * 100.0),
         _ => "n/a".into(),
     }
 }
-
 pub(crate) fn markdown(summaries: &[Summary]) -> String {
     let mut out = String::new();
-    let models = summaries
+    for model in summaries
         .iter()
-        .map(|row| &row.model)
-        .collect::<std::collections::BTreeSet<_>>();
-    for model in models {
+        .map(|r| &r.model)
+        .collect::<std::collections::BTreeSet<_>>()
+    {
         let rows = summaries
             .iter()
-            .filter(|row| &row.model == model)
+            .filter(|r| &r.model == model)
             .collect::<Vec<_>>();
         writeln!(
             out,
@@ -152,88 +111,50 @@ pub(crate) fn markdown(summaries: &[Summary]) -> String {
             rows[0].reasoning_effort.name()
         )
         .unwrap();
-        writeln!(out, "| Cohort | Pass/rows | Input | Output | Cache read | Cache write | Cost USD | Wall total s | Wall median s | Tokens/task | Cost/task USD | Executions | Failed exec | Host calls | Expected N | Matched N | Rounds | Retries | Cost unknown |").unwrap();
-        writeln!(
-            out,
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
-        )
-        .unwrap();
-        for row in &rows {
-            writeln!(
-                out,
-                "| {}/{} | {}/{} | {} | {} | {} | {} | {} | {:.3} | {:.3} | {:.1} | {} | {} | {} | {} | {} | {:.1}% | {} | {} | {} |",
-                row.channel,
-                row.dialect,
-                row.passed,
-                row.rows,
-                row.usage.input,
-                row.usage.output,
-                row.usage.cache_read,
-                row.usage.cache_write,
-                money(row.usage.cost),
-                row.wall_total_s,
-                row.wall_median_s,
-                row.tokens_per_task,
-                money(row.cost_per_task),
-                row.executions, row.failed_exec_iterations, row.tool_call_count, row.expected_tool_call_count, row.matched_tool_call_percent, row.rounds, row.retries, row.cost_unknown
-            )
-            .unwrap();
+        out.push_str("| Cohort | Pass | Rounds | Prompt total | of which cached (read) | Cache write | Completion | Reasoning | Cost USD | Wall total/median s | Prompt/task | Completion/task | Reasoning/task | Cost/task USD | Rounds/task | First prompt mean | Retries |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+        for r in &rows {
+            writeln!(out,"| {}/{} | {}/{} | {} | {} | {} | {} | {} | {} | {} | {:.3}/{:.3} | {} | {} | {} | {} | {:.2} | {} | {} |",r.channel,r.dialect,r.passed,r.rows,r.rounds,number(r.usage.prompt_tokens_total),number(r.usage.cache_read),number(r.usage.cache_write),number(r.usage.completion_tokens),number(r.usage.reasoning_tokens),decimal(r.usage.cost,6),r.wall_total_s,r.wall_median_s,decimal(r.prompt_per_task,1),decimal(r.completion_per_task,1),decimal(r.reasoning_per_task,1),decimal(r.cost_per_task,6),r.rounds_per_task,decimal(r.system_prompt_tokens_first_call_mean,1),r.retries).unwrap();
         }
         out.push('\n');
-        for native in rows.iter().filter(|row| row.channel == "native") {
-            if let Some(cell) = rows
-                .iter()
-                .find(|row| row.channel == "cell" && row.dialect == native.dialect)
+        for r in &rows {
+            if let Some(base) = rows.iter().find(|b| b.channel == "standard")
+                && r.channel != "standard"
             {
-                comparison(
-                    &mut out,
-                    &format!("native vs cell ({})", native.dialect),
-                    native,
-                    cell,
-                );
-            }
-            if let Some(standard) = rows.iter().find(|row| row.channel == "standard") {
-                comparison(
-                    &mut out,
-                    &format!("standard vs native ({})", native.dialect),
-                    standard,
-                    native,
-                );
+                writeln!(out,"- {}/{} vs standard: Δ prompt/task {}, Δ completion/task {}, Δ reasoning/task {}, Δ cost/task {}, Δ rounds/task {}.",r.channel,r.dialect,delta(r.prompt_per_task,base.prompt_per_task),delta(r.completion_per_task,base.completion_per_task),delta(r.reasoning_per_task,base.reasoning_per_task),delta(r.cost_per_task,base.cost_per_task),delta(Some(r.rounds_per_task),Some(base.rounds_per_task))).unwrap();
             }
         }
         out.push('\n');
     }
-    out.push_str("Tokens = input + output + cache read + cache write (Lash uses disjoint usage buckets). Costs are n/a if any attempt lacks provider cost. Deltas compare per-task means; wall totals sum task durations and are not elapsed run time. Failed rows are included.\n");
+    out.push_str("Prompt total includes uncached, cache read and cache write. Reasoning is INCLUDED in completion. Rounds count actual provider attempts (including retries); protocol rounds are separately recorded on attempts. First prompt includes protocol, task and tool definitions, not just the system prompt. Missing metering makes sums n/a. Failed tasks are included; preflight is reported separately. Wall totals sum task durations, not elapsed run time.\n");
     out
 }
-fn comparison(out: &mut String, label: &str, value: &Summary, base: &Summary) {
-    writeln!(
-        out,
-        "- {label}: Δ tokens {}, Δ cost {}, Δ wall {}.",
-        delta(Some(value.tokens_per_task), Some(base.tokens_per_task)),
-        delta(value.cost_per_task, base.cost_per_task),
-        delta(
-            Some(value.wall_total_s / value.rows as f64),
-            Some(base.wall_total_s / base.rows as f64)
-        )
-    )
-    .unwrap();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn arithmetic_keeps_missing_usage_unknown_and_reasoning_in_completion() {
+        let u = Usage::from_attempts(&[
+            json!({"prompt_tokens_total":150,"prompt_uncached":100,"cache_read":40,"cache_write":10,"completion_tokens":20,"reasoning_tokens":15,"cost_usd":0.02}),
+            json!({"prompt_tokens_total":200,"prompt_uncached":50,"cache_read":150,"cache_write":0,"completion_tokens":30,"reasoning_tokens":25,"cost_usd":0.01}),
+        ]);
+        assert_eq!(u.prompt_tokens_total, Some(350));
+        assert_eq!(u.completion_tokens, Some(50));
+        assert_eq!(u.reasoning_tokens, Some(40));
+        assert_eq!(u.cost, Some(0.03));
+        assert_eq!(Usage::from_attempts(&[json!({})]).cost, None);
+        assert_eq!(Usage::from_attempts(&[]).cost, Some(0.0));
+        assert_eq!(delta(Some(300.0), Some(100.0)), "+200.0%");
+    }
 
     #[test]
-    fn aggregation_counts_retries_cache_cost_and_even_median() {
-        let usage = Usage::from_attempts(&[
-            json!({"tokens":{"input":100,"output":10,"cache_read":40},"cost":0.02}),
-            json!({"tokens":{"input":50,"output":5,"cache_read":10},"cost":0.01}),
-        ]);
+    fn cohort_sums_unknowns_medians_and_per_task_means() {
+        let usage = Usage::from_raw(
+            &json!({"prompt_tokens":350,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":190,"cache_write_tokens":10},"completion_tokens_details":{"reasoning_tokens":40},"cost":0.03}),
+        );
         let make = |wall_ms, passed| TaskResult {
             model: "model".into(),
-            reasoning_effort: ReasoningEffort::Medium,
+            reasoning_effort: crate::ReasoningEffort::Medium,
             run: 1,
             id: "task".into(),
             dialect: "none".into(),
@@ -242,6 +163,8 @@ mod tests {
             passed,
             failure_reason: None,
             rounds: 2,
+            provider_calls: 2,
+            system_prompt_tokens_first_call: Some(150),
             iterations: 2,
             executions: 0,
             expected_tool_call_count: 1,
@@ -261,41 +184,22 @@ mod tests {
             checker: String::new(),
             usage: usage.clone(),
         };
+
         let mut rows = vec![make(1000, true), make(3000, false)];
         let summary = aggregate(&rows).remove(0);
         assert_eq!((summary.passed, summary.rows, summary.rounds), (1, 2, 4));
-        assert_eq!(
-            (
-                summary.usage.input,
-                summary.usage.output,
-                summary.usage.cache_read
-            ),
-            (300, 30, 100)
-        );
+        assert_eq!(summary.usage.prompt_tokens_total, Some(700));
+        assert_eq!(summary.usage.completion_tokens, Some(100));
+        assert_eq!(summary.usage.reasoning_tokens, Some(80));
         assert_eq!(summary.usage.cost, Some(0.06));
-        assert_eq!(summary.retries, 2);
-        assert!(markdown(&[summary]).contains("| Retries |"));
-        let summary = aggregate(&rows).remove(0);
-        assert_eq!(
-            (
-                summary.wall_total_s,
-                summary.wall_median_s,
-                summary.tokens_per_task
-            ),
-            (4.0, 2.0, 215.0)
-        );
-        assert_eq!(summary.matched_tool_call_percent, 100.0);
+        assert_eq!((summary.wall_total_s, summary.wall_median_s), (4.0, 2.0));
+        assert_eq!(summary.prompt_per_task, Some(350.0));
+        assert_eq!(summary.system_prompt_tokens_first_call_mean, Some(150.0));
+        assert!(markdown(&[summary]).contains("| Prompt total |"));
+        rows[1].usage.prompt_tokens_total = None;
         rows[1].usage.cost = None;
         rows[1].cost_unknown = true;
-        rows[1].tool_call_count = 2;
-        assert_eq!(aggregate(&rows)[0].cost_unknown, 1);
-        assert_eq!(aggregate(&rows)[0].matched_tool_call_percent, 50.0);
+        assert_eq!(aggregate(&rows)[0].usage.prompt_tokens_total, None);
         assert_eq!(aggregate(&rows)[0].usage.cost, None);
-        assert!(markdown(&aggregate(&rows)).contains("n/a"));
-        assert_eq!(Usage::from_attempts(&[]).cost, Some(0.0));
-        assert_eq!(
-            Usage::from_attempts(&[json!({"cost":1}), json!({})]).cost,
-            None
-        );
     }
 }

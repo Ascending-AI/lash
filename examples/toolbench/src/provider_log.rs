@@ -5,9 +5,12 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]
 pub(crate) struct Capture {
+    pub(crate) http_bodies: Arc<Mutex<std::collections::BTreeMap<usize, Vec<u8>>>>,
     pub(crate) entries: Arc<Mutex<Vec<Value>>>,
     secret: Arc<Mutex<String>>,
     span: Arc<Mutex<Option<tracing::Span>>>,
+    dump_prefix: Arc<Mutex<Option<std::path::PathBuf>>>,
+    pub(crate) dump_errors: Arc<Mutex<Vec<String>>>,
 }
 impl std::fmt::Debug for Capture {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -120,9 +123,65 @@ impl Provider for LoggedProvider {
                 error.partial_response.as_deref(),
             ),
         };
-        let row = json!({"request_id":request_id, "request_ms":started.elapsed().as_millis(), "error":error,
+        let mut row = json!({"request_id":request_id, "request_ms":started.elapsed().as_millis(), "error":error,
             "cost":reported_cost(response, result.as_ref().err()),
             "response":response.map(|r| redact(serde_json::to_value(r).expect("response serializes"), &self.secret))});
+        let mut entries = self
+            .capture
+            .entries
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        for key in ["wire_request", "wire_responses", "request_sizes"] {
+            row[key] = entries[attempt_index - 1][key].clone();
+        }
+        let http_body = self
+            .capture
+            .http_bodies
+            .lock()
+            .unwrap()
+            .get(&attempt_index)
+            .cloned();
+        let http_json = http_body
+            .as_deref()
+            .and_then(|b| serde_json::from_slice::<Value>(b).ok());
+        row["http_response_json"] = http_json.clone().unwrap_or(Value::Null);
+        let raw_usage = response
+            .and_then(|r| r.provider_usage.clone())
+            .or_else(|| {
+                result
+                    .as_ref()
+                    .err()?
+                    .raw
+                    .as_deref()
+                    .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                    .and_then(|v| v.get("usage").cloned())
+            })
+            .or_else(|| {
+                row["wire_responses"]
+                    .as_array()?
+                    .iter()
+                    .rev()
+                    .find_map(|v| v.get("usage").filter(|u| !u.is_null()).cloned())
+            });
+        if row["wire_request"].is_null() {
+            let body = response
+                .and_then(|r| r.request_body.as_deref())
+                .and_then(|s| serde_json::from_str::<Value>(s).ok());
+            if let Some(body) = body {
+                row["wire_request"] = self.capture.redact(body);
+                row["request_sizes"] = crate::accounting::request_sizes(&row["wire_request"]);
+                self.capture
+                    .dump(attempt_index, "request", &row["wire_request"]);
+            }
+        }
+        row["raw_usage"] = raw_usage
+            .or_else(|| http_json.as_ref()?.get("usage").cloned())
+            .unwrap_or(Value::Null);
+        row["usage"] = serde_json::to_value(crate::accounting::Usage::from_raw(&row["raw_usage"]))
+            .expect("usage serializes");
+        entries[attempt_index - 1] = row.clone();
+        drop(entries);
+        self.capture.dump(attempt_index, "response", &row);
         tracing::debug!(target: "toolbench", parent: &self.capture.span(), attempt_index, evidence = %row, "provider response");
         self.capture
             .entries
@@ -179,11 +238,9 @@ pub(crate) fn error_object(error: &LlmTransportError, secret: &str) -> Value {
         });
     let request_body = error.request_body.as_deref().map(|s| {
         let text = redact(serde_json::from_str(s).unwrap_or_else(|_| json!(s)), secret);
-        let text = text
-            .as_str()
+        text.as_str()
             .map(str::to_owned)
-            .unwrap_or_else(|| text.to_string());
-        bounded_bytes(&text, 4096).to_owned()
+            .unwrap_or_else(|| text.to_string())
     });
     redact(
         json!({
@@ -202,13 +259,6 @@ pub(crate) fn error_object(error: &LlmTransportError, secret: &str) -> Value {
     )
 }
 
-fn bounded_bytes(text: &str, limit: usize) -> &str {
-    let mut end = text.len().min(limit);
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    &text[..end]
-}
 fn sensitive(key: &str) -> bool {
     matches!(
         key.to_ascii_lowercase().as_str(),
@@ -245,7 +295,7 @@ pub(crate) fn redact(value: Value, secret: &str) -> Value {
                                 .as_str()
                                 .map(str::to_owned)
                                 .unwrap_or_else(|| safe.to_string());
-                            json!(bounded_bytes(&text, 4096))
+                            json!(text)
                         }
                         other => redact(other, secret),
                     }
@@ -279,3 +329,72 @@ pub(crate) fn trace_subscriber(
 #[cfg(test)]
 #[path = "provider_log_tests.rs"]
 mod tests;
+
+impl Capture {
+    pub(crate) fn set_dump_prefix(&self, prefix: Option<std::path::PathBuf>) {
+        *self.dump_prefix.lock().unwrap() = prefix;
+    }
+    pub(crate) fn dump(&self, attempt: usize, direction: &str, body: &Value) {
+        let prefix = self.dump_prefix.lock().unwrap().clone();
+        if let Some(prefix) = prefix {
+            let path = prefix.with_extension(format!("turn-1-round-{attempt}-{direction}.json"));
+            let result = (|| -> std::io::Result<()> {
+                std::fs::create_dir_all(path.parent().expect("dump parent"))?;
+                std::fs::write(
+                    &path,
+                    serde_json::to_vec_pretty(&self.redact(body.clone()))?,
+                )
+            })();
+            if let Err(error) = result {
+                self.dump_errors
+                    .lock()
+                    .unwrap()
+                    .push(format!("{}: {error}", path.display()));
+            }
+        }
+    }
+}
+impl lash::tracing::TraceSink for Capture {
+    fn append(
+        &self,
+        record: &lash::tracing::TraceRecord,
+    ) -> Result<(), lash::tracing::TraceSinkError> {
+        use lash::tracing::TraceEvent;
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        let attempt = entries.len();
+        let Some(row) = entries.last_mut() else {
+            return Ok(());
+        };
+        match &record.event {
+            TraceEvent::ProviderRequest { event } => {
+                let body = self.redact(event.body_json.clone().unwrap_or(Value::Null));
+                if body.is_null() {
+                    return Ok(());
+                }
+                row["wire_request"] = body.clone();
+                row["request_sizes"] = if body.is_null() {
+                    Value::Null
+                } else {
+                    crate::accounting::request_sizes(&body)
+                };
+                tracing::debug!(target: "toolbench", parent: &self.span(), attempt, request = %body, sizes = %row["request_sizes"], "wire request");
+                self.dump(attempt, "request", &body);
+            }
+            TraceEvent::ProviderStreamEvent { event } => {
+                let body = self.redact(event.raw_json.clone().unwrap_or(Value::Null));
+                if !row["wire_responses"].is_array() {
+                    row["wire_responses"] = json!([]);
+                }
+                row["wire_responses"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(body.clone());
+                tracing::debug!(target: "toolbench", parent: &self.span(), attempt, response = %body, "wire response chunk");
+                // Write through every chunk so interrupted calls retain their evidence.
+                self.dump(attempt, "response", row);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}

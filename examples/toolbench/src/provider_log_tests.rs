@@ -151,7 +151,10 @@ async fn request_shape_errors_are_not_retried_and_failed_rows_keep_rich_errors()
         assert_eq!(rows[0]["error"]["raw"], "provider body verbatim");
         assert_eq!(rows[0]["error"]["provider_request_id"], "req-17");
         assert_eq!(rows[0]["retry_decision"]["scheduled"], false);
-        assert!(rows[0]["error"]["request_body"].as_str().unwrap().len() <= 4096);
+        // Forensic captures retain the complete redacted request, including Unicode.
+        let body: Value =
+            serde_json::from_str(rows[0]["error"]["request_body"].as_str().unwrap()).unwrap();
+        assert_eq!(body["text"].as_str().unwrap().chars().count(), 5000);
         assert!(!rows[0].to_string().contains("test-secret"));
     }
 }

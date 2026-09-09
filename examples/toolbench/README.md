@@ -86,27 +86,21 @@ finish value, executions, failed executions, actual and expected host tool count
 rounds, grade, wall time, aggregate usage, cost availability and configured limits.
 RLM attempt rows include `code` (null for prose-only/request-finish attempts)
 and `observation`. Standard attempt rows use `tool_calls: [{name, arguments}]`
-instead of `code`. Observations are capped at 2,000 Unicode characters and
+with `code: null`. RLM rows have an empty `tool_calls` array. Observations are capped at 2,000 Unicode characters and
 `observation_truncated` reports whether anything was cut. Transport retries
 have no execution source or observation; failed/timed-out tasks retain partial
 evidence. A provider call interrupted before its ledger is sealed gets an
-`interrupted` attempt row with unknown tokens/cost and attempt ordinal. Summary rows have `kind: "summary"` for each model/cohort. The Markdown tables print to
+`interrupted` attempt row with observed usage (or null if unavailable) and attempt ordinal. Summary rows have `kind: "summary"` for each model/cohort. The Markdown tables print to
 stdout and are saved at `<results-file>.summary.md`.
 
-Tables include pass/rows, uncached input tokens, output tokens, cache reads and
-writes, provider cost USD, summed task wall time, median task wall time,
-tokens/task and cost/task, executions, failed executions, host calls, expected N,
-matched N percentage, model rounds and unknown-cost row counts. Lash normalizes
-usage into disjoint buckets: total tokens add input, output, cache read and cache write. Every recorded attempt,
-including failed retries, contributes usage. Cost is the provider usage `cost`
-field, never estimated from pricing; any missing attempt cost makes the
-cohort's cost `n/a`, avoiding incomplete totals. Failed task rows are included.
-Probe usage is outside the task cohort totals.
-
-Comparison lines report native versus cell per dialect and standard versus
-each native dialect, using per-task mean token, cost and wall deltas. A zero
-baseline or missing cost yields `n/a`. Summed wall time is task work, not the
-elapsed duration of concurrent execution.
+Tables show pass/rows, rounds, total prompt tokens, cache reads and writes,
+completion and reasoning tokens, provider cost, summed/median task wall time,
+and per-task means. Every attempt, including retries and failures, contributes.
+Missing metering makes the corresponding total `n/a`. Probe usage is separately
+logged outside the task cohort totals. Deltas compare each RLM cohort against
+standard using per-task means of the same quantity; zero or unknown baselines
+produce `n/a`. Wall totals sum task durations, not concurrent elapsed time.
+See the field mapping below for exact definitions.
 
 Keep new tasks small: one to three host calls and at most three prompt sentences.
 Validate every channel/dialect against a 30-second target before adding a task. Cohort runs should run concurrently
@@ -157,3 +151,96 @@ with unavailable cost stays unknown. If cancellation interrupts a backoff, the
 row retains observed calls and their partial costs even though Lash has not
 sealed the call ledger. Such rows explicitly mark the retry decision unavailable.
 Summary tables include Retries. Probe calls remain outside cohort cost totals.
+
+## Accounting and forensic capture
+
+Every `attempt` and `preflight` row uses the same OpenRouter Chat Completions
+usage definition. `raw_usage` preserves the provider object; missing usage is
+`null`, never zero. Cache/reasoning detail fields omitted from an otherwise
+metered response are treated as zero, following the adapter's convention.
+
+| Report field | OpenRouter usage field | Lash facade mapping |
+|---|---|---|
+| `prompt_tokens_total` | `prompt_tokens` | `input_tokens + cache_read_input_tokens + cache_write_input_tokens` |
+| `prompt_uncached` | prompt total minus cache reads and writes | `input_tokens` |
+| `cache_read` | `prompt_tokens_details.cached_tokens` | `cache_read_input_tokens` |
+| `cache_write` | `prompt_tokens_details.cache_write_tokens` | `cache_write_input_tokens` |
+| `completion_tokens` | `completion_tokens` | `output_tokens` |
+| `reasoning_tokens` | `completion_tokens_details.reasoning_tokens` | `reasoning_output_tokens` |
+| `cost_usd` | `cost` | `LlmResponse.provider_usage["cost"]` |
+
+Source: `crates/lash-llm-transport/src/normalize.rs`,
+`openai_usage_from_usage_value`; facade types `lash::direct::LlmUsage` and
+`lash::provider::LlmResponse`. Reasoning is a **subset of completion**, so it is
+never added again. Cache writes are part of total input, not cache reads. An
+impossible cache sum leaves `prompt_uncached` unknown rather than clamping it.
+The old `tokens.input` field is the uncached remainder, not prompt total; the
+legacy `tokens` and `cost` objects remain attempt diagnostics only. Summary
+columns and deltas use the explicit fields above.
+
+`round` counts provider attempts from 1 within the task, including retries;
+`protocol_round` counts logical model calls; `turn` is 1 because the runner
+opens one turn per task. Task `rounds` and `provider_calls` count attempts;
+`iterations` counts protocol iterations. Task `usage` sums every attempt,
+including failed attempts. If any quantity is unknown its sum is unknown.
+Preflight costs are logged separately and excluded from task cohort averages;
+`excluded_route.usage` includes all failed probe attempts.
+
+`system_prompt_tokens_first_call` is the first call's **whole prompt** count:
+protocol instructions, task, message framing and tool definitions. It is a
+baseline for protocol overhead, not a tokenizer measurement of the system
+message alone. The cohort summary reports its mean. Later prompt totals can
+be compared with that baseline to measure round-by-round growth.
+
+`messages_chars`/`messages_bytes` measure the compact JSON message array;
+`system_prompt_chars`/`system_prompt_bytes` sum compact JSON content values for
+system/developer messages, and `tool_result_chars`/`tool_result_bytes` do the
+same for tool messages. Tool definition count and compact JSON sizes are
+separate. RLM cell observations may be carried in other message roles: use the
+full message array to inspect those. Characters count Unicode scalars; bytes
+count UTF-8. These measures explain relative input size, not tokenization.
+
+Extended facade tracing captures wire request JSON and every response JSON
+chunk, with contextual model/task/repetition/channel/dialect in `--trace-log`.
+`--dump-requests DIR` additionally writes redacted request JSON and response
+capture JSON (including ordered wire chunks, raw usage, normalized response
+and errors) named by model/task/channel/dialect/repetition/turn/round. Response
+captures are updated on each chunk to retain interrupted calls. Credential
+values and sensitive object keys are redacted; request bodies are no longer
+truncated to 4096 bytes. Dump errors are carried on attempt rows.
+
+A task-local loopback HTTP recorder forwards the unmodified JSON request and
+streams the OpenRouter response, capturing bodies before the facade's 2 KB
+request projection and 4 KB failure excerpt limits. It uses the fixed OpenRouter
+origin, forwards authentication only in headers, and shuts down with the task.
+Every cohort uses this same recorder. Its local hop and synchronous capture I/O
+are included in wall timings. `http-response.json` files preserve the received
+HTTP body text (including SSE framing), updated on each chunk; normalized
+`response.json` files retain parsed chunks and usage. Interrupted streams are
+explicitly partial. This avoids pretending a normalized request is wire evidence.
+
+```sh
+target/debug/toolbench --model z-ai/glm-5.3-flash --paired --channel-set all \
+  --dialect both --reasoning-effort medium --concurrency 8 --allow-partial \
+  --results-file results.jsonl --dump-requests requests
+target/debug/toolbench --reconcile results.jsonl
+```
+
+Reconciliation writes `results.jsonl.reconcile.md` and
+`results.jsonl.reconcile.jsonl` (`kind: "reconcile"`). It randomly samples at
+least 30 attempts, balanced across the model/channel/dialect groups present
+in the input, and queries the [OpenRouter generation endpoint](https://openrouter.ai/docs/api/api-reference/generations/get-generation).
+Both `tokens_prompt`/`tokens_completion` and their `native_tokens_*` counterparts
+are compared, without silently replacing differently tokenized counters.
+Token tolerance is exact; cost tolerance is 0.000001 USD. Missing IDs, unavailable
+fields and mismatches are recorded per row with both values and produce a
+nonzero exit. The report retains `cache_discount` as money; it cannot establish
+cache-read token equality when `native_tokens_cached` is absent. See also
+[OpenRouter prompt caching](https://openrouter.ai/docs/guides/best-practices/prompt-caching).
+
+The validation sample from 2026-09-09 matched all native token/cache-read/reasoning
+counts and costs across 60 calls. Normalized generation counters differed in
+119 of 120 comparisons; this is a tokenizer distinction, not permission to
+replace the native prompt counts. The reconcile reports deliberately retain
+those mismatches and exit nonzero. OpenRouter documents the distinction in
+[its native-versus-normalized billing explanation](https://openrouter.zendesk.com/hc/en-us/articles/51691717731483-Why-was-I-charged-more-per-token-than-the-price-shown-on-the-model-page).

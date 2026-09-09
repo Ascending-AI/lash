@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use lash::provider::{ProviderHandle, ProviderOptions};
 use lash::rlm::RlmTurnBuilderExt as _;
 use lash::{LashCore, TurnEvent, TurnInput};
-use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
+use lash_provider_openai::{OpenAiCompat, OpenAiCompatibleProvider};
 
 use crate::grading::RunEvidence;
 use crate::tasks::Task;
@@ -23,11 +23,36 @@ pub(crate) async fn run_task(
     effort: crate::ReasoningEffort,
     turn_wall_limit_secs: u64,
     provider_retries: u32,
+    dump_dir: Option<&std::path::Path>,
 ) -> (World, RunEvidence) {
     let started = std::time::Instant::now();
     // Every run owns its world, telemetry, provider and in-memory stores. No
-    // process environment mutations, listeners or filesystem stores are used.
+    // process environment is mutated; the HTTP recorder owns a task-local listener.
     let telemetry = Arc::new(crate::telemetry::Telemetry::default());
+    let safe = |s: &str| {
+        s.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>()
+    };
+    telemetry.capture.set_dump_prefix(dump_dir.map(|dir| {
+        dir.join(format!(
+            "{}-{}-{}-{}-rep-{run}",
+            safe(model),
+            safe(task.id),
+            channel.name(),
+            if channel == crate::ChannelSelection::Standard {
+                "none"
+            } else {
+                dialect.language_id()
+            }
+        ))
+    }));
     let world = SharedWorld::new(task.seed.clone());
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(turn_wall_limit_secs),
@@ -149,9 +174,12 @@ async fn run_turn(
     telemetry: &Arc<crate::telemetry::Telemetry>,
     provider_retries: u32,
 ) -> Result<(lash::TurnOutput, Vec<String>)> {
+    let recorder = crate::wire_log::Recorder::start(telemetry.capture.clone())
+        .await
+        .context("start request recorder")?;
     let provider = ProviderHandle::new(
         telemetry.capture.wrap(
-            OpenAiCompatibleProvider::new(api_key.to_string(), OPENROUTER_BASE_URL)
+            OpenAiCompatibleProvider::new(api_key.to_string(), &recorder.base_url)
                 .with_compat(OpenAiCompat::openrouter())
                 .with_options(ProviderOptions {
                     expose_thinking: true,
@@ -190,6 +218,8 @@ async fn run_turn(
         }
     };
     let core = builder
+        .trace_sink(Arc::new(telemetry.capture.clone()))
+        .trace_level(lash::tracing::TraceLevel::Extended)
         .no_progress_budget(lash::NoProgressBudget::Unbounded)
         .without_queued_work()
         .plugins(lash::plugins::runtime_plugin_stack().configure(|stack| {
@@ -286,7 +316,8 @@ pub(crate) async fn preflight(
     effort: crate::ReasoningEffort,
     turn_wall_limit_secs: u64,
     provider_retries: u32,
-) -> Result<(), String> {
+    dump_dir: Option<&std::path::Path>,
+) -> (Result<(), String>, Vec<RunEvidence>) {
     let mut probe = task.clone();
     probe.id = "__native_probe";
     probe.prompt = "Call execute_code exactly once with code that finishes with the number 1. Do not call any host operations.".into();
@@ -297,6 +328,7 @@ pub(crate) async fn preflight(
     probe.expected_world = probe.seed.clone();
     probe.finish = crate::tasks::FinishMatcher::Exact(serde_json::json!(1));
     let mut failures = Vec::with_capacity(PREFLIGHT_ATTEMPTS);
+    let mut probes = Vec::new();
     for attempt in 0..PREFLIGHT_ATTEMPTS {
         let (_, evidence) = run_task(
             &probe,
@@ -308,26 +340,32 @@ pub(crate) async fn preflight(
             effort,
             turn_wall_limit_secs,
             provider_retries,
+            dump_dir,
         )
         .await;
         if crate::grading::grade(&probe, &probe.seed, &evidence, f64::INFINITY).passed
             && evidence.tool_call_count == 0
             && (channel == crate::ChannelSelection::Standard || evidence.executions == 1)
         {
-            return Ok(());
+            probes.push(evidence);
+            return (Ok(()), probes);
         }
-        failures.push(evidence.completion_error.unwrap_or_else(|| {
+        failures.push(evidence.completion_error.clone().unwrap_or_else(|| {
             format!(
                 "{} one-call probe finished with {:?} instead of 1",
                 channel.name(),
                 evidence.finish_value
             )
         }));
+        probes.push(evidence);
     }
-    Err(format!(
-        "{PREFLIGHT_ATTEMPTS} probe attempts failed: {}",
-        failures.join(" | ")
-    ))
+    (
+        Err(format!(
+            "{PREFLIGHT_ATTEMPTS} probe attempts failed: {}",
+            failures.join(" | ")
+        )),
+        probes,
+    )
 }
 
 fn model_spec(model: &str, effort: crate::ReasoningEffort) -> Result<lash::ModelSpec> {
