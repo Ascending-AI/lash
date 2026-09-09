@@ -908,10 +908,10 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
         .await?;
 
     let prompts = seen.lock_recover();
-    assert!(prompts[0].contains("Trigger registry"));
-    assert!(prompts[0].contains("trigger registration connects"));
+    assert!(prompts[0].contains("- Triggers:"));
+    assert!(prompts[0].contains("connects a source value"));
     assert!(prompts[0].contains("process definition"));
-    assert!(prompts[0].contains("triggers.list({})"));
+    assert!(prompts[0].contains("await triggers.list("));
     assert!(!prompts[0].contains("TRIGGER."));
     Ok(())
 }
