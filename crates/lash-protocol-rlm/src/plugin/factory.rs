@@ -444,9 +444,9 @@ mod label_config_tests {
         assert!(!super::super::RlmLanguageFeatures::default().label_annotations);
         for enabled in [false, true] {
             let mut config = RlmProtocolPluginConfig::builder()
-                .instruction_limit(super::super::InstructionBound::Unbounded)
-                .wall_clock(super::super::WallClockBound::Unbounded)
-                .memory_limit(super::super::MemoryBound::Unbounded)
+                .instruction_limit(super::super::InstructionBound::unbounded())
+                .wall_clock(super::super::WallClockBound::unbounded())
+                .memory_limit(super::super::MemoryBound::unbounded())
                 .build();
             config.lashlang_language_features.label_annotations = enabled;
             let config = rlm_protocol_config(config, false);
