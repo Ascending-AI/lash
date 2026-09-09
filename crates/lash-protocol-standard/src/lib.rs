@@ -68,11 +68,23 @@ const STANDARD_PROTOCOL_PLUGIN_ID: &str = "standard_protocol";
 /// Plugin factory that installs the standard-protocol driver,
 /// session plugin, and native tool catalog.
 #[derive(Default)]
-pub struct StandardProtocolPluginFactory;
+pub struct StandardProtocolPluginFactory {
+    config: StandardProtocolConfig,
+}
+
+/// Host construction-time standard-mode presentation settings.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StandardProtocolConfig {
+    pub discovery: Option<lash_core::ToolDiscovery>,
+}
 
 impl StandardProtocolPluginFactory {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    pub fn with_config(config: StandardProtocolConfig) -> Self {
+        Self { config }
     }
 }
 
@@ -82,11 +94,15 @@ impl PluginFactory for StandardProtocolPluginFactory {
     }
 
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(StandardProtocolPlugin))
+        Ok(Arc::new(StandardProtocolPlugin {
+            config: self.config.clone(),
+        }))
     }
 }
 
-struct StandardProtocolPlugin;
+struct StandardProtocolPlugin {
+    config: StandardProtocolConfig,
+}
 
 impl SessionPlugin for StandardProtocolPlugin {
     fn id(&self) -> &'static str {
@@ -96,11 +112,34 @@ impl SessionPlugin for StandardProtocolPlugin {
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         reg.protocol().session(Arc::new(StandardProtocolSession))?;
         reg.protocol()
-            .protocol_driver(Arc::new(StandardProtocolDriver))?;
+            .protocol_driver(Arc::new(StandardProtocolDriver {
+                config: self.config.clone(),
+            }))?;
         reg.tools()
             .orchestrating(standard_batch_orchestrating_tool())?;
+        let discovery = self.config.discovery.clone();
+        reg.tool_catalog().contribute(Arc::new(move |ctx| {
+            validate_discovery(&ctx.tools, discovery.as_ref())?;
+            Ok(Default::default())
+        }));
         Ok(())
     }
+}
+
+fn validate_discovery(
+    tools: &[lash_core::ToolManifest],
+    discovery: Option<&lash_core::ToolDiscovery>,
+) -> Result<(), PluginError> {
+    if let Some(discovery) = discovery
+        && !tools
+            .iter()
+            .any(|tool| tool.inline && tool.name == discovery.operation)
+    {
+        return Err(PluginError::InvalidToolDiscovery {
+            operation: discovery.operation.clone(),
+        });
+    }
+    Ok(())
 }
 
 struct StandardProtocolSession;
@@ -115,7 +154,9 @@ impl ProtocolSessionPlugin for StandardProtocolSession {
     }
 }
 
-struct StandardProtocolDriver;
+struct StandardProtocolDriver {
+    config: StandardProtocolConfig,
+}
 
 impl ProtocolDriverPlugin for StandardProtocolDriver {
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
@@ -127,7 +168,11 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
                 true,
                 Arc::new(turn_limit_exhausted_message),
             ),
-            tool_specs: input.tool_catalog.model_tool_specs(),
+            tool_specs: if self.config.discovery.is_some() {
+                input.tool_catalog.inline_tools().model_tool_specs()
+            } else {
+                input.tool_catalog.model_tool_specs()
+            },
             tool_names,
             tool_names_fingerprint,
             execution_prompt: Arc::from(STANDARD_EXECUTION_SECTION),
@@ -1447,5 +1492,63 @@ mod tests {
         );
         assert!(matches!(parts[2].kind, PartKind::ToolResult));
         assert!(parts[2].content.ends_with("\"after\"]"));
+    }
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+    #[test]
+    fn standard_discovery_filters_provider_specs_and_requires_an_inline_member() {
+        let tool = |name: &str, inline| {
+            let mut tool = lash_core::ToolDefinition::raw(
+                name,
+                name,
+                name,
+                serde_json::json!({"type":"object"}),
+                serde_json::json!({"type":"string"}),
+            );
+            tool.manifest.inline = inline;
+            tool
+        };
+        let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![
+            tool("tools.search", true),
+            tool("hidden", false),
+        ]);
+        let manifests = catalog
+            .tools
+            .iter()
+            .map(|entry| entry.manifest.clone())
+            .collect::<Vec<_>>();
+        for discovery in [
+            None,
+            Some(lash_core::ToolDiscovery {
+                operation: "tools.search".into(),
+            }),
+        ] {
+            validate_discovery(&manifests, discovery.as_ref()).unwrap();
+            let expected = if discovery.is_some() { 1 } else { 2 };
+            let driver = StandardProtocolDriver {
+                config: StandardProtocolConfig { discovery },
+            };
+            let preamble = driver.build_preamble(ProtocolBuildInput {
+                tool_catalog: Arc::new(catalog.clone()),
+                plugin_extensions: Default::default(),
+                trigger_events: Default::default(),
+                extra_prompt_contributions: Vec::new(),
+            });
+            assert_eq!(preamble.tool_specs.len(), expected);
+        }
+        for operation in ["hidden", "absent"] {
+            assert!(matches!(
+                validate_discovery(
+                    &manifests,
+                    Some(&lash_core::ToolDiscovery {
+                        operation: operation.into()
+                    })
+                ),
+                Err(PluginError::InvalidToolDiscovery { .. })
+            ));
+        }
     }
 }

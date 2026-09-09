@@ -2,7 +2,7 @@ mod driver;
 mod history;
 pub(crate) mod plugin;
 mod projector;
-mod prompt;
+pub(crate) mod prompt;
 mod stall;
 mod state;
 mod tool;

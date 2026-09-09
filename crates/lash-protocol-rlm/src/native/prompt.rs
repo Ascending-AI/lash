@@ -3,7 +3,7 @@ use lash_rlm_types::RlmTermination;
 
 /// Only transport prose changes. Runtime, language and standard library copy
 /// comes verbatim from the dialect's authoritative teaching.
-pub(super) fn execution_section(
+pub(crate) fn execution_section(
     dialect: &dyn RlmDialect,
     features: crate::protocol::RlmPromptFeatures,
     catalog: &lash_core::ToolCatalog,

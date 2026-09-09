@@ -33,6 +33,7 @@ pub type SharedPromptUsage = Arc<RwLock<Option<PromptUsage>>>;
 
 #[derive(Clone)]
 pub struct RlmProjectorConfig {
+    pub discovery: Option<lash_core::ToolDiscovery>,
     pub max_output_chars: usize,
     pub max_budget_tokens: Option<usize>,
     pub last_prompt_usage: SharedPromptUsage,
@@ -41,6 +42,7 @@ pub struct RlmProjectorConfig {
 }
 
 pub(crate) struct RlmPreambleConfig {
+    pub(crate) discovery: Option<lash_core::ToolDiscovery>,
     pub(crate) max_output_chars: usize,
     pub(crate) max_budget_tokens: Option<usize>,
     pub(crate) last_prompt_usage: SharedPromptUsage,
@@ -50,6 +52,7 @@ pub(crate) struct RlmPreambleConfig {
 impl Default for RlmProjectorConfig {
     fn default() -> Self {
         Self {
+            discovery: None,
             max_output_chars: 10_000,
             max_budget_tokens: None,
             last_prompt_usage: Arc::new(RwLock::new(None)),
@@ -84,6 +87,7 @@ pub(crate) fn build_rlm_preamble_with_bound_variables(
     build_rlm_preamble_with_dialect(
         input,
         RlmPreambleConfig {
+            discovery: config.discovery,
             max_output_chars: config.max_output_chars,
             max_budget_tokens: config.max_budget_tokens,
             last_prompt_usage: config.last_prompt_usage,
@@ -104,6 +108,13 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     let tool_names = tool_catalog.tool_names();
     let tool_names_fingerprint = tool_catalog.tool_names_fingerprint();
     let mut prompt_contributions = Vec::new();
+    let visible_catalog;
+    let tool_catalog = if config.discovery.is_some() {
+        visible_catalog = tool_catalog.inline_tools();
+        &visible_catalog
+    } else {
+        tool_catalog
+    };
 
     let tool_docs = crate::tool_catalog::rlm_prompt_tool_docs(
         tool_catalog,
@@ -117,6 +128,14 @@ pub(crate) fn build_rlm_preamble_with_dialect(
         ));
     }
     prompt_contributions.extend(input.extra_prompt_contributions);
+    let execution = dialect
+        .render_execution_section(config.prompt_features, tool_catalog)
+        .expect("validated dialect surface");
+    let execution = crate::tool_catalog::with_discovery_sentence(
+        execution,
+        config.discovery.as_ref(),
+        dialect.as_ref(),
+    );
     let turn_limit_dialect = Arc::clone(&dialect);
     TurnDriverPreamble {
         config: TurnDriverConfig {
@@ -143,11 +162,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
         tool_specs: Arc::new(Vec::new()),
         tool_names,
         tool_names_fingerprint,
-        execution_prompt: Arc::from(
-            dialect
-                .render_execution_section(config.prompt_features, tool_catalog)
-                .expect("RLM tool catalog registration must validate the active dialect surface"),
-        ),
+        execution_prompt: Arc::from(execution),
         prompt_contributions,
     }
 }

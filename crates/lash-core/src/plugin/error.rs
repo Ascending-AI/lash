@@ -2,6 +2,9 @@
 #[serde(tag = "type", content = "message", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum PluginError {
+    /// Discovery must itself be an inline member of the tool catalogue.
+    #[error("discovery operation `{operation}` must be an inline catalogue member")]
+    InvalidToolDiscovery { operation: String },
     #[error("plugin registration error: {0}")]
     Registration(String),
     #[error("plugin invoke error: {0}")]

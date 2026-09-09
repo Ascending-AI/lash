@@ -22,6 +22,13 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     let tool_names = tool_catalog.tool_names();
     let tool_names_fingerprint = tool_catalog.tool_names_fingerprint();
     let mut prompt_contributions = Vec::new();
+    let visible_catalog;
+    let tool_catalog = if config.discovery.is_some() {
+        visible_catalog = tool_catalog.inline_tools();
+        &visible_catalog
+    } else {
+        tool_catalog
+    };
 
     let tool_docs = crate::tool_catalog::rlm_prompt_tool_docs(
         tool_catalog,
@@ -35,6 +42,13 @@ pub(crate) fn build_rlm_preamble_with_dialect(
         ));
     }
     prompt_contributions.extend(input.extra_prompt_contributions);
+    let execution =
+        super::prompt::execution_section(dialect.as_ref(), config.prompt_features, tool_catalog);
+    let execution = crate::tool_catalog::with_discovery_sentence(
+        execution,
+        config.discovery.as_ref(),
+        dialect.as_ref(),
+    );
     let turn_limit_dialect = Arc::clone(&dialect);
     TurnDriverPreamble {
         config: TurnDriverConfig {
@@ -61,11 +75,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
         tool_specs: Arc::new(vec![super::tool::tool_spec(dialect.as_ref())]),
         tool_names,
         tool_names_fingerprint,
-        execution_prompt: Arc::from(super::prompt::execution_section(
-            dialect.as_ref(),
-            config.prompt_features,
-            tool_catalog,
-        )),
+        execution_prompt: Arc::from(execution),
         prompt_contributions,
     }
 }

@@ -19,6 +19,7 @@ impl ProtocolDriverPlugin for RlmProtocolDriver {
         build_rlm_preamble_with_dialect(
             input,
             RlmPreambleConfig {
+                discovery: self.config.discovery.clone(),
                 max_output_chars: self.config.max_output_chars,
                 max_budget_tokens: self.config.continue_as_soft_warn_tokens,
                 last_prompt_usage: Arc::clone(&self.last_prompt_usage),

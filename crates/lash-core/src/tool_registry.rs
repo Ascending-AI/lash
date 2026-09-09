@@ -51,6 +51,7 @@ where
                 "description": manifest.description,
                 "bindings": manifest.bindings,
                 "activation": manifest.activation,
+                "inline": manifest.inline,
             });
             if let Some(contract) = manifest.compact_contract {
                 projected

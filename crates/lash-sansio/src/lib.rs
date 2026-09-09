@@ -81,8 +81,8 @@ pub use tool_catalog::{
 pub use tool_contract::validate_tool_input;
 pub use tool_contract::{
     CompactToolContract, LashSchema, ModelTool, ToolActivation, ToolArgumentProjectionPolicy,
-    ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutputContract, ToolRetryPolicy,
-    schema_for,
+    ToolContract, ToolDefinition, ToolDiscovery, ToolId, ToolManifest, ToolOutputContract,
+    ToolRetryPolicy, schema_for,
 };
 pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason,

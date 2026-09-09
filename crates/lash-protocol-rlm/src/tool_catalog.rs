@@ -1105,3 +1105,130 @@ mod tests {
         );
     }
 }
+
+pub(crate) fn validate_discovery(
+    tools: &[lash_core::ToolManifest],
+    discovery: Option<&lash_core::ToolDiscovery>,
+    dialect: &dyn crate::dialect::RlmDialect,
+) -> Result<(), PluginError> {
+    if let Some(discovery) = discovery
+        && !tools.iter().any(|tool| {
+            tool.inline
+                && dialect.tool_call_path(tool).ok().as_deref()
+                    == Some(discovery.operation.as_str())
+        })
+    {
+        return Err(PluginError::InvalidToolDiscovery {
+            operation: discovery.operation.clone(),
+        });
+    }
+    Ok(())
+}
+
+pub(crate) fn with_discovery_sentence(
+    mut execution: String,
+    discovery: Option<&lash_core::ToolDiscovery>,
+    dialect: &dyn crate::dialect::RlmDialect,
+) -> String {
+    execution = execution.replace(" Use discovery if available.", "");
+    if let Some(discovery) = discovery {
+        let suffix = if dialect.language_id() == "lashlang" {
+            "?"
+        } else {
+            ""
+        };
+        let sentence = format!(
+            " Other tools exist; find them with `await {}({{ ... }}){suffix}`.",
+            discovery.operation
+        );
+        let at = execution.find("\n\n").unwrap_or(execution.len());
+        execution.insert_str(at, &sentence);
+    }
+    execution
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+    use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
+    #[test]
+    fn discovery_filters_each_dialect_and_channel_and_requires_an_inline_operation() {
+        let tool = |name: &str, inline| {
+            let mut tool = lash_core::ToolDefinition::raw(
+                name,
+                name,
+                format!("Description for {name}"),
+                serde_json::json!({"type":"object"}),
+                serde_json::json!({"type":"string"}),
+            )
+            .with_tool_binding(ToolBinding::new(["tools"], name));
+            tool.manifest.inline = inline;
+            tool
+        };
+        let catalog = ToolCatalog::from_tool_definitions(vec![
+            tool("search", true),
+            tool("hidden", false),
+            tool("visible", true),
+        ]);
+        let manifests = catalog
+            .tools
+            .iter()
+            .map(|entry| entry.manifest.clone())
+            .collect::<Vec<_>>();
+        let dialects: [Box<dyn crate::dialect::RlmDialect>; 2] = [
+            Box::new(crate::dialect::lashlang_test_dialect()),
+            Box::new(crate::dialect::typescript_test_dialect()),
+        ];
+        for dialect in dialects {
+            for native in [false, true] {
+                for discovery in [
+                    None,
+                    Some(lash_core::ToolDiscovery {
+                        operation: "tools.search".into(),
+                    }),
+                ] {
+                    validate_discovery(&manifests, discovery.as_ref(), dialect.as_ref()).unwrap();
+                    let visible = if discovery.is_some() {
+                        catalog.inline_tools()
+                    } else {
+                        catalog.clone()
+                    };
+                    let execution = if native {
+                        crate::native::prompt::execution_section(
+                            dialect.as_ref(),
+                            Default::default(),
+                            &visible,
+                        )
+                    } else {
+                        dialect
+                            .render_execution_section(Default::default(), &visible)
+                            .unwrap()
+                    };
+                    let text =
+                        with_discovery_sentence(execution, discovery.as_ref(), dialect.as_ref());
+                    let docs = rlm_prompt_tool_docs(&visible, dialect.as_ref(), Default::default());
+                    assert!(docs.contains("Description for search"));
+                    assert!(docs.contains("Description for visible"));
+                    assert_eq!(docs.contains("Description for hidden"), discovery.is_none());
+                    assert_eq!(
+                        text.contains("Other tools exist; find them with `await tools.search"),
+                        discovery.is_some()
+                    );
+                    assert!(!text.contains("Use discovery if available"));
+                }
+            }
+            for operation in ["tools.hidden", "tools.absent"] {
+                assert!(matches!(
+                    validate_discovery(
+                        &manifests,
+                        Some(&lash_core::ToolDiscovery {
+                            operation: operation.into()
+                        }),
+                        dialect.as_ref()
+                    ),
+                    Err(PluginError::InvalidToolDiscovery { .. })
+                ));
+            }
+        }
+    }
+}

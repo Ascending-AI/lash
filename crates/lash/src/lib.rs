@@ -196,13 +196,13 @@ pub mod tools {
         TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, TimeoutBehavior, ToolActivation,
         ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,
         ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContext,
-        ToolContract, ToolDefinition, ToolDirectCompletionClient, ToolDispatchClient,
-        ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolFailureSource, ToolIntent,
-        ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd,
-        ToolIntentParentEndAction, ToolIntentParentEndOutcome, ToolIntentRefusalReason,
-        ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
-        ToolPrepareCall, ToolPrepareContext, ToolProcessEventClient, ToolProvider, ToolRegistry,
-        ToolRetryStatus, ToolSessionAdmin, ToolSessionModel, ToolValue,
+        ToolContract, ToolDefinition, ToolDirectCompletionClient, ToolDiscovery,
+        ToolDispatchClient, ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolFailureSource,
+        ToolIntent, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
+        ToolIntentParentEnd, ToolIntentParentEndAction, ToolIntentParentEndOutcome,
+        ToolIntentRefusalReason, ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone,
+        ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProcessEventClient,
+        ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionAdmin, ToolSessionModel, ToolValue,
         derive_tool_intent_identity, facade_support::OrchestrationContext,
         facade_support::ReconfigureError, facade_support::ToolRegistryFacadeOps,
         facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
@@ -469,6 +469,7 @@ pub mod plugins {
         SpillPolicy, ToolOutputBudgetConfig, ToolOutputBudgetMode, ToolOutputBudgetPluginFactory,
         tool_output_budget_stack as runtime_plugin_stack,
     };
+    pub use lash_protocol_standard::{StandardProtocolConfig, StandardProtocolPluginFactory};
     /// Default chat projector installed by [`TurnDriverConfig::chat`].
     pub use lash_sansio::ChatContextProjector;
     /// Projection contract stored by [`TurnDriverConfig`] when a protocol supplies a custom

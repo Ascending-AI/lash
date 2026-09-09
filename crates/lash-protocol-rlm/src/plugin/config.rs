@@ -6,6 +6,9 @@ use super::{
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RlmProtocolPluginConfig {
+    /// Host construction-time discovery; never recorded in protocol state.
+    #[serde(skip)]
+    pub discovery: Option<lash_core::ToolDiscovery>,
     /// Session-pinned transport used for model-authored programs.
     #[serde(default)]
     pub channel: super::RlmChannel,
@@ -90,6 +93,7 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound, MemoryBoun
     /// Finish the config. Available only once all three bounds are chosen.
     pub fn build(self) -> RlmProtocolPluginConfig {
         RlmProtocolPluginConfig {
+            discovery: None,
             channel: super::RlmChannel::Cell,
             instruction_limit: self.instruction_limit,
             wall_clock: self.wall_clock,
@@ -104,6 +108,11 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound, MemoryBoun
 }
 
 impl RlmProtocolPluginConfig {
+    pub fn with_discovery(mut self, discovery: lash_core::ToolDiscovery) -> Self {
+        self.discovery = Some(discovery);
+        self
+    }
+
     /// Select the transport before session materialization.
     pub fn with_channel(mut self, channel: super::RlmChannel) -> Self {
         self.channel = channel;
