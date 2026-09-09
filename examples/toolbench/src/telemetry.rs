@@ -159,6 +159,63 @@ impl Telemetry {
                 rows.push(row);
             }
         }
+        for (index, row) in rows.iter_mut().enumerate() {
+            let transport = captured.get(index).cloned().unwrap_or(Value::Null);
+            let usage = crate::accounting::Usage::from_raw(&transport["raw_usage"]);
+            row.as_object_mut().unwrap().extend(
+                serde_json::to_value(usage)
+                    .unwrap()
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            );
+            row["round"] = (index + 1).into();
+            row["turn"] = 1.into();
+            row["protocol_round"] = row["call_index"].as_u64().map(|n| n + 1).into();
+            row["raw_usage"] = transport["raw_usage"].clone();
+            row["provider_response_id"] = row["evidence"]["provider_response_id"].clone();
+            if row["provider_response_id"].is_null() {
+                row["provider_response_id"] =
+                    transport["response"]["execution_evidence"]["provider_response_id"].clone();
+            }
+            if let Some(sizes) = transport["request_sizes"].as_object() {
+                row.as_object_mut().unwrap().extend(sizes.clone());
+            } else {
+                for key in [
+                    "system_prompt_chars",
+                    "system_prompt_bytes",
+                    "messages_chars",
+                    "messages_bytes",
+                    "tool_result_chars",
+                    "tool_result_bytes",
+                    "tool_definitions_count",
+                    "tool_definitions_chars",
+                    "tool_definitions_bytes",
+                ] {
+                    row[key] = Value::Null;
+                }
+            }
+            if row.get("code").is_none() {
+                row["code"] = Value::Null;
+            }
+            if row.get("tool_calls").is_none() {
+                row["tool_calls"] = serde_json::json!([]);
+            }
+            if row["provider_response_id"].is_null() {
+                row["provider_response_id"] = transport["wire_responses"]
+                    .as_array()
+                    .and_then(|chunks| chunks.iter().rev().find_map(|v| v.get("id").cloned()))
+                    .unwrap_or(Value::Null);
+            }
+            if row["provider_response_id"].is_null() {
+                row["provider_response_id"] = row["error"]["provider_response_id"].clone();
+            }
+            if row["provider_response_id"].is_null() {
+                row["provider_response_id"] = transport["http_response_json"]["id"].clone();
+            }
+            row["cost_unknown"] = row["cost_usd"].is_null().into();
+            row["capture_errors"] = serde_json::json!(*self.capture.dump_errors.lock().unwrap());
+        }
         rows.into_iter()
             .map(|row| self.capture.redact(row))
             .collect()

@@ -5219,10 +5219,13 @@ version = "0.0.0-dev"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "clap",
  "dotenvy",
+ "futures-util",
  "lash-internal-provider-openai",
  "lash-runtime",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "tokio",

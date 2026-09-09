@@ -1,9 +1,12 @@
+mod accounting;
 mod grading;
 mod provider_log;
+mod reconcile;
 mod runtime;
 mod summary;
 mod tasks;
 mod telemetry;
+mod wire_log;
 mod world;
 
 use anyhow::{Context, Result, bail};
@@ -98,6 +101,12 @@ struct Args {
     /// File for contextual Lash and provider tracing.
     #[arg(long)]
     trace_log: Option<std::path::PathBuf>,
+    /// Reconcile a stratified random sample against OpenRouter generation records.
+    #[arg(long)]
+    reconcile: Option<std::path::PathBuf>,
+    /// Persist redacted wire request and response JSON for each provider attempt.
+    #[arg(long)]
+    dump_requests: Option<std::path::PathBuf>,
     /// Maximum retries per provider round (no whole-task re-drive).
     #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(..4294967295))]
     provider_retries: u32,
@@ -167,6 +176,8 @@ struct TaskResult {
     seed: World,
     checker: String,
     usage: summary::Usage,
+    provider_calls: usize,
+    system_prompt_tokens_first_call: Option<u64>,
 }
 
 #[tokio::main]
@@ -179,6 +190,9 @@ async fn main() -> Result<()> {
     let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
     if api_key.trim().is_empty() {
         bail!("OPENROUTER_API_KEY is not set");
+    }
+    if let Some(path) = &args.reconcile {
+        return reconcile::run(path, &api_key).await;
     }
     let trace_path = args.trace_log.clone().unwrap_or_else(|| {
         let mut path = args.results_file.as_os_str().to_os_string();
@@ -237,10 +251,21 @@ async fn main() -> Result<()> {
         let writer = &writer;
         async move {
             let model = &args.model[item.model_index];
-            match runtime::preflight(&tasks[0], item.dialect, model, api_key, item.channel, args.reasoning_effort, args.turn_wall_limit_secs, args.provider_retries).await {
+            let (outcome, probes) = runtime::preflight(&tasks[0], item.dialect, model, api_key, item.channel, args.reasoning_effort, args.turn_wall_limit_secs, args.provider_retries, args.dump_requests.as_deref()).await;
+            let mut file = writer.lock().await;
+            let mut all_attempts = Vec::new();
+            for (repetition, probe) in probes.iter().enumerate() {
+                for attempt in &probe.attempts {
+                    let mut row = attempt.clone();
+                    row.as_object_mut().unwrap().extend(serde_json::json!({"kind":"preflight","task":"__native_probe","model":model,"channel":item.channel.name(),"dialect":item.dialect_name(),"repetition":repetition}).as_object().unwrap().clone());
+                    write_row(&mut file, &row)?;
+                }
+                all_attempts.extend(probe.attempts.clone());
+            }
+            match outcome {
                 Ok(()) => Ok(None),
                 Err(reason) => {
-                    write_row(&mut *writer.lock().await, &serde_json::json!({"kind":"excluded_route","route":"openrouter","model":model,"channel":item.channel.name(),"dialect":item.dialect_name(),"reasoning_effort":args.reasoning_effort,"rounds":0,"reason":reason}))?;
+                    write_row(&mut file, &serde_json::json!({"usage":summary::Usage::from_attempts(&all_attempts),"provider_calls":all_attempts.len(),"kind":"excluded_route","route":"openrouter","model":model,"channel":item.channel.name(),"dialect":item.dialect_name(),"reasoning_effort":args.reasoning_effort,"rounds":all_attempts.len(),"reason":reason}))?;
                     Ok(Some((item.model_index, item.channel)))
                 }
             }
@@ -265,7 +290,7 @@ async fn main() -> Result<()> {
         async move {
             let task = &tasks[item.task_index];
             let model = &args.model[item.model_index];
-            let (final_world, evidence) = runtime::run_task(task, item.dialect, model, api_key, item.run, item.channel, args.reasoning_effort, args.turn_wall_limit_secs, args.provider_retries).await;
+            let (final_world, evidence) = runtime::run_task(task, item.dialect, model, api_key, item.run, item.channel, args.reasoning_effort, args.turn_wall_limit_secs, args.provider_retries, args.dump_requests.as_deref()).await;
             let grade = grade(task, &final_world, &evidence, args.max_task_cost_usd);
             let usage = summary::Usage::from_attempts(&evidence.attempts);
             let mut file = writer.lock().await;
@@ -279,6 +304,7 @@ async fn main() -> Result<()> {
                 run: item.run, id: task.id.into(), dialect: item.dialect_name().into(), channel: item.channel.name().into(),
                 wall_ms: evidence.wall_ms, passed: grade.passed, failure_reason: grade.failure_reason,
                 executions: evidence.executions, expected_tool_call_count: task.tool_calls, cost_unknown: usage.cost.is_none(), max_task_cost_usd: args.max_task_cost_usd, turn_wall_limit_secs: args.turn_wall_limit_secs,
+                provider_calls: evidence.attempts.len(), system_prompt_tokens_first_call: evidence.attempts.first().and_then(|r| r["prompt_tokens_total"].as_u64()),
                 rounds: evidence.rounds, iterations: evidence.iterations, tool_call_count: evidence.tool_call_count,
                 submit_count: evidence.submit_count, submit_values: evidence.submit_values, retries: evidence.retries, provider_attempts: evidence.attempts.len(), turn_outcome: evidence.turn_outcome, error: evidence.error, failed_exec_iterations: evidence.failed_execution_errors.len(),
                 finish_value: evidence.finish_value, seed: task.seed.clone(),
