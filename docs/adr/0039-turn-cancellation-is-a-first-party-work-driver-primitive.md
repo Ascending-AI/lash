@@ -100,11 +100,13 @@ the receipt reports `Escalated`. A same-or-weaker request still reports
 `AlreadyRequested`. Lash ships no escalation timer; "abort if the step has
 not finished after N seconds" is host policy expressed as a second request.
 
-Known limitation: the Restate durable-wait race wakes on any gate resolution
-without carrying its payload, so an after-step request that lands while a
-Restate-owned turn is inside a durable sleep or await is honoured at that
-wake as an abort rather than composing to the step boundary. Carrying the
-gate payload through `RestateTurnCancelWake` is a follow-up in lash-restate.
+Restate durable waits carry the gate payload. The wake an awakeable
+journals is derived from the gate resolution that settled it, so an
+`Immediate` request unwinds a parked sleep, await-event or process await at
+that wake exactly as before, while an `AfterStep` request lets the wait
+finish on its own terms: the iteration completes and the turn stops at its
+step boundary. A deferred wait re-parks on the turn's escalation promise, so
+a later `Immediate` request still unwinds it mid-wait.
 
 ## Terminal product-event ownership
 

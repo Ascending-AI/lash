@@ -71,6 +71,7 @@ mod endpoint_protocol;
 mod process_tool_replay;
 mod replay_corpus;
 mod tool_context_conformance;
+mod turn_cancel_modes;
 use endpoint_protocol::{
     durable_wait_index_call_response, encode_call_replay, encode_captured_run_and_call_replay,
     encode_captured_run_and_interrupted_call_replay, encode_captured_run_command_replay,
@@ -6711,11 +6712,8 @@ impl TestTurnCancelGate {
             .remove(&registration_id);
     }
 
-    fn resolve(&self, key: &AwaitEventKey) -> bool {
-        self.wake_matching(
-            |entry| entry.key == *key,
-            RestateTurnCancelWake::TurnCancelled,
-        )
+    fn resolve(&self, key: &AwaitEventKey, wake: RestateTurnCancelWake) -> bool {
+        self.wake_matching(|entry| entry.key == *key, wake)
     }
 
     fn revoke_session(&self, session_id: &str) {
@@ -6765,10 +6763,45 @@ fn test_turn_cancel_wake_outcome<T>(
     session_id: String,
 ) -> RestateTurnCancelRaceOutcome<T> {
     match wake {
-        RestateTurnCancelWake::TurnCancelled => RestateTurnCancelRaceOutcome::TurnCancelled,
+        RestateTurnCancelWake::TurnCancelled | RestateTurnCancelWake::TurnCancelDeferred => {
+            RestateTurnCancelRaceOutcome::TurnCancelled
+        }
         RestateTurnCancelWake::SessionRevoked => {
             RestateTurnCancelRaceOutcome::SessionRevoked { session_id }
         }
+    }
+}
+
+/// What the test gate race does after a wake lands while the guarded wait is
+/// still pending. Mirrors the deployed `race_turn_cancel_gate` flow: a deferred
+/// stop re-registers on the escalation key and keeps waiting; anything else
+/// unwinds.
+enum TestTurnCancelWakeStep {
+    Continue(TestTurnCancelRegistration),
+    Unwind(RestateTurnCancelWake),
+}
+
+fn test_turn_cancel_wake_step(
+    gate: &TestTurnCancelGate,
+    turn_cancel_key: &AwaitEventKey,
+    escalated: bool,
+    wake: RestateTurnCancelWake,
+) -> Result<TestTurnCancelWakeStep, TerminalError> {
+    if escalated || wake != RestateTurnCancelWake::TurnCancelDeferred {
+        return Ok(TestTurnCancelWakeStep::Unwind(wake));
+    }
+    let escalation_key = restate_await_event_key(
+        &turn_cancel_key.scope,
+        AwaitEventWaitIdentity::TurnCancelEscalation,
+    )
+    .map_err(TerminalError::from_error)?;
+    match gate.register(escalation_key)? {
+        TestTurnCancelRegistrationVerdict::Registered(registration) => {
+            Ok(TestTurnCancelWakeStep::Continue(registration))
+        }
+        TestTurnCancelRegistrationVerdict::Revoked => Ok(TestTurnCancelWakeStep::Unwind(
+            RestateTurnCancelWake::SessionRevoked,
+        )),
     }
 }
 
@@ -6802,25 +6835,39 @@ where
             .ok_or_else(|| {
                 TerminalError::new("turn cancellation gate is missing its session id")
             })?;
-        let mut registration = match gate.register(turn_cancel.key)? {
+        let turn_cancel_key = turn_cancel.key;
+        let mut registration = match gate.register(turn_cancel_key.clone())? {
             TestTurnCancelRegistrationVerdict::Registered(registration) => registration,
             TestTurnCancelRegistrationVerdict::Revoked => {
                 return Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id });
             }
         };
-        tokio::select! {
-            biased;
-            result = context.sleep_send(duration) => {
-                gate.unregister(registration.id);
-                result.map(RestateTurnCancelRaceOutcome::Completed)
-            }
-            wake = &mut registration.receiver => {
-                let wake = wake.map_err(|_| TerminalError::new("test turn cancellation gate was dropped"))?;
-                Ok(test_turn_cancel_wake_outcome(wake, session_id))
-            }
-            _ = cancellation.cancelled() => {
-                gate.unregister(registration.id);
-                Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
+        let mut escalated = false;
+        let guarded = context.sleep_send(duration);
+        tokio::pin!(guarded);
+        loop {
+            tokio::select! {
+                biased;
+                result = &mut guarded => {
+                    gate.unregister(registration.id);
+                    return result.map(RestateTurnCancelRaceOutcome::Completed);
+                }
+                wake = &mut registration.receiver => {
+                    let wake = wake.map_err(|_| TerminalError::new("test turn cancellation gate was dropped"))?;
+                    match test_turn_cancel_wake_step(gate, &turn_cancel_key, escalated, wake)? {
+                        TestTurnCancelWakeStep::Continue(next) => {
+                            registration = next;
+                            escalated = true;
+                        }
+                        TestTurnCancelWakeStep::Unwind(wake) => {
+                            return Ok(test_turn_cancel_wake_outcome(wake, session_id));
+                        }
+                    }
+                }
+                _ = cancellation.cancelled() => {
+                    gate.unregister(registration.id);
+                    return Ok(RestateTurnCancelRaceOutcome::TurnCancelled);
+                }
             }
         }
     })
@@ -6852,28 +6899,42 @@ where
             .ok_or_else(|| {
                 TerminalError::new("turn cancellation gate is missing its session id")
             })?;
-        let mut registration = match gate.register(turn_cancel.key)? {
+        let turn_cancel_key = turn_cancel.key;
+        let mut registration = match gate.register(turn_cancel_key.clone())? {
             TestTurnCancelRegistrationVerdict::Registered(registration) => registration,
             TestTurnCancelRegistrationVerdict::Revoked => {
                 return Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id });
             }
         };
         let event_key = request.key.clone();
-        tokio::select! {
-            biased;
-            wake = &mut registration.receiver => {
-                let wake = wake.map_err(|_| TerminalError::new("test turn cancellation gate was dropped"))?;
-                if wake == RestateTurnCancelWake::TurnCancelled {
-                    context.resolve_event(RestateDurableWaitResolveRequest {
-                        key: event_key,
-                        resolution: Resolution::Cancelled,
-                    }).await?;
+        let mut escalated = false;
+        let guarded = context.await_event(request, cancellation);
+        tokio::pin!(guarded);
+        loop {
+            tokio::select! {
+                biased;
+                wake = &mut registration.receiver => {
+                    let wake = wake.map_err(|_| TerminalError::new("test turn cancellation gate was dropped"))?;
+                    match test_turn_cancel_wake_step(gate, &turn_cancel_key, escalated, wake)? {
+                        TestTurnCancelWakeStep::Continue(next) => {
+                            registration = next;
+                            escalated = true;
+                        }
+                        TestTurnCancelWakeStep::Unwind(wake) => {
+                            if wake != RestateTurnCancelWake::SessionRevoked {
+                                context.resolve_event(RestateDurableWaitResolveRequest {
+                                    key: event_key,
+                                    resolution: Resolution::Cancelled,
+                                }).await?;
+                            }
+                            return Ok(test_turn_cancel_wake_outcome(wake, session_id));
+                        }
+                    }
                 }
-                Ok(test_turn_cancel_wake_outcome(wake, session_id))
-            }
-            result = context.await_event(request, cancellation) => {
-                gate.unregister(registration.id);
-                result.map(RestateTurnCancelRaceOutcome::Completed)
+                result = &mut guarded => {
+                    gate.unregister(registration.id);
+                    return result.map(RestateTurnCancelRaceOutcome::Completed);
+                }
             }
         }
     })
@@ -6905,23 +6966,37 @@ where
             .ok_or_else(|| {
                 TerminalError::new("turn cancellation gate is missing its session id")
             })?;
-        let mut registration = match gate.register(turn_cancel.key)? {
+        let turn_cancel_key = turn_cancel.key;
+        let mut registration = match gate.register(turn_cancel_key.clone())? {
             TestTurnCancelRegistrationVerdict::Registered(registration) => registration,
             TestTurnCancelRegistrationVerdict::Revoked => {
                 return Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id });
             }
         };
-        tokio::select! {
-            biased;
-            wake = &mut registration.receiver => {
-                let wake = wake.map_err(|_| TerminalError::new("test turn cancellation gate was dropped"))?;
-                Ok(test_turn_cancel_wake_outcome(wake, session_id))
-            }
-            result = context.await_process_terminal(process_id) => {
-                gate.unregister(registration.id);
-                result
-                    .map(Box::new)
-                    .map(RestateTurnCancelRaceOutcome::Completed)
+        let mut escalated = false;
+        let guarded = context.await_process_terminal(process_id);
+        tokio::pin!(guarded);
+        loop {
+            tokio::select! {
+                biased;
+                wake = &mut registration.receiver => {
+                    let wake = wake.map_err(|_| TerminalError::new("test turn cancellation gate was dropped"))?;
+                    match test_turn_cancel_wake_step(gate, &turn_cancel_key, escalated, wake)? {
+                        TestTurnCancelWakeStep::Continue(next) => {
+                            registration = next;
+                            escalated = true;
+                        }
+                        TestTurnCancelWakeStep::Unwind(wake) => {
+                            return Ok(test_turn_cancel_wake_outcome(wake, session_id));
+                        }
+                    }
+                }
+                result = &mut guarded => {
+                    gate.unregister(registration.id);
+                    return result
+                        .map(Box::new)
+                        .map(RestateTurnCancelRaceOutcome::Completed);
+                }
             }
         }
     })
@@ -7033,7 +7108,10 @@ impl RecordingContext {
         {
             return ResolveOutcome::UnknownOrRevoked;
         }
-        self.turn_cancel_gate.resolve(&request.key);
+        self.turn_cancel_gate.resolve(
+            &request.key,
+            RestateTurnCancelWake::for_gate_resolution(&request.resolution),
+        );
         self.terminalize_durable_event(request)
     }
 
@@ -8136,7 +8214,10 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
     where
         'ctx: 'run,
     {
-        let outcome = if self.turn_cancel_gate.resolve(&request.key) {
+        let outcome = if self.turn_cancel_gate.resolve(
+            &request.key,
+            RestateTurnCancelWake::for_gate_resolution(&request.resolution),
+        ) {
             ResolveOutcome::Accepted
         } else {
             ResolveOutcome::UnknownOrRevoked

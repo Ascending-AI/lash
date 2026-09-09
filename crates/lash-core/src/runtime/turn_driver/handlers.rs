@@ -272,7 +272,7 @@ impl RuntimeTurnDriver<'_> {
                 // streamed, tools completed, work committed), and the machine
                 // has already advanced its counter, so the closed iteration
                 // is one behind. A machine that finished on this checkpoint
-                // seals the gate at commit instead.
+                // has its request honoured at commit instead.
                 if !machine.is_done()
                     && let Some(closed_iteration) = machine.protocol_iteration().checked_sub(1)
                 {
