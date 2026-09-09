@@ -271,7 +271,7 @@ const CENSUS: &[(&str, RetentionClass)] = &[
     (
         "effect_scope_retirements",
         PermanentlyExempt {
-            reason: "single-use process and runtime-operation identities keep a permanent scope fence",
+            reason: "scope fences: a runtime-operation fence is permanent; a process fence lasts until the host registers the id again (ADR 0049)",
         },
     ),
 ];

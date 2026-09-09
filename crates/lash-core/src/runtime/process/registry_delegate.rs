@@ -398,6 +398,17 @@ macro_rules! delegate_process_retention {
                     .prune_terminal_processes(cutoff_epoch_ms, filter, watermark)
                     .await
             }
+
+            async fn prunable_terminal_processes(
+                &self,
+                cutoff_epoch_ms: u64,
+                filter: Option<$crate::ProcessListFilter>,
+                watermark: $crate::ProjectionWatermark,
+            ) -> Result<Vec<String>, $crate::PluginError> {
+                self.$inner
+                    .prunable_terminal_processes(cutoff_epoch_ms, filter, watermark)
+                    .await
+            }
         }
     };
 }

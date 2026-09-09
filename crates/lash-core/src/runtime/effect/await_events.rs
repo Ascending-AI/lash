@@ -28,7 +28,6 @@ type PendingCheckHook = fn(&AwaitEventRegistry, &AwaitEventKey);
 
 const COMPLETED_TURN_CONTROL_KEY_LIMIT: usize = 4_096;
 const REVOKED_SESSION_LIMIT: usize = 4_096;
-const RETIRED_SCOPE_LIMIT: usize = 4_096;
 
 #[derive(Debug)]
 struct AwaitEventEntry {
@@ -80,14 +79,18 @@ pub(super) struct AwaitEventRegistry {
     session_shards: RwLock<HashMap<String, AwaitEventRegistryShard>>,
     unscoped_shard: AwaitEventRegistryShard,
     revoked_session_order: std::sync::Mutex<VecDeque<String>>,
-    /// Retired non-session scopes by journal identity key, in retirement
-    /// order. The in-process twin of the durable scope-retirement tombstone:
-    /// bounded like the revoked-session cache, because a process that never
-    /// restarts would otherwise grow it for its whole lifetime.
-    retired_scopes: std::sync::Mutex<(HashSet<String>, VecDeque<String>)>,
+    /// Journal-identity keys of retired non-session scopes. The in-process
+    /// twin of the durable scope-retirement fence, and like it unbounded: a
+    /// fence that could be evicted would let a retired scope mint again once
+    /// enough later retirements had passed through, which is exactly the
+    /// re-admission the fence exists to refuse. Growth is bounded by the
+    /// host's own retirement rate (one small string per retired process or
+    /// runtime operation for the life of the process), and a process fence
+    /// is released again by [`reinstate_scope`](Self::reinstate_scope) when
+    /// the host re-registers the id.
+    retired_scopes: std::sync::Mutex<HashSet<String>>,
     completed_turn_control_key_limit: usize,
     revoked_session_limit: usize,
-    retired_scope_limit: usize,
     #[cfg(test)]
     verify_uncached_calls: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
@@ -96,27 +99,18 @@ pub(super) struct AwaitEventRegistry {
 
 impl AwaitEventRegistry {
     pub(super) fn new() -> Self {
-        Self::with_limits(
-            COMPLETED_TURN_CONTROL_KEY_LIMIT,
-            REVOKED_SESSION_LIMIT,
-            RETIRED_SCOPE_LIMIT,
-        )
+        Self::with_limits(COMPLETED_TURN_CONTROL_KEY_LIMIT, REVOKED_SESSION_LIMIT)
     }
 
-    fn with_limits(
-        completed_turn_control_key_limit: usize,
-        revoked_session_limit: usize,
-        retired_scope_limit: usize,
-    ) -> Self {
+    fn with_limits(completed_turn_control_key_limit: usize, revoked_session_limit: usize) -> Self {
         Self {
             secret: uuid::Uuid::new_v4().as_bytes().to_vec(),
             session_shards: RwLock::new(HashMap::new()),
             unscoped_shard: Arc::new(std::sync::Mutex::new(AwaitEventRegistryState::new())),
             revoked_session_order: std::sync::Mutex::new(VecDeque::new()),
-            retired_scopes: std::sync::Mutex::new((HashSet::new(), VecDeque::new())),
+            retired_scopes: std::sync::Mutex::new(HashSet::new()),
             completed_turn_control_key_limit,
             revoked_session_limit,
-            retired_scope_limit,
             #[cfg(test)]
             verify_uncached_calls: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
@@ -185,16 +179,12 @@ impl AwaitEventRegistry {
 
     /// Whether `scope` carries an in-process retirement tombstone. Session
     /// scopes never do: they are fenced per session shard by revocation.
-    fn scope_is_retired(&self, scope: &ExecutionScope) -> Result<bool, RuntimeError> {
+    pub(super) fn scope_is_retired(&self, scope: &ExecutionScope) -> Result<bool, RuntimeError> {
         if scope.session_id().is_some() {
             return Ok(false);
         }
         let scope_id = scope.journal_identity()?;
-        Ok(self
-            .retired_scopes
-            .lock_recover()
-            .0
-            .contains(scope_id.key()))
+        Ok(self.retired_scopes.lock_recover().contains(scope_id.key()))
     }
 
     fn derive_key(
@@ -522,7 +512,7 @@ impl AwaitEventRegistry {
 
     /// Retire a terminal non-session `scope`: in-flight waiters under it error
     /// with `await_event_unknown_or_revoked`, its entries are dropped, and a
-    /// bounded tombstone rejects later mints, resolves, peeks, and waits under
+    /// permanent fence rejects later mints, resolves, peeks, and waits under
     /// the scope. The in-process twin of the durable scope-retirement fence.
     pub(super) fn retire_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
         scope.validate()?;
@@ -551,16 +541,20 @@ impl AwaitEventRegistry {
             completed_turn_control_order
                 .retain(|key_id| completed_turn_control.contains_key(key_id));
         }
-        let mut retired = self.retired_scopes.lock_recover();
-        let (set, order) = &mut *retired;
-        if set.insert(scope_id.clone()) {
-            order.push_back(scope_id);
-            while order.len() > self.retired_scope_limit {
-                if let Some(expired) = order.pop_front() {
-                    set.remove(&expired);
-                }
-            }
+        self.retired_scopes.lock_recover().insert(scope_id);
+        Ok(())
+    }
+
+    /// Lift the fence on a non-session `scope` whose owner is registered
+    /// again. Only the fence goes; the scope starts with no promises, which is
+    /// what a re-registered process id expects.
+    pub(super) fn reinstate_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
+        scope.validate()?;
+        if scope.session_id().is_some() {
+            return Err(super::executor::await_event_scope_not_retirable(scope));
         }
+        let scope_id = scope.journal_identity()?;
+        self.retired_scopes.lock_recover().remove(scope_id.key());
         Ok(())
     }
 
@@ -677,7 +671,7 @@ mod tests {
 
     #[tokio::test]
     async fn completed_turn_control_entries_leave_the_live_registry_and_are_bounded() {
-        let registry = AwaitEventRegistry::with_limits(2, 2, 2);
+        let registry = AwaitEventRegistry::with_limits(2, 2);
         let scope = turn_scope("bounded-turn-control", "turn-1");
         let gate = registry
             .key_for(&scope, AwaitEventWaitIdentity::TurnCancelGate)
@@ -736,7 +730,7 @@ mod tests {
 
     #[tokio::test]
     async fn turn_control_waiter_cancellation_never_resolves_the_gate() {
-        let registry = AwaitEventRegistry::with_limits(2, 2, 2);
+        let registry = AwaitEventRegistry::with_limits(2, 2);
         let gate = registry
             .key_for(
                 &turn_scope("waiter-cancel", "turn"),
@@ -760,7 +754,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_revoke_drains_entries_and_bounds_tombstones() {
-        let registry = AwaitEventRegistry::with_limits(2, 2, 2);
+        let registry = AwaitEventRegistry::with_limits(2, 2);
         let key = registry
             .key_for(
                 &turn_scope("revoke-1", "turn"),

@@ -73,6 +73,7 @@ The durable reference-edge inventory includes:
 | Row class | Exactly-one owner | Reclaim trigger |
 | --- | --- | --- |
 | `checkpoint_blob_refs` / `lash_checkpoint_blob_refs` | Session: the session whose head or anchor owns the checkpoint root identified by `checkpoint_ref`; components may be shared, but each edge belongs to that session-owned root. | Owner-delete cascade: owner-scoped session delete or process prune deletes the unreferenced checkpoint root, cascading its projection edges in the same transaction. The host-invoked global GC additionally severs the outgoing edges of any root retaining neither a live session head nor a node anchor — content-aliased dead roots outside that cascade — and every such severance completes before any blob delete. |
+| `effect_scope_retirements` / `lash_effect_scope_retirements` | Scope: the process or runtime operation whose journal was retired as unreachable; written by the scope-exact retirement in the same transaction as the journal deletions. | Permanent for runtime-operation scopes (used-once ids). A process fence is released only by the host registering the same process id again (`Processes::start` reinstates the scope before the registry insert, ADR 0049); no retention or vacuum sweep removes either. |
 
 #### Reclaim is severance, not sweeping
 

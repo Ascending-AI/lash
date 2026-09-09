@@ -7,6 +7,7 @@ use crate::support::{
 };
 pub(crate) use lash_core::facade_support::SessionConfigPatch;
 use lash_core::facade_support::{ToolRegistryFacadeOps, ToolStateFacadeOps};
+use lash_sansio::sync::MutexExt;
 // `PluginQuery` / `PluginCommand` / `PluginTask` bound the operation runners
 // below, but their home is `crate::plugins`: authoring surface a plugin
 // implements, not a name a host writes to invoke one (ADR 0051, FIG-1921).
@@ -100,6 +101,32 @@ impl CoreTriggerAdmin {
 pub struct SessionAdmin {
     pub(crate) runtime: RuntimeHandle,
     pub(crate) process_work: Option<Arc<dyn lash_core::ProcessWorkSubstrate>>,
+    pub(crate) deferred_scope_retirements: DeferredScopeRetirements,
+}
+
+/// Runtime-operation scopes minted by the facade for plugin commands and
+/// tasks whose retirement had to wait: the receipt came back while an effect
+/// group child or drain was still running under the scope, so the store
+/// refused to delete a live journal (`effect_scope_not_quiescent`). Each
+/// later plugin operation on the session retries them first; a scope that
+/// has gone quiescent is then retired and fenced, one that has not stays
+/// queued. Session-local by design: the scopes are this session's own.
+#[derive(Clone, Default)]
+pub(crate) struct DeferredScopeRetirements {
+    scopes: Arc<std::sync::Mutex<Vec<lash_core::ExecutionScope>>>,
+}
+
+impl DeferredScopeRetirements {
+    fn push(&self, scope: lash_core::ExecutionScope) {
+        let mut scopes = self.scopes.lock_recover();
+        if !scopes.contains(&scope) {
+            scopes.push(scope);
+        }
+    }
+
+    fn take(&self) -> Vec<lash_core::ExecutionScope> {
+        std::mem::take(&mut *self.scopes.lock_recover())
+    }
 }
 
 impl SessionAdmin {
@@ -516,14 +543,25 @@ impl SessionAdmin {
             "{session_id}:plugin_command:{name}:{}",
             lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
         ));
+        self.retire_deferred_operation_scopes(&runtime.effect_host())
+            .await;
         let receipt = runtime
             .run_plugin_command(name, args, Some(session_id), operation_scope.clone())
             .await;
-        retire_facade_operation_scope(&runtime.effect_host(), &operation_scope).await?;
-        let receipt = receipt?;
-        self.record_plugin_operation_observations(&receipt.events, &receipt.pending_turn_inputs);
-        self.runtime.publish_from(&runtime);
-        Ok(receipt)
+        // The receipt and its observations land first; retirement is a
+        // reclaim that can only be deferred or logged, never a reason to lose
+        // what the operation already did. A failed receipt is terminal for
+        // the scope too, so it retires on both paths.
+        if let Ok(receipt) = &receipt {
+            self.record_plugin_operation_observations(
+                &receipt.events,
+                &receipt.pending_turn_inputs,
+            );
+            self.runtime.publish_from(&runtime);
+        }
+        self.retire_operation_scope(&runtime.effect_host(), operation_scope)
+            .await;
+        Ok(receipt?)
     }
 
     async fn run_plugin_task_raw_with_cancel(
@@ -549,6 +587,8 @@ impl SessionAdmin {
                     "plugin task execution requires an effect host that can create a static runtime-operation scope".to_string(),
                 ))
             })?;
+        self.retire_deferred_operation_scopes(&runtime.effect_host())
+            .await;
         let receipt = runtime
             .run_plugin_task(
                 name,
@@ -558,11 +598,68 @@ impl SessionAdmin {
                 cancellation_token,
             )
             .await;
-        retire_facade_operation_scope(&runtime.effect_host(), &operation_scope).await?;
-        let receipt = receipt?;
-        self.record_plugin_operation_observations(&receipt.events, &receipt.pending_turn_inputs);
-        self.runtime.publish_from(&runtime);
-        Ok(receipt)
+        // Receipt and observations first, retirement after, on success and
+        // failure alike: see `run_plugin_command_raw`.
+        if let Ok(receipt) = &receipt {
+            self.record_plugin_operation_observations(
+                &receipt.events,
+                &receipt.pending_turn_inputs,
+            );
+            self.runtime.publish_from(&runtime);
+        }
+        self.retire_operation_scope(&runtime.effect_host(), operation_scope)
+            .await;
+        Ok(receipt?)
+    }
+
+    /// Retire a facade-minted runtime-operation scope once its receipt has
+    /// been recorded. The retirement is gated on the store's own quiescence
+    /// proof: the receipt returning is not proof that nothing runs under the
+    /// scope (a run-to-completion group may still be draining), so a live
+    /// scope is queued and retried before the session's next plugin
+    /// operation rather than deleted out from under its work. Any other
+    /// failure is logged; the receipt already returned and stands.
+    async fn retire_operation_scope(
+        &self,
+        effect_host: &Arc<dyn lash_core::EffectHost>,
+        operation_scope: lash_core::ExecutionScope,
+    ) {
+        match retire_facade_operation_scope(effect_host, &operation_scope).await {
+            Ok(FacadeScopeRetirement::Retired) => {}
+            Ok(FacadeScopeRetirement::Deferred) => {
+                tracing::debug!(
+                    scope = %operation_scope.id(),
+                    "facade operation scope still has live effects; retirement deferred"
+                );
+                self.deferred_scope_retirements.push(operation_scope);
+            }
+            Err(err) => {
+                tracing::warn!(
+                    scope = %operation_scope.id(),
+                    error = %err,
+                    "facade operation scope retirement failed; journal rows retained"
+                );
+            }
+        }
+    }
+
+    /// Retry every deferred retirement on this session; scopes that are still
+    /// live go back on the queue.
+    async fn retire_deferred_operation_scopes(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+        for scope in self.deferred_scope_retirements.take() {
+            match retire_facade_operation_scope(effect_host, &scope).await {
+                Ok(FacadeScopeRetirement::Retired) => {}
+                Ok(FacadeScopeRetirement::Deferred) => self.deferred_scope_retirements.push(scope),
+                Err(err) => {
+                    tracing::warn!(
+                        scope = %scope.id(),
+                        error = %err,
+                        "deferred facade operation scope retirement failed; retrying later"
+                    );
+                    self.deferred_scope_retirements.push(scope);
+                }
+            }
+        }
     }
 
     fn record_plugin_operation_observations(
@@ -1348,18 +1445,28 @@ impl SessionStateAdmin {
 /// unreachable and go in one transaction, and the scope fence keeps a late
 /// worker from reopening it (FIG-2499, FIG-2500). Caller-supplied scopes are
 /// never handed here — they stay the caller's to retire.
+enum FacadeScopeRetirement {
+    Retired,
+    Deferred,
+}
+
 async fn retire_facade_operation_scope(
     effect_host: &Arc<dyn lash_core::EffectHost>,
     operation_scope: &lash_core::ExecutionScope,
-) -> Result<()> {
+) -> Result<FacadeScopeRetirement> {
     let Some(retirement) = lash_core::EffectJournalRetirement::for_scope(operation_scope) else {
-        return Ok(());
+        return Ok(FacadeScopeRetirement::Retired);
     };
-    effect_host
-        .retire_effect_journal(retirement)
+    match effect_host
+        .retire_effect_journal(retirement.when_quiescent())
         .await
-        .map(|_| ())
-        .map_err(EmbedError::Runtime)
+    {
+        Ok(_) => Ok(FacadeScopeRetirement::Retired),
+        Err(err) if err.code == lash_core::RuntimeErrorCode::EffectScopeNotQuiescent => {
+            Ok(FacadeScopeRetirement::Deferred)
+        }
+        Err(err) => Err(EmbedError::Runtime(err)),
+    }
 }
 
 #[derive(Clone)]

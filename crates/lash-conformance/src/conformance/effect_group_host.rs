@@ -290,6 +290,115 @@ where
     (key_of(&retired_scope), key_of(&in_flight_scope))
 }
 
+/// A quiescence-gated retirement (`when_quiescent`) refuses a scope whose
+/// run-to-completion loser is still draining, fences nothing, and succeeds
+/// once the drain has settled — after which the scope is fenced like any
+/// other retirement (FIG-2499 fix round 1). Returns the scope's journal key
+/// so a store suite can count its rows and fence.
+pub async fn effect_group_quiescent_retirement_waits_for_live_children<F>(make: F) -> String
+where
+    F: Fn(Option<Arc<dyn GroupExecutors>>) -> Host,
+{
+    let make = || make(Some(suite_executors() as Arc<dyn GroupExecutors>));
+    let prefix = format!(
+        "group-quiescent-retirement-{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    let host = make();
+
+    let live_scope = scope(&prefix, "live");
+    let live = host
+        .scoped(live_scope.clone())
+        .expect("the live operation's scope binds");
+    let live_key = group_key(&prefix, "live");
+    let (draining, gate) = gated(1);
+    let mut handle = open(
+        &live,
+        &live_key,
+        2,
+        GroupWakePolicy::First,
+        RUN,
+        vec![settles(0), draining],
+    )
+    .await;
+    let first = next(&live, &mut handle)
+        .await
+        .expect("the live operation settles its first child");
+    assert_eq!(first.position, 0);
+    close(&live, handle, RUN)
+        .await
+        .expect("the live operation closes its group; the loser drains to completion");
+    gate.wait_until_waiting().await;
+
+    let operation_id = format!("{prefix}-live");
+    let refusal = host
+        .retire_effect_journal(
+            crate::EffectJournalRetirement::runtime_operation(operation_id.clone())
+                .when_quiescent(),
+        )
+        .await
+        .expect_err("a draining child keeps the scope live");
+    assert_eq!(
+        refusal.code,
+        crate::RuntimeErrorCode::EffectScopeNotQuiescent,
+        "the refusal names quiescence, not a missing scope"
+    );
+    host.await_event_key(
+        &live_scope,
+        crate::AwaitEventWaitIdentity::tool_completion(format!("{prefix}-still-mints")),
+    )
+    .await
+    .expect("a refused retirement fences nothing: the scope still mints");
+
+    gate.release();
+    until(|| gate.finished() == 1).await;
+    // The drain journals the loser's terminal after its executor returns;
+    // the gate's counter fires before that write lands, so the retirement
+    // is retried until the store proves the scope quiescent.
+    let deleted = tokio::time::timeout(AWAIT_BUDGET, async {
+        loop {
+            match host
+                .retire_effect_journal(
+                    crate::EffectJournalRetirement::runtime_operation(operation_id.clone())
+                        .when_quiescent(),
+                )
+                .await
+            {
+                Ok(deleted) => break deleted,
+                Err(err) if err.code == crate::RuntimeErrorCode::EffectScopeNotQuiescent => {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                Err(err) => panic!("quiescent retirement failed: {err}"),
+            }
+        }
+    })
+    .await
+    .expect("the scope becomes quiescent once its drain settles");
+    assert_eq!(
+        deleted, 2,
+        "the quiescent retirement reports both settled children"
+    );
+
+    let reader = make();
+    let refusal = reader
+        .scoped(live_scope.clone())
+        .expect("a retired scope still binds a controller")
+        .controller()
+        .open_effect_group(staged(
+            group(&live_key, 2, GroupWakePolicy::First, RUN),
+            vec![settles(0), settles(1)],
+        ))
+        .await
+        .expect_err("a retired scope never reopens its group");
+    assert_eq!(refusal.code, crate::RuntimeErrorCode::EffectScopeRetired);
+
+    live_scope
+        .journal_identity()
+        .expect("runtime-operation scopes form durable journal identities")
+        .key()
+        .to_string()
+}
+
 // =============================================================================
 // The laws
 // =============================================================================

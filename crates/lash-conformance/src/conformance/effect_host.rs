@@ -183,6 +183,7 @@ where
     effect_host_await_event_cancel_and_timeout_are_terminal(make()).await;
     effect_host_await_event_revokes_session_scope(make()).await;
     effect_host_await_event_retires_non_session_scopes(make()).await;
+    effect_host_await_event_reinstate_lifts_process_scope_fence(make()).await;
     effect_host_await_event_session_cancel_resolves_outstanding_waits(make()).await;
     effect_host_await_event_rejects_tampered_keys(make()).await;
 }
@@ -1113,6 +1114,67 @@ async fn effect_host_await_event_revokes_session_scope(host: Arc<dyn EffectHost>
 /// retire with their scope through the journal lever, and the fence that
 /// retirement leaves refuses every later mint, resolve, peek, and await while
 /// a sibling scope's terminal keeps answering (FIG-2499). Session scopes are
+/// A pruned process id the host registers again starts unfenced: reinstating
+/// the process scope lifts the fence its retirement left, so the new
+/// incarnation mints and resolves promises, while a session-bearing scope is
+/// refused on this lever exactly as on retirement (ADR 0049, FIG-2499).
+async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<dyn EffectHost>) {
+    let suffix = uuid::Uuid::new_v4().simple();
+    let process_id = format!("await-event-reinstated-process-{suffix}");
+    let scope = ExecutionScope::process(process_id.clone());
+    host.await_event_key(
+        &scope,
+        AwaitEventWaitIdentity::tool_completion("call-before-prune"),
+    )
+    .await
+    .expect("the first incarnation mints");
+    host.retire_effect_journal(crate::EffectJournalRetirement::process(process_id.clone()))
+        .await
+        .expect("the prune retires the process scope");
+    let fenced = host
+        .await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion("call-while-fenced"),
+        )
+        .await
+        .expect_err("a pruned process id mints nothing until it is registered again");
+    assert_eq!(fenced.code.as_str(), "await_event_unknown_or_revoked");
+
+    host.reinstate_effect_scope(&scope)
+        .await
+        .expect("registering the id again lifts the fence");
+    let key = host
+        .await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion("call-after-reregistration"),
+        )
+        .await
+        .expect("the re-registered incarnation mints");
+    assert_eq!(
+        host.resolve_await_event(&key, Resolution::Ok(serde_json::json!("again")))
+            .await
+            .expect("the re-registered incarnation resolves"),
+        ResolveOutcome::Accepted
+    );
+    assert_eq!(
+        host.peek_await_event(&key)
+            .await
+            .expect("the re-registered incarnation's terminal reads"),
+        Some(Resolution::Ok(serde_json::json!("again")))
+    );
+    host.reinstate_effect_scope(&scope)
+        .await
+        .expect("reinstating an unfenced scope is idempotent");
+
+    let session_scope =
+        durable_turn_scope(format!("await-event-reinstate-session-{suffix}"), "turn-1");
+    let refused = host
+        .reinstate_effect_scope(&session_scope)
+        .await
+        .expect_err("session scopes are fenced by revocation, not the scope lever");
+    assert_eq!(refused.code.as_str(), "await_event_scope_not_retirable");
+}
+
 /// refused by the scope lever: their promises die with their session.
 async fn effect_host_await_event_retires_non_session_scopes(host: Arc<dyn EffectHost>) {
     let suffix = uuid::Uuid::new_v4().simple();

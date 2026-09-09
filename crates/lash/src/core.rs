@@ -321,6 +321,7 @@ impl LashCore {
             process_work,
             process_phase_probe_slot: self.substrate_slot.phase_probe_slot(),
             turn_cancels: crate::turn::TurnCancelRegistry::default(),
+            deferred_scope_retirements: crate::admin::DeferredScopeRetirements::default(),
         })
     }
 

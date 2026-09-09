@@ -19,9 +19,9 @@ use lash_core::{
 };
 
 use crate::durable_wait::{
-    RestateDurableWaitAddress, RestateDurableWaitResolveRequest, durable_wait_index_object_key,
-    restate_await_event_key, restate_await_event_key_is_valid, restate_durable_wait_request,
-    restate_unknown_or_revoked,
+    RestateDurableWaitAddress, RestateDurableWaitResolveRequest, durable_wait_index_key_for_scope,
+    durable_wait_index_object_key, restate_await_event_key, restate_await_event_key_is_valid,
+    restate_durable_wait_request, restate_unknown_or_revoked,
 };
 use crate::effect_group::{
     EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
@@ -119,6 +119,27 @@ impl AwaitEventResolver for RestateEffectHost {
             .cancel_await_events_for_session(session_id)
             .await
     }
+
+    async fn retire_await_events_for_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        self.controller.retire_await_events_for_scope(scope).await
+    }
+
+    async fn reinstate_await_event_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        self.controller.reinstate_await_event_scope(scope).await
+    }
+
+    async fn await_event_scope_is_retired(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        self.controller.await_event_scope_is_retired(scope).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -127,12 +148,16 @@ impl EffectHost for RestateEffectHost {
         self
     }
 
+    /// The deployment host binds one fence-checking controller per scope:
+    /// a retired process or runtime-operation scope refuses every effect and
+    /// group with `effect_scope_retired` before Restate is asked to run it,
+    /// the same admission refusal the durable-journal hosts make at claim time.
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
         scope.validate()?;
-        ScopedEffectController::shared(self.controller.clone(), scope)
+        ScopedEffectController::shared(self.fenced_controller(scope.clone()), scope)
     }
 
     fn scoped_static(
@@ -141,7 +166,7 @@ impl EffectHost for RestateEffectHost {
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
         scope.validate()?;
         Ok(Some(ScopedEffectController::shared(
-            self.controller.clone(),
+            self.fenced_controller(scope.clone()),
             scope,
         )?))
     }
@@ -165,13 +190,218 @@ impl EffectHost for RestateEffectHost {
         sink.retain_in_journal(identity, submitted, outcome).await
     }
 
+    /// Restate owns invocation-journal retention natively, so no Lash-side
+    /// replay ledger is deleted here and the count is always 0. The promise
+    /// half is real: a scope-exact retirement revokes every durable wait the
+    /// scope owns and fences later mints, resolves, peeks, awaits, effects,
+    /// and groups under it through the scope's `LashDurableWaitIndex` object,
+    /// which survives restarts and redeploys. Session retirements stay a
+    /// no-op: session promises are revoked through the session lever the
+    /// host already calls. A [`EffectRetirementGate::WhenQuiescent`] request
+    /// needs no proof here: the only Lash-owned rows under a scope are its
+    /// promises, and effects in flight complete under Restate's own journal.
     async fn retire_effect_journal(
         &self,
-        _retirement: lash_core::EffectJournalRetirement,
+        retirement: lash_core::EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
-        // Restate owns invocation-journal retention natively. There is no
-        // Lash-side replay ledger to delete at this lifecycle boundary.
+        if let Some(scope) = retirement.retired_scope() {
+            self.controller
+                .retire_await_events_for_scope(&scope)
+                .await?;
+        }
         Ok(0)
+    }
+
+    async fn reinstate_effect_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
+        self.controller.reinstate_await_event_scope(scope).await
+    }
+}
+
+impl RestateEffectHost {
+    fn fenced_controller(&self, scope: ExecutionScope) -> Arc<dyn RuntimeEffectController> {
+        Arc::new(FencedRestateController {
+            controller: self.controller.clone(),
+            scope,
+        })
+    }
+}
+
+/// One scope's view of the deployment host: forwards everything to the shared
+/// controller and refuses effects and groups once the scope is retired.
+struct FencedRestateController {
+    controller: Arc<RestateEffectHostController>,
+    scope: ExecutionScope,
+}
+
+impl FencedRestateController {
+    async fn refuse_if_retired(&self) -> Result<(), RuntimeEffectControllerError> {
+        if self.scope.session_id().is_some() {
+            return Ok(());
+        }
+        if self
+            .controller
+            .await_event_scope_is_retired(&self.scope)
+            .await?
+        {
+            let identity = self.scope.journal_identity()?;
+            return Err(
+                lash_core::facade_support::effect_replay_driver::scope_retired(identity.key()),
+            );
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl AwaitEventResolver for FencedRestateController {
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<CompletionKeyPreparation, RuntimeError> {
+        self.controller
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+    ) -> Result<AwaitEventKey, RuntimeError> {
+        self.controller.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &AwaitEventKey,
+        resolution: Resolution,
+    ) -> Result<ResolveOutcome, RuntimeError> {
+        self.controller.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &AwaitEventKey,
+    ) -> Result<Option<Resolution>, RuntimeError> {
+        self.controller.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &AwaitEventKey,
+        cancel: tokio_util::sync::CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<Resolution, RuntimeError> {
+        self.controller
+            .await_await_event(key, cancel, deadline)
+            .await
+    }
+
+    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+        self.controller
+            .revoke_await_events_for_session(session_id)
+            .await
+    }
+
+    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+        self.controller
+            .cancel_await_events_for_session(session_id)
+            .await
+    }
+
+    async fn retire_await_events_for_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        self.controller.retire_await_events_for_scope(scope).await
+    }
+
+    async fn reinstate_await_event_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        self.controller.reinstate_await_event_scope(scope).await
+    }
+
+    async fn await_event_scope_is_retired(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        self.controller.await_event_scope_is_retired(scope).await
+    }
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectController for FencedRestateController {
+    fn owns_commit_backpressure(&self) -> bool {
+        self.controller.owns_commit_backpressure()
+    }
+
+    fn supports_concurrent_effects(&self) -> bool {
+        self.controller.supports_concurrent_effects()
+    }
+
+    fn supports_effect_groups(&self) -> bool {
+        self.controller.supports_effect_groups()
+    }
+
+    fn wants_segment_boundary(
+        &self,
+        progress: &lash_core::SegmentProgress,
+    ) -> Option<lash_core::BoundaryReason> {
+        self.controller.wants_segment_boundary(progress)
+    }
+
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: RuntimeErrorCode,
+    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
+        self.controller
+            .runtime_effect_failure_disposition(code)
+            .await
+    }
+
+    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
+        self.controller.turn_control_participation().await
+    }
+
+    async fn execute_effect(
+        &self,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        self.refuse_if_retired().await?;
+        self.controller
+            .execute_effect(envelope, local_executor)
+            .await
+    }
+
+    async fn open_effect_group(
+        &self,
+        group: RuntimeEffectGroup,
+    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        self.refuse_if_retired().await?;
+        self.controller.open_effect_group(group).await
+    }
+
+    async fn await_next_settlement(
+        &self,
+        handle: &mut EffectGroupHandle,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
+        self.controller.await_next_settlement(handle, cancel).await
+    }
+
+    async fn close_effect_group(
+        &self,
+        handle: EffectGroupHandle,
+        disposition: LoserPolicy,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.controller
+            .close_effect_group(handle, disposition)
+            .await
     }
 }
 #[derive(Clone)]
@@ -225,13 +455,16 @@ async fn update_restate_session_waits_via_ingress(
         })
 }
 
-async fn restate_session_is_revoked_via_ingress(
+/// Whether the `LashDurableWaitIndex` object at `index_key` (a session's, or
+/// a non-session scope's) has been revoked: the durable fence every mint,
+/// resolve, peek, await, effect, and group under it consults.
+async fn restate_index_is_revoked_via_ingress(
     ingress: &RestateAwaitEventIngress,
-    session_id: &str,
+    index_key: &str,
 ) -> Result<bool, RuntimeError> {
     ingress
         .ingress
-        .call_object_json::<_, bool>("LashDurableWaitIndex", session_id, "is_revoked", &())
+        .call_object_json::<_, bool>("LashDurableWaitIndex", index_key, "is_revoked", &())
         .await
         .map_err(|err| {
             RuntimeError::new(
@@ -248,12 +481,39 @@ async fn ensure_restate_key_access_via_ingress(
     if !restate_await_event_key_is_valid(key) {
         return Err(restate_unknown_or_revoked());
     }
-    if let Some(session_id) = key.scope.session_id()
-        && restate_session_is_revoked_via_ingress(ingress, session_id).await?
-    {
+    let index_key = durable_wait_index_object_key(&RestateDurableWaitAddress::for_key(key));
+    if restate_index_is_revoked_via_ingress(ingress, &index_key).await? {
         return Err(restate_unknown_or_revoked());
     }
     Ok(())
+}
+
+fn restate_scope_not_retirable(scope: &ExecutionScope) -> RuntimeError {
+    RuntimeError::new(
+        RuntimeErrorCode::AwaitEventScopeNotRetirable,
+        format!(
+            "scope `{}` carries a session and is retired through session revocation, not the scope lever",
+            scope.id()
+        ),
+    )
+}
+
+async fn update_restate_scope_waits_via_ingress(
+    ingress: &RestateAwaitEventIngress,
+    scope: &ExecutionScope,
+    handler: &str,
+) -> Result<(), RuntimeError> {
+    let index_key = durable_wait_index_key_for_scope(scope);
+    ingress
+        .ingress
+        .call_object_empty("LashDurableWaitIndex", &index_key, handler)
+        .await
+        .map_err(|err| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                err.to_string(),
+            )
+        })
 }
 
 async fn await_restate_await_event_via_ingress(
@@ -341,9 +601,8 @@ impl AwaitEventResolver for RestateEffectHostController {
     ) -> Result<AwaitEventKey, RuntimeError> {
         scope.validate()?;
         let ingress = &self.await_event_ingress;
-        if let Some(session_id) = scope.session_id()
-            && restate_session_is_revoked_via_ingress(ingress, session_id).await?
-        {
+        let index_key = durable_wait_index_key_for_scope(scope);
+        if restate_index_is_revoked_via_ingress(ingress, &index_key).await? {
             return Err(restate_unknown_or_revoked());
         }
         restate_await_event_key(scope, wait)
@@ -402,6 +661,42 @@ impl AwaitEventResolver for RestateEffectHostController {
     async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
         let ingress = &self.await_event_ingress;
         update_restate_session_waits_via_ingress(ingress, session_id, false).await
+    }
+
+    /// Revoke every durable wait of a non-session `scope` and fence the
+    /// scope's `LashDurableWaitIndex` object, durably: the promise half of
+    /// scope retirement on Restate. A session scope is refused as everywhere.
+    async fn retire_await_events_for_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        scope.validate()?;
+        if scope.session_id().is_some() {
+            return Err(restate_scope_not_retirable(scope));
+        }
+        update_restate_scope_waits_via_ingress(&self.await_event_ingress, scope, "revoke_all").await
+    }
+
+    async fn reinstate_await_event_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        scope.validate()?;
+        if scope.session_id().is_some() {
+            return Err(restate_scope_not_retirable(scope));
+        }
+        update_restate_scope_waits_via_ingress(&self.await_event_ingress, scope, "reinstate").await
+    }
+
+    async fn await_event_scope_is_retired(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        if scope.session_id().is_some() {
+            return Ok(false);
+        }
+        let index_key = durable_wait_index_key_for_scope(scope);
+        restate_index_is_revoked_via_ingress(&self.await_event_ingress, &index_key).await
     }
 }
 

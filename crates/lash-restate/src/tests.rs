@@ -4502,17 +4502,17 @@ fn durable_wait_index_epoch_rejects_legacy_state_and_accepts_fresh_state() {
         &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()],
     )
     .expect_err("wrong identity epoch must be rejected");
-    assert!(wrong_epoch.contains("incompatible with epoch 4"));
+    assert!(wrong_epoch.contains("incompatible with epoch 5"));
     assert!(wrong_epoch.contains("drain and recreate"));
     assert!(DURABLE_WAIT_INDEX_METADATA_KEY.starts_with("wait-index/v2/"));
 }
 
 #[test]
-fn durable_wait_identity_epoch_four_rejects_epoch_three_state() {
+fn durable_wait_identity_epoch_five_rejects_epoch_four_state() {
     let error =
-        validate_durable_wait_index_epoch(Some(3), &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()])
-            .expect_err("epoch-3 durable-wait state must not open under epoch 4");
-    assert!(error.contains("identity epoch 3 is incompatible with epoch 4"));
+        validate_durable_wait_index_epoch(Some(4), &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()])
+            .expect_err("epoch-4 durable-wait state must not open under epoch 5");
+    assert!(error.contains("identity epoch 4 is incompatible with epoch 5"));
     assert!(error.contains("drain and recreate"));
 }
 
@@ -7531,9 +7531,11 @@ async fn replay_tool_intent_corpus_fixture(
 #[tokio::test]
 async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes() {
     for checked_in in [
+        // The mid-drain prefix ends before the durable-wait index call, so
+        // its v2 capture is unchanged by the scope-keyed index cutover.
         include_bytes!("../tests/fixtures/tool_intent_journals/v2-mid-drain.json").as_slice(),
-        include_bytes!("../tests/fixtures/tool_intent_journals/v2-mid-intent.json").as_slice(),
-        include_bytes!("../tests/fixtures/tool_intent_journals/v2-full-drain.json").as_slice(),
+        include_bytes!("../tests/fixtures/tool_intent_journals/v3-mid-intent.json").as_slice(),
+        include_bytes!("../tests/fixtures/tool_intent_journals/v3-full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
@@ -7562,49 +7564,68 @@ async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_ou
     }
 }
 
+/// Pre-cutover journals refuse loudly and never duplicate their committed
+/// effect. The v1 journal carries the pre-cutover process reference format;
+/// the v2 journals that reached the durable-wait index addressed a
+/// session-free wait by its per-wait index object (`unscoped:{workflow key}`),
+/// which the scope-keyed index (`scope:{journal identity}`, durable-wait
+/// identity epoch 5, FIG-2499) replaced. Either replay diverges before the signal command re-executes,
+/// so the process sees its committed effect exactly once.
 #[tokio::test]
-async fn checked_in_v1_tool_intent_journal_refuses_the_process_reference_cutover_without_duplicate_effect()
- {
-    let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(include_bytes!(
-        "../tests/fixtures/tool_intent_journals/v1-full-drain.json"
-    ))
-    .expect("decode the pre-cutover endpoint corpus fixture");
-    let (endpoint, registry) = tool_intent_corpus_endpoint().await;
+async fn checked_in_pre_cutover_tool_intent_journals_refuse_loudly_without_duplicate_effect() {
+    for (name, checked_in) in [
+        (
+            "v1-full-drain",
+            include_bytes!("../tests/fixtures/tool_intent_journals/v1-full-drain.json").as_slice(),
+        ),
+        (
+            "v2-mid-intent",
+            include_bytes!("../tests/fixtures/tool_intent_journals/v2-mid-intent.json").as_slice(),
+        ),
+        (
+            "v2-full-drain",
+            include_bytes!("../tests/fixtures/tool_intent_journals/v2-full-drain.json").as_slice(),
+        ),
+    ] {
+        let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(checked_in)
+            .expect("decode the pre-cutover endpoint corpus fixture");
+        let (endpoint, registry) = tool_intent_corpus_endpoint().await;
 
-    let response = invoke_endpoint_body(
-        &endpoint,
-        "ToolIntentCorpusReplay",
-        "run",
-        bytes::Bytes::from(fixture.invocation_body_bytes),
-    )
-    .await
-    .expect("feed the v1 journal through the v2 endpoint");
-    let error = restate_output_failure_message(&response)
-        .or_else(|| restate_error_message(&response))
-        .unwrap_or_else(|| {
-            panic!(
-                "v1 replay must refuse loudly; messages={:?}; frames={:?}; output={:?}",
-                restate_message_types(&response),
-                restate_command_frame_types(&response),
-                restate_output_json::<serde_json::Value>(&response)
-            )
-        });
-
-    assert!(
-        error.contains("process_reference_format_cutover"),
-        "the refusal must retain its typed process-reference cutover code: {error}"
-    );
-    assert_eq!(
-        registry
-            .events_after(TOOL_INTENT_CORPUS_TARGET, 0)
-            .await
-            .expect("read the refusal witness target")
-            .into_iter()
-            .filter(|event| event.event_type == "signal.resume")
-            .count(),
-        1,
-        "a pre-cutover journal may reconstruct its committed effect but must not duplicate it"
-    );
+        let response = invoke_endpoint_body(
+            &endpoint,
+            "ToolIntentCorpusReplay",
+            "run",
+            bytes::Bytes::from(fixture.invocation_body_bytes),
+        )
+        .await
+        .expect("feed the pre-cutover journal through the current endpoint");
+        let error = restate_output_failure_message(&response)
+            .or_else(|| restate_error_message(&response))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{name} replay must refuse loudly; messages={:?}; frames={:?}; output={:?}",
+                    restate_message_types(&response),
+                    restate_command_frame_types(&response),
+                    restate_output_json::<serde_json::Value>(&response)
+                )
+            });
+        assert!(
+            error.contains("process_reference_format_cutover")
+                || error.contains("unscoped:") && error.contains("scope:"),
+            "{name} must refuse on its cutover, not somewhere later: {error}"
+        );
+        assert_eq!(
+            registry
+                .events_after(TOOL_INTENT_CORPUS_TARGET, 0)
+                .await
+                .expect("read the refusal witness target")
+                .into_iter()
+                .filter(|event| event.event_type == "signal.resume")
+                .count(),
+            1,
+            "{name}: a pre-cutover journal may reconstruct its committed effect but must not duplicate it"
+        );
+    }
 }
 
 /// Regeneration is deliberately separate from the replay law above: the law
@@ -7678,11 +7699,11 @@ async fn capture_tool_intent_journal_corpus_from_real_endpoint_interruptions() {
             mid_drain,
         ),
         (
-            "v2-mid-intent",
+            "v3-mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v2-full-drain", "full_drain", full),
+        ("v3-full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {
@@ -18575,4 +18596,91 @@ async fn a_failed_ingress_submit_reports_a_worker_fault_to_the_sink() {
     };
     assert_eq!(process_id, "submit-fails-loudly");
     assert_eq!(*operation, ProcessRecoveryOperation::SubmitRun);
+}
+
+/// Every wait of a non-session scope is owned by that scope's own
+/// `LashDurableWaitIndex` object, keyed by the scope's journal identity, so a
+/// scope-exact retirement can revoke and fence the whole scope in one keyed
+/// handler; session waits keep the session's object (FIG-2499 fix round 1).
+#[test]
+fn durable_wait_index_is_keyed_by_scope_for_session_free_waits() {
+    let process = lash_core::ExecutionScope::process("proc-1");
+    let operation = lash_core::ExecutionScope::runtime_operation("op-1");
+    let process_key = crate::durable_wait::durable_wait_index_key_for_scope(&process);
+    let operation_key = crate::durable_wait::durable_wait_index_key_for_scope(&operation);
+    assert_eq!(
+        process_key,
+        format!(
+            "scope:{}",
+            process.journal_identity().expect("process identity").key()
+        )
+    );
+    assert_ne!(process_key, operation_key);
+    let session = lash_core::ExecutionScope::turn("session-1", "turn-1");
+    assert_eq!(
+        crate::durable_wait::durable_wait_index_key_for_scope(&session),
+        "session-1"
+    );
+    for (scope, wait) in [
+        (
+            process.clone(),
+            AwaitEventWaitIdentity::tool_completion("a"),
+        ),
+        (
+            process.clone(),
+            AwaitEventWaitIdentity::tool_completion("b"),
+        ),
+    ] {
+        let key = restate_await_event_key(&scope, wait).expect("mint");
+        assert_eq!(
+            RestateDurableWaitAddress::for_key(&key).index_key(),
+            process_key,
+            "every wait of one scope shares the scope's index object"
+        );
+    }
+}
+
+/// With no Restate reachable, a scope-exact retirement is a typed failure —
+/// never a silent `Ok(0)` that would let the scope mint again — and a mint
+/// under a session-free scope consults the durable fence before minting,
+/// exactly as a session-bearing scope already did (FIG-2499 review round 1).
+#[tokio::test]
+async fn scope_retirement_and_mint_consult_restate_rather_than_answering_locally() {
+    let host = crate::RestateEffectHost::new(crate::RestateConnection::new("http://127.0.0.1:1"));
+    let scope = lash_core::ExecutionScope::runtime_operation("unreachable-op");
+    let retirement = host
+        .retire_effect_journal(
+            lash_core::EffectJournalRetirement::for_scope(&scope)
+                .expect("runtime operations retire"),
+        )
+        .await
+        .expect_err("retirement without a reachable Restate is a typed failure");
+    assert_eq!(
+        retirement.code,
+        lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate
+    );
+    let mint = host
+        .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("late"))
+        .await
+        .expect_err("a session-free mint reads the durable fence first");
+    assert_eq!(
+        mint.code,
+        lash_core::RuntimeErrorCode::RestateAwaitEventRevocationRead
+    );
+    let reinstate = host
+        .reinstate_effect_scope(&lash_core::ExecutionScope::process("unreachable-process"))
+        .await
+        .expect_err("reinstatement without a reachable Restate is a typed failure");
+    assert_eq!(
+        reinstate.code,
+        lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate
+    );
+    let session = host
+        .reinstate_effect_scope(&lash_core::ExecutionScope::turn("s", "t"))
+        .await
+        .expect_err("session scopes are refused before any ingress call");
+    assert_eq!(
+        session.code,
+        lash_core::RuntimeErrorCode::AwaitEventScopeNotRetirable
+    );
 }

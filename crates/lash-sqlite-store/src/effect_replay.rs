@@ -25,8 +25,9 @@ use lash_core::facade_support::effect_replay_driver::{
     StoredGroupSettlement, ToolBatchRedrive, UnsettledGroupChild, decide_effect_claim,
 };
 use lash_core::{
-    EffectJournalRetirement, ExecutionScope, GroupExecutors, RuntimeEffectControllerError,
-    RuntimeError, StoreEffectGroupDrain, facade_support::LeaseTimings,
+    EffectJournalRetirement, EffectRetirementGate, ExecutionScope, GroupExecutors,
+    RuntimeEffectControllerError, RuntimeError, StoreEffectGroupDrain,
+    facade_support::LeaseTimings,
 };
 
 use super::*;
@@ -744,6 +745,10 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         &self,
         retirement: &EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
+        let retired_scope_key = retirement
+            .retired_scope()
+            .and_then(|scope| scope.journal_identity().ok())
+            .map(|identity| identity.key().to_string());
         let retirement = retirement.clone();
         let now_ms = self.clock.timestamp_ms();
         let deleted = self
@@ -758,7 +763,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                         "DELETE FROM runtime_effect_group WHERE session_id = ?1",
                         params![session_id],
                     )?;
-                    Ok(deleted)
+                    Ok(Some(deleted))
                 }
                 EffectJournalRetirement::Process { .. }
                 | EffectJournalRetirement::RuntimeOperation { .. } => {
@@ -770,6 +775,14 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                         .expect("process and runtime-operation scopes always form durable journal identities");
                     let scope_json = serde_json::to_string(&scope)
                         .expect("execution scopes serialize infallibly");
+                    // The quiescence proof is read under the same lock the
+                    // fence is written under, so no child can start between
+                    // the proof and the deletions.
+                    if retirement.gate() == Some(EffectRetirementGate::WhenQuiescent)
+                        && !scope_is_quiescent(tx, identity.key())?
+                    {
+                        return Ok(None);
+                    }
                     tx.execute(
                         "INSERT INTO effect_scope_retirements (scope_id, retired_at_ms)
                          VALUES (?1, ?2)
@@ -788,7 +801,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                         "DELETE FROM await_event_waits WHERE scope_json = ?1",
                         params![scope_json],
                     )?;
-                    Ok(deleted)
+                    Ok(Some(deleted))
                 }
             })
             .await
@@ -798,8 +811,55 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                     error.to_string(),
                 )
             })?;
-        Ok(deleted)
+        match deleted {
+            Some(deleted) => Ok(deleted),
+            None => Err(effect_replay_driver::scope_not_quiescent(
+                retired_scope_key.as_deref().unwrap_or_default(),
+            )),
+        }
     }
+
+    async fn reinstate_scope(&self, scope_id: &str) -> Result<(), RuntimeError> {
+        let scope_id = scope_id.to_string();
+        self.conn
+            .write(move |tx| {
+                tx.execute(
+                    "DELETE FROM effect_scope_retirements WHERE scope_id = ?1",
+                    params![scope_id],
+                )
+            })
+            .await
+            .map(|_| ())
+            .map_err(|error| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    error.to_string(),
+                )
+            })
+    }
+}
+
+/// Whether nothing under `scope_id` is still live: no `in_progress` effect row
+/// and no group row still waiting for a child that has not been journaled
+/// (an open group, or a run-to-completion close whose drain has not yet
+/// claimed every loser).
+fn scope_is_quiescent(tx: &rusqlite::Transaction<'_>, scope_id: &str) -> rusqlite::Result<bool> {
+    let live: bool = tx.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM runtime_effect_replay
+            WHERE scope_id = ?1 AND status = 'in_progress'
+         ) OR EXISTS(
+            SELECT 1 FROM runtime_effect_group AS grp
+            WHERE grp.scope_id = ?1
+              AND grp.children > (
+                  SELECT COUNT(*) FROM runtime_effect_replay AS child
+                  WHERE child.scope_id = ?1 AND child.group_key = grp.group_key
+              )
+         )",
+        params![scope_id],
+        |row| row.get(0),
+    )?;
+    Ok(!live)
 }
 
 fn select_effect_row(

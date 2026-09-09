@@ -1382,6 +1382,51 @@ impl super::registry::ProcessWakeOutbox for TestLocalProcessRegistry {
         Ok(super::WakeDeliveryClaimOutcome::Applied)
     }
 }
+impl TestLocalProcessRegistry {
+    async fn processes_with_pending_deliveries(&self) -> HashSet<String> {
+        self.wake_deliveries
+            .lock()
+            .await
+            .values()
+            .filter(|delivery| {
+                matches!(
+                    delivery.state(),
+                    super::WakeDeliveryState::Pending | super::WakeDeliveryState::Enqueuing
+                )
+            })
+            .map(|delivery| delivery.wake.process_id.clone())
+            .collect()
+    }
+
+    /// The prune eligibility predicate, shared by the survey and the prune so
+    /// the two can never drift.
+    fn prunable_process_ids(
+        managed: &HashMap<String, ManagedProcessRecord>,
+        cutoff_epoch_ms: u64,
+        filter: Option<&ProcessListFilter>,
+        watermark: ProjectionWatermark,
+        processes_with_pending_deliveries: &HashSet<String>,
+    ) -> Vec<String> {
+        let max_change_seq = match watermark {
+            ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
+            ProjectionWatermark::NoProjector => None,
+        };
+        let mut prunable: Vec<String> = managed
+            .iter()
+            .filter(|(_, record)| {
+                record.record.status.is_retired() && record.record.updated_at_ms < cutoff_epoch_ms
+            })
+            .filter(|(_, record)| filter.is_none_or(|filter| filter.matches_record(&record.record)))
+            .filter(|(_, record)| max_change_seq.is_none_or(|max| record.change_seq <= max))
+            .filter(|(id, _)| !processes_with_pending_deliveries.contains(*id))
+            .filter(|(_, record)| record.parent_end_actions.is_none())
+            .map(|(id, _)| id.clone())
+            .collect();
+        prunable.sort();
+        prunable
+    }
+}
+
 #[async_trait::async_trait]
 impl super::registry::ProcessRetention for TestLocalProcessRegistry {
     async fn compact_process_tombstones(
@@ -1427,6 +1472,24 @@ impl super::registry::ProcessRetention for TestLocalProcessRegistry {
         Ok(before - tombstones.len())
     }
 
+    async fn prunable_terminal_processes(
+        &self,
+        cutoff_epoch_ms: u64,
+        filter: Option<ProcessListFilter>,
+        watermark: ProjectionWatermark,
+    ) -> Result<Vec<String>, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let processes_with_pending_deliveries = self.processes_with_pending_deliveries().await;
+        let managed = self.managed.lock().await;
+        Ok(Self::prunable_process_ids(
+            &managed,
+            cutoff_epoch_ms,
+            filter.as_ref(),
+            watermark,
+            &processes_with_pending_deliveries,
+        ))
+    }
+
     async fn prune_terminal_processes(
         &self,
         cutoff_epoch_ms: u64,
@@ -1434,43 +1497,17 @@ impl super::registry::ProcessRetention for TestLocalProcessRegistry {
         watermark: ProjectionWatermark,
     ) -> Result<ProcessPruneReport, PluginError> {
         let _transaction = self.transaction.lock().await;
-        let max_change_seq = match watermark {
-            ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
-            ProjectionWatermark::NoProjector => None,
-        };
-        let processes_with_pending_deliveries = self
-            .wake_deliveries
-            .lock()
-            .await
-            .values()
-            .filter(|delivery| {
-                matches!(
-                    delivery.state(),
-                    super::WakeDeliveryState::Pending | super::WakeDeliveryState::Enqueuing
-                )
-            })
-            .map(|delivery| delivery.wake.process_id.clone())
-            .collect::<HashSet<_>>();
+        let processes_with_pending_deliveries = self.processes_with_pending_deliveries().await;
         let mut pruned_events = 0;
         let prunable: HashSet<String> = {
             let mut managed = self.managed.lock().await;
-            let mut prunable: Vec<String> = managed
-                .iter()
-                .filter(|(_, record)| {
-                    record.record.status.is_retired()
-                        && record.record.updated_at_ms < cutoff_epoch_ms
-                })
-                .filter(|(_, record)| {
-                    filter
-                        .as_ref()
-                        .is_none_or(|filter| filter.matches_record(&record.record))
-                })
-                .filter(|(_, record)| max_change_seq.is_none_or(|max| record.change_seq <= max))
-                .filter(|(id, _)| !processes_with_pending_deliveries.contains(*id))
-                .filter(|(_, record)| record.parent_end_actions.is_none())
-                .map(|(id, _)| id.clone())
-                .collect();
-            prunable.sort();
+            let prunable = Self::prunable_process_ids(
+                &managed,
+                cutoff_epoch_ms,
+                filter.as_ref(),
+                watermark,
+                &processes_with_pending_deliveries,
+            );
             let pruned_at_ms = self.clock.timestamp_ms();
             for id in &prunable {
                 if let Some(record) = managed.remove(id) {

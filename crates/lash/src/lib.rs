@@ -739,10 +739,10 @@ pub mod durability {
     /// Effect-host inputs, replay projections, and local execution capabilities.
     pub use lash_core::runtime::{
         BoundaryReason, CanonicalRuntimeEffectEnvelope, EffectJournalIdentity,
-        EffectJournalRetirement, ProcessLocalExecution, ProcessOutcomeObserver,
-        ProcessTurnCancellation, RuntimeAwaitEventOptions, RuntimeEffectReplayTrace, RuntimeReplay,
-        RuntimeReplayAttribution, RuntimeSleepOptions, RuntimeSubject, SegmentProgress,
-        ToolAttemptLaunch, ToolCallLaunch, TriggerLocalExecution,
+        EffectJournalRetirement, EffectRetirementGate, ProcessLocalExecution,
+        ProcessOutcomeObserver, ProcessTurnCancellation, RuntimeAwaitEventOptions,
+        RuntimeEffectReplayTrace, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
+        RuntimeSubject, SegmentProgress, ToolAttemptLaunch, ToolCallLaunch, TriggerLocalExecution,
     };
     pub use lash_core::{
         EffectHost, WorkerProcessWork, facade_support::DurableProcessWorker,

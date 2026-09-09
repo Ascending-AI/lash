@@ -1423,6 +1423,15 @@ impl lash_core::ProcessRetention for PostgresProcessRegistry {
     ) -> Result<ProcessPruneReport, PluginError> {
         prune_api::prune_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
     }
+
+    async fn prunable_terminal_processes(
+        &self,
+        cutoff_epoch_ms: u64,
+        filter: Option<lash_core::ProcessListFilter>,
+        watermark: lash_core::ProjectionWatermark,
+    ) -> Result<Vec<String>, PluginError> {
+        prune_api::prunable_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
+    }
 }
 
 impl lash_core::ProcessClockRebind for PostgresProcessRegistry {

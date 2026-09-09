@@ -23,13 +23,14 @@ pub use envelope::{
 pub use executor::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
-    ExecutionScope, ExternalCompletionError, NativeRuntimeEffectController, ProcessLocalExecution,
-    ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt,
-    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome,
-    RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectFailureDisposition, RuntimeEffectLocalExecutor, RuntimeSleepOptions,
-    ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TriggerLocalExecution, TurnControlBinding, TurnControlParticipation,
+    EffectRetirementGate, ExecutionScope, ExternalCompletionError, NativeRuntimeEffectController,
+    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition,
+    QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
+    ResolveOutcome, RuntimeAwaitEventOptions, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectFailureDisposition, RuntimeEffectLocalExecutor,
+    RuntimeSleepOptions, ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink,
+    ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution, TurnControlBinding,
+    TurnControlParticipation,
 };
 pub use group::{
     EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserPolicy,

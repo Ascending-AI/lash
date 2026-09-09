@@ -69,6 +69,51 @@ invocations cannot resume across this cutover: operators must drain them or
 purge the Restate state before upgrading, otherwise their old promises are
 orphaned under the prior key.
 
+### Scope fences are a permanent-row class with one release rule (FIG-2499)
+
+Process and runtime-operation scopes carry no session, so session deletion
+never reaches their effect journal or their await-event promises. They are
+reclaimed by scope-exact retirement instead: `EffectJournalRetirement::process`
+and `::runtime_operation` delete the scope's effect rows, group rows, and
+promise rows and write a scope fence (`effect_scope_retirements` /
+`lash_effect_scope_retirements`, keyed by the scope's journal identity) in the
+same transaction, under the same lock every admission path takes. Every
+admission path — journal claim, group open, promise mint, resolve, peek, await,
+and the in-process and Restate hosts' scoped controllers — reads the fence and
+fails closed, so a late redrive can never re-execute under an emptied journal.
+The fence is a permanent row on the same terms as `deleted_sessions`: retention
+and vacuum never remove it, and the retention census lists it as permanently
+exempt.
+
+Retirement rests on proven unreachability, and the proof is named on the
+request (`EffectRetirementGate`). A prune is owner-terminal proof: the registry
+has deleted the row, so in-flight rows go too, and the facade fences exactly
+the ids the registry's own eligibility survey returns — never a process the
+registry keeps because of a projection watermark, a pending wake delivery, or
+a parent-end plan. A receipt returning is not proof: the facade retires its
+plugin-command and plugin-task scopes `when_quiescent`, and the store refuses
+(`effect_scope_not_quiescent`) while a child is still in progress or a group
+still waits for one, leaving the journal untouched until a later retry.
+
+A runtime-operation fence is permanent: those ids are used once. A process
+fence lasts until the host registers the same id again. Host-named process ids
+are reusable by contract, and the fence exists to cover the interval between
+the prune and that re-registration; the registration lifts it
+(`EffectHost::reinstate_effect_scope`, called by `Processes::start` before the
+registry insert) so the new incarnation starts unfenced with the empty journal
+the prune left. The registry and the effect journal are separate stores on
+SQLite and in memory, so the lift is ordered before the insert rather than
+sharing one transaction with it; the ordering is safe because a fence only
+exists where no live row exists, and a start that fails after the lift leaves
+an empty, unfenced, unregistered scope — exactly a never-used id. On Restate
+the fence is the scope's own `LashDurableWaitIndex` object, revoked on
+retirement and reinstated on registration; keying session-free waits by scope
+is a durable-wait identity epoch cutover (epoch 5) and a tool-intent journal
+cutover (corpus v3): pre-cutover state and journals refuse loudly before any
+effect re-executes; the in-process host keeps an
+unbounded fence set for the same reason the durable rows are permanent.
+Retention of these rows is a host lever on the terms of ADR 0023.
+
 > **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
 
 ## Consequences

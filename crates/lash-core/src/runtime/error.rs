@@ -93,6 +93,7 @@ pub enum RuntimeErrorCode {
     EffectGroupUnsupported,
     EffectJournalRetirementUnsupported,
     EffectScopeRetired,
+    EffectScopeNotQuiescent,
     AwaitEventScopeNotRetirable,
     InvalidAwaitEventSessionId,
     InvalidAwaitEventWaitIdentity,
@@ -546,6 +547,7 @@ impl RuntimeErrorCode {
             Self::EffectGroupUnsupported => "effect_group_unsupported",
             Self::EffectJournalRetirementUnsupported => "effect_journal_retirement_unsupported",
             Self::EffectScopeRetired => "effect_scope_retired",
+            Self::EffectScopeNotQuiescent => "effect_scope_not_quiescent",
             Self::AwaitEventScopeNotRetirable => "await_event_scope_not_retirable",
             Self::InvalidAwaitEventSessionId => "invalid_await_event_session_id",
             Self::InvalidAwaitEventWaitIdentity => "invalid_await_event_wait_identity",
@@ -777,6 +779,7 @@ impl RuntimeErrorCode {
                 | Self::EffectGroupUnsupported
                 | Self::EffectJournalRetirementUnsupported
                 | Self::EffectScopeRetired
+                | Self::EffectScopeNotQuiescent
                 | Self::AwaitEventScopeNotRetirable
                 | Self::InvalidAwaitEventSessionId
                 | Self::InvalidAwaitEventWaitIdentity
@@ -924,6 +927,7 @@ impl RuntimeErrorCode {
             "effect_group_unsupported" => Self::EffectGroupUnsupported,
             "effect_journal_retirement_unsupported" => Self::EffectJournalRetirementUnsupported,
             "effect_scope_retired" => Self::EffectScopeRetired,
+            "effect_scope_not_quiescent" => Self::EffectScopeNotQuiescent,
             "await_event_scope_not_retirable" => Self::AwaitEventScopeNotRetirable,
             "invalid_await_event_session_id" => Self::InvalidAwaitEventSessionId,
             "invalid_await_event_wait_identity" => Self::InvalidAwaitEventWaitIdentity,
@@ -1322,6 +1326,7 @@ mod tests {
             | RuntimeErrorCode::EffectGroupUnsupported
             | RuntimeErrorCode::EffectJournalRetirementUnsupported
             | RuntimeErrorCode::EffectScopeRetired
+            | RuntimeErrorCode::EffectScopeNotQuiescent
             | RuntimeErrorCode::AwaitEventScopeNotRetirable
             | RuntimeErrorCode::InvalidAwaitEventSessionId
             | RuntimeErrorCode::InvalidAwaitEventWaitIdentity
@@ -1482,6 +1487,7 @@ mod tests {
             RuntimeErrorCode::EffectGroupUnsupported,
             RuntimeErrorCode::EffectJournalRetirementUnsupported,
             RuntimeErrorCode::EffectScopeRetired,
+            RuntimeErrorCode::EffectScopeNotQuiescent,
             RuntimeErrorCode::AwaitEventScopeNotRetirable,
             RuntimeErrorCode::InvalidAwaitEventSessionId,
             RuntimeErrorCode::InvalidAwaitEventWaitIdentity,

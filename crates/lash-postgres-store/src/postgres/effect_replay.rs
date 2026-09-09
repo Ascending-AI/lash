@@ -590,6 +590,17 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         // the same transaction so the fence and the deletions land together.
         if let Some(scope) = fenced_scope.as_ref() {
             lock_scope(&mut tx, &key).await.map_err(retirement_error)?;
+            // The quiescence proof is read under the same scope lock the
+            // fence is written under, so no child can start between the
+            // proof and the deletions.
+            if retirement.gate() == Some(lash_core::EffectRetirementGate::WhenQuiescent)
+                && !scope_is_quiescent(&mut tx, &key)
+                    .await
+                    .map_err(retirement_error)?
+            {
+                tx.rollback().await.map_err(retirement_error)?;
+                return Err(effect_replay_driver::scope_not_quiescent(&key));
+            }
             let scope_json = serde_json::to_string(scope).map_err(|err| {
                 RuntimeError::new(
                     lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
@@ -625,6 +636,52 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         tx.commit().await.map_err(retirement_error)?;
         Ok(children as usize)
     }
+
+    async fn reinstate_scope(&self, scope_id: &str) -> Result<(), RuntimeError> {
+        let retirement_error = |error: sqlx::Error| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                error.to_string(),
+            )
+        };
+        let mut tx = self.pool.begin().await.map_err(retirement_error)?;
+        lock_scope(&mut tx, scope_id)
+            .await
+            .map_err(retirement_error)?;
+        sqlx::query("DELETE FROM lash_effect_scope_retirements WHERE scope_id = $1")
+            .bind(scope_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(retirement_error)?;
+        tx.commit().await.map_err(retirement_error)
+    }
+}
+
+/// Whether nothing under `scope_id` is still live: no `in_progress` effect row
+/// and no group row still waiting for a child that has not been journaled
+/// (an open group, or a run-to-completion close whose drain has not yet
+/// claimed every loser).
+async fn scope_is_quiescent(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    scope_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let live: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM lash_runtime_effect_replay
+            WHERE scope_id = $1 AND status = 'in_progress'
+         ) OR EXISTS(
+            SELECT 1 FROM lash_runtime_effect_group AS grp
+            WHERE grp.scope_id = $1
+              AND grp.children > (
+                  SELECT COUNT(*) FROM lash_runtime_effect_replay AS child
+                  WHERE child.scope_id = $1 AND child.group_key = grp.group_key
+              )
+         )",
+    )
+    .bind(scope_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(!live)
 }
 
 impl PostgresEffectReplayRowStore {

@@ -159,6 +159,20 @@ impl AwaitEventResolver for NativeRuntimeEffectController {
     ) -> Result<(), RuntimeError> {
         self.await_events.retire_scope(scope)
     }
+
+    async fn reinstate_await_event_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        self.await_events.reinstate_scope(scope)
+    }
+
+    async fn await_event_scope_is_retired(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        self.await_events.scope_is_retired(scope)
+    }
 }
 
 #[async_trait::async_trait]

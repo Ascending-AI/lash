@@ -832,6 +832,26 @@ pub trait ProcessRetention: Send + Sync {
         filter: Option<ProcessListFilter>,
         watermark: ProjectionWatermark,
     ) -> Result<ProcessPruneReport, PluginError>;
+
+    /// The process ids [`prune_terminal_processes`](Self::prune_terminal_processes)
+    /// would delete right now for the same arguments, in ascending id order,
+    /// without deleting anything. The survey applies the prune's complete
+    /// eligibility predicate — retired status, `updated_at_ms` before the
+    /// cutoff, the projection `watermark`, no pending or enqueuing wake
+    /// delivery, no parent-end plan, and `filter` — so a caller that must
+    /// reclaim rows the registry does not own (the process's durable effect
+    /// journal and its await-event promises) fences exactly the rows the
+    /// prune reclaims and never a process the registry keeps. The prune
+    /// re-evaluates the predicate under its own transaction; a process that
+    /// becomes ineligible between survey and prune is retained by the prune
+    /// and its already-fenced journal stays reclaimed, which is the conservative
+    /// direction for a retired row.
+    async fn prunable_terminal_processes(
+        &self,
+        cutoff_epoch_ms: u64,
+        filter: Option<ProcessListFilter>,
+        watermark: ProjectionWatermark,
+    ) -> Result<Vec<String>, PluginError>;
 }
 
 /// Rebinding a registry backend to the runtime's clock.

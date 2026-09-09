@@ -36,6 +36,8 @@ mod support;
 
 #[path = "../../lash-core/tests/support/cold_process_turn_parent.rs"]
 mod cold_process_turn_parent;
+#[path = "conformance/scope_retirement.rs"]
+mod scope_retirement;
 #[path = "conformance/session_delete_blob_reclaim.rs"]
 mod session_delete_blob_reclaim;
 #[path = "conformance/wake_delivery.rs"]

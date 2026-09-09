@@ -937,10 +937,37 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
     /// `await_event_unknown_or_revoked` rather than re-executing under an
     /// empty journal. Session retirements keep their shipped shape: rows go,
     /// no tombstone is written here (session promise revocation owns that).
+    /// A scope-exact retirement gated [`EffectRetirementGate::WhenQuiescent`]
+    /// first proves, inside the same transaction and under the same lock,
+    /// that the scope is quiescent: no `in_progress` effect row (a running
+    /// child or a draining loser) and no open group still waiting for a child
+    /// that has not been journaled yet. A live scope is left untouched and
+    /// the retirement fails with [`RuntimeErrorCode::EffectScopeNotQuiescent`].
+    /// [`EffectRetirementGate::OwnerTerminal`] skips the proof: the caller
+    /// holds it (the registry pruned the owner), so in-flight rows go too.
     async fn retire_journal(
         &self,
         retirement: &EffectJournalRetirement,
     ) -> Result<usize, RuntimeError>;
+
+    /// Delete the scope-retirement fence row of `scope_id`, if any, under the
+    /// same lock retirement writes it: the scope's owner is being registered
+    /// again (a pruned process id reused by the host, ADR 0049). Nothing else
+    /// is written; the re-registered scope starts with the empty journal its
+    /// prune left.
+    async fn reinstate_scope(&self, scope_id: &str) -> Result<(), RuntimeError>;
+}
+
+/// The refusal a quiescence-gated retirement reports for a scope that still
+/// has live work: nothing was deleted or fenced, and the caller retries once
+/// the work settles.
+pub fn scope_not_quiescent(scope_id: &str) -> RuntimeError {
+    RuntimeError::new(
+        RuntimeErrorCode::EffectScopeNotQuiescent,
+        format!(
+            "effect scope `{scope_id}` still has in-progress effects or an open group; retirement deferred until it is quiescent"
+        ),
+    )
 }
 
 /// The refusal every admission path reports for a scope whose retirement
@@ -1230,6 +1257,17 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         retirement: EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
         self.row_store.retire_journal(&retirement).await
+    }
+
+    /// Lift the scope-retirement fence of a non-session `scope` whose owner is
+    /// registered again (ADR 0049). Session scopes are refused as on the
+    /// retirement lever.
+    pub async fn reinstate_effect_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
+        if EffectJournalRetirement::for_scope(scope).is_none() {
+            return Err(super::executor::await_event_scope_not_retirable(scope));
+        }
+        let identity = scope.journal_identity()?;
+        self.row_store.reinstate_scope(identity.key()).await
     }
 
     /// Run `envelope` for `scope` exactly once, replaying any recorded terminal.

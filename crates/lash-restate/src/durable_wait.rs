@@ -72,7 +72,7 @@ pub(crate) fn restate_unknown_or_revoked() -> RuntimeError {
     )
 }
 const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
-pub(crate) const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 4;
+pub(crate) const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 5;
 const DURABLE_WAIT_INDEX_EPOCH_KEY: &str = "wait-index/v2/identity-epoch";
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
 const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";
@@ -89,10 +89,7 @@ impl RestateDurableWaitAddress {
     pub fn for_key(key: &AwaitEventKey) -> Self {
         Self {
             workflow_key: format!("{:x}", Sha256::digest(key.key_id.as_bytes())),
-            scope: match key.scope.session_id() {
-                Some(session_id) => RestateDurableWaitScope::Session(session_id.to_string()),
-                None => RestateDurableWaitScope::Unscoped,
-            },
+            scope: RestateDurableWaitScope::for_scope(&key.scope),
             classification: if key.wait.is_turn_control() {
                 RestateDurableWaitClassification::TurnControl
             } else {
@@ -107,19 +104,45 @@ impl RestateDurableWaitAddress {
     }
 }
 
+/// Which `LashDurableWaitIndex` object owns a wait: the session's object for
+/// a session-bearing scope, or the object of the exact non-session scope
+/// (a process or runtime operation, keyed by its journal identity). One
+/// object per scope is what lets a scope-exact retirement revoke every wait
+/// the scope owns and fence later mints in one keyed handler, exactly as a
+/// session's object does for session revocation (FIG-2499).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RestateDurableWaitScope {
     Session(String),
-    Unscoped,
+    Scope(String),
 }
 
 impl RestateDurableWaitScope {
-    pub fn index_key(&self, workflow_key: &str) -> String {
-        match self {
-            Self::Session(session_id) => session_id.clone(),
-            Self::Unscoped => format!("unscoped:{workflow_key}"),
+    /// The index scope of an execution scope. Validated scopes always form a
+    /// journal identity; a scope that does not still gets a stable key from
+    /// its identity fields so no address can collide with a real scope.
+    pub fn for_scope(scope: &ExecutionScope) -> Self {
+        match scope.session_id() {
+            Some(session_id) => Self::Session(session_id.to_string()),
+            None => Self::Scope(
+                scope
+                    .journal_identity()
+                    .map(|identity| identity.key().to_string())
+                    .unwrap_or_else(|_| format!("invalid:{}", scope.id())),
+            ),
         }
     }
+
+    pub fn index_key(&self, _workflow_key: &str) -> String {
+        match self {
+            Self::Session(session_id) => session_id.clone(),
+            Self::Scope(scope_key) => format!("scope:{scope_key}"),
+        }
+    }
+}
+
+/// The `LashDurableWaitIndex` object key that owns every wait of `scope`.
+pub(crate) fn durable_wait_index_key_for_scope(scope: &ExecutionScope) -> String {
+    RestateDurableWaitScope::for_scope(scope).index_key("")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -464,6 +487,10 @@ pub trait LashDurableWaitIndex {
     ) -> HandlerResult<Json<()>>;
     async fn cancel_all() -> HandlerResult<Json<()>>;
     async fn revoke_all() -> HandlerResult<Json<()>>;
+    /// Lift a revocation because the scope's owner is registered again: a
+    /// pruned process id the host reuses (ADR 0049). State stays cleared; only
+    /// the fence goes.
+    async fn reinstate() -> HandlerResult<Json<()>>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -867,6 +894,15 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
             revoke_durable_wait_awakeable(&ctx, &entry);
         }
         resolve_indexed_waits(&ctx, waits, false).await?;
+        Ok(Json(()))
+    }
+
+    async fn reinstate(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
+        let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
+        if metadata.revoked {
+            metadata.revoked = false;
+            ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
+        }
         Ok(Json(()))
     }
 }

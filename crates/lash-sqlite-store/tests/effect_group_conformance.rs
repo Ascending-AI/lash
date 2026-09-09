@@ -216,3 +216,34 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
         "the winner's registration stands whatever the losers did"
     );
 }
+
+/// A quiescence-gated retirement leaves a draining scope's rows alone and
+/// fences nothing; once the drain settles it removes the rows and leaves the
+/// fence (FIG-2499 fix round 1).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_quiescent_retirement_waits_for_the_drain() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("quiescent-retirement.db");
+    let scope_id =
+        lash_conformance::effect_group_quiescent_retirement_waits_for_live_children(|executors| {
+            Arc::new(host(&path, executors)) as Arc<dyn EffectHost>
+        })
+        .await;
+    let conn = rusqlite::Connection::open(&path).expect("open the effect journal");
+    let count = |sql: &str| -> i64 {
+        conn.query_row(sql, [&scope_id], |row| row.get(0))
+            .expect("count journal rows")
+    };
+    assert_eq!(
+        count("SELECT COUNT(*) FROM runtime_effect_replay WHERE scope_id = ?1"),
+        0
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) FROM runtime_effect_group WHERE scope_id = ?1"),
+        0
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) FROM effect_scope_retirements WHERE scope_id = ?1"),
+        1
+    );
+}

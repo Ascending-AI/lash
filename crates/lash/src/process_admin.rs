@@ -330,6 +330,21 @@ impl Processes {
         };
         let observers = request.observers.clone();
         let registration = request.into_registration(env_ref);
+        // A host-named process id may be one the registry pruned earlier: its
+        // scope fence has been refusing every redrive since. Registration is
+        // the owner coming back, so the fence is lifted first; the journal the
+        // prune deleted stays empty, which is what a new incarnation expects
+        // (ADR 0049). Lifting before the insert is safe: a fence exists only
+        // where no live row exists, and a start that then fails leaves an
+        // unfenced but empty and unregistered scope, exactly like a never-used
+        // id.
+        self.core
+            .env
+            .core
+            .control
+            .effect_host
+            .reinstate_effect_scope(&lash_core::ExecutionScope::process(registration.id.clone()))
+            .await?;
         let command = lash_core::ProcessCommand::Start {
             registration,
             observers,
@@ -594,29 +609,30 @@ impl Processes {
         watermark: lash_core::ProjectionWatermark,
     ) -> Result<lash_core::ProcessPruneReport> {
         let registry = self.registry()?;
-        let candidates = registry
-            .list_processes(&Self::prune_selection(filter)?)
+        Self::prune_selection(filter)?;
+        // Survey exactly the rows the registry's prune will delete, with the
+        // registry's own eligibility predicate (retired status, cutoff,
+        // projection watermark, no pending wake delivery, no parent-end
+        // plan, filter): a process the registry keeps keeps its journal and
+        // its promises too. The fence lands before the row goes, so the
+        // interval between prune and any re-registration of the same id is
+        // covered (ADR 0049).
+        let prunable = registry
+            .prunable_terminal_processes(cutoff_epoch_ms, filter.cloned(), watermark)
             .await?;
-        for process in candidates
-            .into_iter()
-            // Survey exactly the rows the prune SQL deletes: the retired
-            // partition, which includes `CallerDeparted` alongside the
-            // terminal outcomes. Surveying only terminal rows would leak the
-            // effect journal of every caller-departed row the SQL reclaims.
-            .filter(|process| {
-                process.status.is_retired() && process.updated_at_ms < cutoff_epoch_ms
-            })
-        {
+        for process_id in prunable {
             // The process journal and the worker's trigger-delivery reconcile
             // scope for the same process: that runtime operation exists only
             // to admit this process, so nothing can replay it once the row is
             // gone (FIG-2500). Both retirements also retire the scopes'
-            // await-event promises and leave the permanent fence (FIG-2499).
+            // await-event promises and leave the scope fence (FIG-2499). The
+            // registry's verdict is the unreachability proof, so the
+            // owner-terminal gate applies and in-flight rows go with the rest.
             let reconcile_scope =
-                lash_core::facade_support::trigger_delivery_reconcile_scope(&process.id);
+                lash_core::facade_support::trigger_delivery_reconcile_scope(&process_id);
             let retirements = [
                 Some(lash_core::EffectJournalRetirement::process(
-                    process.id.clone(),
+                    process_id.clone(),
                 )),
                 lash_core::EffectJournalRetirement::for_scope(&reconcile_scope),
             ];
@@ -633,7 +649,7 @@ impl Processes {
                     tracing::warn!(
                         failure_stage = "retire_process_effect_journal",
                         cutoff_epoch_ms,
-                        process_id = %process.id,
+                        process_id = %process_id,
                         error = %err,
                         "process retention failed"
                     );

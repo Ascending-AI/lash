@@ -212,6 +212,10 @@ impl<T: StoreReplayHost> EffectHost for T {
     ) -> Result<usize, RuntimeError> {
         self.replay_driver().retire_effect_journal(retirement).await
     }
+
+    async fn reinstate_effect_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
+        self.replay_driver().reinstate_effect_scope(scope).await
+    }
 }
 
 #[async_trait]

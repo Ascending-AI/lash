@@ -35,7 +35,9 @@ schedule runs it. A runtime receipt is eligible only if its owner is durably in
 `deleted_sessions` and its stored commit timestamp is before that horizon.
 Session deletion now retains these receipts for this lever instead of erasing
 them implicitly. `deleted_sessions` is permanently exempt: FIG-754 / FIG-748
-require identity evidence after every other row disappears.
+require identity evidence after every other row disappears. Scope fences
+(`effect_scope_retirements`) are the other permanent-row class; ADR 0049 owns
+their release rule.
 
 Usage deltas use the same terminal-session gate. They remain while their
 matching operation receipt remains. Live deltas reconstruct the token ledger
