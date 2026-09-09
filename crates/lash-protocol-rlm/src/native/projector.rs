@@ -1,6 +1,7 @@
 use super::history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 use crate::dialect::RlmDialect;
 use crate::driver::{RlmPreambleConfig, SharedPromptUsage};
+use crate::execution_prompt::render_system_prompt;
 use crate::rlm_support::{SharedBoundVariablesPrompt, decode_rlm_options, effective_budget_tokens};
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
@@ -122,8 +123,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
 
         Arc::new(LlmRequest {
             model: ctx.config.model.clone(),
-            instructions: (!ctx.config.system_prompt.trim().is_empty())
-                .then(|| Arc::from(ctx.config.system_prompt.trim())),
+            instructions: render_system_prompt(&ctx.config.system_prompt, self.dialect.as_ref()),
             messages,
             resolved_stored: Default::default(),
             tools: Arc::new(vec![super::tool::tool_spec(self.dialect.as_ref())]),

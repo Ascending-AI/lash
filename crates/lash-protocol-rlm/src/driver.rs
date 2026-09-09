@@ -1,3 +1,4 @@
+use crate::execution_prompt::render_system_prompt;
 use lash_sansio::sync::RwLockExt;
 pub(crate) mod history;
 
@@ -351,8 +352,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         generation.suppress_stop_sequences_for_protocol();
 
         Arc::new(LlmRequest {
-            instructions: (!ctx.config.system_prompt.trim().is_empty())
-                .then(|| Arc::from(ctx.config.system_prompt.trim())),
+            instructions: render_system_prompt(&ctx.config.system_prompt, self.dialect.as_ref()),
             model: ctx.config.model.clone(),
             messages,
             resolved_stored: Default::default(),

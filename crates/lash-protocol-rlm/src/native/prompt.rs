@@ -248,10 +248,13 @@ mod prompt_diet_tests {
                 crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect, features)
             ));
         }
-        lash_core::PromptTemplate::default().render(&lash_sansio::PromptContext {
+        let prompt = lash_core::PromptTemplate::default().render(&lash_sansio::PromptContext {
             execution_prompt: execution.into(),
             ..Default::default()
-        })
+        });
+        crate::execution_prompt::render_system_prompt(&prompt, dialect)
+            .unwrap()
+            .to_string()
     }
 
     #[test]
@@ -310,6 +313,35 @@ mod prompt_diet_tests {
                     prompt.split_once("## Guidance").unwrap().1,
                     standard.split_once("## Guidance").unwrap().1
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn dialect_execution_headings_have_a_body_in_both_channels() {
+        for (typescript, heading) in [
+            (true, "## TypeScript execution"),
+            (false, "## Lashlang execution"),
+        ] {
+            for native in [false, true] {
+                let prompt = system(dialect(typescript, false).as_ref(), native, true);
+                assert_eq!(prompt.lines().filter(|line| *line == heading).count(), 1);
+                assert!(!prompt.lines().any(|line| line == "## Execution"));
+                let lines: Vec<_> = prompt.lines().filter(|line| !line.is_empty()).collect();
+                for pair in lines.windows(2) {
+                    assert!(
+                        !(pair[0].starts_with('#') && pair[1].starts_with('#')),
+                        "bodiless heading: {} before {}",
+                        pair[0],
+                        pair[1]
+                    );
+                }
+                let transport = if native {
+                    "Call `execute_code` once"
+                } else {
+                    "paired"
+                };
+                assert!(prompt.split_once(heading).unwrap().1.contains(transport));
             }
         }
     }

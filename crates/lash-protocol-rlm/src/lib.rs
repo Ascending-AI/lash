@@ -7,6 +7,7 @@ mod cell_scan;
 mod control_tools;
 mod dialect;
 mod driver;
+mod execution_prompt;
 mod executor;
 mod feedback;
 mod native;
