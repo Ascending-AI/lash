@@ -1449,11 +1449,19 @@ mod tests {
             .position(|window| window == format_version_needle)
             .expect("find format_version");
         let version_val_pos = version_pos + format_version_needle.len();
+        let version_end = future_bytes[version_val_pos..]
+            .iter()
+            .position(|byte| !byte.is_ascii_digit())
+            .expect("version delimiter")
+            + version_val_pos;
         assert_eq!(
-            future_bytes[version_val_pos],
-            b'0' + VM_CONTINUATION_FORMAT_VERSION as u8
+            &future_bytes[version_val_pos..version_end],
+            VM_CONTINUATION_FORMAT_VERSION.to_string().as_bytes()
         );
-        future_bytes[version_val_pos] = b'0' + (VM_CONTINUATION_FORMAT_VERSION + 1) as u8;
+        future_bytes.splice(
+            version_val_pos..version_end,
+            (VM_CONTINUATION_FORMAT_VERSION + 1).to_string().bytes(),
+        );
 
         let decode_error = serde_json::from_slice::<VmContinuation>(&future_bytes).expect_err(
             "newer version with unknown variant must be refused with FormatVersionMismatch",

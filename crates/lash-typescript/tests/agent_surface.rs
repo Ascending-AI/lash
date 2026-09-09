@@ -2217,3 +2217,28 @@ fn runtime_array_rejections_use_recorded_settlement_order() {
         assert!(error.to_string().contains("early-B"), "{source}: {error}");
     }
 }
+
+#[test]
+fn pending_tool_handles_survive_durable_process_park() {
+    for mode in ["all", "allSettled"] {
+        let source = format!(
+            r#"const worker = defineProcess({{
+            name: "worker", signals: {{}}, run: async () => {{
+                const pending = [web.fetch({{value: "kept"}}), 42];
+                await sleep(5);
+                return await Promise.{mode}(pending);
+            }}
+        }});"#
+        );
+        let expected = if mode == "all" {
+            serde_json::json!(["kept", 42])
+        } else {
+            serde_json::json!([{"status":"fulfilled","value":"kept"},{"status":"fulfilled","value":42}])
+        };
+        assert_eq!(
+            suspend_and_resume_process(&source, serde_json::json!({})),
+            ExecutionOutcome::Finished(lashlang::from_json(expected)),
+            "{mode}"
+        );
+    }
+}
