@@ -21,18 +21,22 @@ use crate::driver::SharedPromptUsage;
 use crate::executor::RlmLashlangExecutionTraceConfig;
 use crate::projection::{ProjectionRegistry, ProjectionResolver};
 
-/// Apply the RLM protocol config transformation: enable label annotations, and
-/// (when process lifecycle is available) the process/sleep/signal abilities.
+/// Apply the RLM protocol config transformation: enable, when process lifecycle
+/// is available, the process/sleep/signal abilities.
 ///
 /// This is protocol logic; it lives here rather than in the facade because both
 /// the plugin surface and the contributed Lashlang process engine derive from
 /// it.
+///
+/// Language features are NOT transformed here. The default (label annotations
+/// on) is decided once, where every config is born — `RlmProtocolPluginConfig`'s
+/// builder and serde default — so a host that turns a feature off keeps it off
+/// end to end, as ADR 0085 promises (FIG-2768).
 pub fn rlm_protocol_config(
     config: RlmProtocolPluginConfig,
     process_lifecycle: bool,
 ) -> RlmProtocolPluginConfig {
-    let language_features = config.lashlang_language_features.with_label_annotations();
-    let mut config = config.with_lashlang_language_features(language_features);
+    let mut config = config;
     if process_lifecycle {
         config.lashlang_abilities = config
             .lashlang_abilities
@@ -433,5 +437,102 @@ impl SessionPlugin for RlmProtocolPlugin {
             Arc::clone(&self.dialect),
             Arc::clone(&self.last_prompt_usage),
         )
+    }
+}
+
+#[cfg(test)]
+mod label_annotation_tests {
+    use super::{rlm_lashlang_surface, rlm_protocol_config};
+    use crate::plugin::{InstructionBound, MemoryBound, RlmProtocolPluginConfig, WallClockBound};
+    use crate::protocol::{RlmPromptFeatures, rlm_execution_section_for_host_environment};
+
+    fn base_config() -> RlmProtocolPluginConfig {
+        RlmProtocolPluginConfig::builder()
+            .instruction_limit(InstructionBound::instructions(1_000_000))
+            .wall_clock(WallClockBound::secs(30))
+            .memory_limit(MemoryBound::mebibytes(64))
+            .build()
+    }
+
+    /// Run a host config through the plugin's config transformation the way a
+    /// session build does, and render the prompt section it produces.
+    fn rendered_surface(
+        config: RlmProtocolPluginConfig,
+    ) -> (String, lashlang::LashlangHostEnvironment) {
+        let config = rlm_protocol_config(config, false);
+        let host_environment = rlm_lashlang_surface(&config, false)
+            .host_environment(&lash_core::ToolCatalog::from_tool_definitions(Vec::new()))
+            .expect("host environment");
+        let section = rlm_execution_section_for_host_environment(
+            RlmPromptFeatures::default(),
+            &host_environment,
+        );
+        (section, host_environment)
+    }
+
+    fn labelled_program() -> lashlang::Program {
+        lashlang::parse(
+            r#"
+            @label(title: "Answer")
+            finish "ok"
+            "#,
+        )
+        .expect("parse labelled program")
+    }
+
+    #[test]
+    fn host_disabled_label_annotations_are_absent_from_prompt_and_language() {
+        // Toolbench's shape (examples/toolbench/src/runtime.rs): every optional
+        // language feature spelled off.
+        let mut config = base_config();
+        config.lashlang_language_features.label_annotations = false;
+        let (section, host_environment) = rendered_surface(config);
+
+        assert!(!section.contains("@label"), "{section}");
+        assert!(!section.contains("Execution labels"), "{section}");
+        assert!(!host_environment.language_features.label_annotations);
+        let err = lashlang::LinkedModule::link(labelled_program(), &host_environment)
+            .expect_err("label syntax must be rejected when the host disabled the feature");
+        assert!(
+            matches!(
+                err,
+                lashlang::LinkError::FeatureDisabled {
+                    feature: "label annotations",
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn default_config_keeps_label_annotations_on() {
+        let (section, host_environment) = rendered_surface(base_config());
+
+        assert!(section.contains("@label"), "{section}");
+        assert!(section.contains("Execution labels"), "{section}");
+        assert!(host_environment.language_features.label_annotations);
+        lashlang::LinkedModule::link(labelled_program(), &host_environment)
+            .expect("default surface links label annotations");
+    }
+
+    #[test]
+    fn serde_config_without_language_features_keeps_the_default() {
+        let config: RlmProtocolPluginConfig = serde_json::from_value(serde_json::json!({
+            "instruction_limit": { "bounded": 1_000_000 },
+            "wall_clock": { "bounded": 30_000 },
+            "memory_limit": { "bounded": 67_108_864 }
+        }))
+        .expect("rlm config");
+        assert!(config.lashlang_language_features.label_annotations);
+
+        let config: RlmProtocolPluginConfig = serde_json::from_value(serde_json::json!({
+            "instruction_limit": { "bounded": 1_000_000 },
+            "wall_clock": { "bounded": 30_000 },
+            "memory_limit": { "bounded": 67_108_864 },
+            "lashlang_language_features": { "label_annotations": false }
+        }))
+        .expect("rlm config");
+        assert!(!config.lashlang_language_features.label_annotations);
     }
 }
