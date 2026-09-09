@@ -15,25 +15,32 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
         Teardown,
         CrashBeforeRepair,
     }
-    for disposition in [
-        crate::TurnCancelDisposition::Defer,
-        crate::TurnCancelDisposition::Drop,
+    for mode in [
+        crate::TurnCancelMode::Immediate,
+        crate::TurnCancelMode::AfterStep,
     ] {
-        for path in [
-            RepairPath::Commit,
-            RepairPath::Teardown,
-            RepairPath::CrashBeforeRepair,
+        for disposition in [
+            crate::TurnCancelDisposition::Defer,
+            crate::TurnCancelDisposition::Drop,
         ] {
-            turn_cancel_disposition_crash_cell(Arc::clone(&factory), disposition, path).await;
+            for path in [
+                RepairPath::Commit,
+                RepairPath::Teardown,
+                RepairPath::CrashBeforeRepair,
+            ] {
+                turn_cancel_disposition_crash_cell(Arc::clone(&factory), mode, disposition, path)
+                    .await;
+            }
         }
     }
 
     async fn turn_cancel_disposition_crash_cell(
         factory: Arc<dyn crate::SessionStoreFactory>,
+        mode: crate::TurnCancelMode,
         disposition: crate::TurnCancelDisposition,
         path: RepairPath,
     ) {
-        let suffix = format!("{:?}-{:?}", disposition, path).to_ascii_lowercase();
+        let suffix = format!("{:?}-{:?}-{:?}", mode, disposition, path).to_ascii_lowercase();
         let request = session_store_request(
             &format!("turn-cancel-{suffix}"),
             "turn-cancel-drop-model",
@@ -68,7 +75,8 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
             format!("turn-cancel-{suffix}:request"),
             Some("conformance-host".to_string()),
         )
-        .undelivered(disposition);
+        .undelivered(disposition)
+        .mode(mode);
         store
             .record_turn_cancel_request(cancel.clone())
             .await
@@ -149,7 +157,10 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
             .await
             .expect("read durable cancel request")
             .expect("cancel request survives reopen");
-        assert_eq!(durable.request, cancel);
+        assert_eq!(
+            durable.request, cancel,
+            "{suffix}: the durable row carries the requested mode"
+        );
         assert_eq!(
             serde_json::to_value(&durable.outcome).expect("encode durable cancel outcome"),
             serde_json::to_value(Some(&outcome)).expect("encode repair outcome"),
@@ -169,4 +180,119 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
             "cancel repair applies disposition only to ActiveTurn and never touches NextTurn"
         );
     }
+}
+
+/// Escalating a durable after-step request to an immediate abort upgrades the
+/// row in place: the address keeps one record, the record carries the
+/// stronger request, and a same-or-weaker request never downgrades it.
+pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let request = session_store_request(
+        "turn-cancel-escalation",
+        "turn-cancel-escalation-model",
+        crate::SessionRelation::Root,
+    );
+    let turn_id = "turn-cancel-escalation:turn";
+    let store = factory
+        .create_store(&request)
+        .await
+        .expect("create escalation store");
+    let address = crate::TurnAddress::new(&request.session_id, turn_id);
+    let stop = crate::TurnCancelRequest::new(
+        address.clone(),
+        "turn-cancel-escalation:stop",
+        Some("conformance-host".to_string()),
+    )
+    .with_reason("stop after the step")
+    .undelivered(crate::TurnCancelDisposition::Drop)
+    .mode(crate::TurnCancelMode::AfterStep);
+    store
+        .record_turn_cancel_request(stop.clone())
+        .await
+        .expect("persist the after-step request");
+    let durable = store
+        .turn_cancel_request(&address)
+        .await
+        .expect("read durable request")
+        .expect("after-step request persisted");
+    assert_eq!(durable.request, stop);
+    assert!(durable.outcome.is_none());
+
+    let weaker_again = crate::TurnCancelRequest::new(
+        address.clone(),
+        "turn-cancel-escalation:stop-again",
+        Some("conformance-host".to_string()),
+    )
+    .mode(crate::TurnCancelMode::AfterStep);
+    store
+        .record_turn_cancel_request(weaker_again)
+        .await
+        .expect("record a same-strength request");
+    let durable = store
+        .turn_cancel_request(&address)
+        .await
+        .expect("read durable request")
+        .expect("request persists");
+    assert_eq!(
+        durable.request, stop,
+        "a same-strength request never replaces the first writer"
+    );
+
+    let abort = crate::TurnCancelRequest::new(
+        address.clone(),
+        "turn-cancel-escalation:abort",
+        Some("conformance-operator".to_string()),
+    )
+    .with_reason("escalated to abort")
+    .undelivered(crate::TurnCancelDisposition::Defer);
+    store
+        .record_turn_cancel_request(abort.clone())
+        .await
+        .expect("escalate the durable request");
+    let durable = store
+        .turn_cancel_request(&address)
+        .await
+        .expect("read durable request")
+        .expect("request persists");
+    assert_eq!(
+        durable.request, abort,
+        "an immediate abort upgrades the after-step row in place"
+    );
+    assert!(durable.outcome.is_none());
+
+    let downgrade = crate::TurnCancelRequest::new(
+        address.clone(),
+        "turn-cancel-escalation:late-stop",
+        Some("conformance-host".to_string()),
+    )
+    .mode(crate::TurnCancelMode::AfterStep);
+    store
+        .record_turn_cancel_request(downgrade)
+        .await
+        .expect("record a weaker request after the upgrade");
+    let durable = store
+        .turn_cancel_request(&address)
+        .await
+        .expect("read durable request")
+        .expect("request persists");
+    assert_eq!(
+        durable.request, abort,
+        "a weaker request never downgrades the upgraded row"
+    );
+
+    // Reopen models an owner crash after the upgrade: the upgraded record is
+    // what the successor reads.
+    drop(store);
+    let reopened = factory
+        .open_existing_store(&request)
+        .await
+        .expect("reopen escalation store")
+        .expect("session admitted");
+    let durable = reopened
+        .turn_cancel_request(&address)
+        .await
+        .expect("read durable request after reopen")
+        .expect("request survives reopen");
+    assert_eq!(durable.request, abort);
 }

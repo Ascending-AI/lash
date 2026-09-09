@@ -232,10 +232,6 @@ pub(crate) const TYPESCRIPT_BUILTINS: &[Builtin] = &[
         arity: Arity::Exact(1),
     },
     Builtin {
-        name: "__typescript_console",
-        arity: Arity::AtLeast(0),
-    },
-    Builtin {
         name: "__typescript_async_map",
         arity: Arity::Exact(2),
     },

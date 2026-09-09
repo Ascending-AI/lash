@@ -8766,6 +8766,8 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
                 origin: Some("test-user".to_string()),
                 reason: Some("user stopped the turn".to_string()),
                 undelivered: crate::TurnCancelDisposition::Drop,
+                mode: crate::TurnCancelMode::Immediate,
+                honoured_after_step: None,
             }
         })
     );
@@ -10556,3 +10558,6 @@ async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does() {
 
 #[path = "commit_placement.rs"]
 mod commit_placement;
+
+#[path = "turn_cancel_modes.rs"]
+mod turn_cancel_modes;

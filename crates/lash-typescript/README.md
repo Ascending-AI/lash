@@ -19,8 +19,9 @@ operators. `in` is an own-property query because dialect objects have no prototy
 URLSearchParams, Array, and Object.
 `console.log`, `console.warn`, `console.error`, `console.info`, and
 `console.debug` accept any arity and emit through the existing print-observation
-channel after ECMA `ToString` conversion, joined by one space; lexical bindings
-named `console` take precedence.
+channel, joining their arguments with one space; each argument is rendered for
+the observation — plain objects and arrays as compact JSON, every other value as
+its ECMA `ToString` — and lexical bindings named `console` take precedence.
 Accepted operations follow ECMA-262 coercion, truthiness, operand-return, and
 reference rules. Type-level TypeScript syntax is erased: annotations,
 interfaces, type aliases, generics and type arguments, `as`/angle-bracket
@@ -333,10 +334,17 @@ language semantics:
   a function, plus nested-path mutation, membership, and deletion share the
   same durable session slots as top-level bindings. Nested-function replacement
   uses the root-global set intrinsic and returns the assigned value.
-- The five accepted `console` methods are host-defined rather than ECMA-262,
-  share one print-observation channel, and print ECMA
-  `ToString` of each argument. Node's inspector formatting is not reproduced:
-  `console.log({a: 1})` prints `[object Object]` where Node prints `{ a: 1 }`.
+- The five accepted `console` methods are host-defined rather than ECMA-262 and
+  share one print-observation channel, joining their arguments with a single
+  space. Each argument is rendered for the observation rather than string-
+  coerced: plain objects and arrays print as compact JSON, matching the host's
+  own print projector, so `console.log({a: 1})` prints `{"a":1}`. Every other
+  value keeps ECMA `ToString`, which is already the useful text for numbers,
+  booleans, `null`, `undefined`, dates, regexps and errors — a `Map` or `Set`
+  prints as `[object Map]`/`[object Set]` because it has no JSON body. Node's
+  inspector formatting is still not reproduced. ECMA coercion elsewhere is
+  untouched: `"" + {a: 1}`, `` `${{a: 1}}` `` and `String({a: 1})` all remain
+  `[object Object]`.
 - Multi-argument Date construction and ISO date-times without an explicit
   offset are interpreted as UTC, never the host timezone. `Date.parse` and
   string construction accept only ECMA date-time syntax; a structurally valid

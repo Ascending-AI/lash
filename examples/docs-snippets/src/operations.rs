@@ -89,9 +89,18 @@ async fn graceful_drain(
     // 2. Finish or cancel in-flight turns. Exact retained turn addresses should
     //    normally go through `core.turn_work_driver().request_cancel(...)`.
     //    This process-local cancel-all remains a shutdown compatibility lever;
-    //    "shutdown" is opaque host vocabulary.
+    //    "shutdown" is opaque host vocabulary. Ask for `AfterStep` first so a
+    //    step in flight finishes and commits, then escalate to `Immediate`
+    //    once the host's own drain deadline passes: lash ships no timer.
     for session in &idle_sessions {
-        session.cancel_running_turns_with_origin(Some("shutdown".to_string()));
+        session.cancel_running_turns_with_origin_and_mode(
+            Some("shutdown".to_string()),
+            lash::TurnCancelMode::AfterStep,
+        );
+    }
+    tokio::time::sleep(Duration::from_secs(0)).await; // the host's drain deadline
+    for session in &idle_sessions {
+        session.cancel_running_turns_with_mode(lash::TurnCancelMode::Immediate);
     }
 
     // 3. Park resumable sessions (flush dirty state through a fresh-lease commit,

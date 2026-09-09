@@ -272,6 +272,74 @@ async fn cancel_turn(core: &LashCore, session: &LashSession) -> anyhow::Result<(
     Ok(())
 }
 
+async fn stop_turn_after_step(core: &LashCore, session: &LashSession) -> anyhow::Result<()> {
+    // docs:start:stop-turn-after-step
+    use lash::{
+        TurnCancelDisposition, TurnCancelMode, TurnCancelOutcome, TurnCancelRequest, TurnOutcome,
+        TurnStop,
+    };
+
+    let turn_id = "incident-summary-43";
+    let stream = session
+        .turn(TurnInput::text("Summarize the incident, then file it."))
+        .turn_id(turn_id)
+        .stream()?;
+
+    // A Stop control that must not lose work asks for `AfterStep`: the model
+    // response finishes streaming, every tool call of that protocol iteration
+    // runs to completion, the checkpoint commits, and the turn stops at that
+    // step boundary. Nothing backtracks and no tool ever sees a cancelled
+    // token. `Immediate` (the default) is the abort: it fires the cooperative
+    // token and drops uncommitted work back to the last checkpoint.
+    let stop = session
+        .request_turn_cancel_with_mode(
+            turn_id,
+            "stop-button-8",
+            Some("user".to_string()),
+            Some("operator pressed Stop".to_string()),
+            TurnCancelDisposition::Defer,
+            TurnCancelMode::AfterStep,
+        )
+        .await?;
+    if let TurnCancelOutcome::Requested(evidence) = &stop.outcome {
+        assert_eq!(evidence.mode, TurnCancelMode::AfterStep);
+        assert!(!evidence.mode.is_immediate());
+    }
+
+    // Escalation is host policy: Lash ships no timer. A host that wants
+    // "abort if the step has not finished after N seconds" waits, then sends a
+    // stronger request to the same address. `Immediate` outranks `AfterStep`,
+    // so the durable record upgrades and the receipt says `Escalated`; a
+    // same-or-weaker request only reports `AlreadyRequested`.
+    assert!(TurnCancelMode::Immediate.is_stronger_than(TurnCancelMode::AfterStep));
+    let abort = core
+        .turn_work_driver()
+        .request_cancel(
+            TurnCancelRequest::new(
+                session.turn_address(turn_id),
+                "abort-button-8",
+                Some("user".to_string()),
+            )
+            .with_reason("step did not finish within the host deadline")
+            .mode(TurnCancelMode::Immediate),
+        )
+        .await?;
+    let _escalated = matches!(abort.outcome, TurnCancelOutcome::Escalated(_));
+
+    let result = stream.finish().await?;
+    if let TurnOutcome::Stopped(TurnStop::Cancelled { evidence }) = &result.outcome {
+        // An after-step stop names the protocol iteration whose closing step
+        // boundary honoured it; an escalated abort carries the abort's
+        // evidence instead.
+        match evidence.mode {
+            TurnCancelMode::AfterStep => assert!(evidence.honoured_after_step.is_some()),
+            TurnCancelMode::Immediate => assert_eq!(evidence.request_id, "abort-button-8"),
+        }
+    }
+    // docs:end:stop-turn-after-step
+    Ok(())
+}
+
 fn restate_turn_control(ingress_url: &str) {
     // docs:start:restate-turn-control
     let deployment = lash_restate::RestateTurnDeployment::new(ingress_url);
@@ -412,6 +480,19 @@ mod asserted_examples {
             lash::CancellationToken::is_cancelled(&borrowed_guarded),
             "dropping a borrowed guard must publish cancellation"
         );
+    }
+
+    #[test]
+    fn after_step_stop_leaves_the_escalation_promise_to_the_owner() {
+        // The escalation promise is a reserved turn-control identity: an
+        // ordinary durable-wait sweep never resolves it and session deletion
+        // revokes it, exactly like the gate and the terminal.
+        assert!(lash::AwaitEventWaitIdentity::TurnCancelEscalation.is_turn_control());
+        // A process-local after-step stop flags the shared origin hint instead
+        // of firing a token; the owning turn honours it at its next step
+        // boundary.
+        let hint = lash::TurnCancelOriginHint::default();
+        hint.request_after_step(Some("shutdown".to_string()));
     }
 
     #[test]

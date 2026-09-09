@@ -398,7 +398,6 @@ pub(crate) enum Instruction {
         right: f64,
     },
     AppendAssign(usize),
-    PrintValues(usize),
     Print,
     ProcessYield,
     ProcessWake,
@@ -577,7 +576,7 @@ impl Instruction {
             | Instruction::AddAssignIndexNumber { .. }
             | Instruction::AddAssignIndexSlotNumber { .. } => InstructionProfileTag::AddAssign,
             Instruction::AppendAssign(_) => InstructionProfileTag::AppendAssign,
-            Instruction::PrintValues(_) | Instruction::Print => InstructionProfileTag::Print,
+            Instruction::Print => InstructionProfileTag::Print,
             Instruction::Finish => InstructionProfileTag::Finish,
             Instruction::ProcessYield | Instruction::ProcessWake | Instruction::ProcessFail => {
                 InstructionProfileTag::SessionProcessAdmin

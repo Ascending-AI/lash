@@ -72,6 +72,21 @@ fn string_coercion_of_a_deeply_nested_array_is_a_typed_refusal() {
     });
 }
 
+/// The console observation renderer walks the same containers, so it carries
+/// the same bound: an inspect step must refuse a value it cannot describe
+/// rather than take the thread stack down with it (FIG-2767).
+#[test]
+fn console_observation_of_a_deeply_nested_array_is_a_typed_refusal() {
+    on_stack_budget("value-depth-console-observation", || {
+        let error = execute(&nested_array_source(3_000, "console.log(deep);"))
+            .expect_err("an over-deep observation must refuse");
+        assert!(
+            matches!(error, RuntimeError::ValueDepthLimitExceeded { .. }),
+            "{error}"
+        );
+    });
+}
+
 /// Template interpolation reaches the same walk by a different opcode.
 #[test]
 fn template_interpolation_of_a_deeply_nested_array_is_a_typed_refusal() {

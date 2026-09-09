@@ -642,13 +642,18 @@ impl Lowerer {
             && matches!(method, "log" | "warn" | "error" | "info" | "debug")
         {
             if !self.has_binding("console") {
-                return Ok(LashExpr::BuiltinCall {
-                    name: "__typescript_console".into(),
-                    args: args
-                        .iter()
-                        .map(|arg| self.lower_expr(arg))
-                        .collect::<Result<_, _>>()?,
-                });
+                // The arguments reach the substrate untouched. Joining them
+                // here with `+` would coerce every object to `"[object Object]"`
+                // before the observation was written, which is the one thing the
+                // inspect step must not do; `__consoleObservationText` owns the
+                // rendering instead (FIG-2767).
+                let arguments = args
+                    .iter()
+                    .map(|arg| self.lower_expr(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(LashExpr::Print(Box::new(console_observation_text(
+                    arguments,
+                ))));
             }
             if self.has_binding("console") {
                 return Ok(LashExpr::Call {
@@ -1085,5 +1090,24 @@ impl Lowerer {
                 })
                 .collect::<Result<_, Diagnostic>>()?,
         }))
+    }
+}
+
+/// Lowers a `console.*` argument list to the substrate call that renders it.
+///
+/// `console.log` is the inspect step the RLM prompt tells a cell to use, so its
+/// text has to describe the value. Handing the raw arguments to
+/// `__consoleObservationText` keeps the rendering in the one place that can see
+/// the heap — plain objects and arrays become JSON, everything else keeps
+/// JavaScript's coercion — instead of flattening them to `"[object Object]"`
+/// here (FIG-2767).
+///
+/// The method name is spelled by hand on both sides of the seam; a drift makes
+/// the substrate reject the call rather than answer it quietly.
+fn console_observation_text(mut arguments: Vec<LashExpr>) -> LashExpr {
+    arguments.insert(0, LashExpr::String("__consoleObservationText".into()));
+    LashExpr::BuiltinCall {
+        name: "__typescript_stdlib".into(),
+        args: arguments,
     }
 }

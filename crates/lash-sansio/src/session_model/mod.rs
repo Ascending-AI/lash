@@ -570,6 +570,36 @@ impl TurnCancelDisposition {
     }
 }
 
+/// When a turn-cancel request is honoured.
+///
+/// `Immediate` is the compatibility default for requests and evidence decoded
+/// from durable records written before this field existed: the cooperative
+/// token fires as soon as the request is observed and uncommitted work
+/// backtracks to the last checkpoint. `AfterStep` is honoured only at the
+/// step boundary that closes a protocol iteration, after that iteration's
+/// checkpoint commit; nothing in flight is interrupted and nothing backtracks.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnCancelMode {
+    #[default]
+    Immediate,
+    AfterStep,
+}
+
+impl TurnCancelMode {
+    pub fn is_immediate(&self) -> bool {
+        *self == Self::Immediate
+    }
+
+    /// `Immediate` outranks `AfterStep`; a request in a stronger mode
+    /// escalates an address that already holds a weaker durable request.
+    pub fn is_stronger_than(self, other: Self) -> bool {
+        matches!((self, other), (Self::Immediate, Self::AfterStep))
+    }
+}
+
 /// Durable evidence that a turn was cancelled.
 ///
 /// Minted either from a host turn-cancel request, which supplies the
@@ -587,6 +617,14 @@ pub struct TurnCancellationEvidence {
     /// Applied policy for active-turn input this turn did not deliver.
     #[serde(default, skip_serializing_if = "TurnCancelDisposition::is_defer")]
     pub undelivered: TurnCancelDisposition,
+    /// Mode of the request that produced this evidence.
+    #[serde(default, skip_serializing_if = "TurnCancelMode::is_immediate")]
+    pub mode: TurnCancelMode,
+    /// The protocol iteration whose closing step boundary honoured an
+    /// after-step request. `None` for immediate evidence and for an
+    /// after-step request refused at the start gate before any step ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub honoured_after_step: Option<usize>,
 }
 
 impl TurnCancellationEvidence {
@@ -598,6 +636,8 @@ impl TurnCancellationEvidence {
             origin: None,
             reason: None,
             undelivered: TurnCancelDisposition::Defer,
+            mode: TurnCancelMode::Immediate,
+            honoured_after_step: None,
         }
     }
 }

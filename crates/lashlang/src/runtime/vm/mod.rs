@@ -1181,9 +1181,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 return Ok(VmStep::Effect(VmEffect::AwaitArray { settle }));
             }
             Instruction::AwaitPending => return Ok(VmStep::Effect(VmEffect::AwaitPending)),
-            Instruction::PrintValues(argc) => {
-                return Ok(VmStep::Effect(VmEffect::PrintValues(argc)));
-            }
             Instruction::ResourceOperationBatch(batch) => {
                 return Ok(VmStep::Effect(VmEffect::ResourceOperationBatch(batch)));
             }

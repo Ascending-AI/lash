@@ -11,6 +11,7 @@ mod fig1416;
 
 mod fig2471;
 mod response_settlement;
+mod turn_cancel_modes;
 #[derive(Clone, Debug)]
 struct EffectControllerRecord {
     kind: RuntimeEffectKind,
@@ -37,6 +38,8 @@ pub(super) struct RecordingEffectController {
     llm_calls: Arc<Mutex<usize>>,
     native: NativeRuntimeEffectController,
     cancel_after_llm: bool,
+    cancel_after_step: bool,
+    escalate_after_llm: bool,
     controller_owned_replay: bool,
     engine_paced_lane: bool,
     replay_by_key: bool,
@@ -64,6 +67,29 @@ pub(super) struct RecordingEffectController {
 impl RecordingEffectController {
     fn with_cancel_after_llm(mut self) -> Self {
         self.cancel_after_llm = true;
+        self
+    }
+
+    /// The journaled cancel gate holds an after-step request once the model
+    /// has run; the escalation promise stays unresolved.
+    fn with_after_step_cancel(mut self) -> Self {
+        self.cancel_after_step = true;
+        self
+    }
+
+    /// Alongside [`Self::with_after_step_cancel`]: the escalation promise
+    /// holds an immediate abort by the time the after-LLM peek runs.
+    fn with_escalation_after_llm(mut self) -> Self {
+        self.escalate_after_llm = true;
+        self
+    }
+
+    /// A replaying owner with no live cancel state: every canned gate
+    /// resolution is off, so what replay sees comes from the journal alone.
+    fn without_canned_cancel(mut self) -> Self {
+        self.cancel_after_llm = false;
+        self.cancel_after_step = false;
+        self.escalate_after_llm = false;
         self
     }
 
@@ -543,6 +569,35 @@ impl RuntimeEffectController for RecordingEffectController {
             RuntimeEffectCommand::AwaitEvent { .. } => Ok(RuntimeEffectOutcome::AwaitEvent {
                 resolution: crate::Resolution::Ok(serde_json::json!(null)),
             }),
+            RuntimeEffectCommand::PeekAwaitEvent { key }
+                if self.cancel_after_step && *self.llm_calls.lock_recover() > 0 =>
+            {
+                let resolution = match key.wait {
+                    AwaitEventWaitIdentity::TurnCancelGate => {
+                        Some(Resolution::Ok(serde_json::json!({
+                            "state": "cancel_requested",
+                            "cancellation": {
+                                "request_id": "stop-after-step",
+                                "origin": "effect-controller-test",
+                                "reason": "stop after the current step",
+                                "mode": "after_step"
+                            }
+                        })))
+                    }
+                    AwaitEventWaitIdentity::TurnCancelEscalation if self.escalate_after_llm => {
+                        Some(Resolution::Ok(serde_json::json!({
+                            "state": "cancel_requested",
+                            "cancellation": {
+                                "request_id": "abort-escalated",
+                                "origin": "effect-controller-test",
+                                "reason": "escalated to an immediate abort"
+                            }
+                        })))
+                    }
+                    _ => None,
+                };
+                Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution })
+            }
             RuntimeEffectCommand::PeekAwaitEvent { .. }
                 if self.cancel_after_llm && *self.llm_calls.lock_recover() > 0 =>
             {
@@ -705,56 +760,6 @@ async fn standard_turn_llm_and_checkpoint_effects_cross_controller_once() {
                 record.replay_key.starts_with("root:")
             }
     }));
-}
-
-#[tokio::test]
-async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run() {
-    let recorder = RecordingEffectController::default()
-        .with_cancel_after_llm()
-        .with_controller_owned_replay();
-    let mut runtime = runtime_with_plugins_and_tools_and_host(
-        Vec::new(),
-        Arc::new(EmptyTools),
-        mock_provider(Vec::new()),
-        host_with_effect_recorder(recorder.clone()),
-    )
-    .await;
-
-    let turn = runtime
-        .run_turn_assembled(
-            TurnInput::text("cancel while the model is running"),
-            CancellationToken::new(),
-            scoped_test_turn(&recorder, "llm-cancel-boundary"),
-        )
-        .await
-        .expect("cancelled turn");
-
-    assert!(matches!(
-        turn.outcome,
-        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
-    ));
-    assert_eq!(
-        recorder
-            .records()
-            .into_iter()
-            .map(|record| (record.kind, record.replay_key))
-            .collect::<Vec<_>>(),
-        vec![
-            (
-                RuntimeEffectKind::PeekAwaitEvent,
-                "turn_cancel.start_gate".to_string()
-            ),
-            (
-                RuntimeEffectKind::LlmCall,
-                "root:llm-cancel-boundary:1:0:llm_call:1".to_string()
-            ),
-            (
-                RuntimeEffectKind::PeekAwaitEvent,
-                "turn_cancel.after_llm.0".to_string()
-            ),
-        ],
-        "the deployed LLM command must stay first within the iteration and the durable cancel observation must follow it"
-    );
 }
 
 #[tokio::test]

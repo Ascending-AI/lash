@@ -19,7 +19,8 @@ const AWAIT_EVENT_FAMILY_VERSION: u8 = 3;
 ///
 /// Execution scopes: 1 turn, 2 process, 3 queue drain, 4 session delete,
 /// 5 runtime operation. Wait identities: 1 tool completion, 2 process signal,
-/// 3 turn cancel gate, 4 turn terminal, 5 custom. Retired tags remain burned.
+/// 3 turn cancel gate, 4 turn terminal, 5 custom, 6 turn cancel escalation.
+/// Retired tags remain burned.
 fn promise_key_preimage(scope: &ExecutionScope, wait: &AwaitEventWaitIdentity) -> Vec<u8> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
         "lash.await-event",
@@ -76,6 +77,7 @@ fn promise_key_preimage(scope: &ExecutionScope, wait: &AwaitEventWaitIdentity) -
             identity.tag(5);
             identity.string(key);
         }
+        AwaitEventWaitIdentity::TurnCancelEscalation => identity.tag(6),
     }
     identity.finish()
 }

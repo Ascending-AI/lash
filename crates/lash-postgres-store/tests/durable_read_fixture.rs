@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 80);
+    assert_eq!(PostgresStorage::schema_version(), 81);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -237,8 +237,10 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
              ADD CONSTRAINT lash_runtime_turn_commits_append_identity_all_or_none
                  CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL)
                      AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL));
+         ALTER TABLE lash_turn_cancel_requests
+             ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'immediate';
          UPDATE lash_schema_versions
-            SET version = 80
+            SET version = 81
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)

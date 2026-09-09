@@ -13,14 +13,14 @@ impl ExecutionHost for Host {
     }
 }
 #[test]
-fn console_values_use_compact_json_and_space_joining() {
+fn console_methods_follow_observation_rendering() {
     for method in ["log", "info", "warn", "error", "debug"] {
         for (args, expected) in [
             ("{ a: 1, b: [2, 3] }", r#"{"a":1,"b":[2,3]}"#),
             (r#""x", { a: 1 }"#, r#"x {"a":1}"#),
             ("[{ a: 1 }]", r#"[{"a":1}]"#),
             ("null", "null"),
-            ("undefined", "null"),
+            ("undefined", "undefined"),
         ] {
             let source = format!("console.{method}({args});");
             let program = lash_typescript::compile(&source).unwrap();

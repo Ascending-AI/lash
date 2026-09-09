@@ -20,7 +20,16 @@ pub enum TurnCancelPeekIdentity {
     PostAbortGate,
     // Shipped protocols issue at most one LLM call per protocol iteration, so
     // the iteration is a unique replay identity for this between-call peek.
-    AfterLlm { protocol_iteration: usize },
+    AfterLlm {
+        protocol_iteration: usize,
+    },
+    /// The step boundary that closed `protocol_iteration`: its response was
+    /// streamed, every tool call of that iteration completed, and its
+    /// checkpoint committed. Observed exactly once per closed iteration on
+    /// every binding, so it is a stable replay identity.
+    AfterStep {
+        protocol_iteration: usize,
+    },
 }
 
 impl TurnCancelPeekIdentity {
@@ -31,6 +40,30 @@ impl TurnCancelPeekIdentity {
             Self::AfterLlm { protocol_iteration } => {
                 format!("turn_cancel.after_llm.{protocol_iteration}")
             }
+            Self::AfterStep { protocol_iteration } => {
+                format!("turn_cancel.after_step.{protocol_iteration}")
+            }
+        }
+    }
+
+    /// Identity of the escalation peek that follows this gate peek when the
+    /// gate holds an after-step request. Issued only in that case, and the
+    /// gate answer it depends on is itself journaled, so replay is stable.
+    fn escalation_causal_identity(self) -> String {
+        format!(
+            "turn_cancel.escalation.{}",
+            &self.causal_identity()["turn_cancel.".len()..]
+        )
+    }
+
+    /// Boundaries that honour an after-step request outright. The post-abort
+    /// gate is reached only after the cooperative token already fired, and a
+    /// mid-run peek defers an after-step request to its step boundary.
+    fn honours_after_step(self) -> Option<Option<usize>> {
+        match self {
+            Self::StartGate | Self::PostAbortGate => Some(None),
+            Self::AfterStep { protocol_iteration } => Some(Some(protocol_iteration)),
+            Self::AfterLlm { .. } => None,
         }
     }
 }
@@ -79,6 +112,7 @@ pub struct TurnCancelOriginHint {
 struct TurnCancelOriginState {
     configured_origin: Option<Option<String>>,
     observed_origin: Option<Option<String>>,
+    after_step_requested: bool,
 }
 
 impl TurnCancelOriginHint {
@@ -88,6 +122,21 @@ impl TurnCancelOriginHint {
         if state.observed_origin.is_none() {
             state.observed_origin = Some(origin);
         }
+    }
+
+    /// Record a process-local after-step stop. The token stays untouched; the
+    /// owning turn honours the flag at its next step boundary by resolving its
+    /// own cancellation gate with internal after-step evidence.
+    pub fn request_after_step(&self, origin: Option<String>) {
+        let mut state = self.state.lock_recover();
+        if state.observed_origin.is_none() {
+            state.observed_origin = Some(origin);
+        }
+        state.after_step_requested = true;
+    }
+
+    pub(crate) fn after_step_requested(&self) -> bool {
+        self.state.lock_recover().after_step_requested
     }
 
     pub(crate) fn get(&self) -> Option<String> {
@@ -113,7 +162,7 @@ impl TurnCancelOriginHint {
     }
 }
 
-pub use lash_sansio::{TurnCancelDisposition, TurnCancellationEvidence};
+pub use lash_sansio::{TurnCancelDisposition, TurnCancelMode, TurnCancellationEvidence};
 
 /// One undelivered active-turn input affected by cancellation repair.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -166,6 +215,12 @@ pub struct TurnCancelRequest {
     /// Policy for active-turn input the cancelled turn did not deliver.
     #[serde(default, skip_serializing_if = "turn_cancel_disposition_is_defer")]
     pub undelivered: TurnCancelDisposition,
+    /// When the request is honoured. `Immediate` fires the cooperative token
+    /// and backtracks to the last checkpoint; `AfterStep` waits for the step
+    /// boundary that closes the current protocol iteration. Records written
+    /// before this field existed decode as `Immediate`.
+    #[serde(default, skip_serializing_if = "TurnCancelMode::is_immediate")]
+    pub mode: TurnCancelMode,
 }
 
 fn turn_cancel_disposition_is_defer(disposition: &TurnCancelDisposition) -> bool {
@@ -184,6 +239,7 @@ impl TurnCancelRequest {
             origin,
             reason: None,
             undelivered: TurnCancelDisposition::Defer,
+            mode: TurnCancelMode::Immediate,
         }
     }
 
@@ -194,6 +250,11 @@ impl TurnCancelRequest {
 
     pub fn undelivered(mut self, disposition: TurnCancelDisposition) -> Self {
         self.undelivered = disposition;
+        self
+    }
+
+    pub fn mode(mut self, mode: TurnCancelMode) -> Self {
+        self.mode = mode;
         self
     }
 
@@ -214,6 +275,8 @@ impl TurnCancelRequest {
             origin: self.origin.clone(),
             reason: self.reason.clone(),
             undelivered: self.undelivered,
+            mode: self.mode,
+            honoured_after_step: None,
         }
     }
 }
@@ -231,6 +294,9 @@ pub struct TurnCancelRequestRecord {
 pub enum TurnCancelOutcome {
     Requested(TurnCancellationEvidence),
     AlreadyRequested(TurnCancellationEvidence),
+    /// The address already held a weaker durable request and this stronger
+    /// one upgraded it. The evidence is the escalating request's.
+    Escalated(TurnCancellationEvidence),
     CompletionWonRace,
     UnknownOrRevoked,
 }
@@ -380,6 +446,11 @@ impl TurnWorkDriver {
         {
             ResolveOutcome::Accepted => Ok(TurnCancelOutcome::Requested(evidence)),
             ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
+                TurnGateTerminal::CancelRequested(existing)
+                    if evidence.mode.is_stronger_than(existing.mode) =>
+                {
+                    self.escalate(&request.address, evidence, existing).await
+                }
                 TurnGateTerminal::CancelRequested(existing) => {
                     Ok(TurnCancelOutcome::AlreadyRequested(existing))
                 }
@@ -402,6 +473,40 @@ impl TurnWorkDriver {
             None
         };
         Ok(TurnCancelReceipt { outcome, record })
+    }
+
+    /// Upgrade an address whose first-writer gate holds a weaker request.
+    ///
+    /// The gate itself is immutable once written, so the stronger request
+    /// rides a second reserved promise that the owner watches only after it
+    /// observed a weaker gate. It is first-writer-wins too: a second stronger
+    /// request reports the escalation that already won.
+    async fn escalate(
+        &self,
+        address: &TurnAddress,
+        evidence: TurnCancellationEvidence,
+        existing: TurnCancellationEvidence,
+    ) -> Result<TurnCancelOutcome, RuntimeError> {
+        let key = escalation_key(self.effect_host.as_ref(), address).await?;
+        let resolution = gate_resolution(TurnGateTerminal::CancelRequested(evidence.clone()))?;
+        Ok(
+            match self
+                .effect_host
+                .resolve_await_event(&key, resolution)
+                .await?
+            {
+                ResolveOutcome::Accepted => TurnCancelOutcome::Escalated(evidence),
+                ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
+                    TurnGateTerminal::CancelRequested(escalated) => {
+                        TurnCancelOutcome::AlreadyRequested(escalated)
+                    }
+                    TurnGateTerminal::CompletionSealed => {
+                        TurnCancelOutcome::AlreadyRequested(existing)
+                    }
+                },
+                ResolveOutcome::UnknownOrRevoked => TurnCancelOutcome::UnknownOrRevoked,
+            },
+        )
     }
 
     pub async fn await_terminal(
@@ -534,13 +639,34 @@ async fn terminal_key(
         .await
 }
 
+async fn escalation_key(
+    resolver: &dyn AwaitEventResolver,
+    address: &TurnAddress,
+) -> Result<AwaitEventKey, RuntimeError> {
+    resolver
+        .await_event_key(
+            &address.execution_scope(),
+            AwaitEventWaitIdentity::TurnCancelEscalation,
+        )
+        .await
+}
+
 /// Per-execution bridge between the durable gate and the turn's internal
 /// cancellation token.
+///
+/// Two evidence slots: `evidence` is the cancellation the turn honours (an
+/// immediate request, an escalation, or an after-step request that reached
+/// its boundary) and is what drives the token, the machine, and the commit.
+/// `deferred` is an observed after-step request that is waiting for its step
+/// boundary; it never reaches the machine, so protocol drivers keep running
+/// the iteration to completion.
 pub struct ActiveTurnControl {
     address: TurnAddress,
     cancel_key: AwaitEventKey,
     terminal_key: AwaitEventKey,
+    escalation_key: AwaitEventKey,
     evidence: Mutex<Option<TurnCancellationEvidence>>,
+    deferred: Mutex<Option<TurnCancellationEvidence>>,
     local_cancel_origin: TurnCancelOriginHint,
 }
 
@@ -553,8 +679,10 @@ impl ActiveTurnControl {
         Ok(Self {
             cancel_key: cancel_gate_key(resolver, &address).await?,
             terminal_key: terminal_key(resolver, &address).await?,
+            escalation_key: escalation_key(resolver, &address).await?,
             address,
             evidence: Mutex::new(None),
+            deferred: Mutex::new(None),
             local_cancel_origin: TurnCancelOriginHint::default(),
         })
     }
@@ -564,29 +692,119 @@ impl ActiveTurnControl {
         self
     }
 
+    /// Live watch for a cancellation the turn must honour now.
+    ///
+    /// Returns immediate evidence as soon as the gate resolves with it. An
+    /// after-step gate is deferred instead and the watch moves on to the
+    /// escalation promise: only an escalation makes this return, so the
+    /// caller fires the cooperative token exactly for immediate stops.
     pub async fn await_cancel(
         &self,
         resolver: &dyn AwaitEventResolver,
         stop_wait: CancellationToken,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
         let resolution = resolver
-            .await_await_event(&self.cancel_key, stop_wait, None)
+            .await_await_event(&self.cancel_key, stop_wait.clone(), None)
             .await?;
         match decode_gate(resolution)? {
-            TurnGateTerminal::CancelRequested(evidence) => {
+            TurnGateTerminal::CancelRequested(evidence) if evidence.mode.is_immediate() => {
                 self.remember(evidence.clone());
                 Ok(Some(evidence))
+            }
+            TurnGateTerminal::CancelRequested(evidence) => {
+                self.remember_deferred(evidence);
+                let resolution = resolver
+                    .await_await_event(&self.escalation_key, stop_wait, None)
+                    .await?;
+                match decode_gate(resolution)? {
+                    TurnGateTerminal::CancelRequested(evidence) => {
+                        self.remember(evidence.clone());
+                        Ok(Some(evidence))
+                    }
+                    TurnGateTerminal::CompletionSealed => Ok(None),
+                }
             }
             TurnGateTerminal::CompletionSealed => Ok(None),
         }
     }
 
+    /// Journaled observation of the cancellation gate at one replay identity.
+    ///
+    /// Returns the evidence the turn honours at this identity. An after-step
+    /// request is honoured at the start gate, the post-abort gate, and its own
+    /// step boundary; at a mid-run peek it is deferred and only an escalation
+    /// (peeked under a derived identity, so replay stays deterministic) makes
+    /// the turn stop there.
     pub async fn observe_pending_cancel(
         &self,
         controller: &dyn RuntimeEffectController,
         identity: TurnCancelPeekIdentity,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
-        let causal_identity = identity.causal_identity();
+        let Some(gate) = self
+            .peek(controller, identity.causal_identity(), &self.cancel_key)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let TurnGateTerminal::CancelRequested(evidence) = gate else {
+            return Ok(None);
+        };
+        if evidence.mode.is_immediate() {
+            self.remember(evidence.clone());
+            return Ok(Some(evidence));
+        }
+        self.remember_deferred(evidence.clone());
+        let escalation = self
+            .peek(
+                controller,
+                identity.escalation_causal_identity(),
+                &self.escalation_key,
+            )
+            .await?;
+        if let Some(TurnGateTerminal::CancelRequested(escalated)) = escalation {
+            self.remember(escalated.clone());
+            return Ok(Some(escalated));
+        }
+        let Some(honoured_after_step) = identity.honours_after_step() else {
+            return Ok(None);
+        };
+        let honoured = TurnCancellationEvidence {
+            honoured_after_step,
+            ..evidence
+        };
+        self.remember(honoured.clone());
+        Ok(Some(honoured))
+    }
+
+    /// Resolve this turn's own gate with internal after-step evidence when a
+    /// process-local stop asked for it. Runs before the step-boundary peek so
+    /// the journaled peek, not process-local state, is what replay sees.
+    pub async fn resolve_local_after_step(
+        &self,
+        resolver: &dyn AwaitEventResolver,
+    ) -> Result<(), RuntimeError> {
+        if !self.local_cancel_origin.after_step_requested() || self.evidence().is_some() {
+            return Ok(());
+        }
+        let evidence = TurnCancellationEvidence {
+            mode: TurnCancelMode::AfterStep,
+            ..self.internal_evidence()
+        };
+        resolver
+            .resolve_await_event(
+                &self.cancel_key,
+                gate_resolution(TurnGateTerminal::CancelRequested(evidence))?,
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn peek(
+        &self,
+        controller: &dyn RuntimeEffectController,
+        causal_identity: String,
+        key: &AwaitEventKey,
+    ) -> Result<Option<TurnGateTerminal>, RuntimeError> {
         let invocation = RuntimeInvocation::effect(
             RuntimeScope {
                 session_id: self.address.session_id.clone(),
@@ -602,9 +820,7 @@ impl ActiveTurnControl {
             .execute_effect(
                 RuntimeEffectEnvelope::new(
                     invocation,
-                    RuntimeEffectCommand::PeekAwaitEvent {
-                        key: self.cancel_key.clone(),
-                    },
+                    RuntimeEffectCommand::PeekAwaitEvent { key: key.clone() },
                 ),
                 RuntimeEffectLocalExecutor::unavailable(),
             )
@@ -616,16 +832,7 @@ impl ActiveTurnControl {
                 format!("{causal_identity} returned a non-peek runtime effect outcome"),
             ));
         };
-        let Some(resolution) = resolution else {
-            return Ok(None);
-        };
-        match decode_gate(resolution)? {
-            TurnGateTerminal::CancelRequested(evidence) => {
-                self.remember(evidence.clone());
-                Ok(Some(evidence))
-            }
-            TurnGateTerminal::CompletionSealed => Ok(None),
-        }
+        resolution.map(decode_gate).transpose()
     }
 
     /// Settle the durable cancellation gate before the turn commits.
@@ -644,7 +851,11 @@ impl ActiveTurnControl {
         if let Some(evidence) = self.evidence() {
             return Ok(Some(evidence));
         }
-        let proposed = if locally_cancelled {
+        // A process-local after-step stop that found no further step boundary
+        // lands at the final commit: the last step ran to completion and the
+        // turn stops here without dropping anything it produced.
+        let after_step_locally = self.local_cancel_origin.after_step_requested();
+        let proposed = if locally_cancelled || after_step_locally {
             TurnGateTerminal::CancelRequested(match assembled {
                 // A lash-originated stop already names itself. The
                 // process-local origin hint, when a host entry point supplied
@@ -655,7 +866,11 @@ impl ActiveTurnControl {
                     }
                     evidence
                 }
-                None => self.internal_evidence(),
+                None if locally_cancelled => self.internal_evidence(),
+                None => TurnCancellationEvidence {
+                    mode: TurnCancelMode::AfterStep,
+                    ..self.internal_evidence()
+                },
             })
         } else {
             TurnGateTerminal::CompletionSealed
@@ -705,8 +920,14 @@ impl ActiveTurnControl {
         }
     }
 
+    /// The cancellation this turn honours, if one has been observed.
     pub fn evidence(&self) -> Option<TurnCancellationEvidence> {
         self.evidence.lock_recover().clone()
+    }
+
+    /// An observed after-step request still waiting for its step boundary.
+    pub fn deferred_evidence(&self) -> Option<TurnCancellationEvidence> {
+        self.deferred.lock_recover().clone()
     }
 
     /// Evidence for an outcome that is already known to be cancelled, before
@@ -719,6 +940,13 @@ impl ActiveTurnControl {
 
     fn remember(&self, evidence: TurnCancellationEvidence) {
         *self.evidence.lock_recover() = Some(evidence);
+    }
+
+    fn remember_deferred(&self, evidence: TurnCancellationEvidence) {
+        let mut deferred = self.deferred.lock_recover();
+        if deferred.is_none() {
+            *deferred = Some(evidence);
+        }
     }
 
     fn internal_evidence(&self) -> TurnCancellationEvidence {
@@ -1084,5 +1312,287 @@ mod tests {
         };
         let encoded = terminal_resolution(&terminal).expect("encode terminal");
         assert!(matches!(encoded, Resolution::Ok(_)));
+    }
+
+    #[test]
+    fn legacy_cancel_request_without_mode_decodes_as_immediate() {
+        let decoded: TurnCancelRequest = serde_json::from_value(serde_json::json!({
+            "address": { "session_id": "legacy-session", "turn_id": "legacy-turn" },
+            "request_id": "legacy-request",
+            "origin": "user",
+            "reason": "stop button",
+            "undelivered": "drop"
+        }))
+        .expect("decode a pre-mode cancel request");
+        assert_eq!(decoded.mode, TurnCancelMode::Immediate);
+        assert_eq!(decoded.undelivered, TurnCancelDisposition::Drop);
+        let encoded = serde_json::to_value(&decoded).expect("encode defaulted request");
+        assert!(
+            encoded.get("mode").is_none(),
+            "the Immediate default stays sparse on the durable row: {encoded}"
+        );
+    }
+
+    #[test]
+    fn legacy_cancellation_evidence_without_mode_decodes_as_immediate() {
+        let decoded: TurnCancellationEvidence = serde_json::from_value(serde_json::json!({
+            "request_id": "legacy-request",
+            "origin": "user"
+        }))
+        .expect("decode pre-mode evidence");
+        assert_eq!(decoded.mode, TurnCancelMode::Immediate);
+        assert_eq!(decoded.honoured_after_step, None);
+        let encoded = serde_json::to_value(&decoded).expect("encode evidence");
+        assert!(encoded.get("mode").is_none());
+        assert!(encoded.get("honoured_after_step").is_none());
+    }
+
+    #[test]
+    fn after_step_request_and_evidence_round_trip_the_mode() {
+        let request = request(address("mode"), "request-1").mode(TurnCancelMode::AfterStep);
+        let encoded = serde_json::to_value(&request).expect("encode request");
+        assert_eq!(encoded["mode"], serde_json::json!("after_step"));
+        let decoded: TurnCancelRequest =
+            serde_json::from_value(encoded).expect("decode after-step request");
+        assert_eq!(decoded, request);
+        let evidence = TurnCancellationEvidence {
+            honoured_after_step: Some(3),
+            ..decoded.evidence()
+        };
+        assert_eq!(evidence.mode, TurnCancelMode::AfterStep);
+        let encoded = serde_json::to_value(&evidence).expect("encode evidence");
+        assert_eq!(encoded["mode"], serde_json::json!("after_step"));
+        assert_eq!(encoded["honoured_after_step"], serde_json::json!(3));
+        let decoded: TurnCancellationEvidence =
+            serde_json::from_value(encoded).expect("decode evidence");
+        assert_eq!(decoded, evidence);
+    }
+
+    #[test]
+    fn cancel_mode_ordering_only_lets_immediate_escalate_after_step() {
+        assert!(TurnCancelMode::Immediate.is_stronger_than(TurnCancelMode::AfterStep));
+        assert!(!TurnCancelMode::AfterStep.is_stronger_than(TurnCancelMode::Immediate));
+        assert!(!TurnCancelMode::Immediate.is_stronger_than(TurnCancelMode::Immediate));
+        assert!(!TurnCancelMode::AfterStep.is_stronger_than(TurnCancelMode::AfterStep));
+        assert!(TurnCancelMode::default().is_immediate());
+    }
+
+    #[test]
+    fn peek_identities_are_replay_deterministic_and_name_their_escalation() {
+        let after_step = TurnCancelPeekIdentity::AfterStep {
+            protocol_iteration: 4,
+        };
+        assert_eq!(after_step.causal_identity(), "turn_cancel.after_step.4");
+        assert_eq!(
+            after_step.escalation_causal_identity(),
+            "turn_cancel.escalation.after_step.4"
+        );
+        assert_eq!(after_step.honours_after_step(), Some(Some(4)));
+        assert_eq!(
+            TurnCancelPeekIdentity::StartGate.honours_after_step(),
+            Some(None)
+        );
+        assert_eq!(
+            TurnCancelPeekIdentity::PostAbortGate.honours_after_step(),
+            Some(None)
+        );
+        assert_eq!(
+            TurnCancelPeekIdentity::AfterLlm {
+                protocol_iteration: 0
+            }
+            .honours_after_step(),
+            None
+        );
+        assert_eq!(
+            TurnCancelPeekIdentity::AfterLlm {
+                protocol_iteration: 0
+            }
+            .escalation_causal_identity(),
+            "turn_cancel.escalation.after_llm.0"
+        );
+    }
+
+    #[tokio::test]
+    async fn after_step_request_is_deferred_until_immediate_escalates_it() {
+        let host = Arc::new(NativeEffectHost::default());
+        let driver = TurnWorkDriver::new(host.clone());
+        let address = address("escalate");
+        let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+            .await
+            .expect("active control");
+
+        let stop = driver
+            .request_cancel(request(address.clone(), "stop-1").mode(TurnCancelMode::AfterStep))
+            .await
+            .expect("after-step request");
+        let stop_evidence = match stop.outcome {
+            TurnCancelOutcome::Requested(evidence) => evidence,
+            other => panic!("expected requested, got {other:?}"),
+        };
+        assert_eq!(stop_evidence.mode, TurnCancelMode::AfterStep);
+
+        // Mid-model-call observation (AfterLlm never honours after-step): the
+        // request is remembered as deferred, never as effective evidence.
+        let observed = active
+            .observe_pending_cancel(
+                host.as_ref(),
+                TurnCancelPeekIdentity::AfterLlm {
+                    protocol_iteration: 0,
+                },
+            )
+            .await
+            .expect("peek after llm");
+        assert_eq!(observed, None);
+        assert_eq!(active.evidence(), None);
+        assert_eq!(active.deferred_evidence(), Some(stop_evidence.clone()));
+
+        let again = driver
+            .request_cancel(request(address.clone(), "stop-2").mode(TurnCancelMode::AfterStep))
+            .await
+            .expect("second after-step request");
+        assert!(matches!(
+            again.outcome,
+            TurnCancelOutcome::AlreadyRequested(ref evidence) if evidence.request_id == "stop-1"
+        ));
+
+        let abort = driver
+            .request_cancel(request(address.clone(), "abort-1"))
+            .await
+            .expect("escalation");
+        let abort_evidence = match abort.outcome {
+            TurnCancelOutcome::Escalated(evidence) => evidence,
+            other => panic!("expected escalated, got {other:?}"),
+        };
+        assert_eq!(abort_evidence.request_id, "abort-1");
+        assert_eq!(abort_evidence.mode, TurnCancelMode::Immediate);
+
+        let repeat = driver
+            .request_cancel(request(address.clone(), "abort-2"))
+            .await
+            .expect("repeated escalation");
+        assert!(matches!(
+            repeat.outcome,
+            TurnCancelOutcome::AlreadyRequested(ref evidence) if evidence.request_id == "abort-1"
+        ));
+
+        let observed = active
+            .observe_pending_cancel(
+                host.as_ref(),
+                TurnCancelPeekIdentity::AfterLlm {
+                    protocol_iteration: 1,
+                },
+            )
+            .await
+            .expect("peek after escalation");
+        assert_eq!(observed, Some(abort_evidence.clone()));
+        assert_eq!(active.evidence(), Some(abort_evidence.clone()));
+
+        let settled = active
+            .settle_before_commit(host.as_ref(), true, None)
+            .await
+            .expect("settle");
+        assert_eq!(settled, Some(abort_evidence));
+    }
+
+    #[tokio::test]
+    async fn after_step_request_is_honoured_at_the_step_boundary_with_its_iteration() {
+        let host = Arc::new(NativeEffectHost::default());
+        let driver = TurnWorkDriver::new(host.clone());
+        let address = address("boundary");
+        let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+            .await
+            .expect("active control");
+        driver
+            .request_cancel(request(address.clone(), "stop-1").mode(TurnCancelMode::AfterStep))
+            .await
+            .expect("after-step request");
+        assert_eq!(
+            active
+                .observe_pending_cancel(
+                    host.as_ref(),
+                    TurnCancelPeekIdentity::AfterLlm {
+                        protocol_iteration: 2,
+                    },
+                )
+                .await
+                .expect("peek after llm"),
+            None
+        );
+        let honoured = active
+            .observe_pending_cancel(
+                host.as_ref(),
+                TurnCancelPeekIdentity::AfterStep {
+                    protocol_iteration: 2,
+                },
+            )
+            .await
+            .expect("peek at boundary")
+            .expect("after-step lands at the boundary");
+        assert_eq!(honoured.request_id, "stop-1");
+        assert_eq!(honoured.mode, TurnCancelMode::AfterStep);
+        assert_eq!(honoured.honoured_after_step, Some(2));
+        assert_eq!(active.evidence(), Some(honoured.clone()));
+        let settled = active
+            .settle_before_commit(host.as_ref(), false, None)
+            .await
+            .expect("settle");
+        assert_eq!(settled, Some(honoured));
+        // Once the gate holds after-step evidence, a later Immediate request
+        // still escalates the record; the owner is what decides whether it
+        // is already past its boundary.
+        let late = driver
+            .request_cancel(request(address.clone(), "abort-late"))
+            .await
+            .expect("late escalation");
+        assert!(matches!(late.outcome, TurnCancelOutcome::Escalated(_)));
+    }
+
+    #[tokio::test]
+    async fn local_after_step_stop_resolves_the_own_gate_and_lands_at_commit() {
+        let host = Arc::new(NativeEffectHost::default());
+        let address = address("local-after-step");
+        let hint = TurnCancelOriginHint::default();
+        let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+            .await
+            .expect("active control")
+            .with_local_cancel_origin(hint.clone());
+        hint.request_after_step(Some("shutdown".to_string()));
+        assert!(hint.after_step_requested());
+        active
+            .resolve_local_after_step(host.as_ref())
+            .await
+            .expect("resolve own gate");
+        let honoured = active
+            .observe_pending_cancel(
+                host.as_ref(),
+                TurnCancelPeekIdentity::AfterStep {
+                    protocol_iteration: 0,
+                },
+            )
+            .await
+            .expect("peek at boundary")
+            .expect("local after-step lands at the boundary");
+        assert_eq!(honoured.mode, TurnCancelMode::AfterStep);
+        assert_eq!(honoured.origin.as_deref(), Some("shutdown"));
+        assert_eq!(honoured.honoured_after_step, Some(0));
+        assert_eq!(honoured.request_id, format!("internal:{}", address.turn_id));
+
+        // Without a boundary the flag still settles the final commit as an
+        // after-step stop.
+        let commit_only = ActiveTurnControl::new(host.as_ref(), self::address("local-commit"))
+            .await
+            .expect("active control")
+            .with_local_cancel_origin({
+                let hint = TurnCancelOriginHint::default();
+                hint.request_after_step(None);
+                hint
+            });
+        let settled = commit_only
+            .settle_before_commit(host.as_ref(), false, None)
+            .await
+            .expect("settle")
+            .expect("after-step flag settles as cancelled");
+        assert_eq!(settled.mode, TurnCancelMode::AfterStep);
+        assert_eq!(settled.honoured_after_step, None);
     }
 }

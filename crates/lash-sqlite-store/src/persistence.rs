@@ -2582,6 +2582,23 @@ impl TurnInputStore for Store {
             .write_flow(move |tx| {
                 let outcome = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
+                    // First writer wins, except that a stronger mode escalates
+                    // the durable request; the repair outcome accumulated so
+                    // far stays attached.
+                    if let Some(mut existing) =
+                        load_turn_cancel_request_conn(tx, &session_id, &turn_id)?
+                    {
+                        if request.mode.is_stronger_than(existing.request.mode) {
+                            existing.request = request;
+                            tx.execute(
+                                "UPDATE turn_cancel_requests SET record_json = ?3
+                                 WHERE session_id = ?1 AND turn_id = ?2",
+                                params![session_id, turn_id, encode_json(&existing)?],
+                            )
+                            .map_err(sqlite_error)?;
+                        }
+                        return Ok(existing);
+                    }
                     let record = lash_core::TurnCancelRequestRecord {
                         request,
                         outcome: None,

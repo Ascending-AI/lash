@@ -287,6 +287,7 @@ const TABLE_REGISTRY: &[TablePair] = &[
                 "affected_dispositions",
                 "affected_input_ids",
                 "disposition",
+                "mode",
                 "origin",
                 "reason",
                 "request_id",

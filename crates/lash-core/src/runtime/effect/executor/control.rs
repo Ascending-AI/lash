@@ -440,6 +440,10 @@ pub enum AwaitEventWaitIdentity {
     Custom {
         key: String,
     },
+    /// Reserved first-writer-wins escalation promise for a foreground turn:
+    /// written only by an immediate request that found the cancellation gate
+    /// already holding an after-step request.
+    TurnCancelEscalation,
 }
 
 impl AwaitEventWaitIdentity {
@@ -473,7 +477,7 @@ impl AwaitEventWaitIdentity {
                 signal_name,
                 ordinal,
             } => process_id.trim().is_empty() || signal_name.trim().is_empty() || *ordinal == 0,
-            Self::TurnCancelGate | Self::TurnTerminal => false,
+            Self::TurnCancelGate | Self::TurnTerminal | Self::TurnCancelEscalation => false,
             Self::Custom { key } => key.trim().is_empty(),
         };
         if invalid {
@@ -488,7 +492,10 @@ impl AwaitEventWaitIdentity {
     /// Lets effect-host implementors distinguish the reserved turn-control wait from ordinary tool
     /// and application waits.
     pub fn is_turn_control(&self) -> bool {
-        matches!(self, Self::TurnCancelGate | Self::TurnTerminal)
+        matches!(
+            self,
+            Self::TurnCancelGate | Self::TurnTerminal | Self::TurnCancelEscalation
+        )
     }
 }
 

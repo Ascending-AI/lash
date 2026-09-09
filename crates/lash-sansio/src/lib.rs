@@ -68,8 +68,8 @@ pub use session_model::{
     PromptTemplate, PromptTemplateEntry, PromptTemplateSection, ProtocolEvent, PruneState,
     RenderedPrompt, ResolvedPromptLayer, SessionAppendNode, SessionHistoryRecord,
     SessionStreamEvent, TokenUsage, TokenUsageOverflow, TurnBudget, TurnCancelDisposition,
-    TurnCancellationEvidence, TurnFinish, TurnOutcome, TurnStop, default_prompt_template,
-    messages_are_prompt_resume_safe, resolve_prompt_layers, shared_parts,
+    TurnCancelMode, TurnCancellationEvidence, TurnFinish, TurnOutcome, TurnStop,
+    default_prompt_template, messages_are_prompt_resume_safe, resolve_prompt_layers, shared_parts,
 };
 #[doc(hidden)]
 pub use standard_batch::BatchResultRow;

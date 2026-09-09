@@ -169,7 +169,6 @@ pub(super) fn instruction_heap_plan(
 
         // Opcodes whose operand count is carried in the instruction, or in the
         // table the instruction points at.
-        I::PrintValues(argc) => InstructionHeapPlan::stack(Top(argc)),
         I::BeginRangeIter { argc, .. } => InstructionHeapPlan::stack(Top(argc)),
         I::PendingTool { argc, .. }
         | I::ResourceCall { argc, .. }

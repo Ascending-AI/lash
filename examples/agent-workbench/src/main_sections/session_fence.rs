@@ -186,7 +186,11 @@ pub(crate) async fn retire_session(state: &AppState, session_id: &str) -> Result
 async fn retire_session_attempt(state: &AppState, session_id: &str) -> Result<(), AppError> {
     restate::cancel_cron_jobs_for_session(state, session_id, "reset").await?;
     let cancellations = state
-        .cancel_turns_for_session_with_driver(session_id, &state.core.turn_work_driver())
+        .cancel_turns_for_session_with_driver(
+            session_id,
+            &state.core.turn_work_driver(),
+            WorkbenchTurnCancelMode::Abort,
+        )
         .await?;
     state.trace_for_session(
         session_id,
