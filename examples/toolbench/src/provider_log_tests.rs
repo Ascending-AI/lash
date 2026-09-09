@@ -314,3 +314,32 @@ async fn cancellation_during_backoff_keeps_the_failed_call_and_its_cost() {
     assert!(rows[0]["retry_decision_unavailable"].is_string());
     assert_eq!(crate::summary::Usage::from_attempts(&rows).cost, Some(0.02));
 }
+
+#[tokio::test]
+async fn empty_response_keeps_cost_from_raw_usage_even_without_partial_response() {
+    let telemetry = crate::telemetry::Telemetry::default();
+    let error = LlmTransportError::new("OpenAI-compatible empty_response")
+        .with_retry_verdict(TransportRetryVerdict::NotRetryable)
+        .with_raw(r#"{"id":"gen-empty","usage":{"cost":0.00010212,"prompt_tokens":1098,"completion_tokens":11}}"#);
+    let failure = handle(&telemetry.capture, 3, vec![Err(error)])
+        .complete(request())
+        .await
+        .unwrap_err();
+    record(
+        &telemetry,
+        TurnEvent::ModelCallRecorded {
+            record: *failure.call_record,
+        },
+    )
+    .await;
+    let rows = telemetry.rows(&[], true);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["retry_decision"]["reason"], "not_retryable");
+    assert_eq!(rows[0]["cost_unknown"], false);
+    assert_eq!(
+        crate::summary::Usage::from_attempts(&rows).cost,
+        Some(0.00010212)
+    );
+    assert!(rows[0]["error"]["partial_response"].is_null());
+    assert_eq!(rows[0]["error"]["provider_response_id"], "gen-empty");
+}

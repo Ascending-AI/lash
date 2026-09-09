@@ -151,7 +151,8 @@ turn result exists, plus the last error; a harness exception/deadline has no
 TurnOutcome and records null with its explicit error instead.
 
 All attempts, including failures with partial responses, contribute their
-reported costs. A run with no provider invocations costs zero; an actual call
+reported costs, including `usage.cost` from a raw final response chunk when
+the adapter omits the partial response. A run with no provider invocations costs zero; an actual call
 with unavailable cost stays unknown. If cancellation interrupts a backoff, the
 row retains observed calls and their partial costs even though Lash has not
 sealed the call ledger. Such rows explicitly mark the retry decision unavailable.

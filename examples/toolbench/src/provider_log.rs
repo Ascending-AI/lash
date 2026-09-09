@@ -121,7 +121,7 @@ impl Provider for LoggedProvider {
             ),
         };
         let row = json!({"request_id":request_id, "request_ms":started.elapsed().as_millis(), "error":error,
-            "cost":response.and_then(|r| r.provider_usage.as_ref()).and_then(|u| u.get("cost")).filter(|v| v.is_number()),
+            "cost":reported_cost(response, result.as_ref().err()),
             "response":response.map(|r| redact(serde_json::to_value(r).expect("response serializes"), &self.secret))});
         tracing::debug!(target: "toolbench", parent: &self.capture.span(), attempt_index, evidence = %row, "provider response");
         self.capture
@@ -130,6 +130,28 @@ impl Provider for LoggedProvider {
             .unwrap_or_else(|e| e.into_inner())[attempt_index - 1] = row;
         result
     }
+}
+
+fn reported_cost(
+    response: Option<&LlmResponse>,
+    error: Option<&LlmTransportError>,
+) -> Option<Value> {
+    response
+        .and_then(|r| r.provider_usage.as_ref())
+        .and_then(|u| u.get("cost"))
+        .filter(|v| v.is_number())
+        .cloned()
+        .or_else(|| {
+            // OpenAI empty_response failures can expose a final usage chunk in
+            // raw while omitting partial_response entirely. It is still money
+            // spent, with the same OpenRouter usage.cost contract as success.
+            let raw = error?.raw.as_deref()?;
+            serde_json::from_str::<Value>(raw)
+                .ok()?
+                .pointer("/usage/cost")
+                .filter(|v| v.is_number())
+                .cloned()
+        })
 }
 
 pub(crate) fn error_object(error: &LlmTransportError, secret: &str) -> Value {
@@ -142,6 +164,19 @@ pub(crate) fn error_object(error: &LlmTransportError, secret: &str) -> Value {
             .map(|(_, v)| v)
     };
     let raw = error.raw.as_deref().map(|s| s.as_str());
+    let raw_json = raw.and_then(|s| serde_json::from_str::<Value>(s).ok());
+    let response_id = error
+        .partial_response
+        .as_ref()
+        .and_then(|r| r.execution_evidence.as_ref())
+        .and_then(|e| e.provider_response_id.clone())
+        .or_else(|| {
+            raw_json
+                .as_ref()
+                .and_then(|v| v.get("id"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
     let request_body = error.request_body.as_deref().map(|s| {
         let text = redact(serde_json::from_str(s).unwrap_or_else(|_| json!(s)), secret);
         let text = text
@@ -155,7 +190,7 @@ pub(crate) fn error_object(error: &LlmTransportError, secret: &str) -> Value {
             "kind":error.kind, "status":error.status, "message":error.message,
             "body_excerpt":raw.map(|s| s.chars().take(2000).collect::<String>()), "raw":raw,
             "provider_request_id":header("x-request-id").or_else(|| header("request-id")),
-            "provider_response_id":error.partial_response.as_ref().and_then(|r| r.execution_evidence.as_ref()).and_then(|e| e.provider_response_id.as_ref()),
+            "provider_response_id":response_id,
             "retry_after":classified.retry_after(), "code":error.code, "terminal_reason":error.terminal_reason,
             "headers":error.headers.iter().map(|(k,v)| (k, if sensitive(k) { "[REDACTED]" } else { v })).collect::<Vec<_>>(),
             "request_body":request_body, "output_started":error.output_started,
