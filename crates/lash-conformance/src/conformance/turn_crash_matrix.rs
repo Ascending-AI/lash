@@ -89,7 +89,8 @@ pub use cold_process::{
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
 const OUTCOME_TABLE: &str = include_str!("turn_crash_outcomes.json");
-const RECOVERY_TTL: Duration = Duration::from_millis(300);
+// 10x the renewal cadence leaves stall margin on loaded runners; fencing is unchanged.
+const RECOVERY_TTL: Duration = Duration::from_secs(3);
 const RECOVERY_RENEW: Duration = Duration::from_millis(100);
 const NOMINAL_RECOVERY_TTL: Duration = Duration::from_secs(5);
 const CRASHED_TURN_TTL: Duration = Duration::from_secs(60);
@@ -1218,7 +1219,7 @@ impl crate::ToolProvider for TraceTool {
 
 fn recovery_timings() -> crate::LeaseTimings {
     crate::LeaseTimings::new(RECOVERY_TTL, RECOVERY_RENEW)
-        .expect("300ms TTL / 100ms renew satisfies ttl >= 3x renew")
+        .expect("3s TTL / 100ms renew satisfies ttl >= 3x renew")
 }
 
 /// Lease timings for a scripted turn that is about to be crashed.
@@ -1316,14 +1317,14 @@ fn scoped_controller(
 async fn build_runtime(
     store: Arc<dyn RuntimePersistence>,
     control: SeamControl,
-    executions: Arc<std::sync::atomic::AtomicUsize>,
+    effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
     trace_tool: TraceTool,
 ) -> crate::LashRuntime {
     build_runtime_with_lease_timings(
         store,
         control,
-        executions,
+        effect_controller,
         identity,
         trace_tool,
         crashed_turn_timings(),
@@ -1334,17 +1335,13 @@ async fn build_runtime(
 async fn build_runtime_with_lease_timings(
     store: Arc<dyn RuntimePersistence>,
     control: SeamControl,
-    executions: Arc<std::sync::atomic::AtomicUsize>,
+    effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
     mut trace_tool: TraceTool,
     lease_timings: crate::LeaseTimings,
 ) -> crate::LashRuntime {
     super::bind_conformance_session(&store, &identity.session_id).await;
-    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: Arc::new(crate::NativeRuntimeEffectController::default()),
-        control: control.clone(),
-        executions,
-    });
+    // The live host watcher must share the turn controller's await-event registry.
     let mut host = crate::RuntimeHostConfig::new(
         Arc::new(crate::NativeEffectHost::new(Arc::clone(&effect_controller))),
         Arc::new(crate::InMemoryAttachmentStore::new()),
@@ -1658,10 +1655,15 @@ where
     let identity = ReferenceIdentity::for_scenario("trace-drift");
     seed_reference_ingress(&raw, &identity, "trace-drift").await;
     let decorated = SeamStore::wrap(raw, control.clone());
+    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
+        inner: Arc::new(crate::NativeRuntimeEffectController::default()),
+        control: control.clone(),
+        executions,
+    });
     let runtime = Box::pin(build_runtime_with_lease_timings(
         decorated,
         control.clone(),
-        Arc::clone(&executions),
+        Arc::clone(&effect_controller),
         &identity,
         TraceTool::default(),
         nominal_recovery_timings(),
@@ -1671,11 +1673,6 @@ where
     // The golden trace below is an exact ordering; pin the one seam whose timing
     // is owned by a background timer rather than by the turn.
     control.pin_renewal_after_provider();
-    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: Arc::new(crate::NativeRuntimeEffectController::default()),
-        control: control.clone(),
-        executions,
-    });
     let turn = drive_turn(runtime, effect_controller, &identity)
         .await
         .expect("reference turn succeeds")
@@ -1861,15 +1858,6 @@ async fn run_crash_matrix_case<F, I>(
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let decorated = SeamStore::wrap(raw, control.clone());
-    let runtime = Box::pin(build_runtime(
-        decorated,
-        control.clone(),
-        Arc::clone(&executions),
-        &identity,
-        TraceTool::default(),
-    ))
-    .await;
-    control.arm(entry.point.clone());
     let invocation = make_invocation(scenario);
     let effect_redrive = invocation.effect_redrive();
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
@@ -1877,6 +1865,15 @@ async fn run_crash_matrix_case<F, I>(
         control: control.clone(),
         executions: Arc::clone(&executions),
     });
+    let runtime = Box::pin(build_runtime(
+        decorated,
+        control.clone(),
+        Arc::clone(&effect_controller),
+        &identity,
+        TraceTool::default(),
+    ))
+    .await;
+    control.arm(entry.point.clone());
     let task_identity = identity.clone();
     let task =
         crate::task::spawn(
@@ -1908,10 +1905,16 @@ async fn run_crash_matrix_case<F, I>(
         RenewalPressure::Nominal => nominal_recovery_timings(),
         RenewalPressure::Starved => recovery_timings(),
     };
+    let successor_effect_controller: Arc<dyn RuntimeEffectController> =
+        Arc::new(SeamEffectController {
+            inner: successor_invocation.controller_handle(),
+            control: successor_control.clone(),
+            executions: Arc::clone(&executions),
+        });
     let successor = Box::pin(build_runtime_with_lease_timings(
         Arc::clone(&successor_store),
         successor_control.clone(),
-        Arc::clone(&executions),
+        Arc::clone(&successor_effect_controller),
         &identity,
         TraceTool::default(),
         successor_timings,
@@ -1921,12 +1924,6 @@ async fn run_crash_matrix_case<F, I>(
     if pressure == RenewalPressure::Starved {
         successor_control.starve_renewals();
     }
-    let successor_effect_controller: Arc<dyn RuntimeEffectController> =
-        Arc::new(SeamEffectController {
-            inner: successor_invocation.controller_handle(),
-            control: successor_control,
-            executions: Arc::clone(&executions),
-        });
     let _ = drive_turn(successor, successor_effect_controller, &identity)
         .await
         .unwrap_or_else(|error| panic!("successor failed for {scenario} ({entry:?}): {error}"));
@@ -2068,22 +2065,22 @@ async fn drive_drain_turn<F, I>(
     let identity = &identity;
     let control = SeamControl::default();
     let store = SeamStore::wrap(make(scenario), control.clone());
+    let invocation = make_invocation(&identity.turn_id);
+    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
+        inner: invocation.controller_handle(),
+        control: control.clone(),
+        executions: Arc::clone(executions),
+    });
     let runtime = Box::pin(build_runtime_with_lease_timings(
         store,
         control.clone(),
-        Arc::clone(executions),
+        Arc::clone(&effect_controller),
         identity,
         TraceTool::default(),
         nominal_recovery_timings(),
     ))
     .await;
     control.clear();
-    let invocation = make_invocation(&identity.turn_id);
-    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: invocation.controller_handle(),
-        control,
-        executions: Arc::clone(executions),
-    });
     let _ = drive_turn(runtime, effect_controller, identity)
         .await
         .unwrap_or_else(|error| panic!("drain turn failed for {scenario}: {error}"));
