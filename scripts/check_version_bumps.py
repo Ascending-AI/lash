@@ -114,6 +114,11 @@ REGISTRATION_BASELINES = {
 # and burns the answer here. Entries stay after the change lands as
 # dead-but-honest history.
 IDENTIFIER_RENAME_BASELINES = {
+    # FIG-2774: the sole tool_execution.rs change ignores the new presentation
+    # field in an exhaustive manifest destructure. No preimage field, tag,
+    # serialization call or byte expression changes; batch identity stays v1.
+    'crates/lash-core/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION': 'sha256:3f7b64de0d53961e1c8e33f8ca5f4284c2aca7a3cf364a29b49f5cb299b5767d',
+
     # FIG-1102: the workbench include! splice became real modules, so every
     # item in state.rs gained pub(crate) and one line was rewrapped. Serde
     # attributes, field and variant names, and constant values are unchanged;
