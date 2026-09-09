@@ -2386,6 +2386,19 @@ fn mixed_aggregate_surfaces_the_first_failing_process_when_tools_succeed() {
 }
 
 #[test]
+fn promise_all_keeps_nested_process_handles_shallow() {
+    let body = "const h = start(worker, { input: 'p' }); \
+                finish(await Promise.all([[h], web.fetch({ value: 1 })]));";
+    assert_eq!(
+        run_mixed_aggregate(body).expect("nested process handle remains an ordinary value"),
+        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!([
+            [{"__handle__": "process", "id": "p"}],
+            1
+        ])))
+    );
+}
+
+#[test]
 fn mixed_all_settled_reports_every_outcome_in_array_order() {
     let body = "const ok = start(worker, { input: 'p' }); const bad = start(worker, { input: 'fail-q' }); \
                 finish(await Promise.allSettled([web.fetch({ fail: true }), ok, bad, web.fetch({ value: 2 })]));";

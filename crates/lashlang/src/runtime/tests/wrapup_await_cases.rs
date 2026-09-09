@@ -91,6 +91,53 @@ impl ExecutionHost for ComprehensionBatchHost {
     }
 }
 
+#[derive(Default)]
+struct AggregateProcessHost {
+    awaits: AtomicUsize,
+    reject_await: bool,
+}
+
+impl ExecutionHost for AggregateProcessHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
+                ResourceOperationBatchResult::settled_in_input_order(
+                    batch
+                        .operations
+                        .iter()
+                        .map(|operation| {
+                            if operation.operation == "err" {
+                                ResourceOperationResult::Error(ExecutionHostError::new(
+                                    "tool failed",
+                                ))
+                            } else {
+                                ResourceOperationResult::Value(Value::Number(7.0))
+                            }
+                        })
+                        .collect(),
+                ),
+            )),
+            AbilityOp::StartProcess(_) => {
+                let mut handle = Record::new();
+                handle.insert("handle".to_string(), Value::String("h".into()));
+                Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
+            }
+            AbilityOp::Await(_) => {
+                self.awaits.fetch_add(1, Ordering::SeqCst);
+                if self.reject_await {
+                    Err(ExecutionHostError::new("process failed"))
+                } else {
+                    Ok(AbilityResult::Value(Value::Number(42.0)))
+                }
+            }
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
+            other => Err(ExecutionHostError::new(format!(
+                "unexpected host ability in aggregate process await test: {other:?}"
+            ))),
+        }
+    }
+}
+
 fn comprehension_compile(source: &str) -> CompiledProgram {
     let mut catalog = crate::LashlangHostCatalog::new();
     for (module, operation) in [
@@ -128,6 +175,69 @@ async fn comprehension_finish(host: &ComprehensionBatchHost, source: &str) -> Va
         ExecutionOutcome::Finished(value) => value,
         other => panic!("expected finish, got {other:?}"),
     }
+}
+
+async fn aggregate_process_finish(host: &AggregateProcessHost, source: &str) -> Value {
+    let compiled = comprehension_compile(source);
+    let mut state = State::new();
+    match execute_compiled(&compiled, &mut state, host)
+        .await
+        .expect("program should run")
+    {
+        ExecutionOutcome::Finished(value) => value,
+        other => panic!("expected finish, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn bound_process_containers_use_process_await_seam() {
+    for (source, expected) in [
+        (
+            "process echo() { finish null }; h=start echo(); finish await [[h], tools.echo({})?]",
+            r#"[[{"ok":true,"value":42}],7]"#,
+        ),
+        (
+            "process echo() { finish null }; h=start echo(); hs=[h]; finish await [hs, tools.echo({})?]",
+            r#"[[{"ok":true,"value":42}],7]"#,
+        ),
+        (
+            "process echo() { finish null }; h=start echo(); hr={child:h}; finish await [hr, tools.echo({})?]",
+            r#"[{"child":{"ok":true,"value":42}},7]"#,
+        ),
+        (
+            "process echo() { finish null }; h=start echo(); hs=[[[h]]]; finish await [hs, tools.echo({})?]",
+            r#"[[[[{"ok":true,"value":42}]]],7]"#,
+        ),
+        (
+            r#"process echo() { finish null }; h=start echo(); hs=[1,h,{note:"kept"}]; finish await [hs, tools.echo({})?]"#,
+            r#"[[1,{"ok":true,"value":42},{"note":"kept"}],7]"#,
+        ),
+        (
+            "process echo() { finish null }; h=start echo(); hs=[h]; finish await hs",
+            r#"[{"ok":true,"value":42}]"#,
+        ),
+    ] {
+        let host = AggregateProcessHost::default();
+        let value = aggregate_process_finish(&host, source).await;
+        assert_eq!(value.to_string(), expected, "{source}");
+        assert_eq!(host.awaits.load(Ordering::SeqCst), 1, "{source}");
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn bound_failing_process_waits_until_module_leaves_settle() {
+    let host = AggregateProcessHost {
+        reject_await: true,
+        ..AggregateProcessHost::default()
+    };
+    let compiled = comprehension_compile(
+        "process echo() { finish null }; h=start echo(); hs=[h]; finish await [hs, tools.err({})?]",
+    );
+    let error = execute_compiled(&compiled, &mut State::new(), &host)
+        .await
+        .expect_err("the module rejection must win");
+    assert!(error.to_string().contains("tool failed"), "{error}");
+    assert_eq!(host.awaits.load(Ordering::SeqCst), 0);
 }
 
 #[test]

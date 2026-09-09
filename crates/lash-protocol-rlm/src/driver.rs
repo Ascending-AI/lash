@@ -296,8 +296,10 @@ mod catalogue_tests {
 
         assert!(prompt.contains("finish <value>"));
         assert!(prompt.contains("REQUIRED OUTPUT"));
-        assert!(prompt.contains("Each response acts in a block"));
-        assert!(prompt.contains("Do not call `finish` until the answer is in hand"));
+        assert!(prompt.contains(
+            "Every response, including the last, acts inside a paired `<lashlang>...</lashlang>` block"
+        ));
+        assert!(prompt.contains("Do not call `finish <value>` until the answer is in hand"));
         assert!(prompt.contains("the final response's block calls `finish <value>`"));
         assert!(prompt.contains("prose alone never ends this turn"));
         assert!(prompt.contains("Never announce an action without the block that performs it"));

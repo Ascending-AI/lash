@@ -508,7 +508,9 @@ pub(crate) trait RlmDialect: Send + Sync {
     fn finish_required_finalization(&self, requires_schema: bool) -> String {
         let vocabulary = self.prompt_vocabulary();
         let mut text = format!(
-            "Finish-required: prose alone never ends this turn. Each response acts in a block. Do not call `finish` until the answer is in hand; the final response's block calls `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the block that performs it.",
+            "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside a paired `{open}...{close}` block. Do not call `{finish}` until the answer is in hand; the final response's block calls `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the block that performs it.",
+            open = self.cell_tags().open,
+            close = self.cell_tags().close,
             finish = vocabulary.finish_statement,
             finish_null = vocabulary.finish_null_statement,
         );

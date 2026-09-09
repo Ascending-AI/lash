@@ -32,7 +32,7 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
     "blocks": [
       {
         "Text": {
-          "text": "\n\n\n=== CURRENT ITERATION: 2 ===\n\n\n=== BOUND VARIABLES ===\n\n- `history`: `list[HistoryItem]`, read-only, 2 entries\n\n\n=== FINALIZATION ===\n\nFinish-required: prose alone never ends this turn. Each response acts in an `execute_code` call. Do not call `finish` until the answer is in hand; the final response's `execute_code` call runs `finish <value>` (`finish null` only when null is the answer). Never announce an action without the `execute_code` call that performs it. The value must match the REQUIRED OUTPUT contract.\n\n=== REQUIRED OUTPUT ===\n\nstr",
+          "text": "\n\n\n=== CURRENT ITERATION: 2 ===\n\n\n=== BOUND VARIABLES ===\n\n- `history`: `list[HistoryItem]`, read-only, 2 entries\n\n\n=== FINALIZATION ===\n\nFinish-required: prose alone never ends this turn. Every response, including the last, acts inside the `code` argument of an `execute_code` call. Do not call `finish <value>` until the answer is in hand; the final response's `execute_code` call runs `finish <value>` (`finish null` only when null is the answer). Never announce an action without the `execute_code` call that performs it. The value must match the REQUIRED OUTPUT contract.\n\n=== REQUIRED OUTPUT ===\n\nstr",
           "response_meta": null,
           "cache_breakpoint": false
         }
