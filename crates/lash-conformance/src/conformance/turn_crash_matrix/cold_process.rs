@@ -193,7 +193,6 @@ pub async fn cold_process_real_turn_driver(
     };
     let identity = ReferenceIdentity::for_scenario(scenario);
     let control = SeamControl::default();
-    let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let recovers_existing_turn = matches!(
         action,
         ColdProcessTurnAction::Recover
@@ -348,7 +347,7 @@ pub async fn cold_process_real_turn_driver(
     let runtime = Box::pin(build_runtime(
         decorated,
         control.clone(),
-        executions,
+        Arc::clone(&effect_controller),
         &identity,
         trace_tool,
     ))

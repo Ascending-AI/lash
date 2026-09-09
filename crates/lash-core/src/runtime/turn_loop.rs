@@ -4026,7 +4026,7 @@ impl LashRuntime {
             protocol_run_offset,
             Arc::clone(&self.host.core.clock),
             Arc::clone(&turn_control),
-            turn_control_resolver,
+            Arc::clone(&turn_control_host),
             turn_cancel_peek_controller,
             &mut event_rx,
             &mut assembler,
@@ -4333,7 +4333,7 @@ async fn run_turn_effect_loop(
     protocol_run_offset: usize,
     clock: Arc<dyn Clock>,
     turn_control: Arc<ActiveTurnControl>,
-    turn_control_resolver: &dyn AwaitEventResolver,
+    turn_control_host: Arc<dyn EffectHost>,
     cancel_controller: &dyn RuntimeEffectController,
     event_rx: &mut mpsc::Receiver<RuntimeStreamEvent>,
     assembler: &mut TurnAssembler,
@@ -4364,7 +4364,7 @@ async fn run_turn_effect_loop(
         cancellation.cancel();
     }
     let cancel_watcher = await_turn_cancellation_with_retry(clock.as_ref(), || {
-        turn_control.await_cancel(turn_control_resolver, CancellationToken::new())
+        turn_control.await_cancel(turn_control_host.as_ref(), CancellationToken::new())
     });
     // Canonical future-size seam: `driver.run` is boxed exactly once here.
     // Driver growth is absorbed by this allocation instead of accreting
