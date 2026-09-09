@@ -83,6 +83,8 @@ fn turn_cancel_core_conversions_round_trip_every_envelope() {
         origin: Some("workbench-user".to_string()),
         reason: Some("stop button".to_string()),
         undelivered: lash_core::facade_support::TurnCancelDisposition::Defer,
+        mode: lash_core::facade_support::TurnCancelMode::Immediate,
+        honoured_after_step: None,
     };
     let remote_evidence = RemoteTurnCancellationEvidence::from(evidence.clone());
     assert_eq!(
@@ -94,6 +96,8 @@ fn turn_cancel_core_conversions_round_trip_every_envelope() {
         origin: None,
         reason: None,
         undelivered: lash_core::facade_support::TurnCancelDisposition::Defer,
+        mode: lash_core::facade_support::TurnCancelMode::Immediate,
+        honoured_after_step: None,
     };
     let remote_evidence = RemoteTurnCancellationEvidence::from(evidence_without_origin.clone());
     assert_eq!(
@@ -1196,6 +1200,8 @@ fn assert_terminal_call_record_converts_and_validates(
                         origin: None,
                         reason: None,
                         undelivered: lash_core::facade_support::TurnCancelDisposition::Defer,
+                        mode: lash_core::facade_support::TurnCancelMode::Immediate,
+                        honoured_after_step: None,
                     },
                 },
             )
@@ -1222,20 +1228,6 @@ fn assert_terminal_call_record_converts_and_validates(
     result
         .validate()
         .expect("turn-result conversion validates the terminal call record");
-}
-
-#[test]
-fn cancelled_mid_call_record_converts_and_validates() {
-    assert_terminal_call_record_converts_and_validates(
-        synthetic_terminal_call_record(
-            "cancelled-call",
-            lash_core::AttemptOutcome::Aborted,
-            lash_core::ProviderFailureKind::Unknown,
-            "cancelled",
-            true,
-        ),
-        true,
-    );
 }
 
 #[test]

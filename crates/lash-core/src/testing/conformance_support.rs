@@ -11,7 +11,7 @@ pub use crate::runtime::native_substrate::lane_wait::{
 };
 pub use crate::runtime::state::RuntimeCheckpointComponents;
 pub use crate::runtime::state::{append_session_nodes_to_state_with_clock, boundary_operation};
-pub use crate::runtime::turn_control::ActiveTurnControl;
+pub use crate::runtime::turn_control::{ActiveTurnControl, TurnCancelPeekIdentity};
 pub use crate::runtime::{
     PendingTokenLedgerEntry, StagedTokenLedger, append_receipt_mixed_usage_envelope_conformance,
     append_usage_cancellation_exactly_once_conformance,

@@ -1061,11 +1061,87 @@ pub(super) async fn invoke_endpoint_body_with_json_call_responses(
     tokio::time::timeout(
         ENDPOINT_TEST_TIMEOUT,
         invoke_endpoint_body_with_json_call_responses_unbounded(
-            endpoint, service, handler, body, responses,
+            endpoint,
+            service,
+            handler,
+            body,
+            responses,
+            InputAfterLastResponse::Open,
         ),
     )
     .await
     .map_err(|_| TerminalError::new("scripted-call endpoint test timed out"))?
+}
+
+/// Like [`invoke_endpoint_body_with_json_call_responses`], but closes the
+/// invocation input as soon as the last scripted response has been sent, so a
+/// handler that parks after that call suspends instead of waiting on an input
+/// that will never carry anything else.
+pub(super) async fn invoke_endpoint_body_with_json_call_responses_then_suspend(
+    endpoint: &Endpoint,
+    service: &str,
+    handler: &str,
+    body: Bytes,
+    responses: Vec<serde_json::Value>,
+) -> Result<Bytes, TerminalError> {
+    tokio::time::timeout(
+        ENDPOINT_TEST_TIMEOUT,
+        invoke_endpoint_body_with_json_call_responses_unbounded(
+            endpoint,
+            service,
+            handler,
+            body,
+            responses,
+            InputAfterLastResponse::Closed,
+        ),
+    )
+    .await
+    .map_err(|_| TerminalError::new("scripted-call endpoint test timed out"))?
+}
+
+/// A request body that keeps reporting end-of-stream once it has ended.
+///
+/// The SDK drains the request body again after the handler settles. A
+/// `Channel` body polled past its end trips its error oneshot, so a driver
+/// that closes its sender before the handler suspends must fuse the body.
+struct FusedBody<B> {
+    inner: B,
+    ended: bool,
+}
+
+impl<B: Body + Unpin> Body for FusedBody<B> {
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        if self.ended {
+            return Poll::Ready(None);
+        }
+        match Pin::new(&mut self.inner).poll_frame(cx) {
+            Poll::Ready(None) => {
+                self.ended = true;
+                Poll::Ready(None)
+            }
+            other => other,
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.ended || self.inner.is_end_stream()
+    }
+}
+
+/// What the scripted-call driver does with the invocation input once its
+/// last response has been sent.
+#[derive(Clone, Copy)]
+enum InputAfterLastResponse {
+    /// Keep it open; the handler is expected to finish on its own.
+    Open,
+    /// Close it; the handler is expected to suspend.
+    Closed,
 }
 
 pub(super) async fn invoke_endpoint_with_scripted_responses<T: serde::Serialize>(
@@ -1547,6 +1623,7 @@ async fn invoke_endpoint_body_with_json_call_responses_unbounded(
     handler: &str,
     invocation_body: Bytes,
     responses: Vec<serde_json::Value>,
+    after_last_response: InputAfterLastResponse,
 ) -> Result<Bytes, TerminalError> {
     let (mut input_sender, body) = Channel::<Bytes, Infallible>::new(8);
     input_sender
@@ -1554,12 +1631,15 @@ async fn invoke_endpoint_body_with_json_call_responses_unbounded(
         .await
         .map_err(|err| TerminalError::new(format!("endpoint input failed: {err}")))?;
     let mut input_sender = Some(input_sender);
-    let mut responses = responses.into_iter();
+    let mut responses = responses.into_iter().peekable();
     let response = endpoint.handle(
         http::Request::builder()
             .uri(format!("/invoke/{service}/{handler}"))
             .header(http::header::CONTENT_TYPE, RESTATE_INVOCATION_CONTENT_TYPE)
-            .body(body)
+            .body(FusedBody {
+                inner: body,
+                ended: false,
+            })
             .expect("endpoint invocation request"),
     );
     let status = response.status();
@@ -1606,6 +1686,11 @@ async fn invoke_endpoint_body_with_json_call_responses_unbounded(
                         .map_err(|err| {
                             TerminalError::new(format!("call completion input failed: {err}"))
                         })?;
+                    if matches!(after_last_response, InputAfterLastResponse::Closed)
+                        && responses.peek().is_none()
+                    {
+                        drop(input_sender.take());
+                    }
                 } else {
                     drop(input_sender.take());
                 }

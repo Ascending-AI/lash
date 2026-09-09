@@ -666,6 +666,7 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_requests (
     origin text,
     reason text,
     disposition text DEFAULT 'defer'::text NOT NULL,
+    mode text DEFAULT 'immediate'::text NOT NULL,
     affected_input_ids text[] DEFAULT '{}'::text[] NOT NULL,
     affected_dispositions text[] DEFAULT '{}'::text[] NOT NULL
 );
@@ -963,7 +964,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 80);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 81);
 
 
 --

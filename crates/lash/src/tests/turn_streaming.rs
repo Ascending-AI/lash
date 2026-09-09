@@ -9300,3 +9300,158 @@ async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained_after_reop
     );
     Ok(())
 }
+
+fn gated_app_lookup_provider(
+    started: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+    released: Arc<std::sync::atomic::AtomicBool>,
+    provider_calls: Arc<AtomicUsize>,
+) -> ProviderHandle {
+    crate::testing::TestProvider::builder()
+        .kind("embed-test")
+        .complete(move |_request| {
+            let started = Arc::clone(&started);
+            let release = Arc::clone(&release);
+            let released = Arc::clone(&released);
+            let provider_calls = Arc::clone(&provider_calls);
+            async move {
+                match provider_calls.fetch_add(1, Ordering::SeqCst) {
+                    0 => {
+                        started.notify_one();
+                        while !released.load(Ordering::SeqCst) {
+                            let notified = release.notified();
+                            if released.load(Ordering::SeqCst) {
+                                break;
+                            }
+                            notified.await;
+                        }
+                        Ok(LlmResponse {
+                            parts: vec![LlmOutputPart::ToolCall {
+                                call_id: "call-1".to_string(),
+                                tool_name: "app_lookup".to_string(),
+                                input_json: "{}".to_string(),
+                                replay: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..LlmResponse::default()
+                        })
+                    }
+                    _ => Ok(text_response("finished after the stop")),
+                }
+            }
+        })
+        .build()
+        .into_handle()
+}
+
+#[tokio::test]
+async fn cancel_running_turns_after_step_stops_at_the_step_boundary() -> Result<()> {
+    let started = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(gated_app_lookup_provider(
+            Arc::clone(&started),
+            Arc::clone(&release),
+            Arc::clone(&released),
+            Arc::clone(&provider_calls),
+        ))
+        .model(mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("stop-after-step").open().await?;
+    let stopper = session.clone();
+
+    let stream = session
+        .turn(TurnInput::text("use the tool, then stop"))
+        .stream()?;
+    started.notified().await;
+    assert_eq!(
+        stopper.cancel_running_turns_with_origin_and_mode(
+            Some("shutdown".to_string()),
+            crate::TurnCancelMode::AfterStep
+        ),
+        1
+    );
+    released.store(true, Ordering::SeqCst);
+    release.notify_one();
+
+    let result = stream.finish().await?;
+    let evidence = match &result.outcome {
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { evidence }) => {
+            evidence.clone()
+        }
+        other => panic!("expected an after-step stop, got {other:?}"),
+    };
+    assert_eq!(evidence.mode, crate::TurnCancelMode::AfterStep);
+    assert_eq!(evidence.honoured_after_step, Some(0));
+    assert_eq!(evidence.origin.as_deref(), Some("shutdown"));
+    assert_eq!(
+        result.tool_calls.len(),
+        1,
+        "the tool call of the closing step ran to completion"
+    );
+    assert_eq!(
+        provider_calls.load(Ordering::SeqCst),
+        1,
+        "no further model call starts after the step boundary"
+    );
+    assert_eq!(stopper.cancel_running_turns(), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn host_escalates_a_local_after_step_stop_to_an_immediate_abort() -> Result<()> {
+    let started = Arc::new(tokio::sync::Notify::new());
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    // The response never arrives, so an after-step stop can never land by
+    // itself; the host escalates after its own deadline.
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(gated_app_lookup_provider(
+            Arc::clone(&started),
+            Arc::new(tokio::sync::Notify::new()),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Arc::clone(&provider_calls),
+        ))
+        .model(mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("escalate-after-step").open().await?;
+    let stopper = session.clone();
+
+    let stream = session
+        .turn(TurnInput::text("hang, then escalate"))
+        .stream()?;
+    started.notified().await;
+    assert_eq!(
+        stopper.cancel_running_turns_with_mode(crate::TurnCancelMode::AfterStep),
+        1
+    );
+    for _ in 0..32 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        stopper.cancel_running_turns_with_mode(crate::TurnCancelMode::AfterStep),
+        1,
+        "the after-step stop leaves the turn running until its step closes"
+    );
+    assert_eq!(
+        stopper.cancel_running_turns_with_origin(Some("operator".to_string())),
+        1,
+        "escalation aborts the still-running turn"
+    );
+
+    let result = stream.finish().await?;
+    let evidence = match &result.outcome {
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { evidence }) => {
+            evidence.clone()
+        }
+        other => panic!("expected an aborted turn, got {other:?}"),
+    };
+    assert_eq!(evidence.mode, crate::TurnCancelMode::Immediate);
+    assert_eq!(evidence.honoured_after_step, None);
+    assert!(result.tool_calls.is_empty(), "the response never arrived");
+    assert_eq!(stopper.cancel_running_turns(), 0);
+    Ok(())
+}

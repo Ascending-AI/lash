@@ -1,5 +1,9 @@
 use super::*;
 
+// The remote wire shape predates `TurnCancelMode` and is a versioned
+// surface: a remote request always compiles to an immediate stop and remote
+// evidence drops the mode and the honoured step. Carrying the mode over the
+// wire is a follow-up that bumps `REMOTE_PROTOCOL_VERSION`.
 impl From<lash_core::facade_support::TurnCancellationEvidence> for RemoteTurnCancellationEvidence {
     fn from(value: lash_core::facade_support::TurnCancellationEvidence) -> Self {
         let lash_core::facade_support::TurnCancellationEvidence {
@@ -7,6 +11,8 @@ impl From<lash_core::facade_support::TurnCancellationEvidence> for RemoteTurnCan
             origin,
             reason,
             undelivered,
+            mode: _,
+            honoured_after_step: _,
         } = value;
         Self {
             request_id,
@@ -44,6 +50,8 @@ impl From<RemoteTurnCancellationEvidence> for lash_core::facade_support::TurnCan
                     lash_core::facade_support::TurnCancelDisposition::Drop
                 }
             },
+            mode: lash_core::facade_support::TurnCancelMode::Immediate,
+            honoured_after_step: None,
         }
     }
 }
@@ -75,6 +83,7 @@ impl RemoteTurnCancelRequest {
                     lash_core::facade_support::TurnCancelDisposition::Drop
                 }
             },
+            mode: lash_core::facade_support::TurnCancelMode::Immediate,
         })
     }
 }
@@ -87,6 +96,7 @@ impl From<lash_core::facade_support::TurnCancelRequest> for RemoteTurnCancelRequ
             origin,
             reason,
             undelivered,
+            mode: _,
         } = value;
         Self {
             session_id: address.session_id,
@@ -116,6 +126,14 @@ impl From<lash_core::facade_support::TurnCancelOutcome> for RemoteTurnCancelOutc
             }
             lash_core::facade_support::TurnCancelOutcome::AlreadyRequested(cancellation) => {
                 Self::AlreadyRequested {
+                    cancellation: cancellation.into(),
+                }
+            }
+            // A remote request is always immediate; when it escalates a local
+            // after-step request it took effect, which the pre-mode wire can
+            // only say as `Requested`.
+            lash_core::facade_support::TurnCancelOutcome::Escalated(cancellation) => {
+                Self::Requested {
                     cancellation: cancellation.into(),
                 }
             }

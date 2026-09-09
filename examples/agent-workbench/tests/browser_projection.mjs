@@ -31,6 +31,8 @@ const stopReceipt = {
               request_id: "workbench-stop-browser-projection",
               origin: "user",
               reason: "workbench Stop control",
+              mode: "after_step",
+              honoured_after_step: 0,
             },
           },
         },
@@ -116,13 +118,14 @@ test("committed-cancelled Stop renders its request evidence", async () => {
     controller: null,
     resetInFlight: false,
     async fetch(url, options) {
-      assert.equal(url, "/api/turn/cancel");
+      assert.equal(url, "/api/turn/cancel?mode=stop");
       assert.equal(options.method, "POST");
       return {
         ok: true,
         async json() { return stopReceipt; },
       };
     },
+    armStopEscalation() {},
     renderNote(message) { notes.push(message); },
     renderError(message) { errors.push(message); },
     refreshBusyState() {
@@ -140,7 +143,7 @@ test("committed-cancelled Stop renders its request evidence", async () => {
   await completed;
 
   assert.deepEqual(notes, [
-    "turn stopped · request workbench-stop-browser-projection",
+    "turn stopped after step 0 · request workbench-stop-browser-projection",
   ]);
   assert.deepEqual(errors, []);
   assert.equal(busyRefreshes, 1);

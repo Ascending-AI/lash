@@ -16,9 +16,11 @@ use std::thread::ThreadId;
 use std::time::Duration;
 
 use lash_core::{
-    ProcessAwaitOutput, ProcessExecutionContext, ProcessRegistration, Resolution, ResolveOutcome,
+    AwaitEventWaitIdentity, ProcessAwaitOutput, ProcessExecutionContext, ProcessRegistration,
+    Resolution, ResolveOutcome,
 };
 use lash_sansio::sync::MutexExt;
+use restate_sdk::context::macro_support::SealedDurableFuture;
 use restate_sdk::context::{
     Context as RestateContext, ContextAwakeables, ContextClient, ObjectContext, RunRetryPolicy,
     SharedObjectContext, SharedWorkflowContext, WorkflowContext,
@@ -32,7 +34,7 @@ use crate::durable_wait::{
     RestateDurableWaitAwaitRequest, RestateDurableWaitEffectRequest,
     RestateDurableWaitGroupRequest, RestateDurableWaitResolveRequest, RestateTurnCancelGate,
     RestateTurnCancelRaceOutcome, RestateTurnCancelWake, durable_wait_index_object_key,
-    register_turn_cancel_gate, retire_turn_cancel_gate,
+    register_turn_cancel_gate, restate_await_event_key, retire_turn_cancel_gate,
 };
 use crate::effect_group::{
     EffectGroupCloseRequest, EffectGroupCloseResponse, EffectGroupDispatchClient,
@@ -341,6 +343,196 @@ where
 type TurnCancelRaceFuture<'run, T> = Pin<
     Box<dyn Future<Output = Result<RestateTurnCancelRaceOutcome<T>, TerminalError>> + Send + 'run>,
 >;
+
+/// Which side of a gate race the journal completed first.
+enum GateRaceWinner {
+    Guarded,
+    Gate,
+}
+
+/// A durable SDK future that can also be raced by notification handle.
+///
+/// The concrete sites erase the SDK's opaque futures into this object before
+/// handing them to the generic race so the race never has to project the
+/// opaque type through the context type parameter (rust-lang/rust#100013).
+trait GateWaitFuture: Future + SealedDurableFuture {}
+
+impl<F: Future + SealedDurableFuture> GateWaitFuture for F {}
+
+type GateWait<'run, T> =
+    Pin<Box<dyn GateWaitFuture<Output = Result<T, TerminalError>> + Send + 'run>>;
+
+/// A fresh gate awakeable, erased for the race.
+fn gate_awakeable<'run, 'ctx, C>(
+    context: &'run C,
+) -> (String, GateWait<'run, Json<RestateTurnCancelWake>>)
+where
+    C: ContextAwakeables<'ctx>,
+    'ctx: 'run,
+{
+    let (id, wait) = context.awakeable::<Json<RestateTurnCancelWake>>();
+    (id, erase_gate_wait(wait))
+}
+
+fn erase_gate_wait<'run, T>(
+    wait: impl GateWaitFuture<Output = Result<T, TerminalError>> + Send + 'run,
+) -> GateWait<'run, T> {
+    Box::pin(wait)
+}
+
+/// Wait for the first of the guarded wait and a gate awakeable to complete.
+///
+/// This is the SDK's `select!` without its consuming semantics: the macro
+/// awaits the winner and drops the loser, but a deferred wake must keep the
+/// guarded wait alive and await it afterwards. The VM's first-completed await
+/// does not consume either notification, so the loser stays awaitable.
+fn first_of_gate_race<G, A>(
+    guarded: &G,
+    gate: &A,
+) -> impl Future<Output = Result<GateRaceWinner, TerminalError>> + Send + use<G, A>
+where
+    G: SealedDurableFuture + ?Sized,
+    A: SealedDurableFuture + ?Sized,
+{
+    // Take the handles synchronously so no borrow of the erased futures is
+    // held across the await.
+    let inner = guarded.inner_context();
+    let handles = vec![guarded.handle(), gate.handle()];
+    async move {
+        match inner.select(handles).await? {
+            0 => Ok(GateRaceWinner::Guarded),
+            1 => Ok(GateRaceWinner::Gate),
+            index => Err(TerminalError::new(format!(
+                "turn-cancel gate race completed out-of-range branch {index}"
+            ))),
+        }
+    }
+}
+
+/// Race one parked wait against this turn's durable cancel gate.
+///
+/// The gate awakeable's journaled value carries the mode of the request that
+/// settled the gate. An `Immediate` settlement unwinds the wait at this wake,
+/// exactly as every gate resolution did before the mode existed. An
+/// `AfterStep` settlement composes to the step boundary instead: the wait
+/// stays parked and finishes on its own terms, the iteration completes, and
+/// the turn stops at its `turn_cancel.after_step.{n}` peek. So that a later
+/// `Immediate` request still unwinds the wait, a deferred wake re-parks the
+/// gate on the turn's escalation promise before continuing.
+///
+/// Journal order is the deployed contract: the awakeable, then its
+/// registration, then whatever `guarded` emits. Sites whose guarded command
+/// must precede the awakeable construct it first and hand it over through the
+/// closure; the timer site constructs it in the closure so it lands after the
+/// registration verdict. Every command a deferred wake adds sits on a branch
+/// no journal written before the mode existed can take, so replay of an
+/// in-flight invocation is unchanged.
+async fn race_turn_cancel_gate<'run, 'ctx, C, T>(
+    context: &C,
+    session_id: &str,
+    turn_cancel: RestateDurableWaitAwaitRequest,
+    awakeable: impl Fn() -> (String, GateWait<'run, Json<RestateTurnCancelWake>>),
+    guarded: impl FnOnce() -> GateWait<'run, T>,
+) -> Result<RestateTurnCancelRaceOutcome<T>, TerminalError>
+where
+    C: ContextClient<'ctx>,
+{
+    let scope = turn_cancel.key.scope.clone();
+    let (awakeable_id, awakeable_wait) = awakeable();
+    let gate = match register_turn_cancel_gate(context, session_id, turn_cancel.key, awakeable_id)
+        .await?
+    {
+        RestateTurnCancelGate::Registered(gate) => gate,
+        RestateTurnCancelGate::Revoked => {
+            return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
+                session_id: session_id.to_string(),
+            });
+        }
+    };
+    let guarded = guarded();
+    match first_of_gate_race(&*guarded, &*awakeable_wait).await? {
+        GateRaceWinner::Guarded => {
+            let value = guarded.await?;
+            retire_turn_cancel_gate(context, session_id, gate).await?;
+            return Ok(RestateTurnCancelRaceOutcome::Completed(value));
+        }
+        GateRaceWinner::Gate => {}
+    }
+    let Json(wake) = awakeable_wait.await?;
+    match wake {
+        RestateTurnCancelWake::TurnCancelled => {
+            return Ok(RestateTurnCancelRaceOutcome::TurnCancelled);
+        }
+        RestateTurnCancelWake::SessionRevoked => {
+            return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
+                session_id: session_id.to_string(),
+            });
+        }
+        RestateTurnCancelWake::TurnCancelDeferred => {}
+    }
+    // The stop is deferred to the step boundary. The index dropped the gate
+    // entry when it fired, so nothing is retired here; the wait now parks
+    // against the escalation promise, which only an `Immediate` request that
+    // found the gate holding this after-step request ever writes.
+    tracing::debug!(
+        target: "lash::restate",
+        event = "restate.turn_cancel_deferred",
+        session_id,
+        "after-step stop observed by a parked durable wait; composing to the step boundary"
+    );
+    let escalation_key =
+        restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelEscalation)
+            .map_err(TerminalError::from_error)?;
+    let (escalation_id, escalation) = awakeable();
+    let escalation_gate = match register_turn_cancel_gate(
+        context,
+        session_id,
+        escalation_key,
+        escalation_id,
+    )
+    .await?
+    {
+        RestateTurnCancelGate::Registered(gate) => gate,
+        RestateTurnCancelGate::Revoked => {
+            return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
+                session_id: session_id.to_string(),
+            });
+        }
+    };
+    match first_of_gate_race(&*guarded, &*escalation).await? {
+        GateRaceWinner::Guarded => {
+            // The escalation entry is retired whichever way the guarded wait
+            // settles: it only ever exists on the deferred branch, so no
+            // journal written before the mode existed can reach this
+            // retirement, and a failing guarded wait would otherwise leave the
+            // index holding an entry for a wait that is gone. The success path
+            // keeps the deployed order — guarded value first, then the
+            // retirement — byte for byte.
+            let value = guarded.await;
+            let retirement = retire_turn_cancel_gate(context, session_id, escalation_gate).await;
+            let value = value?;
+            retirement?;
+            Ok(RestateTurnCancelRaceOutcome::Completed(value))
+        }
+        GateRaceWinner::Gate => {
+            let Json(wake) = escalation.await?;
+            Ok(match wake {
+                // The escalation promise only ever holds an immediate request;
+                // a deferred wake on it would be a weaker request that cannot
+                // exist there, and is honoured as the stop it escalates.
+                RestateTurnCancelWake::TurnCancelled
+                | RestateTurnCancelWake::TurnCancelDeferred => {
+                    RestateTurnCancelRaceOutcome::TurnCancelled
+                }
+                RestateTurnCancelWake::SessionRevoked => {
+                    RestateTurnCancelRaceOutcome::SessionRevoked {
+                        session_id: session_id.to_string(),
+                    }
+                }
+            })
+        }
+    }
+}
 
 #[doc(hidden)]
 pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
@@ -691,46 +883,19 @@ macro_rules! impl_restate_controller_context {
                             ));
                         };
                         // Journal order is the deployed contract: the awakeable,
-                        // then its registration, then the timer. The gate helpers
-                        // own the two index calls; the call site keeps ownership of
-                        // when each journaled command is emitted.
-                        let (awakeable_id, awakeable) =
-                            self.awakeable::<Json<RestateTurnCancelWake>>();
-                        let gate = match register_turn_cancel_gate(
+                        // then its registration, then the timer. The race helper
+                        // owns the index calls and the wake verdict; this site
+                        // keeps the timer behind the registration verdict.
+                        race_turn_cancel_gate(
                             self,
                             &session_id,
-                            turn_cancel.key,
-                            awakeable_id,
+                            turn_cancel,
+                            || gate_awakeable(self),
+                            || erase_gate_wait(restate_sdk::context::ContextTimers::sleep(
+                                self, duration,
+                            )),
                         )
-                        .await?
-                        {
-                            RestateTurnCancelGate::Registered(gate) => gate,
-                            RestateTurnCancelGate::Revoked => {
-                                return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                                    session_id,
-                                });
-                            }
-                        };
-
-                        let timer = restate_sdk::context::ContextTimers::sleep(self, duration);
-                        restate_sdk::select! {
-                            result = timer => {
-                                result?;
-                                retire_turn_cancel_gate(self, &session_id, gate).await?;
-                                Ok(RestateTurnCancelRaceOutcome::Completed(()))
-                            },
-                            result = awakeable => {
-                                let Json(wake) = result?;
-                                Ok(match wake {
-                                    RestateTurnCancelWake::TurnCancelled => {
-                                        RestateTurnCancelRaceOutcome::TurnCancelled
-                                    }
-                                    RestateTurnCancelWake::SessionRevoked => {
-                                        RestateTurnCancelRaceOutcome::SessionRevoked { session_id }
-                                    }
-                                })
-                            }
-                        }
+                        .await
                     })
                 }
 
@@ -892,58 +1057,38 @@ macro_rules! impl_restate_controller_context {
                                 event_address.workflow_key.clone(),
                             )
                             .await_resolution(Json(request));
-                        let event = event.call();
-                        let (awakeable_id, awakeable) =
-                            self.awakeable::<Json<RestateTurnCancelWake>>();
-                        let gate = match register_turn_cancel_gate(
+                        let event = erase_gate_wait(event.call());
+                        match race_turn_cancel_gate(
                             self,
                             &session_id,
-                            turn_cancel.key,
-                            awakeable_id,
+                            turn_cancel,
+                            || gate_awakeable(self),
+                            move || event,
                         )
                         .await?
                         {
-                            RestateTurnCancelGate::Registered(gate) => gate,
-                            RestateTurnCancelGate::Revoked => {
-                                return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                                    session_id,
-                                });
-                            }
-                        };
-
-                        restate_sdk::select! {
-                            result = event => {
-                                let Json(resolution) = result?;
-                                retire_turn_cancel_gate(self, &session_id, gate).await?;
+                            RestateTurnCancelRaceOutcome::Completed(Json(resolution)) => {
                                 Ok(RestateTurnCancelRaceOutcome::Completed(resolution))
-                            },
-                            result = awakeable => {
-                                let Json(wake) = result?;
-                                match wake {
-                                    RestateTurnCancelWake::TurnCancelled => {
-                                        // Release the losing event wait. The
-                                        // retired nested workflow did this from
-                                        // its own journal; on the gate it is the
-                                        // waiter's job, or the event workflow
-                                        // stays parked with nobody left to
-                                        // resolve it.
-                                        let resolve = self
-                                            .object_client::<LashDurableWaitIndexClient>(
-                                                durable_wait_index_object_key(&event_address),
-                                            )
-                                            .resolve(Json(RestateDurableWaitResolveRequest {
-                                                key: event_key,
-                                                resolution: Resolution::Cancelled,
-                                            }));
-                                        let Json(_) = resolve.call().await?;
-                                        Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
-                                    }
-                                    RestateTurnCancelWake::SessionRevoked => {
-                                        Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                                            session_id,
-                                        })
-                                    }
-                                }
+                            }
+                            RestateTurnCancelRaceOutcome::TurnCancelled => {
+                                // Release the losing event wait. The retired
+                                // nested workflow did this from its own journal;
+                                // on the gate it is the waiter's job, or the
+                                // event workflow stays parked with nobody left
+                                // to resolve it.
+                                let resolve = self
+                                    .object_client::<LashDurableWaitIndexClient>(
+                                        durable_wait_index_object_key(&event_address),
+                                    )
+                                    .resolve(Json(RestateDurableWaitResolveRequest {
+                                        key: event_key,
+                                        resolution: Resolution::Cancelled,
+                                    }));
+                                let Json(_) = resolve.call().await?;
+                                Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
+                            }
+                            RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
+                                Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id })
                             }
                         }
                     })
@@ -1014,77 +1159,40 @@ macro_rules! impl_restate_controller_context {
                             .await_terminal(Json(RestateProcessAwaitRequest {
                                 process_id: process_id.clone(),
                             }));
-                        let process = process.call();
-                        let (awakeable_id, awakeable) =
-                            self.awakeable::<Json<RestateTurnCancelWake>>();
-                        let gate = match register_turn_cancel_gate(
+                        let process = erase_gate_wait(process.call());
+                        let outcome = race_turn_cancel_gate(
                             self,
                             &session_id,
-                            turn_cancel.key,
-                            awakeable_id,
+                            turn_cancel,
+                            || gate_awakeable(self),
+                            move || process,
                         )
-                        .await?
-                        {
-                            RestateTurnCancelGate::Registered(gate) => gate,
-                            RestateTurnCancelGate::Revoked => {
-                                tracing::info!(
-                                    target: "lash::restate",
-                                    event = "restate.process_await_adjudicated",
-                                    process_id = %process_id,
-                                    registration_state = "revoked",
-                                    winning_branch = "session_revoked",
-                                    "Restate process-await adjudication"
-                                );
-                                return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                                    session_id,
-                                });
+                        .await?;
+                        let winning_branch = match &outcome {
+                            RestateTurnCancelRaceOutcome::Completed(_) => "process_terminal",
+                            RestateTurnCancelRaceOutcome::TurnCancelled => "turn_cancelled",
+                            RestateTurnCancelRaceOutcome::SessionRevoked { .. } => {
+                                "session_revoked"
                             }
                         };
-
-                        restate_sdk::select! {
-                            result = process => {
-                                let Json(output) = result?;
-                                retire_turn_cancel_gate(self, &session_id, gate).await?;
-                                tracing::info!(
-                                    target: "lash::restate",
-                                    event = "restate.process_await_adjudicated",
-                                    process_id = %process_id,
-                                    registration_state = "registered",
-                                    winning_branch = "process_terminal",
-                                    "Restate process-await adjudication"
-                                );
-                                Ok(RestateTurnCancelRaceOutcome::Completed(Box::new(output)))
-                            },
-                            result = awakeable => {
-                                let Json(wake) = result?;
-                                match wake {
-                                    RestateTurnCancelWake::TurnCancelled => {
-                                        tracing::info!(
-                                            target: "lash::restate",
-                                            event = "restate.process_await_adjudicated",
-                                            process_id = %process_id,
-                                            registration_state = "registered",
-                                            winning_branch = "turn_cancelled",
-                                            "Restate process-await adjudication"
-                                        );
-                                        Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
-                                    }
-                                    RestateTurnCancelWake::SessionRevoked => {
-                                        tracing::info!(
-                                            target: "lash::restate",
-                                            event = "restate.process_await_adjudicated",
-                                            process_id = %process_id,
-                                            registration_state = "registered_then_revoked",
-                                            winning_branch = "session_revoked",
-                                            "Restate process-await adjudication"
-                                        );
-                                        Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                                            session_id,
-                                        })
-                                    }
-                                }
+                        tracing::info!(
+                            target: "lash::restate",
+                            event = "restate.process_await_adjudicated",
+                            process_id = %process_id,
+                            winning_branch,
+                            "Restate process-await adjudication"
+                        );
+                        Ok(match outcome {
+                            RestateTurnCancelRaceOutcome::Completed(Json(output)) => {
+                                RestateTurnCancelRaceOutcome::Completed(Box::new(output))
                             }
-                        }
+                            RestateTurnCancelRaceOutcome::TurnCancelled => {
+                                RestateTurnCancelRaceOutcome::TurnCancelled
+                            }
+                            RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
+                                RestateTurnCancelRaceOutcome::SessionRevoked { session_id }
+                            }
+                        })
                     })
                 }
 

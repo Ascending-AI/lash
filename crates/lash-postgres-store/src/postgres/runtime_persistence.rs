@@ -2531,21 +2531,50 @@ impl TurnInputStore for PostgresSessionStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
-        sqlx::query(
-            "INSERT INTO lash_turn_cancel_requests (
-                 session_id, turn_id, request_id, origin, reason, disposition
-             ) VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (session_id, turn_id) DO NOTHING",
-        )
-        .bind(session_id)
-        .bind(turn_id)
-        .bind(&request.request_id)
-        .bind(&request.origin)
-        .bind(&request.reason)
-        .bind(turn_cancel_disposition_wire(request.undelivered))
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        // First writer wins, except that a stronger mode escalates the durable
+        // request in place; the repair outcome accumulated so far stays
+        // attached because the affected-input arrays are untouched.
+        match load_turn_cancel_request_tx(&mut tx, session_id, turn_id).await? {
+            Some(existing) if request.mode.is_stronger_than(existing.request.mode) => {
+                sqlx::query(
+                    "UPDATE lash_turn_cancel_requests
+                     SET request_id = $3, origin = $4, reason = $5, disposition = $6,
+                         mode = $7
+                     WHERE session_id = $1 AND turn_id = $2",
+                )
+                .bind(session_id)
+                .bind(turn_id)
+                .bind(&request.request_id)
+                .bind(&request.origin)
+                .bind(&request.reason)
+                .bind(turn_cancel_disposition_wire(request.undelivered))
+                .bind(turn_cancel_mode_wire(request.mode))
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+            }
+            Some(existing) => {
+                tx.commit().await.map_err(store_sqlx_error)?;
+                return Ok(existing);
+            }
+            None => {
+                sqlx::query(
+                    "INSERT INTO lash_turn_cancel_requests (
+                         session_id, turn_id, request_id, origin, reason, disposition, mode
+                     ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                )
+                .bind(session_id)
+                .bind(turn_id)
+                .bind(&request.request_id)
+                .bind(&request.origin)
+                .bind(&request.reason)
+                .bind(turn_cancel_disposition_wire(request.undelivered))
+                .bind(turn_cancel_mode_wire(request.mode))
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+            }
+        }
         let record = load_turn_cancel_request_tx(&mut tx, session_id, turn_id)
             .await?
             .ok_or_else(|| {
@@ -3449,8 +3478,8 @@ async fn load_turn_cancel_request_pg(
     turn_id: &str,
 ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
     let mut connection = acquire_runtime_connection(pool).await?;
-    let row: Option<(String, Option<String>, Option<String>, String)> = sqlx::query_as(
-        "SELECT request_id, origin, reason, disposition
+    let row: Option<TurnCancelRequestRow> = sqlx::query_as(
+        "SELECT request_id, origin, reason, disposition, mode
          FROM lash_turn_cancel_requests
          WHERE session_id = $1 AND turn_id = $2",
     )
@@ -3459,7 +3488,7 @@ async fn load_turn_cancel_request_pg(
     .fetch_optional(&mut *connection)
     .await
     .map_err(store_sqlx_error)?;
-    let Some((request_id, origin, reason, disposition)) = row else {
+    let Some(row) = row else {
         return Ok(None);
     };
     let affected_rows: Vec<(String, String, String)> = sqlx::query_as(
@@ -3480,16 +3509,7 @@ async fn load_turn_cancel_request_pg(
     .fetch_all(&mut *connection)
     .await
     .map_err(store_sqlx_error)?;
-    turn_cancel_record_from_rows(
-        session_id,
-        turn_id,
-        request_id,
-        origin,
-        reason,
-        disposition,
-        affected_rows,
-    )
-    .map(Some)
+    turn_cancel_record_from_rows(session_id, turn_id, row, affected_rows).map(Some)
 }
 
 async fn load_turn_cancel_request_tx(
@@ -3497,8 +3517,8 @@ async fn load_turn_cancel_request_tx(
     session_id: &str,
     turn_id: &str,
 ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
-    let row: Option<(String, Option<String>, Option<String>, String)> = sqlx::query_as(
-        "SELECT request_id, origin, reason, disposition
+    let row: Option<TurnCancelRequestRow> = sqlx::query_as(
+        "SELECT request_id, origin, reason, disposition, mode
          FROM lash_turn_cancel_requests
          WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
     )
@@ -3507,7 +3527,7 @@ async fn load_turn_cancel_request_tx(
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    let Some((request_id, origin, reason, disposition)) = row else {
+    let Some(row) = row else {
         return Ok(None);
     };
     let affected_rows: Vec<(String, String, String)> = sqlx::query_as(
@@ -3528,27 +3548,20 @@ async fn load_turn_cancel_request_tx(
     .fetch_all(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    turn_cancel_record_from_rows(
-        session_id,
-        turn_id,
-        request_id,
-        origin,
-        reason,
-        disposition,
-        affected_rows,
-    )
-    .map(Some)
+    turn_cancel_record_from_rows(session_id, turn_id, row, affected_rows).map(Some)
 }
+
+/// One `lash_turn_cancel_requests` row: request id, origin, reason,
+/// disposition, mode.
+type TurnCancelRequestRow = (String, Option<String>, Option<String>, String, String);
 
 fn turn_cancel_record_from_rows(
     session_id: &str,
     turn_id: &str,
-    request_id: String,
-    origin: Option<String>,
-    reason: Option<String>,
-    disposition: String,
+    row: TurnCancelRequestRow,
     affected_rows: Vec<(String, String, String)>,
 ) -> Result<lash_core::TurnCancelRequestRecord, StoreError> {
+    let (request_id, origin, reason, disposition, mode) = row;
     let mut affected_inputs = Vec::with_capacity(affected_rows.len());
     for (input_id, input_json, applied_disposition) in affected_rows {
         affected_inputs.push(lash_core::TurnCancelAffectedInput {
@@ -3564,10 +3577,30 @@ fn turn_cancel_record_from_rows(
             origin,
             reason,
             undelivered: turn_cancel_disposition_from_wire(&disposition)?,
+            mode: turn_cancel_mode_from_wire(&mode)?,
         },
         outcome: (!affected_inputs.is_empty())
             .then_some(lash_core::TurnCancelInputOutcome { affected_inputs }),
     })
+}
+
+fn turn_cancel_mode_wire(mode: lash_core::facade_support::TurnCancelMode) -> &'static str {
+    match mode {
+        lash_core::facade_support::TurnCancelMode::Immediate => "immediate",
+        lash_core::facade_support::TurnCancelMode::AfterStep => "after_step",
+    }
+}
+
+fn turn_cancel_mode_from_wire(
+    mode: &str,
+) -> Result<lash_core::facade_support::TurnCancelMode, StoreError> {
+    match mode {
+        "immediate" => Ok(lash_core::facade_support::TurnCancelMode::Immediate),
+        "after_step" => Ok(lash_core::facade_support::TurnCancelMode::AfterStep),
+        other => Err(StoreError::Backend(format!(
+            "unknown turn cancel mode `{other}`"
+        ))),
+    }
 }
 
 fn turn_cancel_disposition_from_wire(

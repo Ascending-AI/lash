@@ -66,6 +66,48 @@ session-owned; and session-wide cancel-all because it needs an active-turn index
 wrong or a future turn. A host that offers “stop all visible work” retains the exact active turn
 ids it submitted and fans out exact requests.
 
+## Cancel modes: immediate abort and after-step stop (FIG-635)
+
+A request carries a host-chosen `TurnCancelMode`. `Immediate` is the abort
+described above: the owner feeds the evidence into its cooperative token as
+soon as it observes the gate, in-flight provider and tool waits unwind, and the
+uncommitted tail backtracks to the last checkpoint (FIG-408). On a
+controller-owned journal, Immediate lands between journal commands: the start
+gate, the after-LLM gate, and the after-step gate are the journaled
+observation points, so a replay takes the same command path as the original
+attempt.
+
+`AfterStep` is the stop that loses no work. The owner defers the request until
+the step boundary that closes the current protocol iteration: the response
+has streamed, every tool call of that iteration has completed, and the
+iteration's checkpoint has committed. It is observed there under the
+replay-deterministic identity `turn_cancel.after_step.{iteration}` on every
+binding, after the commit, and honoured by finishing the turn with
+`TurnStop::Cancelled` whose evidence names the mode and the iteration. The
+cooperative token never fires for an after-step request, so tools run to
+completion and never see a cancelled token, and nothing backtracks. A turn
+that has not started yet is refused at the start gate in both modes. An
+after-step request that lands during a durable sleep composes with
+cancel-at-wake (FIG-2321): the wait completes, the iteration finishes, and the
+stop honours at its boundary. The undelivered-input disposition applies in
+both modes; a stop never drains queued work.
+
+The gate itself stays first-writer-wins, so a stronger request cannot rewrite
+it. Escalation rides a third reserved promise, `TurnCancelEscalation`,
+written only by an `Immediate` request that found the gate holding an
+`AfterStep` request; the durable record upgrades to the stronger request and
+the receipt reports `Escalated`. A same-or-weaker request still reports
+`AlreadyRequested`. Lash ships no escalation timer; "abort if the step has
+not finished after N seconds" is host policy expressed as a second request.
+
+Restate durable waits carry the gate payload. The wake an awakeable
+journals is derived from the gate resolution that settled it, so an
+`Immediate` request unwinds a parked sleep, await-event or process await at
+that wake exactly as before, while an `AfterStep` request lets the wait
+finish on its own terms: the iteration completes and the turn stops at its
+step boundary. A deferred wait re-parks on the turn's escalation promise, so
+a later `Immediate` request still unwinds it mid-wait.
+
 ## Terminal product-event ownership
 
 The turn execution publisher owns the observer-facing terminal event. A Stop

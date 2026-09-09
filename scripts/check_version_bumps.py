@@ -210,6 +210,13 @@ IDENTIFIER_RENAME_BASELINES = {
     # CHECKPOINT_COMPONENT_ENCODING_VERSION stays 2 (a bump would refuse
     # every existing v2 checkpoint).
     'crates/lash-core/src/store/checkpoint.rs:CHECKPOINT_COMPONENT_ENCODING_VERSION': 'sha256:ae8d9e989bceae4d42097ec18cb935616de4f30ccdb35507e04fb0fd90438da8',
+    # FIG-635: promise_key_preimage gained the tag-6 arm for the new
+    # TurnCancelEscalation wait identity. The tag registry is append-only and
+    # every previously issued key (tags 1-5 under an unchanged scope preimage)
+    # is byte-identical; tag 6 only ever produces keys that never existed, so
+    # AWAIT_EVENT_FAMILY_VERSION stays 3 (a bump would refuse every live
+    # durable wait on every backend). Reviewer-confirmed one-time baseline.
+    'crates/lash-core/src/runtime/effect/promise_semantics.rs:AWAIT_EVENT_FAMILY_VERSION': 'sha256:6a7905bb43b794600173e24507b7fd0369217a4828b65b624737ca7889ff1418',
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved

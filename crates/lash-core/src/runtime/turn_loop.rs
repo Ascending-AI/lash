@@ -1619,6 +1619,7 @@ impl LashRuntime {
                     origin: evidence.origin.clone(),
                     reason: evidence.reason.clone(),
                     undelivered: evidence.undelivered,
+                    mode: evidence.mode,
                 })
                 .await
                 .map_err(|err| {
@@ -4736,6 +4737,8 @@ mod tests {
                         origin: Some("test-user".to_string()),
                         reason: None,
                         undelivered: crate::TurnCancelDisposition::Defer,
+                        mode: crate::TurnCancelMode::Immediate,
+                        honoured_after_step: None,
                     }))
                 }
             }

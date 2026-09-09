@@ -219,11 +219,47 @@ pub struct RestateDurableWaitAwakeableRequest {
 ///
 /// Every gate — sleep, await-event, process await — takes this one payload, so
 /// the index resolves a gate entry without knowing which wait registered it.
+/// The payload is the awakeable's journaled value, so the mode of the request
+/// that settled the gate is part of the journal and replay reads the identical
+/// verdict.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum RestateTurnCancelWake {
+    /// The gate settled with an `Immediate` request: the parked wait unwinds
+    /// now. Journals written before the request mode existed carry this
+    /// value, which is why it keeps its pre-mode name and wire literal.
     TurnCancelled,
+    /// The gate settled with an `AfterStep` request: the parked wait keeps
+    /// waiting, the iteration finishes, and the turn stops at its step
+    /// boundary. The waiter re-parks on the escalation promise so a later
+    /// `Immediate` request still unwinds it.
+    TurnCancelDeferred,
     SessionRevoked,
+}
+
+impl RestateTurnCancelWake {
+    /// The wake a settled turn-control resolution owes its parked waiters.
+    ///
+    /// The gate resolution is lash-core's journaled `TurnGateTerminal`; only
+    /// its `cancellation.mode` matters here. Anything that is not a decodable
+    /// after-step request — an immediate request, a pre-mode record, a sealed
+    /// completion, an unexpected shape — wakes as `TurnCancelled`, which is
+    /// the verdict every gate resolution produced before the mode existed.
+    pub(crate) fn for_gate_resolution(resolution: &Resolution) -> Self {
+        let Resolution::Ok(value) = resolution else {
+            return Self::TurnCancelled;
+        };
+        let evidence = value.get("cancellation").cloned().and_then(|cancellation| {
+            serde_json::from_value::<lash_core::facade_support::TurnCancellationEvidence>(
+                cancellation,
+            )
+            .ok()
+        });
+        match evidence {
+            Some(evidence) if !evidence.mode.is_immediate() => Self::TurnCancelDeferred,
+            _ => Self::TurnCancelled,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
@@ -241,16 +277,17 @@ pub(crate) struct RestateDurableWaitIndexMetadata {
 }
 /// Fire a gate entry because the turn-control wait it guards has settled.
 ///
-/// The wait's own `Resolution` is deliberately not forwarded: a gate entry only
-/// ever guards a turn-control address, so any settlement of it is the turn
-/// being cancelled, and the waiter needs no more than that.
+/// The wait's own `Resolution` is not forwarded whole: a gate entry only ever
+/// guards a turn-control address, so the waiter needs to know that the turn
+/// was asked to stop and in which mode, and nothing more.
 fn resolve_durable_wait_awakeable(
     ctx: &ObjectContext<'_>,
     request: &RestateDurableWaitAwakeableRequest,
+    resolution: &Resolution,
 ) {
     ctx.resolve_awakeable(
         &request.awakeable_id,
-        Json(RestateTurnCancelWake::TurnCancelled),
+        Json(RestateTurnCancelWake::for_gate_resolution(resolution)),
     );
 }
 
@@ -901,20 +938,19 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         if metadata.revoked {
             return Ok(Json(RestateDurableWaitRegistration::Revoked));
         }
-        if ctx
+        if let Some(Json(resolution)) = ctx
             .get::<Json<Resolution>>(&durable_wait_index_resolution_key(&address))
             .await?
-            .is_some()
         {
-            resolve_durable_wait_awakeable(&ctx, &request);
+            resolve_durable_wait_awakeable(&ctx, &request, &resolution);
             return Ok(Json(RestateDurableWaitRegistration::Registered));
         }
         let peek = ctx
             .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
             .peek();
         let Json(resolution) = peek.call().await?;
-        if resolution.is_some() {
-            resolve_durable_wait_awakeable(&ctx, &request);
+        if let Some(resolution) = resolution {
+            resolve_durable_wait_awakeable(&ctx, &request, &resolution);
         } else if !metadata
             .awakeables
             .iter()
@@ -959,6 +995,12 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
             .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key.clone())
             .resolve(Json(request.clone()));
         let Json(outcome) = resolve.call().await?;
+        // Wake with the terminal the gate actually holds: a request that lost
+        // to an earlier writer must not report its own mode to the waiter.
+        let settled = match &outcome {
+            ResolveOutcome::AlreadyResolved { terminal } => terminal.clone(),
+            ResolveOutcome::Accepted | ResolveOutcome::UnknownOrRevoked => resolution.clone(),
+        };
         mirror_resolve_outcome(&ctx, &address, resolution, &outcome);
         if outcome == ResolveOutcome::UnknownOrRevoked {
             return Ok(Json(outcome));
@@ -966,7 +1008,7 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         let mut retained = Vec::with_capacity(metadata.awakeables.len());
         for entry in std::mem::take(&mut metadata.awakeables) {
             if entry.key == request.key {
-                resolve_durable_wait_awakeable(&ctx, &entry);
+                resolve_durable_wait_awakeable(&ctx, &entry, &settled);
             } else {
                 retained.push(entry);
             }
