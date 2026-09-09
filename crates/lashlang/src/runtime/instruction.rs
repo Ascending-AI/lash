@@ -301,6 +301,14 @@ pub(crate) enum Instruction {
         operation: usize,
         argc: usize,
     },
+    PendingTool {
+        operation: usize,
+        argc: usize,
+    },
+    AwaitArray {
+        settle: bool,
+    },
+    AwaitPending,
     ResourceOperationBatch(usize),
     StartProcess {
         process: usize,
@@ -517,7 +525,10 @@ impl Instruction {
             Instruction::ResourceCall { .. } | Instruction::ResourceCallUnwrap { .. } => {
                 InstructionProfileTag::ResourceCall
             }
-            Instruction::ResourceOperationBatch(_) => InstructionProfileTag::ResourceCall,
+            Instruction::PendingTool { .. }
+            | Instruction::AwaitArray { .. }
+            | Instruction::AwaitPending
+            | Instruction::ResourceOperationBatch(_) => InstructionProfileTag::ResourceCall,
             Instruction::StartProcess { .. } => InstructionProfileTag::StartProcess,
             Instruction::AwaitHandle
             | Instruction::AwaitHandleUnwrap

@@ -26,6 +26,7 @@ pub(crate) mod javascript_regexp;
 mod javascript_stdlib;
 mod javascript_substrate;
 mod javascript_url;
+mod pending_tools;
 mod projected_paths;
 mod reference_assignment;
 
@@ -257,6 +258,7 @@ pub struct Vm<'a, H> {
     extras_heapified: bool,
     pub(crate) reference_semantics: bool,
     assigned_globals: std::collections::BTreeSet<String>,
+    pending_tools: Vec<Option<Value>>,
     #[cfg(test)]
     test_suspension: TestSuspension,
 }
@@ -1167,6 +1169,13 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     argc,
                 }));
             }
+            Instruction::PendingTool { operation, argc } => {
+                self.create_pending_tool(operation, argc)?;
+            }
+            Instruction::AwaitArray { settle } => {
+                return Ok(VmStep::Effect(VmEffect::AwaitArray { settle }));
+            }
+            Instruction::AwaitPending => return Ok(VmStep::Effect(VmEffect::AwaitPending)),
             Instruction::ResourceOperationBatch(batch) => {
                 return Ok(VmStep::Effect(VmEffect::ResourceOperationBatch(batch)));
             }

@@ -25,6 +25,24 @@ pub(super) fn validate_program_continuation(
     continuation: &VmContinuation,
     chunk: &Chunk,
 ) -> Result<(), ContinuationError> {
+    for value in continuation.pending_tools.iter().flatten() {
+        let Value::List(call) = value else {
+            unreachable!("structural validation runs first")
+        };
+        let Value::Number(operation) = call[0] else {
+            unreachable!()
+        };
+        let Value::Number(site) = call[1] else {
+            unreachable!()
+        };
+        if !matches!(chunk.code.get(site as usize), Some(Instruction::PendingTool { operation: index, argc }) if *index == operation as usize && *argc == call.len() - 3)
+        {
+            return Err(ContinuationError::UnserializableValue {
+                location: "pending tool".into(),
+                variant: "pending tool does not match its instruction",
+            });
+        }
+    }
     let (active_range, active_owner) = function_code_range(chunk, continuation.active_function)?;
     if !active_range.contains(&continuation.instruction_pointer)
         && continuation.instruction_pointer != active_range.end

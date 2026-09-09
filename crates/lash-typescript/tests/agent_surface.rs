@@ -394,7 +394,7 @@ fn process_handle_exposes_id_member_for_subsequent_operations() {
 }
 
 #[test]
-fn promise_aggregates_reuse_await_shape_and_tools_require_await() {
+fn promise_aggregates_lower_to_runtime_arrays_and_tool_handles() {
     let program = lash_typescript::parse(
         "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
     )
@@ -407,9 +407,9 @@ fn promise_aggregates_reuse_await_shape_and_tools_require_await() {
     .expect("Promise.allSettled should lower");
     assert!(contains_aggregate_await(&settled.main, false));
 
-    let error = lash_typescript::parse("web.fetch({ url: 'a' });")
-        .expect_err("a deferred tool call without await must reject");
-    assert_eq!(error.code, lash_typescript::DiagnosticCode::AwaitRequired);
+    let program = lash_typescript::parse("web.fetch({ url: 'a' });")
+        .expect("unawaited tool calls lower to pending handles; the VM enforces lifetime");
+    assert!(find_receiver_call(&program.main).is_some());
 }
 
 struct ToolCallRecordingHost {
@@ -1409,17 +1409,10 @@ fn contains_start(expr: &Expr) -> bool {
 }
 
 fn contains_aggregate_await(expr: &Expr, unwrap: bool) -> bool {
-    match expr {
-        Expr::Await(value) if matches!(value.as_ref(), Expr::List(_)) => {
-            value
-                .children()
-                .any(|child| matches!(child, Expr::ResultUnwrap(_)))
-                == unwrap
-        }
-        _ => expr
+    matches!(expr, Expr::BuiltinCall { name, args } if name.as_str() == "__typescript_await_array" && matches!(args.last(), Some(Expr::Bool(settle)) if *settle != unwrap))
+        || expr
             .children()
-            .any(|child| contains_aggregate_await(child, unwrap)),
-    }
+            .any(|child| contains_aggregate_await(child, unwrap))
 }
 
 /// The decisive case from the FIG-1305 report.
@@ -1647,7 +1640,7 @@ fn settlement_order_does_not_reach_the_continuation_format() {
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
-        "lashlang-vm-abi-v6",
+        "lashlang-vm-abi-v7",
         "the compiled-batch selection rule moved the VM ABI"
     );
 }

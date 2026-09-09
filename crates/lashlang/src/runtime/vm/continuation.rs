@@ -25,7 +25,7 @@ use super::exceptions::PendingErrorOrigin;
 ///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 8;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 9;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum VmRunOutcome {
@@ -72,6 +72,11 @@ pub struct VmContinuation {
         deserialize_with = "continuation_serde::deserialize_values"
     )]
     pub operand_stack: Vec<Value>,
+    #[serde(
+        serialize_with = "continuation_serde::serialize_slots",
+        deserialize_with = "continuation_serde::deserialize_slots"
+    )]
+    pub pending_tools: Vec<Option<Value>>,
     #[serde(
         serialize_with = "continuation_serde::serialize_optional_value",
         deserialize_with = "continuation_serde::deserialize_optional_value"
@@ -900,6 +905,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             heap_initialized: false,
             extras_heapified: false,
             reference_semantics: false,
+            pending_tools: Vec::new(),
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -936,6 +942,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             heap_initialized: false,
             extras_heapified: false,
             reference_semantics: false,
+            pending_tools: Vec::new(),
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -1075,6 +1082,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 .map(u32::try_from)
                 .transpose()
                 .map_err(|_| ContinuationError::FunctionIndexOverflow)?,
+            pending_tools: self.pending_tools.clone(),
             operand_stack: self.stack.clone(),
             last_value: self.last_value.clone(),
             slots: self.slots.values.clone(),
@@ -1329,6 +1337,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             // only used by durable process segments, which run on their own
             // `State` and never recycle into an `ExecutionScratch`, so there are
             // no earlier marks to carry across the handover blob.
+            pending_tools: continuation.pending_tools,
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -1347,6 +1356,7 @@ mod tests {
             reference_semantics: false,
             instruction_pointer: 0,
             active_function: None,
+            pending_tools: Vec::new(),
             operand_stack: Vec::new(),
             last_value: None,
             slots: Vec::new(),

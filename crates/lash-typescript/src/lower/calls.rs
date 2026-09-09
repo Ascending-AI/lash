@@ -1028,13 +1028,6 @@ impl Lowerer {
             ));
         }
 
-        if self.position.await_depth == 0 {
-            return Err(Diagnostic::new(
-                DiagnosticCode::AwaitRequired,
-                format!("tool call `{method}` must appear under await or Promise.all/allSettled"),
-                None,
-            ));
-        }
         let receiver = if receiver_is_module_authority {
             LashExpr::ResourceRef(ResourceRefExpr::unresolved(
                 module_path(object)
@@ -1046,13 +1039,21 @@ impl Lowerer {
         } else {
             self.lower_expr(object)?
         };
-        Ok(LashExpr::ReceiverCall {
+        let call = LashExpr::ReceiverCall {
             receiver: Box::new(receiver),
             operation: method.into(),
             args: args
                 .iter()
                 .map(|arg| self.lower_expr(arg))
                 .collect::<Result<_, _>>()?,
+        };
+        Ok(if self.position.await_depth == 0 {
+            LashExpr::BuiltinCall {
+                name: "__typescript_pending_tool".into(),
+                args: vec![call],
+            }
+        } else {
+            call
         })
     }
 

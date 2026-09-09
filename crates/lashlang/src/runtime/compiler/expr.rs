@@ -69,6 +69,25 @@ impl Compiler {
             self.code.push(Instruction::CallDynamic);
             return;
         }
+        if let ("__typescript_pending_tool", [call @ Expr::ReceiverCall { .. }]) = (name, args) {
+            self.compile_awaitable_effect_expr(call, None);
+            let instruction = self.code.last_mut().expect("tool call instruction");
+            let Instruction::ResourceCall { operation, argc } = *instruction else {
+                unreachable!()
+            };
+            *instruction = Instruction::PendingTool { operation, argc };
+            return;
+        }
+        if let ("__typescript_await_array", [items, Expr::Bool(settle)]) = (name, args) {
+            self.compile_expr(items);
+            self.code.push(Instruction::AwaitArray { settle: *settle });
+            return;
+        }
+        if let ("__typescript_await_pending", [value]) = (name, args) {
+            self.compile_expr(value);
+            self.code.push(Instruction::AwaitPending);
+            return;
+        }
         if let ("__typescript_async_map", [items, function]) = (name, args) {
             self.compile_expr(items);
             self.compile_expr(function);

@@ -18,6 +18,8 @@ use super::{ActiveLashlangExecutionNode, Vm};
 pub(super) enum VmEffect {
     ResourceCall { operation: usize, argc: usize },
     ResourceCallUnwrap { operation: usize, argc: usize },
+    AwaitArray { settle: bool },
+    AwaitPending,
     ResourceOperationBatch(usize),
     StartProcess { process: usize, keys: usize },
     AwaitHandle,
@@ -98,6 +100,24 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .and_then(|result| result.into_value("module operation"))
                     .map_err(|source| RuntimeError::UnwrappedModuleOperationFailed { source })?;
                 self.stack.push(value);
+            }
+            VmEffect::AwaitArray { settle } => {
+                self.await_pending_array(settle).await?;
+            }
+            VmEffect::AwaitPending => {
+                let value = self.pop_stack()?;
+                if super::pending_tools::pending_tool_id(&value).is_none() {
+                    return Err(RuntimeError::PendingTool {
+                        problem: "await requires a pending handle; this value is already settled"
+                            .into(),
+                    });
+                }
+                self.stack.push(Value::List(vec![value].into()));
+                self.await_pending_array(false).await?;
+                let Value::List(values) = self.pop_stack()? else {
+                    unreachable!()
+                };
+                self.stack.push(values[0].clone());
             }
             VmEffect::ResourceOperationBatch(batch) => {
                 self.resolve_resource_operation_batch(batch).await?;
@@ -230,6 +250,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.stack.push(Value::Null);
             }
             VmEffect::Finish => {
+                self.ensure_no_pending_tools()?;
                 let value = self.pop_stack()?;
                 let value = self
                     .host
@@ -257,9 +278,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     async fn resolve_resource_operation_batch(&mut self, batch: usize) -> Result<(), RuntimeError> {
-        let batch = &self.chunk.resource_operation_batches[batch];
+        let batch = self.chunk.resource_operation_batches[batch].clone();
         let start = self.stack_drain_start(batch.stack_value_count)?;
         let values = self.stack.drain(start..).collect::<Vec<_>>();
+        self.resolve_batch_spec(&batch, values).await
+    }
+
+    pub(super) async fn resolve_batch_spec(
+        &mut self,
+        batch: &super::super::CompiledResourceOperationBatch,
+        values: Vec<Value>,
+    ) -> Result<(), RuntimeError> {
         let mut operations = Vec::with_capacity(batch.leaves.len());
         let mut active_nodes = Vec::with_capacity(batch.leaves.len());
         for leaf in batch.leaves.iter() {

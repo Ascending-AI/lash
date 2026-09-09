@@ -170,9 +170,9 @@ pub(super) fn instruction_heap_plan(
         // Opcodes whose operand count is carried in the instruction, or in the
         // table the instruction points at.
         I::BeginRangeIter { argc, .. } => InstructionHeapPlan::stack(Top(argc)),
-        I::ResourceCall { argc, .. } | I::ResourceCallUnwrap { argc, .. } => {
-            InstructionHeapPlan::stack(Top(argc + 1))
-        }
+        I::PendingTool { argc, .. }
+        | I::ResourceCall { argc, .. }
+        | I::ResourceCallUnwrap { argc, .. } => InstructionHeapPlan::stack(Top(argc + 1)),
         I::ResourceOperationBatch(batch) => InstructionHeapPlan::stack(Top(chunk
             .resource_operation_batches[batch]
             .stack_value_count)),
@@ -180,7 +180,9 @@ pub(super) fn instruction_heap_plan(
             InstructionHeapPlan::stack(Top(chunk.key_lists[keys].len()))
         }
 
-        I::Print
+        I::AwaitArray { .. }
+        | I::AwaitPending
+        | I::Print
         | I::Finish
         | I::SleepFor
         | I::SleepUntil

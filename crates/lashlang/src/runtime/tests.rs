@@ -778,6 +778,9 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
                 compact_json(&chunk.constants[index])
             )
         }
+        Instruction::PendingTool { operation, argc } => format!("pending_tool {operation} {argc}"),
+        Instruction::AwaitArray { settle } => format!("await_array {settle}"),
+        Instruction::AwaitPending => "await_pending".to_string(),
         Instruction::PushNull => "push_null".to_string(),
         Instruction::PushUndefined => "push_undefined".to_string(),
         Instruction::PushBool(value) => format!("push_bool {value}"),

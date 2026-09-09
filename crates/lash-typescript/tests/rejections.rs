@@ -128,16 +128,6 @@ rejection_test!(
     "new WeakMap();",
     Code::NewUnsupported
 );
-rejection_test!(
-    rejects_unsupported_await,
-    "await 1;",
-    Code::AwaitUnsupported
-);
-rejection_test!(
-    rejects_unawaited_tool_call,
-    "web.fetch({});",
-    Code::AwaitRequired
-);
 rejection_test!(rejects_unawaited_sleep, "sleep(1);", Code::AwaitRequired);
 
 #[test]
@@ -523,17 +513,6 @@ fn a_rejection_points_at_the_line_the_model_wrote() {
 #[test]
 fn a_multi_use_code_gives_advice_that_matches_the_actual_refusal() {
     for (source, must_contain, must_not_contain) in [
-        // What may be awaited, not where await may appear.
-        (
-            "const x = 1; finish(await x);",
-            "already settled",
-            "top level",
-        ),
-        (
-            "finish(await Promise.all('nope'));",
-            "build the array first",
-            "top level",
-        ),
         // Arity, not availability.
         (
             "finish([1].map());",
