@@ -45,3 +45,6 @@ mod value_depth_guard;
 
 #[path = "runtime_promises.rs"]
 mod runtime_promises;
+
+#[path = "console_output.rs"]
+mod console_output;

@@ -28,6 +28,7 @@ pub(super) enum VmEffect {
     SignalRun { name: usize },
     AwaitHandleUnwrap,
     CancelHandle,
+    PrintValues(usize),
     Print,
     ProcessEvent(ProcessEventKind),
     Finish,
@@ -239,6 +240,25 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .map_err(|source| RuntimeError::ProcessEventFailed { source })?;
                 self.last_value = Some(value.clone());
                 self.stack.push(value);
+            }
+            VmEffect::PrintValues(argc) => {
+                use super::super::{BudgetedJsonProjector, ValueProjectionContext, ValueProjector};
+                let start = self.stack_drain_start(argc)?;
+                let values = self.stack.drain(start..).collect::<Vec<_>>();
+                let mut rendered = Vec::with_capacity(values.len());
+                for value in values {
+                    rendered.push(
+                        BudgetedJsonProjector::unbounded()
+                            .project(ValueProjectionContext::new(&value))
+                            .await,
+                    );
+                }
+                self.host
+                    .perform(AbilityOp::Print(Value::String(rendered.join(" ").into())))
+                    .await
+                    .map_err(|source| RuntimeError::PrintFailed { source })?;
+                self.last_value = Some(Value::Null);
+                self.stack.push(Value::Null);
             }
             VmEffect::Print => {
                 let value = self.pop_stack()?;

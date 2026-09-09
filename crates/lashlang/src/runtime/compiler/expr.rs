@@ -88,6 +88,13 @@ impl Compiler {
             self.code.push(Instruction::AwaitPending);
             return;
         }
+        if name == "__typescript_console" {
+            for arg in args {
+                self.compile_expr(arg);
+            }
+            self.code.push(Instruction::PrintValues(args.len()));
+            return;
+        }
         if let ("__typescript_async_map", [items, function]) = (name, args) {
             self.compile_expr(items);
             self.compile_expr(function);

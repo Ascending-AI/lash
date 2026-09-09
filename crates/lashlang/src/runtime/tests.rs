@@ -934,6 +934,7 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         Instruction::AppendAssign(slot) => {
             format!("append_assign {slot}:{}", slot_name(chunk, slot))
         }
+        Instruction::PrintValues(argc) => format!("print_values {argc}"),
         Instruction::Print => "print".to_string(),
         Instruction::Finish => "finish".to_string(),
         Instruction::ProcessYield => "process_yield".to_string(),
