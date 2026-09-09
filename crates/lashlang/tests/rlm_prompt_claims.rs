@@ -1221,6 +1221,44 @@ finish items"#,
     assert_eq!(second["chars"], Value::Number(6.0));
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Prompt claim: "Aggregate await ... fans out direct operation leaves in
+//               literal lists/records and in list comprehensions of direct
+//               module calls ... `?` unwraps each leaf"
+// ─────────────────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "current_thread")]
+async fn prompt_claim_aggregate_await_fans_out_list_comprehensions_of_calls() {
+    let host = MockHost::default()
+        .with_file("Cargo.toml", "abc")
+        .with_file("README.md", "abcdef");
+    let Value::Record(record) = run(
+        &host,
+        r#"paths = ["Cargo.toml", "README.md", "skip.md"]
+unwrapped = await [files.read({ path: path })? for path in paths if path != "skip.md"]
+wrapped = await [files.read({ path: path }) for path in paths if path != "skip.md"]
+finish { unwrapped: unwrapped, wrapped: wrapped }"#,
+    ) else {
+        panic!("expected record");
+    };
+
+    assert_eq!(
+        record["unwrapped"],
+        Value::List(vec![Value::String("abc".into()), Value::String("abcdef".into())].into()),
+        "`?` on the comprehension leaf yields the unwrapped values"
+    );
+    let Value::List(wrapped) = &record["wrapped"] else {
+        panic!("expected wrapped list");
+    };
+    assert_eq!(wrapped.len(), 2);
+    let first = wrapped[0].as_record().expect("first wrapper");
+    assert_eq!(first["ok"], Value::Bool(true));
+    assert_eq!(first["value"], Value::String("abc".into()));
+    let second = wrapped[1].as_record().expect("second wrapper");
+    assert_eq!(second["ok"], Value::Bool(true));
+    assert_eq!(second["value"], Value::String("abcdef".into()));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn prompt_example_prints_targeted_slice_for_large_values() {
     let host = MockHost::default().with_file("Cargo.toml", "abcdef");

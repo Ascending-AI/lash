@@ -29,14 +29,14 @@ use super::schema::{SchemaScalarKind, ValidationPlan, compile_schema_value};
 use super::{
     Chunk, ClosureParameterModel, CompileStats, CompiledAggregateAwaitShape, CompiledAssignPath,
     CompiledAssignPathStep, CompiledFormatTemplate, CompiledFunction,
-    CompiledResourceOperationBatch, CompiledResourceOperationBatchLeaf, HandlerScopeExtent,
-    Instruction, IntrinsicOp, JavaScriptUriCodec, LASH_HOST_REQUIREMENTS_REF_KEY,
-    LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
-    LASH_TYPE_KEY, Name, Value, as_number, compile_format_template, eval_binary_values,
-    eval_javascript_binary, eval_javascript_unary, execute_integer_div_builtin, execute_len_direct,
-    execute_range_builtin, is_comparison_binary_op, is_numeric_binary_op, is_truthy,
-    read_field_direct, read_index_direct, read_javascript_field_direct,
-    read_javascript_index_direct, transient_name, unwrap_type_value,
+    CompiledResourceOperationBatch, CompiledResourceOperationBatchLeaf,
+    CompiledResourceOperationListBatch, HandlerScopeExtent, Instruction, IntrinsicOp,
+    JavaScriptUriCodec, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY,
+    LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY, Name, Value, as_number,
+    compile_format_template, eval_binary_values, eval_javascript_binary, eval_javascript_unary,
+    execute_integer_div_builtin, execute_len_direct, execute_range_builtin,
+    is_comparison_binary_op, is_numeric_binary_op, is_truthy, read_field_direct, read_index_direct,
+    read_javascript_field_direct, read_javascript_index_direct, transient_name, unwrap_type_value,
 };
 
 pub(crate) struct Compiler {
@@ -55,6 +55,7 @@ pub(crate) struct Compiler {
     compiled_schemas: Vec<ValidationPlan>,
     assign_paths: Vec<CompiledAssignPath>,
     resource_operation_batches: Vec<CompiledResourceOperationBatch>,
+    resource_operation_list_batches: Vec<CompiledResourceOperationListBatch>,
     compile_stats: Rc<RefCell<CompileStats>>,
     const_slots: Vec<Option<Value>>,
     loop_contexts: Vec<LoopContext>,

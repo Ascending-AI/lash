@@ -23,10 +23,10 @@ impl ExecutionHost for FluencyHost {
             AbilityOp::ResourceOperation(call) => {
                 Ok(AbilityResult::Value(resource_operation_value(&call, 0)))
             }
-            AbilityOp::StartProcess(_) => {
-                Ok(AbilityResult::Value(Value::String("fluency-run".into())))
-            }
-            AbilityOp::Await(Value::String(handle)) if handle.as_str() == "fluency-run" => {
+            AbilityOp::StartProcess(_) => Ok(AbilityResult::Value(process_handle("fluency-run"))),
+            AbilityOp::Await(Value::Record(handle))
+                if handle.get("id") == Some(&Value::String("fluency-run".into())) =>
+            {
                 Ok(AbilityResult::Value(Value::Number(2.0)))
             }
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
@@ -35,6 +35,15 @@ impl ExecutionHost for FluencyHost {
             ))),
         }
     }
+}
+
+/// The handle record a real host mints for a started process; a bare string
+/// is a resolved value, and awaiting one is a guest error.
+fn process_handle(id: &str) -> Value {
+    let mut handle = lashlang::Record::new();
+    handle.insert("__handle__".to_string(), Value::String("process".into()));
+    handle.insert("id".to_string(), Value::String(id.into()));
+    Value::Record(std::sync::Arc::new(handle))
 }
 
 /// Answers one host resource operation.

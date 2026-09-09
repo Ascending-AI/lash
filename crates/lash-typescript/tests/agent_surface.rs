@@ -256,15 +256,24 @@ fn foreground_wake_delivers_a_named_process_signal() {
 
 struct StartHost;
 
+/// The handle record a real host mints for a started process; a bare string
+/// is a resolved value, and awaiting one is a guest error.
+fn process_handle(id: &str) -> Value {
+    let mut handle = lashlang::Record::new();
+    handle.insert("__handle__".to_string(), Value::String("process".into()));
+    handle.insert("id".to_string(), Value::String(id.into()));
+    Value::Record(std::sync::Arc::new(handle))
+}
+
 impl ExecutionHost for StartHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::StartProcess(start) => {
                 assert_eq!(start.process_name, "worker");
                 assert_eq!(start.args.get("input"), Some(&Value::Number(3.0)));
-                Ok(AbilityResult::Value(Value::String("run-handle".into())))
+                Ok(AbilityResult::Value(process_handle("run-handle")))
             }
-            AbilityOp::Await(Value::String(handle)) if handle.as_str() == "run-handle" => {
+            AbilityOp::Await(handle) if handle == process_handle("run-handle") => {
                 Ok(AbilityResult::Value(Value::Number(6.0)))
             }
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),

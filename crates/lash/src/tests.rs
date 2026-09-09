@@ -2390,6 +2390,8 @@ use harness::{
     mock_model_spec, model_spec, run_async_test_on_stack_budget, run_async_test_on_stack_size,
 };
 mod agent_scenarios;
+#[cfg(feature = "rlm")]
+mod aggregate_await_comprehension;
 mod plugin_stack;
 #[cfg(feature = "rlm")]
 mod processes_endstate;

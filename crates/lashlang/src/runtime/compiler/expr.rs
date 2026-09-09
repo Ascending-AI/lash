@@ -289,7 +289,10 @@ impl Compiler {
                 });
             }
             Expr::ListComprehension { element, clauses } => {
-                self.compile_list_comprehension(element, clauses);
+                self.compile_list_comprehension(
+                    super::entry::ListComprehensionElement::Value(element),
+                    clauses,
+                );
             }
             Expr::Record(entries) => {
                 for (_, value) in entries {

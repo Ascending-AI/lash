@@ -176,6 +176,7 @@ pub(super) fn instruction_heap_plan(
         I::ResourceOperationBatch(batch) => InstructionHeapPlan::stack(Top(chunk
             .resource_operation_batches[batch]
             .stack_value_count)),
+        I::ResourceOperationListBatch(_) => InstructionHeapPlan::stack(Top(1)),
         I::StartProcess { keys, .. } => {
             InstructionHeapPlan::stack(Top(chunk.key_lists[keys].len()))
         }
