@@ -57,7 +57,6 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-tool-schema-cache/v2",
     "lash-turn-input/v2",
     "lash-usage-ledger-request/v1",
-    "lash-usage-ledger-request/v2",
     "lash-workflow-edge/v2",
     "lash-workflow-node/v2",
     "lash-workflow-source/v2",
@@ -394,12 +393,11 @@ mod blake3_domain_tests {
     use super::BLAKE3_DOMAINS;
 
     // Permanently reserved, but no longer used: the plugin snapshot revision
-    // after FIG-2113; the v2 usage payload and v1 usage-ledger request after
-    // FIG-2765 moved both to disposition-carrying encodings.
+    // after FIG-2113; the v2 usage payload after FIG-2765 moved it to a
+    // disposition-carrying encoding.
     const RETIRED_BLAKE3_DOMAINS: &[&str] = &[
         "lash-plugin-snapshot-revision/v2",
         "lash-runtime-usage-payload/v2",
-        "lash-usage-ledger-request/v1",
     ];
 
     fn rust_sources_below(root: &Path) -> Vec<PathBuf> {

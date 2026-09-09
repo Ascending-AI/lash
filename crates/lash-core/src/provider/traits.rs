@@ -89,7 +89,7 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     }
 
     /// Look up, after the fact, the usage of a generation whose stream ended
-    /// before the provider reported it (ADR 0031, FIG-2765): an RLM cell
+    /// before the provider reported it (ADR 0031, FIG-2765): a protocol
     /// boundary aborted the stream, or the attempt failed mid-stream.
     ///
     /// `generation_id` is the provider response id the attempt's execution

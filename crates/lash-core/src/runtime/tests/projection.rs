@@ -806,6 +806,7 @@ async fn completed_turns_are_persisted_in_session_graph() {
                 reasoning_output_tokens: 2,
             },
             response_metadata: Default::default(),
+            terminal_reason: crate::LlmTerminalReason::Stop,
             ..LlmResponse::default()
         }),
     }]);

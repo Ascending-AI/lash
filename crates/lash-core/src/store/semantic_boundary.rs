@@ -10,6 +10,10 @@ use super::*;
 
 const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
 const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
+// Version 2 (FIG-2765): staged usage rows carry their usage disposition through
+// the v3 usage-payload identity, so a retried usage-ledger commit whose rows
+// gained a hole or a correction no longer matches a v1 receipt. The projection
+// and domain are unchanged; the version is the fence.
 const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 2;
 
 /// Refuse settlement or evidence content on a semantic-boundary commit.
@@ -120,10 +124,9 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
 }
 
 /// Compute the versioned canonical request identity for one adopting
-/// operation. Every encoding hashes the shared request projection under an
-/// operation-owned, version-suffixed domain string, so identical bytes for
-/// different operations (or versions) can never collide into one identity
-/// family.
+/// operation. Every version-1 encoding hashes the shared request projection
+/// under an operation-owned domain string, so identical bytes for different
+/// operations can never collide into one identity family.
 pub(super) fn semantic_boundary_request_identity(
     commit: &RuntimeCommit,
     operation: crate::store::SemanticBoundaryOperation,
@@ -141,10 +144,7 @@ pub(super) fn semantic_boundary_request_identity(
         ),
         Operation::UsageLedger => (
             USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION,
-            // v2: staged usage rows carry a `usage_disposition` (FIG-2765),
-            // so a retried usage-ledger commit whose rows gained a hole or a
-            // correction encodes under its own family.
-            crate::stable_hash::blake3_hex("lash-usage-ledger-request/v2", encoded.as_bytes()),
+            crate::stable_hash::blake3_hex("lash-usage-ledger-request/v1", encoded.as_bytes()),
         ),
     })
 }

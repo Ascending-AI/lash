@@ -69,7 +69,7 @@ pub const DEFAULT_ABORT_DRAIN_GRACE: std::time::Duration = std::time::Duration::
 pub struct RuntimeControlConfig {
     pub effect_host: Arc<dyn EffectHost>,
     pub termination: TerminationPolicy,
-    /// How long a protocol-owned stream abort (an RLM cell boundary that ends
+    /// How long a protocol-owned stream abort (a protocol boundary that ends
     /// the model's turn under ADR 0036's no-wire-stop rule) keeps draining the
     /// provider stream before the task is aborted. The drain exists so a
     /// cooperative provider's trailing usage event still lands on the aborted
