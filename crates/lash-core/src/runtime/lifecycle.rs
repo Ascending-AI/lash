@@ -277,7 +277,11 @@ impl LashRuntime {
                 crate::plugin::ProtocolSessionRestoreView::new(&state),
             )
             .await?;
-        state.discard_runtime_snapshots();
+        if session.history_store().is_some() {
+            state.discard_runtime_snapshots();
+        } else {
+            state.discard_runtime_snapshots_retaining_accepted_execution();
+        }
         session
             .plugins()
             .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(

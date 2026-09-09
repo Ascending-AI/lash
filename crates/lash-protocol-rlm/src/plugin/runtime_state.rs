@@ -14,7 +14,6 @@ pub(crate) struct RlmRuntimeState {
     dialect: Arc<dyn RlmDialect>,
     session_projected_bindings: tokio::sync::Mutex<RlmProjectedBindings>,
     execution: tokio::sync::Mutex<Box<dyn RlmDialectSession>>,
-    active_agent_frame_id: tokio::sync::Mutex<Option<String>>,
     bound_variables_prompt: SharedBoundVariablesPrompt,
 }
 
@@ -34,7 +33,6 @@ impl RlmRuntimeState {
             dialect_registry,
             dialect,
             session_projected_bindings: tokio::sync::Mutex::new(RlmProjectedBindings::new()),
-            active_agent_frame_id: tokio::sync::Mutex::new(None),
             bound_variables_prompt,
         })
     }
@@ -170,27 +168,36 @@ impl RlmRuntimeState {
             .map_err(|err| SessionError::Protocol(err.to_string()))
     }
 
+    /// Rebuild execution state and projected bindings from the restore view.
+    ///
+    /// Every restore replaces what this state holds (FIG-2521): the execution
+    /// starts from a fresh dialect session, adopts the view's snapshot when the
+    /// view carries one, and replays the view's seed and globals events; the
+    /// projected bindings are rebuilt from those events alone. Restoring the
+    /// frame this state already holds is therefore idempotent — a seed the
+    /// view replays is re-bound rather than rejected — and nothing a failed
+    /// operation left in the live execution survives: an append rolled back on
+    /// commit failure or a follow-on turn whose commit was refused may have
+    /// assigned globals or bound a projected name that never persisted, and
+    /// the view is the only authority. The runtime builds that view from the
+    /// committed state — the durable head, or the pre-append capture for an
+    /// append rollback — so a view without a snapshot restores exactly what a
+    /// cold reopen would build: the frame's replayed events on a fresh
+    /// session.
     pub(crate) async fn restore_runtime_session_state(
         &self,
         state: lash_core::plugin::ProtocolSessionRestoreView,
     ) -> Result<(), SessionError> {
-        let mut active_agent_frame_id = self.active_agent_frame_id.lock().await;
         let mut execution_guard = self.execution.lock().await;
         let execution = &mut *execution_guard;
-        let current_frame_node_id = state
-            .current_frame_node_id
-            .as_ref()
-            .map(ToString::to_string);
-        if *active_agent_frame_id != current_frame_node_id {
-            *execution = self.dialect.create_session()?;
-            *self.session_projected_bindings.lock().await = RlmProjectedBindings::new();
-            *active_agent_frame_id = current_frame_node_id;
-        }
-        let protected_names = self.protected_projected_binding_names().await;
-        if let Some(snapshot) = state.execution_state.map_err(|error| SessionError::Store {
+        let snapshot = state.execution_state.map_err(|error| SessionError::Store {
             context: "failed to hydrate RLM execution-state components".to_string(),
             source: error,
-        })? {
+        })?;
+        *execution = self.dialect.create_session()?;
+        *self.session_projected_bindings.lock().await = RlmProjectedBindings::new();
+        let protected_names = self.protected_projected_binding_names().await;
+        if let Some(snapshot) = snapshot {
             execution.restore_execution_state(&snapshot)?;
             execution.prune_protected_globals(&protected_names)?;
         }
@@ -203,7 +210,6 @@ impl RlmRuntimeState {
             }
         }
         drop(execution_guard);
-        drop(active_agent_frame_id);
         self.refresh_bound_variables_prompt().await?;
         Ok(())
     }
@@ -865,6 +871,295 @@ mod tests {
                                     language `typescript` is pinned"
                     ),
                     "{inactive:?}"
+                );
+            });
+    }
+
+    /// A restore view for `frame` whose active history carries one RLM seed
+    /// event per label, each binding `projected_<label>`.
+    fn seed_restore_view(
+        frame: &str,
+        labels: &[&str],
+    ) -> lash_core::plugin::ProtocolSessionRestoreView {
+        restore_view(
+            frame,
+            None,
+            labels
+                .iter()
+                .flat_map(|label| projected_seed_nodes(label))
+                .collect(),
+        )
+    }
+
+    /// A restore view for `frame` carrying `snapshot` and `nodes` as its
+    /// active history.
+    fn restore_view(
+        frame: &str,
+        snapshot: Option<lash_core::plugin::HydratedExecutionState>,
+        nodes: Vec<lash_core::SessionAppendNode>,
+    ) -> lash_core::plugin::ProtocolSessionRestoreView {
+        lash_core::plugin::ProtocolSessionRestoreView {
+            current_frame_node_id: Some(lash_core::FrameNodeId::new(frame)),
+            execution_state: Ok(snapshot),
+            active_events: nodes
+                .into_iter()
+                .map(|node| match node {
+                    lash_core::SessionAppendNode::ProtocolEvent { event, .. } => {
+                        SessionHistoryRecord::Protocol(event)
+                    }
+                    other => panic!("seed nodes are protocol events: {other:?}"),
+                })
+                .collect(),
+        }
+    }
+
+    /// One RLM seed event binding `projected_<label>` and defaulting the
+    /// global `baton` to `label`.
+    fn baton_seed_nodes(label: &str) -> Vec<lash_core::SessionAppendNode> {
+        let mut seed =
+            crate::projection::RlmSeed::from_seed_value(&serde_json::json!({ "baton": label }))
+                .expect("seed value");
+        seed.projected.push(
+            format!("projected_{label}"),
+            lash_rlm_types::RlmProjectedSeedEntry::Materialized(serde_json::json!({
+                "value": label
+            })),
+        );
+        crate::projection::rlm_seed_initial_nodes(seed)
+    }
+
+    /// The value `finish baton` yields on the state's live execution.
+    async fn live_baton(state: &RlmRuntimeState) -> serde_json::Value {
+        let response = state
+            .execute_code(
+                lash_core::testing::code_execution_context(),
+                cell("finish baton"),
+            )
+            .await
+            .expect("the baton cell runs");
+        state
+            .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+            .await
+            .expect("settle the baton cell");
+        assert_eq!(response.error, None);
+        response.terminal_finish.expect("the baton cell finishes")
+    }
+
+    fn projected_seed_nodes(label: &str) -> Vec<lash_core::SessionAppendNode> {
+        let mut seed = crate::projection::RlmSeed::default();
+        seed.projected.push(
+            format!("projected_{label}"),
+            lash_rlm_types::RlmProjectedSeedEntry::Materialized(serde_json::json!({
+                "value": label
+            })),
+        );
+        crate::projection::rlm_seed_initial_nodes(seed)
+    }
+
+    fn projected_binding_names(contributions: &[lash_core::PromptContribution]) -> Vec<String> {
+        let rendered = format!("{contributions:?}");
+        ["projected_seed", "projected_discarded"]
+            .into_iter()
+            .filter(|name| rendered.contains(name))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// FIG-2521: restoring the frame the state already holds is idempotent.
+    ///
+    /// The runtime restores the protocol session on the current frame after a
+    /// follow-on failure, a reopen-seed receipt replay and an append rollback.
+    /// Each replays the frame's seed events into a state that already bound
+    /// them; the projected seed must be re-bound from the view, never rejected
+    /// as a duplicate.
+    #[test]
+    fn same_frame_restore_rebinds_an_already_bound_projected_seed() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                let state = RlmRuntimeState::new_lashlang_for_tests().expect("state");
+                state
+                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
+                    .await
+                    .expect("first restore binds the seed");
+                let first = state.projected_binding_prompt_contributions().await;
+                assert_eq!(projected_binding_names(&first), ["projected_seed"]);
+
+                state
+                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
+                    .await
+                    .expect("a same-frame restore re-binds the seed it already holds");
+                let second = state.projected_binding_prompt_contributions().await;
+                assert_eq!(
+                    format!("{second:?}"),
+                    format!("{first:?}"),
+                    "a same-frame restore rebuilds exactly the view's bindings"
+                );
+                assert_eq!(
+                    projected_binding_names(&second),
+                    ["projected_seed"],
+                    "the seed is bound once, never twice"
+                );
+            });
+    }
+
+    /// FIG-2521: a same-frame restore replaces the live bindings with the
+    /// view's, so a binding appended but never persisted (an append rolled
+    /// back on commit failure) does not survive into the next prompt.
+    #[test]
+    fn same_frame_restore_drops_bindings_absent_from_the_restore_view() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                let state = RlmRuntimeState::new_lashlang_for_tests().expect("state");
+                state
+                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
+                    .await
+                    .expect("restore binds the durable seed");
+                let durable = state.projected_binding_prompt_contributions().await;
+
+                state
+                    .append_session_nodes(&projected_seed_nodes("discarded"))
+                    .await
+                    .expect("the append binds the pending seed");
+                let pending = state.projected_binding_prompt_contributions().await;
+                assert_eq!(
+                    projected_binding_names(&pending),
+                    ["projected_seed", "projected_discarded"]
+                );
+
+                state
+                    .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
+                    .await
+                    .expect("rolling back to the durable view on the same frame succeeds");
+                let rolled_back = state.projected_binding_prompt_contributions().await;
+                assert_eq!(
+                    format!("{rolled_back:?}"),
+                    format!("{durable:?}"),
+                    "the rolled-back append's binding must not survive the restore"
+                );
+            });
+    }
+
+    /// FIG-2521: a same-frame restore whose view carries no execution snapshot
+    /// rebuilds the execution from the view's events on a fresh session, so a
+    /// global assigned by a cell whose turn never committed does not survive.
+    /// This is the view the runtime builds after a follow-on failure whose
+    /// durable head holds no execution root (a frame switch clears it).
+    #[test]
+    fn same_frame_restore_without_a_snapshot_discards_uncommitted_execution() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                let state = RlmRuntimeState::new_lashlang_for_tests().expect("state");
+                state
+                    .restore_runtime_session_state(restore_view(
+                        "frame-1",
+                        None,
+                        baton_seed_nodes("committed"),
+                    ))
+                    .await
+                    .expect("restore seeds the committed baton");
+                assert_eq!(live_baton(&state).await, serde_json::json!("committed"));
+
+                let mutated = state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        cell("baton = \"uncommitted\"\nfinish baton"),
+                    )
+                    .await
+                    .expect("the mutating cell runs");
+                assert_eq!(
+                    mutated.terminal_finish,
+                    Some(serde_json::json!("uncommitted"))
+                );
+                state
+                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+                    .await
+                    .expect("settle the mutating cell");
+
+                state
+                    .restore_runtime_session_state(restore_view(
+                        "frame-1",
+                        None,
+                        baton_seed_nodes("committed"),
+                    ))
+                    .await
+                    .expect("a same-frame restore without a snapshot succeeds");
+                assert_eq!(
+                    live_baton(&state).await,
+                    serde_json::json!("committed"),
+                    "the restore must rebuild the execution from the view, not keep the \
+                     uncommitted assignment"
+                );
+            });
+    }
+
+    /// FIG-2521: a same-frame restore whose view carries an execution snapshot
+    /// replaces the live execution with that snapshot. This is the view the
+    /// runtime builds for an append rollback (the pre-append capture) and for a
+    /// reload whose durable head carries an execution root.
+    #[test]
+    fn same_frame_restore_with_a_snapshot_replaces_the_live_execution() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                let state = RlmRuntimeState::new_lashlang_for_tests().expect("state");
+                state
+                    .restore_runtime_session_state(restore_view(
+                        "frame-1",
+                        None,
+                        baton_seed_nodes("committed"),
+                    ))
+                    .await
+                    .expect("restore seeds the committed baton");
+                let committed = state
+                    .hydrated_execution_state()
+                    .await
+                    .expect("capture")
+                    .expect("the RLM executor always holds a snapshotable state");
+
+                let mutated = state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        cell("baton = \"uncommitted\"\nfinish baton"),
+                    )
+                    .await
+                    .expect("the mutating cell runs");
+                assert_eq!(
+                    mutated.terminal_finish,
+                    Some(serde_json::json!("uncommitted"))
+                );
+                state
+                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+                    .await
+                    .expect("settle the mutating cell");
+
+                state
+                    .restore_runtime_session_state(restore_view(
+                        "frame-1",
+                        Some(committed.clone()),
+                        baton_seed_nodes("committed"),
+                    ))
+                    .await
+                    .expect("a same-frame restore with a snapshot succeeds");
+                assert_eq!(live_baton(&state).await, serde_json::json!("committed"));
+                assert_eq!(
+                    state
+                        .hydrated_execution_state()
+                        .await
+                        .expect("capture")
+                        .expect("state"),
+                    committed,
+                    "the restored execution is exactly the view's snapshot"
                 );
             });
     }

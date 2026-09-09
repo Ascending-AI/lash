@@ -28,6 +28,17 @@ enum ExecutionStateBodyResidency {
     CommitResultMismatch,
 }
 
+/// What a post-commit body release keeps for a later same-frame restore.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AcceptedExecutionRetention {
+    /// A store holds the committed checkpoint: a restore rehydrates from it,
+    /// and the released execution bodies are a second resident copy.
+    DurableHead,
+    /// No store can supply the committed execution: the accepted execution
+    /// bodies stay resident until the next commit supersedes them (FIG-2521).
+    Resident,
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 enum ResidentCheckpointComponentBody {
     ToolState {
@@ -504,6 +515,19 @@ impl RuntimeCheckpointComponents {
         Ok(())
     }
 
+    /// Whether the next commit can reference the execution-state leaf `key`
+    /// as unchanged: the resident set holds its durable ref or its pending body.
+    fn holds_execution_state_leaf(&self, key: &str) -> bool {
+        self.entries.get(key).is_some_and(|entry| {
+            entry.descriptor.is_some()
+                || (entry.dirty
+                    && matches!(
+                        &entry.body,
+                        ResidentCheckpointComponentBody::Opaque(Some(_))
+                    ))
+        })
+    }
+
     fn execution_state_hydration(
         &self,
     ) -> Result<Option<crate::plugin::HydratedExecutionState>, crate::StoreError> {
@@ -516,14 +540,25 @@ impl RuntimeCheckpointComponents {
             });
         }
         let Some(root) = self.execution_state_snapshot() else {
+            if self.execution_state_body_residency
+                == ExecutionStateBodyResidency::DiscardedPostCommit
+            {
+                // A released root is never "no execution" (FIG-2521): the
+                // durable head must be hydrated instead. Only a set with no
+                // root entry at all never held execution.
+                if self
+                    .entries
+                    .contains_key(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+                {
+                    return Err(crate::StoreError::ExecutionStateBodiesReleased);
+                }
+                return Ok(None);
+            }
             let has_leaves = self
                 .entries
                 .keys()
                 .any(|key| key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX));
-            if has_leaves
-                && self.execution_state_body_residency
-                    != ExecutionStateBodyResidency::DiscardedPostCommit
-            {
+            if has_leaves {
                 return Err(crate::StoreError::StoredDataCorrupt {
                     record_kind: "RuntimeCheckpointComponents",
                     message: "execution-state leaves exist without a root component".to_string(),
@@ -568,7 +603,31 @@ impl RuntimeCheckpointComponents {
             .is_ok_and(|resident| resident.components == manifest.components)
     }
 
-    fn discard_known_bodies(&mut self, committed_components_match: bool) {
+    fn discard_known_bodies(
+        &mut self,
+        committed_components_match: bool,
+        retention: AcceptedExecutionRetention,
+    ) {
+        // With no store to rehydrate from, the resident execution bodies are
+        // the accepted execution itself (FIG-2521): they stay in place, the
+        // residency proof is untouched, and only the tool and plugin snapshots
+        // — re-exported from the live plugins — are released. A set without a
+        // root holds no execution to keep and is released like any other.
+        if retention == AcceptedExecutionRetention::Resident
+            && self.execution_state_snapshot().is_some()
+        {
+            for component in self.entries.values_mut() {
+                match &mut component.body {
+                    ResidentCheckpointComponentBody::ToolState { snapshot, .. } => *snapshot = None,
+                    ResidentCheckpointComponentBody::PluginState { snapshot, .. } => {
+                        *snapshot = None
+                    }
+                    ResidentCheckpointComponentBody::ExecutionState(_)
+                    | ResidentCheckpointComponentBody::Opaque(_) => {}
+                }
+            }
+            return;
+        }
         // This is the sole writer of the privileged `DiscardedPostCommit`
         // state. Staging may only reset the proof to `Resident`.
         self.execution_state_body_residency = match (
@@ -921,8 +980,10 @@ impl RuntimeSessionState {
             .checkpoint_components
             .manifest_matches_resident_commit_intent(&result.manifest);
         self.checkpoint_components.adopt_manifest(&result.manifest);
-        self.checkpoint_components
-            .discard_known_bodies(committed_components_match);
+        self.checkpoint_components.discard_known_bodies(
+            committed_components_match,
+            AcceptedExecutionRetention::DurableHead,
+        );
     }
 
     pub fn pending_graph_commit(&self) -> crate::GraphAppend {
@@ -956,7 +1017,17 @@ impl RuntimeSessionState {
     /// Clears in-memory tool, plugin, and execution-state snapshots for protocol implementors after
     /// their durable references have become authoritative.
     pub fn discard_runtime_snapshots(&mut self) {
-        self.checkpoint_components.discard_known_bodies(true);
+        self.checkpoint_components
+            .discard_known_bodies(true, AcceptedExecutionRetention::DurableHead);
+    }
+
+    /// [`Self::discard_runtime_snapshots`] for a session no store backs: the
+    /// accepted execution bodies stay resident, replaced at the next commit,
+    /// so a same-frame restore rebuilds from them instead of from nothing
+    /// (FIG-2521).
+    pub(crate) fn discard_runtime_snapshots_retaining_accepted_execution(&mut self) {
+        self.checkpoint_components
+            .discard_known_bodies(true, AcceptedExecutionRetention::Resident);
     }
 
     /// Updates execution state snapshot state for protocol and process-engine implementors while
@@ -982,6 +1053,30 @@ impl RuntimeSessionState {
     ) -> Result<(), crate::StoreError> {
         self.checkpoint_components
             .set_execution_state_components(snapshot)
+    }
+
+    /// Stages a complete execution capture the protocol session was just
+    /// restored to, over the resident set this state already holds (FIG-2521).
+    ///
+    /// The executor treats every restored leaf as its persisted baseline, so
+    /// the next commit references them as unchanged. A leaf the resident set
+    /// holds — durably, or as a body still waiting for its first commit —
+    /// keeps exactly that bookkeeping; only a leaf the set never held is
+    /// staged with its body. The root is staged as changed: a capture may
+    /// carry appended seed globals the durable root does not.
+    pub(crate) fn stage_restored_execution_state(
+        &mut self,
+        restored: crate::plugin::HydratedExecutionState,
+    ) -> Result<(), crate::StoreError> {
+        let mut snapshot = crate::plugin::ExecutionStateSnapshot::from_root(Some(restored.root));
+        for (key, body) in restored.components {
+            if self.checkpoint_components.holds_execution_state_leaf(&key) {
+                snapshot.unchanged_component(key);
+            } else {
+                snapshot.changed_component(key, body);
+            }
+        }
+        self.set_execution_state_components(snapshot)
     }
 
     /// Exposes execution state snapshot to protocol and process-engine implementors while

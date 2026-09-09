@@ -461,6 +461,16 @@ pub enum StoreError {
         record_kind: String,
         message: String,
     },
+    /// The resident execution-state bodies were released after their commit
+    /// and no accepted snapshot is retained in process, so this resident state
+    /// cannot supply the execution a same-frame restore rebuilds from. Hydrate
+    /// the durable checkpoint instead: reading the released root as "no
+    /// execution" would rebuild an empty session over committed globals
+    /// (FIG-2521).
+    #[error(
+        "execution-state bodies were released after their commit and no accepted snapshot is retained; hydrate the durable checkpoint before restoring"
+    )]
+    ExecutionStateBodiesReleased,
     /// A durable row was present but unreadable; checkpoint dangling pointers
     /// use the specialized [`Self::CheckpointComponentMissing`] variant.
     #[error("stored {record_kind} data is corrupt: {message}")]
@@ -581,6 +591,7 @@ impl StoreError {
             }
             Self::IncompleteCheckpointComponentSet => "IncompleteCheckpointComponentSet",
             Self::RecordEncodingFailed { .. } => "RecordEncodingFailed",
+            Self::ExecutionStateBodiesReleased => "ExecutionStateBodiesReleased",
             Self::StoredDataCorrupt { .. } => "StoredDataCorrupt",
             Self::StorageFailure { .. } => "StorageFailure",
             Self::Backend(_) => "Backend",

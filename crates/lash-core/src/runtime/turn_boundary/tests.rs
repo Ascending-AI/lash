@@ -1249,7 +1249,13 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
     assert_eq!(state.token_ledger.len(), usage.len());
     assert!(state.tool_state_snapshot().is_none());
     assert!(state.plugin_state().is_none());
-    assert!(state.execution_state_snapshot().is_none());
+    // Without a store the committed execution snapshot is the only accepted
+    // copy, so the storeless release keeps it resident for a later restore.
+    assert_eq!(
+        state.execution_state_snapshot(),
+        Some(b"runtime".as_slice()),
+        "storeless commits retain the accepted execution snapshot"
+    );
 }
 
 #[test]

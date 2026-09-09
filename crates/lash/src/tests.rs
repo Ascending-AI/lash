@@ -2395,6 +2395,8 @@ mod plugin_stack;
 mod processes_endstate;
 #[cfg(feature = "rlm")]
 mod rebuild_conformance;
+#[cfg(feature = "rlm")]
+mod rlm_restore_idempotence;
 mod rolling_history_persistence;
 #[cfg(feature = "rlm")]
 mod stack_budget;
