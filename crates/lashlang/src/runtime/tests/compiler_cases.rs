@@ -71,6 +71,66 @@ fn aggregate_await_record_of_resource_calls_emits_batch_instruction() {
     );
 }
 
+#[test]
+fn aggregate_await_list_comprehension_of_resource_calls_emits_list_batch_instruction() {
+    let compiled = compile_source(
+        r#"
+        results = await [tools.echo({ value: id })? for id in ["a", "b"] if id != "c"]
+        finish results
+        "#,
+    )
+    .expect("program should compile");
+    let listing = compiled_instruction_listing(&compiled);
+    assert_eq!(
+        compiled
+            .chunk
+            .code
+            .iter()
+            .filter(|instruction| matches!(instruction, Instruction::ResourceOperationListBatch(_)))
+            .count(),
+        1,
+        "an awaited comprehension of calls compiles to one list-batch instruction:\n{listing}"
+    );
+    assert!(
+        !compiled.chunk.code.iter().any(|instruction| matches!(
+            instruction,
+            Instruction::ResourceCall { .. }
+                | Instruction::ResourceCallUnwrap { .. }
+                | Instruction::AwaitHandle
+                | Instruction::AwaitHandleUnwrap
+        )),
+        "the comprehension leaves must not run as sequential calls or a bare await:\n{listing}"
+    );
+    assert!(
+        listing.contains("resource_operation_list_batch echo argc=1 unwrap=true"),
+        "the list batch carries the leaf operation and its `?`:\n{listing}"
+    );
+
+    let sequential = compile_source(
+        r#"
+        results = [await tools.echo({ value: id })? for id in ["a", "b"]]
+        finish results
+        "#,
+    )
+    .expect("program should compile");
+    let listing = compiled_instruction_listing(&sequential);
+    assert!(
+        sequential
+            .chunk
+            .code
+            .iter()
+            .any(|instruction| matches!(instruction, Instruction::ResourceCallUnwrap { .. })),
+        "`[await op(x)? for x in xs]` stays a sequential unwrapped call:\n{listing}"
+    );
+    assert!(
+        !sequential.chunk.code.iter().any(|instruction| matches!(
+            instruction,
+            Instruction::ResourceOperationListBatch(_) | Instruction::ResourceOperationBatch(_)
+        )),
+        "the sequential form must not batch:\n{listing}"
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn aggregate_await_nested_resource_calls_reconstructs_shape() {
     let value = exec(

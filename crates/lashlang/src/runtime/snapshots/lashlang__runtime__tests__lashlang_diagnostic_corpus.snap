@@ -190,11 +190,11 @@ finish (await tools.err({})?)
 ---
 
 runtime_invalid_await_handle
-`?` unwrapped failed tool result: expected handle record
+`await` expects a process handle but found number; the value is already resolved
 --> line 1, column 1
 finish (await 1)?
 ^~~~~~~~~~~~~~~~~
-hint: remove `?` and inspect `.ok` or `.error` when you need to handle failures
+hint: value is already resolved; remove `await`, or await the call directly
 
 ---
 

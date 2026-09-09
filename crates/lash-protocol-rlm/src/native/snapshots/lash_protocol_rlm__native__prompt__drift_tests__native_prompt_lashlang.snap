@@ -28,7 +28,7 @@ Call `execute_code` once with a JSON object containing only the string `code`. P
 - Pure functions: `fn f(x: type) -> type { body }`; types required; last expression returns; parameters-only scope. Call `f(arg)`; recursion and forward calls work. Arithmetic yields float: use `-> float`, not int. Keep effects outside functions and pass results in.
 - Tools: `await module.op({ field: value })?`; use only names under **Tools**. Bare calls are builtins; UpperCamel host constructors are pure (never await). `?` aborts on failure with sanitized operation metadata.
 - Sleep: pause foreground code with `sleep for "5s"` or `sleep until deadline`. Durations accept milliseconds, `ms`, `s`, `m`, or `h`; deadlines accept RFC3339 text or Unix epoch milliseconds.
-- Aggregate await: `results = await { a: module.a({})?, b: module.b({})?, label: "kept" }` fans out direct operation leaves in nested lists/records, retaining shape and pure values. `?` unwraps each leaf; all siblings settle before the first source-order failure. Consecutive awaits serialize.
+- Aggregate await: `await { a: module.a({})?, label: "kept" }` or `await [module.op({ id: id })? for id in ids]` fans out direct operation leaves in lists/records/comprehensions, keeping shape and pure values. `?` unwraps a leaf; siblings settle before the first source-order failure. Consecutive awaits serialize.
 - Statements: `if`, `for`, `while`; prefer bounded loops. `break` exits the nearest loop; `continue` skips an iteration; `finish` ends the turn. Expression conditional: `cond ? yes : no`, never expression-form if. Negate with `!cond` or `not cond`.
 - Bare expressions are statements.
 - Use Bound Variables and `history` directly; do not recreate them.

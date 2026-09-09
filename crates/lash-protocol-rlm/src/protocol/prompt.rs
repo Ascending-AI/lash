@@ -476,7 +476,7 @@ fn operation_scheduling_language_bullet(processes: bool) -> String {
         ""
     };
     format!(
-        "- Aggregate await: `results = await {{ a: module.a({{}})?, b: module.b({{}})?, label: \"kept\" }}` fans out direct operation leaves in nested lists/records, retaining shape and pure values. `?` unwraps each leaf; all siblings settle before the first source-order failure. Consecutive awaits serialize.{process_note}"
+        "- Aggregate await: `await {{ a: module.a({{}})?, label: \"kept\" }}` or `await [module.op({{ id: id }})? for id in ids]` fans out direct operation leaves in lists/records/comprehensions, keeping shape and pure values. `?` unwraps a leaf; siblings settle before the first source-order failure. Consecutive awaits serialize.{process_note}"
     )
 }
 

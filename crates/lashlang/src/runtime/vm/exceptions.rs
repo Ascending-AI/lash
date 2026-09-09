@@ -363,7 +363,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             | Instruction::ResourceCallUnwrap { operation, .. } => {
                 Some(self.chunk.names[*operation].text.to_string())
             }
-            Instruction::ResourceOperationBatch(_) => Some("resource_batch".to_string()),
+            Instruction::ResourceOperationBatch(_) | Instruction::ResourceOperationListBatch(_) => {
+                Some("resource_batch".to_string())
+            }
             Instruction::AwaitHandle | Instruction::AwaitHandleUnwrap => Some("await".to_string()),
             Instruction::StartProcess { .. } => Some("start".to_string()),
             Instruction::SleepFor => Some("sleep_for".to_string()),

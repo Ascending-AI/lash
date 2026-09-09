@@ -40,6 +40,30 @@ impl ExecutionHost for AsyncHost {
     }
 }
 
+/// Awaits a real process handle whose `value` is `"fail"` as a host failure,
+/// so a list can hold one settled handle next to one failed handle.
+struct FailingAwaitHost;
+
+impl ExecutionHost for FailingAwaitHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::Await(handle) => {
+                let record = handle
+                    .as_record()
+                    .ok_or_else(|| ExecutionHostError::new("expected handle record"))?;
+                match record.get("value") {
+                    Some(Value::String(value)) if value.as_str() == "fail" => {
+                        Err(ExecutionHostError::new("process failed: fail"))
+                    }
+                    Some(value) => Ok(AbilityResult::Value(value.clone())),
+                    None => Ok(AbilityResult::Value(Value::Null)),
+                }
+            }
+            other => AsyncHost.perform(other).await,
+        }
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn linked_value_constructor_wraps_host_descriptor() {
     let mut resources = crate::LashlangHostCatalog::new();
@@ -644,19 +668,16 @@ async fn await_unknown_handle_reports_runtime_error() {
     )
     .expect("program should parse");
     let mut state = State::new();
-    let outcome = execute_program(&program, &mut state, &AsyncHost)
+    let error = execute_program(&program, &mut state, &AsyncHost)
         .await
-        .expect("program should run");
-    let ExecutionOutcome::Finished(value) = outcome else {
-        panic!("expected finish");
-    };
-    let record = value
-        .as_record()
-        .expect("await should return wrapped error");
-    assert_eq!(record["ok"], Value::Bool(false));
+        .expect_err("awaiting a resolved value must fail loudly");
+    assert!(
+        matches!(&error, RuntimeError::AwaitExpectsHandle { .. }),
+        "expected the typed await error, got {error:?}"
+    );
     assert_eq!(
-        record["error"],
-        Value::String("expected handle record".into())
+        error.to_string(),
+        "`await` expects a process handle but found number; the value is already resolved"
     );
 }
 
@@ -700,14 +721,14 @@ async fn await_list_preserves_per_item_errors() {
     let program = crate::parse(
         r#"
         process echo(value: str) { finish value }
-        handles = [start echo(value: "done"), 1]
+        handles = [start echo(value: "done"), start echo(value: "fail")]
         results = await handles
         finish results
         "#,
     )
     .expect("program should parse");
     let mut state = State::new();
-    let outcome = execute_program(&program, &mut state, &AsyncHost)
+    let outcome = execute_program(&program, &mut state, &FailingAwaitHost)
         .await
         .expect("program should run");
     let ExecutionOutcome::Finished(value) = outcome else {
@@ -726,7 +747,7 @@ async fn await_list_preserves_per_item_errors() {
         .as_record()
         .expect("second result should be wrapped");
     assert_eq!(err["ok"], Value::Bool(false));
-    assert_eq!(err["error"], Value::String("expected handle record".into()));
+    assert_eq!(err["error"], Value::String("process failed: fail".into()));
 }
 
 #[tokio::test(flavor = "current_thread")]

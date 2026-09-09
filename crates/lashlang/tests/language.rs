@@ -19,6 +19,7 @@ struct TestHost {
     observations: std::sync::Mutex<Vec<Value>>,
     active: AtomicUsize,
     max_active: AtomicUsize,
+    calls: std::sync::Mutex<Vec<String>>,
 }
 
 impl TestHost {
@@ -50,11 +51,21 @@ impl ExecutionHost for TestHost {
                     lashlang::ResourceOperationBatchResult::settled_in_input_order(results),
                 ))
             }
-            AbilityOp::StartProcess(start) => self
-                .call_tool(&start.process_name, &start.args)
-                .await
-                .map(AbilityResult::Value),
-            AbilityOp::Await(handle) => Ok(AbilityResult::Value(handle)),
+            // A started process is a real handle record, never its bare
+            // result: awaiting a resolved value is a guest error (FIG-2764).
+            AbilityOp::StartProcess(start) => {
+                let value = self.call_tool(&start.process_name, &start.args).await?;
+                let mut handle = Record::new();
+                handle.insert("__handle__".to_string(), Value::String("process".into()));
+                handle.insert("value".to_string(), value);
+                Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
+            }
+            AbilityOp::Await(handle) => handle
+                .as_record()
+                .filter(|record| record.get("__handle__").is_some())
+                .and_then(|record| record.get("value").cloned())
+                .map(AbilityResult::Value)
+                .ok_or_else(|| ExecutionHostError::new("expected handle record")),
             AbilityOp::Print(value) => {
                 self.observations.lock_recover().push(value);
                 Ok(AbilityResult::Unit)
@@ -102,6 +113,9 @@ impl TestHost {
                 Ok(Value::List(values.into()))
             }
             "sleep_echo" => {
+                self.calls
+                    .lock_recover()
+                    .push(expect_string(args, "value")?.to_string());
                 let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
                 loop {
                     let max = self.max_active.load(Ordering::SeqCst);
@@ -3178,3 +3192,5 @@ async fn parse_errors_are_parse_level_and_precise() {
 include!("language/support.rs");
 
 include!("language/function_declarations.rs");
+
+include!("language/aggregate_await_comprehensions.rs");

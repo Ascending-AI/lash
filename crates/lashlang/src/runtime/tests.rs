@@ -890,6 +890,16 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
                 batch.aggregate_unwrap
             )
         }
+        Instruction::ResourceOperationListBatch(batch) => {
+            let batch = &chunk.resource_operation_list_batches[batch];
+            format!(
+                "resource_operation_list_batch {} argc={} unwrap={} aggregate_unwrap={}",
+                name_text(chunk, batch.operation),
+                batch.argc,
+                batch.unwrap,
+                batch.aggregate_unwrap
+            )
+        }
         Instruction::StartProcess { process, keys } => format!(
             "start_process {} {}",
             name_text(chunk, process),

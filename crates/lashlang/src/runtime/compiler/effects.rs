@@ -1,5 +1,7 @@
 use super::*;
 
+use super::entry::ListComprehensionElement;
+
 impl Compiler {
     pub(super) fn try_compile_label_as_effect_step(
         &mut self,
@@ -214,6 +216,36 @@ impl Compiler {
         aggregate_unwrap: bool,
         forced_site: Option<LashlangExecutionSite>,
     ) -> bool {
+        if let Expr::ListComprehension { element, clauses } = handle
+            && let Some(leaf) = comprehension_call_leaf(element)
+        {
+            self.compile_list_comprehension(
+                ListComprehensionElement::DeferredCall {
+                    receiver: leaf.receiver,
+                    args: leaf.args,
+                },
+                clauses,
+            );
+            let operation = self.push_name(leaf.operation);
+            let site =
+                self.lashlang_execution_site(leaf.call, "resource_operation", leaf.operation);
+            let source_span = self.expression_source_span(leaf.call);
+            let batch =
+                self.push_resource_operation_list_batch(CompiledResourceOperationListBatch {
+                    operation,
+                    argc: leaf.args.len(),
+                    unwrap: leaf.unwrap,
+                    aggregate_unwrap,
+                    site,
+                    source_span,
+                });
+            let instruction = self.code.len();
+            self.code
+                .push(Instruction::ResourceOperationListBatch(batch));
+            self.mark_instruction_source_span(instruction, handle);
+            self.mark_forced_lashlang_execution_site(instruction, forced_site);
+            return true;
+        }
         let Some(leaf_count) = aggregate_await_shape_leaf_count(handle) else {
             return false;
         };
@@ -723,6 +755,39 @@ impl Compiler {
             _ => unreachable!("patched non-jump instruction"),
         }
     }
+}
+
+/// The single module-operation leaf of an awaited list comprehension: a
+/// receiver call, optionally under `?`. Any other element keeps the
+/// comprehension on the plain evaluate-then-await path.
+struct ComprehensionCallLeaf<'a> {
+    call: &'a Expr,
+    receiver: &'a Expr,
+    operation: &'a str,
+    args: &'a [Expr],
+    unwrap: bool,
+}
+
+fn comprehension_call_leaf(element: &Expr) -> Option<ComprehensionCallLeaf<'_>> {
+    let (call, unwrap) = match element {
+        Expr::ResultUnwrap(inner) => (inner.as_ref(), true),
+        other => (other, false),
+    };
+    let Expr::ReceiverCall {
+        receiver,
+        operation,
+        args,
+    } = call
+    else {
+        return None;
+    };
+    Some(ComprehensionCallLeaf {
+        call,
+        receiver,
+        operation: operation.as_str(),
+        args,
+        unwrap,
+    })
 }
 
 fn aggregate_await_shape_leaf_count(expr: &Expr) -> Option<usize> {
