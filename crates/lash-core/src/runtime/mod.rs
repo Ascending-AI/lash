@@ -153,21 +153,22 @@ pub use effect::{
     BoundaryReason, CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointClaimSet,
     ChildDrainOutcome, CompletionKeyPreparation, DrainedChild, EffectGroupHandle,
     EffectGroupMembership, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
-    ExecutionScope, ExternalCompletionError, GroupDrainReport, GroupExecutors, GroupSettlement,
-    GroupWakePolicy, LlmRequestSpec, LoserPolicy, NativeEffectHost, NativeRuntimeEffectController,
-    ProcessCommand, ProcessEffectOutcome, ProcessLocalExecution, ProcessOutcomeObserver,
-    ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
-    QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome,
-    RuntimeAssistantResponseHooksOutcome, RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome,
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
-    RuntimeEffectReplayTrace, RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay,
-    RuntimeReplayAttribution, RuntimeScope, RuntimeSleepOptions, RuntimeSubject,
-    ScopedEffectController, SegmentProgress, StoreEffectGroupDrain, ToolAttemptEffectOutcome,
-    ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch, ToolIntentOutcomeSink,
-    ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution, TurnControlBinding,
-    TurnControlParticipation, refuse_unhonored_group_membership, validate_replayed_effect_envelope,
+    EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupDrainReport,
+    GroupExecutors, GroupSettlement, GroupWakePolicy, LlmRequestSpec, LoserPolicy,
+    NativeEffectHost, NativeRuntimeEffectController, ProcessCommand, ProcessEffectOutcome,
+    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition,
+    QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
+    ResolveOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeAwaitEventOptions,
+    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectFailureDisposition,
+    RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
+    RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope,
+    RuntimeSleepOptions, RuntimeSubject, ScopeBoundController, ScopedEffectController,
+    SegmentProgress, StoreEffectGroupDrain, ToolAttemptEffectOutcome, ToolAttemptLaunch,
+    ToolBatchEffectOutcome, ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation,
+    ToolIntentSubmissionGuard, TriggerLocalExecution, TurnControlBinding, TurnControlParticipation,
+    refuse_unhonored_group_membership, validate_replayed_effect_envelope,
 };
 pub(crate) use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
@@ -228,26 +229,27 @@ pub use process::{
     ProcessLifecycle, ProcessListFilter, ProcessListMode, ProcessLiveReferenceView,
     ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope, ProcessOriginator, ProcessOutcome,
     ProcessParentEndPlan, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord,
-    ProcessRef, ProcessRegistrar, ProcessRegistration, ProcessRegistry, ProcessRetention,
-    ProcessRunOutcome, ProcessService, ProcessSessionDeleteReport, ProcessSpawnProvenance,
-    ProcessStartOptions, ProcessStartOutcome, ProcessStartPlan, ProcessStartRequest,
-    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalSemantics,
-    ProcessTerminalSpec, ProcessTombstone, ProcessToolIntents, ProcessToolVisibilityFilter,
-    ProcessTransition, ProcessTransitionPlan, ProcessValueSelector, ProcessWake,
-    ProcessWakeDelivery, ProcessWakeDeliveryRequest, ProcessWakeOutbox, ProcessWakeSpec,
-    ProcessWorkObserver, ProcessWorkSnapshot, ProcessWorklistCursor, ProcessWorklistPage,
-    ProjectionWatermark, RecoveryContract, SegmentHandover, SessionId, SessionObserverIntentSource,
-    SessionScope, SessionScopeId, UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS,
-    WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WatchedRegistry, allocate_process_event_sequence,
-    apply_process_event_projection, apply_process_status_projection, current_epoch_ms,
-    fold_process_record, load_process_execution_env, materialize_process_event_semantics,
-    persist_process_execution_env, prepare_process_event_append, prepare_process_registration,
-    prepare_process_start, prepare_process_transition, process_registration_fingerprint,
-    process_runtime_session_ids, process_signal_event_type, process_signal_name_from_event_type,
-    process_signal_wait_key, process_wake_delivery, process_wake_input_from_event_payload,
-    process_wake_turn_cause, process_wake_turn_text, reconcile_pruned_trigger_deliveries,
+    ProcessRef, ProcessRegistrar, ProcessRegistration, ProcessRegistrationProbe, ProcessRegistry,
+    ProcessRegistryBinding, ProcessRetention, ProcessRunOutcome, ProcessScopeFenceHosts,
+    ProcessService, ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions,
+    ProcessStartOutcome, ProcessStartPlan, ProcessStartRequest, ProcessStarted, ProcessStatus,
+    ProcessStatusFilter, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone,
+    ProcessToolIntents, ProcessToolVisibilityFilter, ProcessTransition, ProcessTransitionPlan,
+    ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
+    ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot,
+    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, RecoveryContract,
+    SegmentHandover, SessionId, SessionObserverIntentSource, SessionScope, SessionScopeId,
+    UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery,
+    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    WatchedRegistry, allocate_process_event_sequence, apply_process_event_projection,
+    apply_process_status_projection, current_epoch_ms, fold_process_record,
+    load_process_execution_env, materialize_process_event_semantics, persist_process_execution_env,
+    prepare_process_event_append, prepare_process_registration, prepare_process_start,
+    prepare_process_transition, process_registration_fingerprint, process_runtime_session_ids,
+    process_signal_event_type, process_signal_name_from_event_type, process_signal_wait_key,
+    process_wake_delivery, process_wake_input_from_event_payload, process_wake_turn_cause,
+    process_wake_turn_text, reconcile_pruned_trigger_deliveries,
     reconcile_session_process_observer_intents, require_event_replay, terminal_append_request,
     terminal_event_type_name, validate_generic_process_event_append, validate_process_signal_name,
     watch_process_registry, watch_process_registry_with_sink,
@@ -262,6 +264,7 @@ pub use process_worker::{
     ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
     ProcessDrainReport, ProcessExecutionConcurrencyError, ProcessRecoveryAttemptOutcome,
     ProcessRecoveryOperation, ProcessWorkerFault, WorkerProcessWork,
+    trigger_delivery_reconcile_scope,
 };
 pub use queued_drain_policy::default_queued_drain_policy;
 pub use queued_drain_policy::{
@@ -1273,6 +1276,15 @@ enum RuntimeStreamEvent {
 
 #[async_trait::async_trait]
 pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
+    /// Bind the effect host whose scope fences and journal rows
+    /// [`reclaim_retained_evidence`](Self::reclaim_retained_evidence) reads
+    /// and retires. The facade binds the host it was built with. Only a store
+    /// whose sweep must reach a journal kept in a file of its own (see
+    /// [`EffectHost::effect_scope_fence_database`](crate::EffectHost::effect_scope_fence_database))
+    /// has anything to record; a store sharing the journal's database, and
+    /// one with no durable journal to sweep, ignore it.
+    fn bind_effect_host(&self, _effect_host: &Arc<dyn crate::EffectHost>) {}
+
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
@@ -1397,6 +1409,17 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     /// A retry in a deleted scope returns `StoreError::SessionDeleted`, before
     /// and after receipt pruning. The permanent identity tombstone is exempt.
     /// No daemon, clock read or live policy lookup runs this operation.
+    ///
+    /// The sweep is also the durable owner of deferred effect-scope
+    /// retirement (ADR 0049, ADR 0067): every session-free runtime-operation
+    /// scope whose operation has recorded its receipt and under which nothing
+    /// is live any more (no effect in progress, no group still waiting on a
+    /// child, no unresolved promise) is retired under the same fence the
+    /// receipt-time retirement takes, in this same transaction. A receipt
+    /// whose scope is still live is retained past the horizon so the proof
+    /// survives until the scope can go. Stores whose effect journal lives
+    /// elsewhere (the in-memory store, or a host that keeps its journal in
+    /// its own engine) retire nothing here.
     async fn reclaim_retained_evidence(
         &self,
         _bound: crate::store::RetentionBound,

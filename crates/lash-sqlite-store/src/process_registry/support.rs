@@ -364,6 +364,8 @@ impl SqliteProcessRegistry {
             clock,
             process_session_store_root: Some(process_session_store_root),
             wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
+            scope_fence_hosts: lash_core::ProcessScopeFenceHosts::default(),
+            path: Some(path.to_path_buf()),
         })
     }
 
@@ -382,6 +384,8 @@ impl SqliteProcessRegistry {
             clock,
             process_session_store_root: None,
             wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
+            scope_fence_hosts: lash_core::ProcessScopeFenceHosts::default(),
+            path: None,
         })
     }
 
@@ -810,5 +814,38 @@ pub(crate) fn tx_outcome<T>(
     match result {
         Ok(value) => TxOutcome::Commit(Ok(value)),
         Err(err) => TxOutcome::Rollback(Err(err)),
+    }
+}
+
+/// The journal key of a process scope, as the fence table stores it.
+pub(super) fn process_scope_fence_key(process_id: &str) -> Result<String, lash_core::PluginError> {
+    lash_core::ExecutionScope::process(process_id)
+        .journal_identity()
+        .map(|identity| identity.key().to_string())
+        .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+}
+
+/// This registry's registration truth for a bound effect host (ADR 0049).
+pub(super) struct SqliteRegistrationProbe {
+    pub(super) conn: SqliteConnection,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ProcessRegistrationProbe for SqliteRegistrationProbe {
+    async fn process_is_registered(
+        &self,
+        process_id: &str,
+    ) -> Result<bool, lash_core::PluginError> {
+        let process_id = process_id.to_string();
+        self.conn
+            .call(move |connection| {
+                connection.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM processes WHERE process_id = ?1)",
+                    params![process_id],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .map_err(process_sqlite_error)
     }
 }

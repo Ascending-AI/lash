@@ -467,6 +467,9 @@ pub enum EffectClaimObservation {
     },
     /// Strict replay found no recorded effect.
     StrictReplayMiss,
+    /// The scope carries a permanent retirement tombstone: its journal was
+    /// deleted as unreachable and nothing may re-admit an effect under it.
+    ScopeRetired,
     /// The row cannot be interpreted.
     CorruptRow {
         /// Which invariant the row broke.
@@ -922,10 +925,61 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
     /// a deletion *below* a consumed rank would shift ranks even though
     /// allocation never does. The count reports children, matching what the
     /// method has always reported.
+    ///
+    /// **Scope-exact retirements fence** (N4): for a `Process` or
+    /// `RuntimeOperation` retirement the same transaction also deletes the
+    /// scope's await-event promise rows and inserts the scope's permanent
+    /// retirement tombstone, keyed by its journal identity. Every admission
+    /// path — [`claim`](Self::claim), [`open_group`](Self::open_group), and the
+    /// await-event backend's mint/ensure/store/inspect atoms — reads that
+    /// tombstone under the same lock the retirement writes it under, so a
+    /// retired scope reports [`EffectClaimObservation::ScopeRetired`] or
+    /// `await_event_unknown_or_revoked` rather than re-executing under an
+    /// empty journal. Session retirements keep their shipped shape: rows go,
+    /// no tombstone is written here (session promise revocation owns that).
+    /// A scope-exact retirement gated [`EffectRetirementGate::WhenQuiescent`]
+    /// first proves, inside the same transaction and under the same lock,
+    /// that the scope is quiescent: no `in_progress` effect row (a running
+    /// child or a draining loser) and no open group still waiting for a child
+    /// that has not been journaled yet. A live scope is left untouched and
+    /// the retirement fails with [`RuntimeErrorCode::EffectScopeNotQuiescent`].
+    /// [`EffectRetirementGate::OwnerTerminal`] skips the proof: the caller
+    /// holds it (the registry pruned the owner), so in-flight rows go too.
     async fn retire_journal(
         &self,
         retirement: &EffectJournalRetirement,
     ) -> Result<usize, RuntimeError>;
+
+    /// Delete the scope-retirement fence row of `scope_id`, if any, under the
+    /// same lock retirement writes it: the scope's owner is being registered
+    /// again (a pruned process id reused by the host, ADR 0049). Nothing else
+    /// is written; the re-registered scope starts with the empty journal its
+    /// prune left.
+    async fn reinstate_scope(&self, scope_id: &str) -> Result<(), RuntimeError>;
+}
+
+/// The refusal a quiescence-gated retirement reports for a scope that still
+/// has live work: nothing was deleted or fenced, and the caller retries once
+/// the work settles.
+pub fn scope_not_quiescent(scope_id: &str) -> RuntimeError {
+    RuntimeError::new(
+        RuntimeErrorCode::EffectScopeNotQuiescent,
+        format!(
+            "effect scope `{scope_id}` still has in-progress effects or an open group; retirement deferred until it is quiescent"
+        ),
+    )
+}
+
+/// The refusal every admission path reports for a scope whose retirement
+/// tombstone exists: the journal under it was deleted as unreachable, so a
+/// late redrive must fail closed rather than re-execute under an empty journal.
+pub fn scope_retired(scope_id: &str) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(
+        RuntimeErrorCode::EffectScopeRetired,
+        format!(
+            "effect scope `{scope_id}` has been retired: its journal was deleted as unreachable and the scope cannot be re-admitted"
+        ),
+    )
 }
 
 #[doc(hidden)]
@@ -1180,6 +1234,20 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         self.await_events.cancel_session(session_id).await
     }
 
+    /// The promise half of scope retirement, answered from the whole: a
+    /// non-session scope's promises go with its journal in one transaction
+    /// (N4), so this lever is [`retire_effect_journal`](Self::retire_effect_journal)
+    /// for the scope's exact retirement.
+    pub async fn retire_await_events_for_scope(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        let Some(retirement) = EffectJournalRetirement::for_scope(scope) else {
+            return Err(super::executor::await_event_scope_not_retirable(scope));
+        };
+        self.retire_effect_journal(retirement).await.map(|_| ())
+    }
+
     /// Delete the journal rows `retirement` names, reporting how many went.
     ///
     /// Group-atomic: a retired group's row and its children go together, so no
@@ -1189,6 +1257,17 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         retirement: EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
         self.row_store.retire_journal(&retirement).await
+    }
+
+    /// Lift the scope-retirement fence of a non-session `scope` whose owner is
+    /// registered again (ADR 0049). Session scopes are refused as on the
+    /// retirement lever.
+    pub async fn reinstate_effect_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
+        if EffectJournalRetirement::for_scope(scope).is_none() {
+            return Err(super::executor::await_event_scope_not_retirable(scope));
+        }
+        let identity = scope.journal_identity()?;
+        self.row_store.reinstate_scope(identity.key()).await
     }
 
     /// Run `envelope` for `scope` exactly once, replaying any recorded terminal.
@@ -1482,6 +1561,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             EffectClaimObservation::CorruptRow { defect } => {
                 Err(vocabulary.error(EffectReplayFailure::CorruptRow, defect.message()))
             }
+            EffectClaimObservation::ScopeRetired => Err(scope_retired(&request.scope_id)),
         }
     }
 

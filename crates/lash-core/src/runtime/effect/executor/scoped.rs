@@ -12,12 +12,17 @@ impl<'run> ScopedEffectController<'run> {
             ScopedEffectControllerInner::Shared(controller) => {
                 ScopedEffectController::shared(Arc::clone(controller), scope)
             }
+            ScopedEffectControllerInner::Owned(controller) => {
+                ScopedEffectController::owned(controller.for_scope(scope.clone()), scope)
+            }
         }
     }
 
     pub(crate) fn into_static(self) -> Result<ScopedEffectController<'static>, Self> {
         match self.controller {
-            ScopedEffectControllerInner::Borrowed(_) => Err(self),
+            ScopedEffectControllerInner::Borrowed(_) | ScopedEffectControllerInner::Owned(_) => {
+                Err(self)
+            }
             ScopedEffectControllerInner::Shared(controller) => Ok(ScopedEffectController {
                 controller: ScopedEffectControllerInner::Shared(controller),
                 scope: self.scope,

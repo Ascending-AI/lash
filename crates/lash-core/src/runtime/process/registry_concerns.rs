@@ -10,6 +10,9 @@
 
 use crate::plugin::PluginError;
 use std::num::NonZeroUsize;
+use std::sync::{Arc, Weak};
+
+use crate::{EffectHost, ExecutionScope};
 
 use super::ProcessCompletionOutcome;
 use super::events::{
@@ -187,11 +190,40 @@ pub trait ProcessRegistrar: Send + Sync {
     }
 
     /// Atomically register the process and its explicit initial observer set.
+    ///
+    /// Registration is the owner of a process scope coming back, so it also
+    /// lifts the scope-retirement fence a prune left behind (ADR 0049). A
+    /// backend whose fence rows share its database clears the fence in the
+    /// registration transaction itself; every backend additionally lifts the
+    /// fence of each host bound through [`Self::bind_effect_host`] before
+    /// registration reports success, so a registration that fails leaves the
+    /// id fenced and unregistered exactly as before.
     async fn register_process_with_observers(
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
     ) -> Result<ProcessRecord, PluginError>;
+
+    /// Bind the effect host whose scope-retirement fence this registry lifts
+    /// when a process id is registered again (ADR 0049).
+    ///
+    /// The facade binds the effect host it was built with; a host that wires
+    /// a registry and an effect host together by hand binds them the same
+    /// way. Binding is idempotent and the registry holds the host weakly, so
+    /// a host that also owns the registry does not leak.
+    ///
+    /// Binding runs in both directions. The registry hands the host a
+    /// [`ProcessRegistryBinding`] through [`EffectHost::bind_process_registry`]:
+    /// the database that holds the process-scope fence when the registry
+    /// keeps it (the SQLite registry file, whose registration transaction
+    /// inserts the process row and deletes the fence row as one commit; the
+    /// PostgreSQL registry does the same inside its one database) and a probe
+    /// answering whether a process id is registered, which a host whose own
+    /// fence is a cache of the registry's (the Restate durable-wait index)
+    /// reads through to. A fence the host keeps where the registry cannot
+    /// reach it is lifted through [`EffectHost::reinstate_effect_scope`]
+    /// after the registration write.
+    fn bind_effect_host(&self, effect_host: &Arc<dyn EffectHost>);
 
     /// Attach a durable backend reference to a registered process.
     ///
@@ -832,6 +864,26 @@ pub trait ProcessRetention: Send + Sync {
         filter: Option<ProcessListFilter>,
         watermark: ProjectionWatermark,
     ) -> Result<ProcessPruneReport, PluginError>;
+
+    /// The process ids [`prune_terminal_processes`](Self::prune_terminal_processes)
+    /// would delete right now for the same arguments, in ascending id order,
+    /// without deleting anything. The survey applies the prune's complete
+    /// eligibility predicate — retired status, `updated_at_ms` before the
+    /// cutoff, the projection `watermark`, no pending or enqueuing wake
+    /// delivery, no parent-end plan, and `filter` — so a caller that must
+    /// reclaim rows the registry does not own (the process's durable effect
+    /// journal and its await-event promises) fences exactly the rows the
+    /// prune reclaims and never a process the registry keeps. The prune
+    /// re-evaluates the predicate under its own transaction; a process that
+    /// becomes ineligible between survey and prune is retained by the prune
+    /// and its already-fenced journal stays reclaimed, which is the conservative
+    /// direction for a retired row.
+    async fn prunable_terminal_processes(
+        &self,
+        cutoff_epoch_ms: u64,
+        filter: Option<ProcessListFilter>,
+        watermark: ProjectionWatermark,
+    ) -> Result<Vec<String>, PluginError>;
 }
 
 /// Rebinding a registry backend to the runtime's clock.
@@ -1119,5 +1171,104 @@ mod concern_isolation_tests {
             .expect("list observed");
         assert_eq!(observed.len(), 1);
         assert_eq!(observed[0].id, "proc-observer-isolation");
+    }
+}
+
+/// Answers whether a process id is currently registered: the registry's
+/// truth a host reads through to when its own scope fence is only a cache of
+/// the registry's (ADR 0049).
+#[async_trait::async_trait]
+pub trait ProcessRegistrationProbe: Send + Sync {
+    /// Whether `process_id` has a registration row now.
+    async fn process_is_registered(&self, process_id: &str) -> Result<bool, PluginError>;
+}
+
+/// What a registry hands the effect host it binds
+/// ([`EffectHost::bind_process_registry`]).
+#[derive(Clone)]
+pub struct ProcessRegistryBinding {
+    /// The SQLite database file in which the registry keeps the process-scope
+    /// fence beside the process rows, so registration deletes the fence and
+    /// inserts the row in one single-file commit and retirement's fence
+    /// insert is its one commit point. `None` for a registry with no file of
+    /// its own (in memory, or a database the host reaches through its own
+    /// connection).
+    pub fence_database: Option<std::path::PathBuf>,
+    /// The registry's registration truth.
+    pub registrations: Arc<dyn ProcessRegistrationProbe>,
+}
+
+impl std::fmt::Debug for ProcessRegistryBinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProcessRegistryBinding")
+            .field("fence_database", &self.fence_database)
+            .finish_non_exhaustive()
+    }
+}
+/// The effect hosts a process registry lifts scope fences on at registration.
+///
+/// Shared by every registry backend: [`bind`](Self::bind) is idempotent and
+/// weak, [`reinstate_process_scope`](Self::reinstate_process_scope) lifts the
+/// fence of one process scope on every bound host that is still alive. Clones
+/// share the same binding set, so a clock-rebound registry copy keeps the
+/// bindings of the registry it was derived from.
+#[derive(Clone, Default)]
+pub struct ProcessScopeFenceHosts {
+    hosts: Arc<std::sync::Mutex<Vec<Weak<dyn EffectHost>>>>,
+}
+
+impl ProcessScopeFenceHosts {
+    /// Bind `effect_host` and hand it the registry's `binding`; binding the
+    /// same host twice keeps one entry, and the host's own binding is
+    /// idempotent.
+    pub fn bind(&self, effect_host: &Arc<dyn EffectHost>, binding: ProcessRegistryBinding) {
+        effect_host.bind_process_registry(binding);
+        let mut hosts = self
+            .hosts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        hosts.retain(|host| host.strong_count() > 0);
+        let weak = Arc::downgrade(effect_host);
+        if hosts.iter().any(|host| Weak::ptr_eq(host, &weak)) {
+            return;
+        }
+        hosts.push(weak);
+    }
+
+    /// Whether any live host is bound.
+    pub fn is_empty(&self) -> bool {
+        self.hosts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .all(|host| host.strong_count() == 0)
+    }
+
+    /// Lift the scope-retirement fence of `process_id` on every bound host.
+    pub async fn reinstate_process_scope(&self, process_id: &str) -> Result<(), PluginError> {
+        let hosts: Vec<Arc<dyn EffectHost>> = self
+            .hosts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .filter_map(Weak::upgrade)
+            .collect();
+        let scope = ExecutionScope::process(process_id);
+        for host in hosts {
+            host.reinstate_effect_scope(&scope)
+                .await
+                .map_err(|error| {
+                    PluginError::Session(format!(
+                        "process `{process_id}` registration could not lift its effect-scope fence: {error}"
+                    ))
+                })?;
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for ProcessScopeFenceHosts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ProcessScopeFenceHosts(..)")
     }
 }

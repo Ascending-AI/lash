@@ -72,13 +72,11 @@ mod process_tool_replay;
 mod replay_corpus;
 mod tool_context_conformance;
 use endpoint_protocol::{
-    encode_call_replay, encode_captured_run_and_call_replay,
+    durable_wait_index_call_response, encode_call_replay, encode_captured_run_and_call_replay,
     encode_captured_run_and_interrupted_call_replay, encode_captured_run_command_replay,
-    encode_completed_captured_sleep_replay, encode_completed_gate_sleep_replay,
-    encode_completed_intent_drain_replay, encode_completed_sleep_replay,
-    encode_effectful_process_terminal_replay, encode_one_way_call_replay,
-    encode_pending_sleep_replay, encode_process_segment_send_replay,
-    encode_process_terminal_delivery_replay, encode_run_replay,
+    encode_completed_gate_sleep_replay, encode_completed_intent_drain_replay,
+    encode_completed_sleep_replay, encode_one_way_call_replay, encode_process_segment_send_replay,
+    encode_process_terminal_delivery_replay, encode_recorded_commands_replay, encode_run_replay,
     encode_two_one_way_calls_and_call_replay, invoke_endpoint, invoke_endpoint_body,
     invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
     invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
@@ -1549,6 +1547,72 @@ async fn fig779_sleep_suspension_and_cancellation_preserve_recorded_precedence()
     );
 }
 
+/// FIG-2499: a process handler records its process-scope effect in the
+/// scope's index before journaling it, so the deployed first attempt parks
+/// on the `begin_effect` call; once the index admits the effect the attempt
+/// journals its timer and parks on that. Returns both legs' output, whose
+/// commands are the deployed journal: the call, then the timer.
+async fn park_process_on_its_timer(
+    endpoint: &Endpoint,
+    process_id: &str,
+    input: &RestateProcessWorkflowInput,
+) -> Vec<u8> {
+    let recording = invoke_endpoint(endpoint, "LashProcessWorkflow", "run", process_id, input)
+        .await
+        .expect("first process attempt should park on recording its effect");
+    let calls = restate_call_frames(&recording).expect("decode effect-recording calls");
+    assert_eq!(
+        calls
+            .iter()
+            .map(|call| (call.service.as_str(), call.handler.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("LashDurableWaitIndex", "begin_effect")],
+        "the effect is recorded in the scope's index before its timer is journaled"
+    );
+    assert_eq!(
+        restate_message_types(&recording).expect("decode recording frames"),
+        vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+    let admitted = encode_call_replay(
+        process_id,
+        input,
+        &[(calls[0].clone(), Some(serde_json::json!(true)))],
+        None,
+    )
+    .expect("splice the admitted effect recording");
+    let parked = invoke_endpoint_body(endpoint, "LashProcessWorkflow", "run", admitted)
+        .await
+        .expect("admitted process attempt should park on its timer");
+    assert_eq!(
+        restate_message_types(&parked).expect("decode parked process frames"),
+        vec![
+            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+    let mut journal = recording.to_vec();
+    journal.extend_from_slice(&parked);
+    journal
+}
+
+/// Completions for a replayed process journal: the scope index answers its
+/// effect-recording calls, every other call answers `null`, and the timer is
+/// fired or left pending.
+fn process_journal_completion(
+    fire_timer: bool,
+) -> impl Fn(&endpoint_protocol::RecordedCommand) -> Option<serde_json::Value> {
+    move |command| match command.message_type {
+        RESTATE_SLEEP_COMMAND_MESSAGE_TYPE => fire_timer.then_some(serde_json::Value::Null),
+        RESTATE_CALL_COMMAND_MESSAGE_TYPE => command.call.as_ref().map(|(service, handler)| {
+            durable_wait_index_call_response(service, handler).unwrap_or(serde_json::Value::Null)
+        }),
+        _ => None,
+    }
+}
+
 #[tokio::test]
 async fn fig779_suspended_process_redrive_observes_durable_cancellation() {
     let process_id = "fig779-durable-cancel-redrive";
@@ -1583,16 +1647,7 @@ async fn fig779_suspended_process_redrive_observes_durable_cancellation() {
         execution_id: None,
     };
 
-    let suspended = invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
-        .await
-        .expect("first process attempt should suspend on its durable timer");
-    assert_eq!(
-        restate_message_types(&suspended).expect("decode suspended process frames"),
-        vec![
-            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
-            RESTATE_SUSPENSION_MESSAGE_TYPE
-        ]
-    );
+    let parked = park_process_on_its_timer(&endpoint, process_id, &input).await;
 
     registry
         .append_event(
@@ -1604,14 +1659,26 @@ async fn fig779_suspended_process_redrive_observes_durable_cancellation() {
         )
         .await
         .expect("record durable process cancellation");
-    let replay = encode_pending_sleep_replay(process_id, &input, &suspended)
-        .expect("encode suspended process redrive");
-    let cancelled = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
-        .await
-        .expect("redrive should replay the timer command before observing cancellation");
+    let replay = encode_recorded_commands_replay(
+        process_id,
+        &input,
+        &[&parked],
+        process_journal_completion(false),
+    )
+    .expect("encode suspended process redrive");
+    let cancelled = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        replay,
+        vec![serde_json::Value::Null],
+    )
+    .await
+    .expect("redrive should replay the timer command before observing cancellation");
     assert_eq!(
         restate_message_types(&cancelled).expect("decode cancelled redrive frames"),
         vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
             RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
             RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE,
@@ -1655,16 +1722,7 @@ async fn fig788_terminal_outcome_landing_preserves_the_suspended_command_prefix(
         execution_id: None,
     };
 
-    let suspended = invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
-        .await
-        .expect("first process attempt should suspend");
-    assert_eq!(
-        restate_message_types(&suspended).expect("decode suspended process frames"),
-        vec![
-            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
-            RESTATE_SUSPENSION_MESSAGE_TYPE
-        ]
-    );
+    let parked = park_process_on_its_timer(&endpoint, process_id, &input).await;
 
     let stored = process_cancellation("terminal outcome landed between attempts", None);
     registry
@@ -1675,11 +1733,22 @@ async fn fig788_terminal_outcome_landing_preserves_the_suspended_command_prefix(
         )
         .await
         .expect("store terminal outcome between attempts");
-    let replay = encode_completed_captured_sleep_replay(process_id, &input, &suspended)
-        .expect("splice the deployed suspended journal");
-    let output = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
-        .await
-        .expect("terminal redrive must preserve the deployed command prefix");
+    let replay = encode_recorded_commands_replay(
+        process_id,
+        &input,
+        &[&parked],
+        process_journal_completion(true),
+    )
+    .expect("splice the deployed suspended journal");
+    let output = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        replay,
+        vec![serde_json::Value::Null],
+    )
+    .await
+    .expect("terminal redrive must preserve the deployed command prefix");
 
     assert_eq!(
         restate_output_json::<RestateProcessWorkflowOutput>(&output),
@@ -1923,28 +1992,49 @@ async fn fig811_effectful_post_terminal_redrive_replays_the_complete_prefix() {
         execution_id: Some("fig811-effectful-terminal-execution".to_string()),
     };
 
-    let effect_suspension =
-        invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
-            .await
-            .expect("effectful attempt should suspend on its journaled effect");
-    assert_eq!(
-        restate_message_types(&effect_suspension).expect("decode effect suspension"),
-        vec![
-            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
-            RESTATE_SUSPENSION_MESSAGE_TYPE
-        ]
-    );
+    let effect_suspension = park_process_on_its_timer(&endpoint, process_id, &input).await;
     assert!(trace_sink.records.lock_recover().iter().any(|record| {
         record.event.kind() == "durable_timer_started"
             && record.context.run_id.as_deref() == Some("fig811-workflow-trace")
             && record.context.session_id.as_deref() == Some("session")
     }));
 
-    let completed_effect =
-        encode_completed_captured_sleep_replay(process_id, &input, &effect_suspension)
-            .expect("splice completed effect prefix");
-    let terminal_delivery_suspension =
+    let completed_effect = encode_recorded_commands_replay(
+        process_id,
+        &input,
+        &[&effect_suspension],
+        process_journal_completion(true),
+    )
+    .expect("splice completed effect prefix");
+    let effect_cleared =
         invoke_endpoint_body(&endpoint, "LashProcessWorkflow", "run", completed_effect)
+            .await
+            .expect("effect completion should clear the effect from the scope's index");
+    assert_eq!(
+        restate_call_frames(&effect_cleared)
+            .expect("decode effect-clearing calls")
+            .iter()
+            .map(|call| (call.service.as_str(), call.handler.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("LashDurableWaitIndex", "end_effect")],
+        "the completed effect is cleared from the scope's index before terminal delivery"
+    );
+    assert_eq!(
+        restate_message_types(&effect_cleared).expect("decode effect-clearing frames"),
+        vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+    let cleared_replay = encode_recorded_commands_replay(
+        process_id,
+        &input,
+        &[&effect_suspension, &effect_cleared],
+        process_journal_completion(true),
+    )
+    .expect("splice the cleared effect prefix");
+    let terminal_delivery_suspension =
+        invoke_endpoint_body(&endpoint, "LashProcessWorkflow", "run", cleared_replay)
             .await
             .expect("effect completion should reach terminal delivery");
     assert_eq!(
@@ -1957,11 +2047,15 @@ async fn fig811_effectful_post_terminal_redrive_replays_the_complete_prefix() {
         ]
     );
 
-    let complete_replay = encode_effectful_process_terminal_replay(
+    let complete_replay = encode_recorded_commands_replay(
         process_id,
         &input,
-        &effect_suspension,
-        &terminal_delivery_suspension,
+        &[
+            &effect_suspension,
+            &effect_cleared,
+            &terminal_delivery_suspension,
+        ],
+        process_journal_completion(true),
     )
     .expect("splice the complete effectful terminal prefix");
     let completed = invoke_endpoint_body_open(
@@ -4502,17 +4596,17 @@ fn durable_wait_index_epoch_rejects_legacy_state_and_accepts_fresh_state() {
         &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()],
     )
     .expect_err("wrong identity epoch must be rejected");
-    assert!(wrong_epoch.contains("incompatible with epoch 4"));
+    assert!(wrong_epoch.contains("incompatible with epoch 5"));
     assert!(wrong_epoch.contains("drain and recreate"));
     assert!(DURABLE_WAIT_INDEX_METADATA_KEY.starts_with("wait-index/v2/"));
 }
 
 #[test]
-fn durable_wait_identity_epoch_four_rejects_epoch_three_state() {
+fn durable_wait_identity_epoch_five_rejects_epoch_four_state() {
     let error =
-        validate_durable_wait_index_epoch(Some(3), &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()])
-            .expect_err("epoch-3 durable-wait state must not open under epoch 4");
-    assert!(error.contains("identity epoch 3 is incompatible with epoch 4"));
+        validate_durable_wait_index_epoch(Some(4), &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()])
+            .expect_err("epoch-4 durable-wait state must not open under epoch 5");
+    assert!(error.contains("identity epoch 4 is incompatible with epoch 5"));
     assert!(error.contains("drain and recreate"));
 }
 
@@ -4902,8 +4996,12 @@ fn live_restate_effect_group_conformance() {
                     "RESTATE_CONFORMANCE effect_group_cancelled_child_terminal_is_durable PASS"
                 );
                 harness.run_design_witnesses().await;
-                println!("EFFECT_GROUP_CONFORMANCE 18/18 PASS");
+                println!("EFFECT_GROUP_CONFORMANCE 19/19 PASS");
                 println!("EFFECT_GROUP_WITNESSES h-m PASS");
+                harness.run_executing_effect_quiescence_witness().await;
+                println!("RESTATE_QUIESCENCE executing_handler_effect PASS");
+                let registries = harness.run_cold_reopen_witnesses().await;
+                println!("RESTATE_COLD_REOPEN registries={registries} PASS");
                 lash_conformance::effect_host_await_events_cold_instance(
                     harness.effect_host_factory(),
                 )
@@ -7531,9 +7629,11 @@ async fn replay_tool_intent_corpus_fixture(
 #[tokio::test]
 async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes() {
     for checked_in in [
+        // The mid-drain prefix ends before the durable-wait index call, so
+        // its v2 capture is unchanged by the scope-keyed index cutover.
         include_bytes!("../tests/fixtures/tool_intent_journals/v2-mid-drain.json").as_slice(),
-        include_bytes!("../tests/fixtures/tool_intent_journals/v2-mid-intent.json").as_slice(),
-        include_bytes!("../tests/fixtures/tool_intent_journals/v2-full-drain.json").as_slice(),
+        include_bytes!("../tests/fixtures/tool_intent_journals/v3-mid-intent.json").as_slice(),
+        include_bytes!("../tests/fixtures/tool_intent_journals/v3-full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
@@ -7562,49 +7662,68 @@ async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_ou
     }
 }
 
+/// Pre-cutover journals refuse loudly and never duplicate their committed
+/// effect. The v1 journal carries the pre-cutover process reference format;
+/// the v2 journals that reached the durable-wait index addressed a
+/// session-free wait by its per-wait index object (`unscoped:{workflow key}`),
+/// which the scope-keyed index (`scope:{journal identity}`, durable-wait
+/// identity epoch 5, FIG-2499) replaced. Either replay diverges before the signal command re-executes,
+/// so the process sees its committed effect exactly once.
 #[tokio::test]
-async fn checked_in_v1_tool_intent_journal_refuses_the_process_reference_cutover_without_duplicate_effect()
- {
-    let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(include_bytes!(
-        "../tests/fixtures/tool_intent_journals/v1-full-drain.json"
-    ))
-    .expect("decode the pre-cutover endpoint corpus fixture");
-    let (endpoint, registry) = tool_intent_corpus_endpoint().await;
+async fn checked_in_pre_cutover_tool_intent_journals_refuse_loudly_without_duplicate_effect() {
+    for (name, checked_in) in [
+        (
+            "v1-full-drain",
+            include_bytes!("../tests/fixtures/tool_intent_journals/v1-full-drain.json").as_slice(),
+        ),
+        (
+            "v2-mid-intent",
+            include_bytes!("../tests/fixtures/tool_intent_journals/v2-mid-intent.json").as_slice(),
+        ),
+        (
+            "v2-full-drain",
+            include_bytes!("../tests/fixtures/tool_intent_journals/v2-full-drain.json").as_slice(),
+        ),
+    ] {
+        let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(checked_in)
+            .expect("decode the pre-cutover endpoint corpus fixture");
+        let (endpoint, registry) = tool_intent_corpus_endpoint().await;
 
-    let response = invoke_endpoint_body(
-        &endpoint,
-        "ToolIntentCorpusReplay",
-        "run",
-        bytes::Bytes::from(fixture.invocation_body_bytes),
-    )
-    .await
-    .expect("feed the v1 journal through the v2 endpoint");
-    let error = restate_output_failure_message(&response)
-        .or_else(|| restate_error_message(&response))
-        .unwrap_or_else(|| {
-            panic!(
-                "v1 replay must refuse loudly; messages={:?}; frames={:?}; output={:?}",
-                restate_message_types(&response),
-                restate_command_frame_types(&response),
-                restate_output_json::<serde_json::Value>(&response)
-            )
-        });
-
-    assert!(
-        error.contains("process_reference_format_cutover"),
-        "the refusal must retain its typed process-reference cutover code: {error}"
-    );
-    assert_eq!(
-        registry
-            .events_after(TOOL_INTENT_CORPUS_TARGET, 0)
-            .await
-            .expect("read the refusal witness target")
-            .into_iter()
-            .filter(|event| event.event_type == "signal.resume")
-            .count(),
-        1,
-        "a pre-cutover journal may reconstruct its committed effect but must not duplicate it"
-    );
+        let response = invoke_endpoint_body(
+            &endpoint,
+            "ToolIntentCorpusReplay",
+            "run",
+            bytes::Bytes::from(fixture.invocation_body_bytes),
+        )
+        .await
+        .expect("feed the pre-cutover journal through the current endpoint");
+        let error = restate_output_failure_message(&response)
+            .or_else(|| restate_error_message(&response))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{name} replay must refuse loudly; messages={:?}; frames={:?}; output={:?}",
+                    restate_message_types(&response),
+                    restate_command_frame_types(&response),
+                    restate_output_json::<serde_json::Value>(&response)
+                )
+            });
+        assert!(
+            error.contains("process_reference_format_cutover")
+                || error.contains("unscoped:") && error.contains("scope:"),
+            "{name} must refuse on its cutover, not somewhere later: {error}"
+        );
+        assert_eq!(
+            registry
+                .events_after(TOOL_INTENT_CORPUS_TARGET, 0)
+                .await
+                .expect("read the refusal witness target")
+                .into_iter()
+                .filter(|event| event.event_type == "signal.resume")
+                .count(),
+            1,
+            "{name}: a pre-cutover journal may reconstruct its committed effect but must not duplicate it"
+        );
+    }
 }
 
 /// Regeneration is deliberately separate from the replay law above: the law
@@ -7678,11 +7797,11 @@ async fn capture_tool_intent_journal_corpus_from_real_endpoint_interruptions() {
             mid_drain,
         ),
         (
-            "v2-mid-intent",
+            "v3-mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v2-full-drain", "full_drain", full),
+        ("v3-full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {
@@ -18575,4 +18694,91 @@ async fn a_failed_ingress_submit_reports_a_worker_fault_to_the_sink() {
     };
     assert_eq!(process_id, "submit-fails-loudly");
     assert_eq!(*operation, ProcessRecoveryOperation::SubmitRun);
+}
+
+/// Every wait of a non-session scope is owned by that scope's own
+/// `LashDurableWaitIndex` object, keyed by the scope's journal identity, so a
+/// scope-exact retirement can revoke and fence the whole scope in one keyed
+/// handler; session waits keep the session's object (FIG-2499 fix round 1).
+#[test]
+fn durable_wait_index_is_keyed_by_scope_for_session_free_waits() {
+    let process = lash_core::ExecutionScope::process("proc-1");
+    let operation = lash_core::ExecutionScope::runtime_operation("op-1");
+    let process_key = crate::durable_wait::durable_wait_index_key_for_scope(&process);
+    let operation_key = crate::durable_wait::durable_wait_index_key_for_scope(&operation);
+    assert_eq!(
+        process_key,
+        format!(
+            "scope:{}",
+            process.journal_identity().expect("process identity").key()
+        )
+    );
+    assert_ne!(process_key, operation_key);
+    let session = lash_core::ExecutionScope::turn("session-1", "turn-1");
+    assert_eq!(
+        crate::durable_wait::durable_wait_index_key_for_scope(&session),
+        "session-1"
+    );
+    for (scope, wait) in [
+        (
+            process.clone(),
+            AwaitEventWaitIdentity::tool_completion("a"),
+        ),
+        (
+            process.clone(),
+            AwaitEventWaitIdentity::tool_completion("b"),
+        ),
+    ] {
+        let key = restate_await_event_key(&scope, wait).expect("mint");
+        assert_eq!(
+            RestateDurableWaitAddress::for_key(&key).index_key(),
+            process_key,
+            "every wait of one scope shares the scope's index object"
+        );
+    }
+}
+
+/// With no Restate reachable, a scope-exact retirement is a typed failure —
+/// never a silent `Ok(0)` that would let the scope mint again — and a mint
+/// under a session-free scope consults the durable fence before minting,
+/// exactly as a session-bearing scope already did (FIG-2499 review round 1).
+#[tokio::test]
+async fn scope_retirement_and_mint_consult_restate_rather_than_answering_locally() {
+    let host = crate::RestateEffectHost::new(crate::RestateConnection::new("http://127.0.0.1:1"));
+    let scope = lash_core::ExecutionScope::runtime_operation("unreachable-op");
+    let retirement = host
+        .retire_effect_journal(
+            lash_core::EffectJournalRetirement::for_scope(&scope)
+                .expect("runtime operations retire"),
+        )
+        .await
+        .expect_err("retirement without a reachable Restate is a typed failure");
+    assert_eq!(
+        retirement.code,
+        lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate
+    );
+    let mint = host
+        .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("late"))
+        .await
+        .expect_err("a session-free mint reads the durable fence first");
+    assert_eq!(
+        mint.code,
+        lash_core::RuntimeErrorCode::RestateAwaitEventRevocationRead
+    );
+    let reinstate = host
+        .reinstate_effect_scope(&lash_core::ExecutionScope::process("unreachable-process"))
+        .await
+        .expect_err("reinstatement without a reachable Restate is a typed failure");
+    assert_eq!(
+        reinstate.code,
+        lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate
+    );
+    let session = host
+        .reinstate_effect_scope(&lash_core::ExecutionScope::turn("s", "t"))
+        .await
+        .expect_err("session scopes are refused before any ingress call");
+    assert_eq!(
+        session.code,
+        lash_core::RuntimeErrorCode::AwaitEventScopeNotRetirable
+    );
 }

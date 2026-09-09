@@ -17,6 +17,10 @@ use sqlx::postgres::{PgPool, PgRow};
 use sqlx::{Executor, Row as _};
 
 const SESSION_LOCK_NAMESPACE: i64 = 562;
+/// Advisory-lock namespace for session-free scopes, disjoint from the session
+/// namespace so a process or runtime-operation scope never contends with a
+/// session whose id happens to hash alike.
+pub(crate) const SCOPE_LOCK_NAMESPACE: i64 = 563;
 
 const VOCABULARY: AwaitEventVocabulary = AwaitEventVocabulary {
     sign: RuntimeErrorCode::PostgresAwaitEventSign,
@@ -63,6 +67,10 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
         session_is_revoked(&self.pool, session_id).await
     }
 
+    async fn scope_is_retired(&self, scope_id: &str) -> Result<bool, RuntimeError> {
+        scope_is_retired(&self.pool, scope_id).await
+    }
+
     async fn ensure_pending(
         &self,
         key_id: &str,
@@ -71,10 +79,8 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
     ) -> Result<bool, RuntimeError> {
         let now = now_ms as i64;
         let mut tx = self.pool.begin().await.map_err(store_error)?;
-        lock_session(&mut tx, identity.session_id.as_deref()).await?;
-        if let Some(session_id) = identity.session_id.as_deref()
-            && session_is_revoked(&mut *tx, session_id).await?
-        {
+        lock_identity(&mut tx, identity).await?;
+        if identity_is_fenced(&mut tx, identity).await? {
             return Ok(false);
         }
         sqlx::query(
@@ -110,10 +116,8 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
     ) -> Result<TerminalCas, RuntimeError> {
         let now = now_ms as i64;
         let mut tx = self.pool.begin().await.map_err(store_error)?;
-        lock_session(&mut tx, identity.session_id.as_deref()).await?;
-        if let Some(session_id) = identity.session_id.as_deref()
-            && session_is_revoked(&mut *tx, session_id).await?
-        {
+        lock_identity(&mut tx, identity).await?;
+        if identity_is_fenced(&mut tx, identity).await? {
             return Ok(TerminalCas::UnknownOrRevoked);
         }
 
@@ -187,11 +191,8 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
         identity: &AwaitEventRowIdentity,
     ) -> Result<PersistedPromise, RuntimeError> {
         let mut tx = self.pool.begin().await.map_err(store_error)?;
-        lock_session(&mut tx, identity.session_id.as_deref()).await?;
-        let revoked = match identity.session_id.as_deref() {
-            Some(session_id) => session_is_revoked(&mut *tx, session_id).await?,
-            None => false,
-        };
+        lock_identity(&mut tx, identity).await?;
+        let revoked = identity_is_fenced(&mut tx, identity).await?;
         let stored = select_wait_row(&mut *tx, key_id).await?;
         tx.commit().await.map_err(store_error)?;
         if revoked {
@@ -316,12 +317,77 @@ where
     .map_err(store_error)
 }
 
+/// Whether either durable fence refuses `identity`: the owning session's
+/// revocation tombstone, or the scope's retirement tombstone. Read inside the
+/// transaction that holds the identity's advisory lock.
+async fn identity_is_fenced(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    identity: &AwaitEventRowIdentity,
+) -> Result<bool, RuntimeError> {
+    if let Some(session_id) = identity.session_id.as_deref()
+        && session_is_revoked(&mut **tx, session_id).await?
+    {
+        return Ok(true);
+    }
+    scope_is_retired(&mut **tx, &identity.scope_id).await
+}
+
+pub(crate) async fn scope_is_retired<'e, E>(
+    executor: E,
+    scope_id: &str,
+) -> Result<bool, RuntimeError>
+where
+    E: Executor<'e, Database = sqlx::Postgres>,
+{
+    sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM lash_effect_scope_retirements WHERE scope_id = $1
+         )",
+    )
+    .bind(scope_id)
+    .fetch_one(executor)
+    .await
+    .map_err(store_error)
+}
+
+/// Serialize a promise atom against every peer that can fence it: the session
+/// lock for session scopes, the scope lock for session-free scopes (whose
+/// fence is the scope-retirement tombstone that retirement writes under the
+/// same lock).
+async fn lock_identity(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    identity: &AwaitEventRowIdentity,
+) -> Result<(), RuntimeError> {
+    match identity.session_id.as_deref() {
+        Some(_) => lock_session(tx, identity.session_id.as_deref()).await,
+        None => lock_scope(tx, &identity.scope_id)
+            .await
+            .map_err(|err| store_error_message(err.to_string())),
+    }
+}
+
+/// Serialize every fence-sensitive atom for one session-free scope against
+/// its peers, retirement included. Shared with the effect-replay row store,
+/// which takes the same lock before reading the tombstone on claim, group
+/// open, and retirement.
+pub(crate) async fn lock_scope(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    scope_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))")
+        .bind(scope_id)
+        .bind(SCOPE_LOCK_NAMESPACE)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 /// Serialize every promise atom for one session against its peers.
 ///
 /// `READ COMMITTED` cannot make "check the tombstone, then write the row"
 /// atomic on its own: a concurrent revocation would commit between the two
 /// statements and the write would survive its own session's deletion. Session-free
-/// scopes have no tombstone to race with, so they take no lock.
+/// scopes take the scope lock instead (see [`lock_identity`]).
 async fn lock_session(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: Option<&str>,
@@ -342,5 +408,12 @@ fn store_error(err: sqlx::Error) -> RuntimeError {
     RuntimeError::new(
         lash_core::RuntimeErrorCode::PostgresAwaitEventStore,
         err.to_string(),
+    )
+}
+
+fn store_error_message(message: String) -> RuntimeError {
+    RuntimeError::new(
+        lash_core::RuntimeErrorCode::PostgresAwaitEventStore,
+        message,
     )
 }

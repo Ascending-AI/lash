@@ -21,6 +21,14 @@ mod worklist;
 
 #[doc(hidden)]
 pub use permit::release_process_execution_permit_while;
+
+/// The runtime-operation scope under which the worker starts a trigger
+/// delivery whose process row was never registered. It exists only to admit
+/// that one process, so the process's retention pass retires it alongside the
+/// process journal (FIG-2500).
+pub fn trigger_delivery_reconcile_scope(process_id: &str) -> crate::ExecutionScope {
+    crate::ExecutionScope::runtime_operation(format!("trigger-delivery-reconcile:{process_id}"))
+}
 #[cfg(test)]
 use permit::{PROCESS_EXECUTION_PERMIT, ProcessExecutionPermit};
 pub(crate) use permit::{ensure_process_execution_permit, inherit_process_execution_permit};
@@ -882,10 +890,7 @@ impl DurableProcessWorker {
                     .runtime_host
                     .control
                     .effect_host
-                    .scoped_static(crate::ExecutionScope::runtime_operation(format!(
-                        "trigger-delivery-reconcile:{}",
-                        delivery.process_id
-                    )))
+                    .scoped_static(trigger_delivery_reconcile_scope(&delivery.process_id))
                     .map_err(|err| PluginError::Session(err.to_string()))?
                 else {
                     return Err(PluginError::Session(

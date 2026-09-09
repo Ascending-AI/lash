@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 79);
+    assert_eq!(PostgresStorage::schema_version(), 80);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -197,6 +197,10 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("recreate the usage-delta table from the authoritative DDL");
+    sqlx::raw_sql(schema_table_ddl("lash_effect_scope_retirements"))
+        .execute(&pool)
+        .await
+        .expect("create the effect-scope retirement fence from the authoritative DDL");
     sqlx::raw_sql(
         "DROP TABLE lash_process_parent_end_plans;
          DROP TABLE lash_process_segment_handovers;
@@ -234,7 +238,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
                  CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL)
                      AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL));
          UPDATE lash_schema_versions
-            SET version = 79
+            SET version = 80
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)

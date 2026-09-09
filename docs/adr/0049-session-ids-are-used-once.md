@@ -69,6 +69,118 @@ invocations cannot resume across this cutover: operators must drain them or
 purge the Restate state before upgrading, otherwise their old promises are
 orphaned under the prior key.
 
+### Scope fences are a permanent-row class with one release rule (FIG-2499)
+
+Process and runtime-operation scopes carry no session, so session deletion
+never reaches their effect journal or their await-event promises. They are
+reclaimed by scope-exact retirement instead: `EffectJournalRetirement::process`
+and `::runtime_operation` delete the scope's effect rows, group rows, and
+promise rows and write a scope fence (`effect_scope_retirements` /
+`lash_effect_scope_retirements`, keyed by the scope's journal identity) in the
+same transaction, under the same lock every admission path takes. Every
+admission path — journal claim, group open, promise mint, resolve, peek, await,
+and the in-process and Restate hosts' scoped controllers — reads the fence and
+fails closed, so a late redrive can never re-execute under an emptied journal.
+The fence is a permanent row on the same terms as `deleted_sessions`: retention
+and vacuum never remove it, and the retention census lists it as permanently
+exempt.
+
+Retirement rests on proven unreachability, and the proof is named on the
+request (`EffectRetirementGate`). A prune is owner-terminal proof: the registry
+has deleted the row, so in-flight rows go too, and the facade fences exactly
+the ids the registry's own eligibility survey returns — never a process the
+registry keeps because of a projection watermark, a pending wake delivery, or
+a parent-end plan. A receipt returning is not proof: the facade retires its
+plugin-command and plugin-task scopes `when_quiescent`, and the store refuses
+(`effect_scope_not_quiescent`) while a child is still in progress, a group
+still waits for one, or a promise under the scope is still awaited and
+unresolved (an `await_event_waits` row without a terminal; an open wait gate
+on the in-process host; an indexed wait or live awakeable on Restate). A
+refused retirement leaves the journal untouched and the facade simply
+returns: it keeps no queue of deferred scopes, because that queue would die
+with the process. The durable owner of deferred retirement is the reclaim
+sweep (`SessionStoreFactory::reclaim_retained_evidence`, ADR 0067): under the
+same fence lock it retires every session-free runtime-operation scope whose
+owning operation has a recorded receipt and that is quiescent at sweep time,
+and leaves any scope without a recorded receipt alone — no receipt, no proof.
+
+A runtime-operation fence is permanent: those ids are used once. A process
+fence lasts until the host registers the same id again. Host-named process ids
+are reusable by contract, and the fence exists to cover the interval between
+the prune and that re-registration; the registration lifts it. The lift
+lives in the registry insert, not in any caller: every registrant — a direct
+registration, `Processes::start`, a session-scoped start, a trigger delivery,
+a tool-intent `StartProcess`, the Restate scheduler — ends in
+`ProcessRegistrar::register_process_with_observers`, and that write deletes
+the scope's `effect_scope_retirements` row in the same transaction as the
+registry insert, or in the same critical section on the in-memory registry.
+
+Each store has exactly one commit point per registration and one per
+retirement, and the fence row lives where that commit point is. On
+PostgreSQL both live in one database: the registration transaction deletes the
+fence and inserts the record under the scope's advisory lock, and the
+retirement transaction proves quiescence, inserts the fence, and deletes the
+journal rows. On SQLite the process registry is its own file, and a
+multi-database write that modifies more than one file commits per file, so
+the process fence of a registered host lives in the registry file
+(`effect_scope_retirements` in `PROCESS_SCHEMA`). Registration is then a
+single-file transaction: fence delete and registry insert commit together or
+not at all, so a crash leaves the id either fenced-and-unregistered or
+registered-and-unfenced, never both and never neither. Retirement commits the
+fence into the registry file first — the quiescence proof and the fence
+insert are one transaction over the attached files under one `BEGIN
+IMMEDIATE` — and only then purges the journal rows in a second transaction on
+the journal file. A crash between the two leaves a fenced scope with stale
+journal rows, which is safe: admission reads the fence from the registry file
+(the effect host attaches it for reads once the registry is bound), so a cold
+host over that journal admits nothing under the scope, and the leftover rows
+are idempotent cleanup that the next host bind or reclaim sweep purges
+(`purge_rows_under_fenced_scopes`). Runtime-operation fences, and process
+fences written while no registry is bound, stay in the journal file and retire
+in one transaction with their rows; when a registry binds it repairs the
+journal file's leftovers — rows under any fence, and journal-file process
+fences of ids the registry already holds — before the first admission.
+
+The fence and the registry can also be two different stores. The in-process
+host keeps a fence set, and Restate keeps a per-scope `LashDurableWaitIndex`
+object that is revoked on retirement. Both bind to the registry
+(`ProcessRegistrar::bind_effect_host`, done by `LashCore::build`), and the
+binding runs both ways: the registry reinstates the host's fence from the same
+seam once its insert has committed (`EffectHost::reinstate_effect_scope`
+remains the host-facing lever that seam drives, and nothing else calls it),
+and the host receives a `ProcessRegistryBinding` — the registry's own
+"is this process registered" probe. On Restate that probe makes the index's
+revoked flag a cache of the registry's truth rather than a second source of
+it: a revoked index over a process the registry holds is a registration that
+committed after its reinstate was lost (a crash between the insert and the
+ingress call, or a reopen without the reinstate ever reaching the engine), and
+the host's admission reads through to the registry, reinstates the index, and
+admits — no explicit re-registration, on a SQLite- or PostgreSQL-backed
+registry alike. The read-through was chosen over re-driving every registered
+process's reinstate at bind time because binding is synchronous inside
+`LashCore::build` and a bind-time scan is one ingress call per registered
+process on every open; the read-through costs one registry probe per revoked
+admission and nothing on the hot path.
+
+Keying session-free waits by scope on Restate is a durable-wait identity
+epoch cutover (epoch 5) and a tool-intent journal cutover (corpus v3):
+pre-cutover state and journals refuse loudly before any effect re-executes;
+the in-process host keeps an unbounded fence set for the same reason the
+durable rows are permanent. Retention of these rows is a host lever on the
+terms of ADR 0023.
+
+Quiescence is measured on durable ground: an executing effect and a live
+child of an open effect group count as live on every host, and on Restate
+both are entries of the scope's `LashDurableWaitIndex` (`begin_effect` /
+`end_effect` around every scoped effect the handler-side controller runs,
+`record_group` when a group opens; a recorded group is live while its
+`EffectGroupIndex` reports unsettled children). Memory waits are not durable:
+a wait whose waiter was dropped before resolution stays a live entry in every
+durable index and refuses retirement there, but the in-process host has no
+record of a dropped waiter and retires the scope. That is the one
+memory-versus-durable differential in the quiescence law, and it is stated
+in the shared conformance law rather than papered over.
+
 > **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
 
 ## Consequences

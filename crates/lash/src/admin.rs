@@ -512,16 +512,30 @@ impl SessionAdmin {
         let session_id = self.runtime.observe().session_id().to_string();
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
-        let operation_scope = lash_core::ExecutionScope::runtime_operation(format!(
-            "{session_id}:plugin_command:{name}:{}",
-            lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
-        ));
+        let operation_scope = lash_core::ExecutionScope::runtime_operation(
+            lash_core::store::mint_facade_operation_id(
+                &session_id,
+                lash_core::store::FacadePluginOperation::Command,
+                name,
+            ),
+        );
         let receipt = runtime
-            .run_plugin_command(name, args, Some(session_id), operation_scope)
-            .await?;
-        self.record_plugin_operation_observations(&receipt.events, &receipt.pending_turn_inputs);
-        self.runtime.publish_from(&runtime);
-        Ok(receipt)
+            .run_plugin_command(name, args, Some(session_id), operation_scope.clone())
+            .await;
+        // The receipt and its observations land first; retirement is a
+        // reclaim that can only be deferred or logged, never a reason to lose
+        // what the operation already did. A failed receipt is terminal for
+        // the scope too, so it retires on both paths.
+        if let Ok(receipt) = &receipt {
+            self.record_plugin_operation_observations(
+                &receipt.events,
+                &receipt.pending_turn_inputs,
+            );
+            self.runtime.publish_from(&runtime);
+        }
+        self.retire_operation_scope(&runtime.effect_host(), operation_scope)
+            .await;
+        Ok(receipt?)
     }
 
     async fn run_plugin_task_raw_with_cancel(
@@ -533,13 +547,15 @@ impl SessionAdmin {
         let session_id = self.runtime.observe().session_id().to_string();
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
-        let scope_id = format!(
-            "{session_id}:plugin_task:{name}:{}",
-            lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
+        let scope_id = lash_core::store::mint_facade_operation_id(
+            &session_id,
+            lash_core::store::FacadePluginOperation::Task,
+            name,
         );
+        let operation_scope = lash_core::ExecutionScope::runtime_operation(scope_id);
         let scoped_effect_controller = runtime
             .effect_host()
-            .scoped_static(lash_core::ExecutionScope::runtime_operation(scope_id))
+            .scoped_static(operation_scope.clone())
             .map_err(EmbedError::Runtime)?
             .ok_or_else(|| {
                 EmbedError::Plugin(lash_core::PluginError::Session(
@@ -554,10 +570,52 @@ impl SessionAdmin {
                 scoped_effect_controller,
                 cancellation_token,
             )
-            .await?;
-        self.record_plugin_operation_observations(&receipt.events, &receipt.pending_turn_inputs);
-        self.runtime.publish_from(&runtime);
-        Ok(receipt)
+            .await;
+        // Receipt and observations first, retirement after, on success and
+        // failure alike: see `run_plugin_command_raw`.
+        if let Ok(receipt) = &receipt {
+            self.record_plugin_operation_observations(
+                &receipt.events,
+                &receipt.pending_turn_inputs,
+            );
+            self.runtime.publish_from(&runtime);
+        }
+        self.retire_operation_scope(&runtime.effect_host(), operation_scope)
+            .await;
+        Ok(receipt?)
+    }
+
+    /// Retire a facade-minted runtime-operation scope once its receipt has
+    /// been recorded. The retirement is gated on the store's own quiescence
+    /// proof: the receipt returning is not proof that nothing runs under the
+    /// scope (a run-to-completion group may still be draining, a promise may
+    /// still be awaited), so a live scope is left as it is. Its durable owner
+    /// is the retained-evidence reclaim sweep (ADR 0067): the receipt is
+    /// durable, so "receipt recorded and quiescent" is re-derived from the
+    /// store at sweep time, which no process-local queue survives a restart
+    /// to do. Any other failure is logged; the receipt already returned and
+    /// stands.
+    async fn retire_operation_scope(
+        &self,
+        effect_host: &Arc<dyn lash_core::EffectHost>,
+        operation_scope: lash_core::ExecutionScope,
+    ) {
+        match retire_facade_operation_scope(effect_host, &operation_scope).await {
+            Ok(FacadeScopeRetirement::Retired) => {}
+            Ok(FacadeScopeRetirement::Deferred) => {
+                tracing::debug!(
+                    scope = %operation_scope.id(),
+                    "facade operation scope still has live effects; left to the reclaim sweep"
+                );
+            }
+            Err(err) => {
+                tracing::warn!(
+                    scope = %operation_scope.id(),
+                    error = %err,
+                    "facade operation scope retirement failed; journal rows retained"
+                );
+            }
+        }
     }
 
     fn record_plugin_operation_observations(
@@ -1333,6 +1391,37 @@ impl SessionStateAdmin {
         self.control
             .compact_context(instructions, scoped_effect_controller)
             .await
+    }
+}
+
+/// Retire a runtime-operation scope the facade minted for exactly one plugin
+/// operation. The scope id carries a fresh UUID no caller ever sees, so once
+/// the operation's receipt is back (or its failure is) nothing can replay
+/// under it: its effect journal, groups, and await-event promises are
+/// unreachable and go in one transaction, and the scope fence keeps a late
+/// worker from reopening it (FIG-2499, FIG-2500). Caller-supplied scopes are
+/// never handed here — they stay the caller's to retire.
+enum FacadeScopeRetirement {
+    Retired,
+    Deferred,
+}
+
+async fn retire_facade_operation_scope(
+    effect_host: &Arc<dyn lash_core::EffectHost>,
+    operation_scope: &lash_core::ExecutionScope,
+) -> Result<FacadeScopeRetirement> {
+    let Some(retirement) = lash_core::EffectJournalRetirement::for_scope(operation_scope) else {
+        return Ok(FacadeScopeRetirement::Retired);
+    };
+    match effect_host
+        .retire_effect_journal(retirement.when_quiescent())
+        .await
+    {
+        Ok(_) => Ok(FacadeScopeRetirement::Retired),
+        Err(err) if err.code == lash_core::RuntimeErrorCode::EffectScopeNotQuiescent => {
+            Ok(FacadeScopeRetirement::Deferred)
+        }
+        Err(err) => Err(EmbedError::Runtime(err)),
     }
 }
 

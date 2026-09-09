@@ -102,7 +102,9 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         &self,
         bound: lash_core::store::RetentionBound,
     ) -> lash_core::MaintenanceResult<lash_core::store::RetentionReport> {
-        crate::evidence_retention::reclaim(self, bound).await
+        crate::evidence_retention::reclaim(self, bound)
+            .await
+            .map_err(|failure| *failure)
     }
 
     async fn create_store(

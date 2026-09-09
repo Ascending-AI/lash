@@ -41,6 +41,7 @@ mod fig1348_selected_drain;
 mod fig1556_preflight;
 mod fig1556_probe;
 mod fig1922_read_session;
+mod fig2499_scope_retirement;
 mod index;
 mod operations;
 mod persistence;

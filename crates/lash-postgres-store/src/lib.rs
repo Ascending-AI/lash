@@ -301,7 +301,12 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // there is no migration into this generation.
 // ADR 0078 replaces plugin snapshots with mediated namespace state; older
 // catalogs are refused before any prior payload can be read.
-const SCHEMA_VERSION: i32 = 79;
+// Version 80 adds the permanent `lash_effect_scope_retirements` fence
+// (FIG-2499, FIG-2500): retiring a process or runtime-operation scope deletes
+// its effect children, groups, and await-event promises in one transaction
+// and leaves a tombstone every admission path refuses. Component-79 stores
+// must be recreated; there is no migration into this generation.
+const SCHEMA_VERSION: i32 = 80;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -336,6 +341,10 @@ pub struct PostgresProcessRegistry {
     pool: PgPool,
     wake_delivery_config: lash_core::WakeDeliveryConfig,
     clock: Arc<dyn lash_core::Clock>,
+    /// Effect hosts whose scope fence registration lifts (ADR 0049). The
+    /// PostgreSQL journal's own fence rows share the pool and are cleared in
+    /// the registration transaction itself.
+    scope_fence_hosts: lash_core::ProcessScopeFenceHosts,
 }
 
 impl PostgresProcessRegistry {
@@ -756,6 +765,7 @@ impl PostgresStorage {
             pool: self.pool.clone(),
             wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
             clock: Arc::new(lash_core::facade_support::SystemClock),
+            scope_fence_hosts: lash_core::ProcessScopeFenceHosts::default(),
         }
     }
 
@@ -767,6 +777,7 @@ impl PostgresStorage {
             pool: self.pool.clone(),
             wake_delivery_config,
             clock: Arc::new(lash_core::facade_support::SystemClock),
+            scope_fence_hosts: lash_core::ProcessScopeFenceHosts::default(),
         }
     }
 

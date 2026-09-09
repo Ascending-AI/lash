@@ -36,6 +36,8 @@ mod support;
 
 #[path = "../../lash-core/tests/support/cold_process_turn_parent.rs"]
 mod cold_process_turn_parent;
+#[path = "conformance/scope_retirement.rs"]
+mod scope_retirement;
 #[path = "conformance/session_delete_blob_reclaim.rs"]
 mod session_delete_blob_reclaim;
 #[path = "conformance/wake_delivery.rs"]
@@ -1403,10 +1405,10 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 79, "Postgres component schema pin");
+    assert_eq!(current_version, 80, "Postgres component schema pin");
     assert_eq!(
         current_version - 1,
-        78,
+        79,
         "immediate predecessor adjacency pin"
     );
     let payload_hash_nullable: String = sqlx::query_scalar(
@@ -1614,6 +1616,81 @@ async fn postgres_journals_a_cancelled_child_as_its_terminal_when_configured() {
         Arc::new(host) as Arc<dyn EffectHost>
     })
     .await;
+    drop(database_lock);
+}
+
+/// Retiring a runtime-operation scope removes its group and child rows in one
+/// transaction and leaves the fence, while an in-flight operation keeps every
+/// row (FIG-2500).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_retires_a_runtime_operation_journal_atomically() {
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres runtime-operation retirement test: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let database_url = database_url().expect("configured Postgres database URL");
+    let (retired, in_flight) =
+        lash_conformance::effect_group_runtime_operation_retirement_is_atomic(|executors| {
+            let database_url = database_url.clone();
+            let storage = sync_await(async move {
+                PostgresStorage::connect(&database_url)
+                    .await
+                    .expect("PostgreSQL effect-group host")
+            });
+            let host = storage.effect_host();
+            if let Some(executors) = executors {
+                host.register_group_executors(executors)
+                    .expect("a freshly connected host has no resolver yet");
+            }
+            Arc::new(host) as Arc<dyn EffectHost>
+        })
+        .await;
+    let count = |sql: &'static str, scope_id: String| {
+        let pool = storage.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(sql)
+                .bind(scope_id)
+                .fetch_one(&pool)
+                .await
+                .expect("count journal rows")
+        }
+    };
+    let groups = "SELECT COUNT(*) FROM lash_runtime_effect_group WHERE scope_id = $1";
+    let children = "SELECT COUNT(*) FROM lash_runtime_effect_replay WHERE scope_id = $1";
+    let fences = "SELECT COUNT(*) FROM lash_effect_scope_retirements WHERE scope_id = $1";
+    assert_eq!(
+        count(groups, retired.clone()).await,
+        0,
+        "retired scope keeps no group row"
+    );
+    assert_eq!(
+        count(children, retired.clone()).await,
+        0,
+        "retired scope keeps no child row"
+    );
+    assert_eq!(
+        count(fences, retired).await,
+        1,
+        "retired scope leaves one fence"
+    );
+    assert_eq!(
+        count(groups, in_flight.clone()).await,
+        1,
+        "in-flight scope keeps its group"
+    );
+    assert_eq!(
+        count(children, in_flight.clone()).await,
+        2,
+        "in-flight scope keeps its children"
+    );
+    assert_eq!(
+        count(fences, in_flight).await,
+        0,
+        "in-flight scope is not fenced"
+    );
     drop(database_lock);
 }
 
@@ -1978,6 +2055,7 @@ async fn postgres_runtime_effect_controller_satisfies_conformance_when_configure
     let host = storage.effect_host();
     lash_conformance::effect_host_retires_session_journal(&host).await;
     lash_conformance::effect_host_retires_process_journal(&host).await;
+    lash_conformance::effect_host_retires_runtime_operation_journal(&host).await;
     let retained: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM lash_runtime_effect_replay
          WHERE session_id = $1",
@@ -1987,6 +2065,24 @@ async fn postgres_runtime_effect_controller_satisfies_conformance_when_configure
     .await
     .expect("count retained Postgres session journal rows");
     assert_eq!(retained, 0);
+    let session_free_retained: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_runtime_effect_replay WHERE session_id IS NULL",
+    )
+    .fetch_one(storage.pool())
+    .await
+    .expect("count retained Postgres session-free journal rows");
+    assert_eq!(
+        session_free_retained, 1,
+        "only the in-flight runtime operation's row survives among session-free scopes"
+    );
+    let fences: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM lash_effect_scope_retirements")
+        .fetch_one(storage.pool())
+        .await
+        .expect("count Postgres scope fences");
+    assert_eq!(
+        fences, 2,
+        "the process and the retired runtime operation each leave one permanent fence"
+    );
 
     let controller = storage.runtime_effect_controller(ExecutionScope::runtime_operation(
         "postgres-effect-controller-conformance",

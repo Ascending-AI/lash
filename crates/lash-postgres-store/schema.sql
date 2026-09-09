@@ -526,6 +526,14 @@ CREATE TABLE IF NOT EXISTS lash_await_event_revoked_sessions (
     revoked_at_ms BIGINT NOT NULL
 );
 
+-- Permanent by design: process and runtime-operation ids are single-use, so a
+-- retired scope's fence must outlive every retention pass and every restart.
+-- Keyed by the scope's journal identity, the same key its effect rows carry.
+CREATE TABLE IF NOT EXISTS lash_effect_scope_retirements (
+    scope_id TEXT PRIMARY KEY,
+    retired_at_ms BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions (
     subscription_id TEXT PRIMARY KEY,
     owner_scope TEXT NOT NULL,
@@ -596,7 +604,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 79)
+VALUES ('lash-postgres-store', 80)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

@@ -43,6 +43,7 @@ async fn row_store() -> SqliteEffectReplayRowStore {
         completion_keys: CompletionKeys::Unsupported,
         conn,
         clock: Arc::new(lash_core::facade_support::SystemClock),
+        registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
     }
 }
 
@@ -570,6 +571,7 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
         clock.clone(),
         vec![0; 32],
         CompletionKeys::Issued,
+        std::sync::Arc::new(crate::scope_fence::RegistryAttachment::default()),
     );
     let pause = injector.pause(SqliteFaultPoint::AfterBegin);
     let completing = tokio::spawn(async move {
@@ -629,6 +631,7 @@ async fn effect_lease_writes_refuse_expiry_during_sqlite_admission() {
             completion_keys: CompletionKeys::Issued,
             conn,
             clock: clock.clone(),
+            registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
         });
         let mut request = claim("queued-write", "owner");
         request.lease_ttl_ms = 300;

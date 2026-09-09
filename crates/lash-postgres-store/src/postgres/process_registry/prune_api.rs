@@ -1,6 +1,8 @@
 use super::*;
 
-const PRUNE_TERMINAL_SQL: &str = "SELECT process_id, record_json FROM lash_processes
+/// The prune eligibility predicate. The prune appends `FOR UPDATE`; the
+/// survey reads it as is.
+const PRUNABLE_TERMINAL_SELECT: &str = "SELECT process_id, record_json FROM lash_processes
          WHERE status NOT IN ('running', 'waiting')
            AND updated_at_ms < $1
            AND ($2::BIGINT IS NULL OR change_seq <= $2)
@@ -13,8 +15,63 @@ const PRUNE_TERMINAL_SQL: &str = "SELECT process_id, record_json FROM lash_proce
                SELECT 1 FROM lash_process_parent_end_plans AS plan
                WHERE plan.process_id = lash_processes.process_id
            )
-         ORDER BY process_id ASC
-         FOR UPDATE";
+         ORDER BY process_id ASC";
+
+fn prune_terminal_sql() -> String {
+    format!("{PRUNABLE_TERMINAL_SELECT}\n         FOR UPDATE")
+}
+
+fn watermark_change_seq(watermark: lash_core::ProjectionWatermark) -> Option<i64> {
+    match watermark {
+        lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
+        lash_core::ProjectionWatermark::NoProjector => None,
+    }
+}
+
+async fn select_prunable<'c>(
+    executor: impl sqlx::PgExecutor<'c>,
+    sql: &str,
+    cutoff: i64,
+    max_change_seq: Option<i64>,
+    filter: Option<&lash_core::ProcessListFilter>,
+) -> Result<Vec<String>, PluginError> {
+    let rows = sqlx::query(sql)
+        .bind(cutoff)
+        .bind(max_change_seq)
+        .fetch_all(executor)
+        .await
+        .map_err(plugin_sqlx_error)?;
+    let mut prunable = Vec::new();
+    for row in rows {
+        let process_id: String = row.get(0);
+        let record_json: String = row.get(1);
+        let record: ProcessRecord =
+            serde_json::from_str(&record_json).map_err(process_decode_error)?;
+        if filter.is_none_or(|filter| filter.matches_record(&record)) {
+            prunable.push(process_id);
+        }
+    }
+    Ok(prunable)
+}
+
+/// The survey half of the prune: the same predicate, read without locking or
+/// deleting.
+pub(super) async fn prunable_terminal_processes(
+    registry: &PostgresProcessRegistry,
+    cutoff_epoch_ms: u64,
+    filter: Option<lash_core::ProcessListFilter>,
+    watermark: lash_core::ProjectionWatermark,
+) -> Result<Vec<String>, PluginError> {
+    let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+    select_prunable(
+        &registry.pool,
+        PRUNABLE_TERMINAL_SELECT,
+        cutoff,
+        watermark_change_seq(watermark),
+        filter.as_ref(),
+    )
+    .await
+}
 
 pub(super) async fn prune_terminal_processes(
     registry: &PostgresProcessRegistry,
@@ -24,30 +81,16 @@ pub(super) async fn prune_terminal_processes(
 ) -> Result<ProcessPruneReport, PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     let pruned_at_ms = registry.clock.timestamp_ms() as i64;
-    let max_change_seq = match watermark {
-        lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
-        lash_core::ProjectionWatermark::NoProjector => None,
-    };
+    let max_change_seq = watermark_change_seq(watermark);
     let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
-    let rows = sqlx::query(PRUNE_TERMINAL_SQL)
-        .bind(cutoff)
-        .bind(max_change_seq)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-    let mut prunable = Vec::new();
-    for row in rows {
-        let process_id: String = row.get(0);
-        let record_json: String = row.get(1);
-        let record: ProcessRecord =
-            serde_json::from_str(&record_json).map_err(process_decode_error)?;
-        if filter
-            .as_ref()
-            .is_none_or(|filter| filter.matches_record(&record))
-        {
-            prunable.push(process_id);
-        }
-    }
+    let prunable = select_prunable(
+        &mut *tx,
+        &prune_terminal_sql(),
+        cutoff,
+        max_change_seq,
+        filter.as_ref(),
+    )
+    .await?;
 
     if prunable.is_empty() {
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -111,14 +154,16 @@ mod planner_tests {
                 .await
                 .expect("set planner witness preference");
         }
-        let plan =
-            sqlx::query_scalar::<_, String>(&format!("EXPLAIN (COSTS OFF) {PRUNE_TERMINAL_SQL}"))
-                .bind(i64::MAX)
-                .bind(None::<i64>)
-                .fetch_all(&mut *tx)
-                .await
-                .expect("explain process prune")
-                .join(" | ");
+        let plan = sqlx::query_scalar::<_, String>(&format!(
+            "EXPLAIN (COSTS OFF) {}",
+            prune_terminal_sql()
+        ))
+        .bind(i64::MAX)
+        .bind(None::<i64>)
+        .fetch_all(&mut *tx)
+        .await
+        .expect("explain process prune")
+        .join(" | ");
         eprintln!("prune anti-join plan: {plan}");
         assert!(
             plan.contains("Merge Anti Join")
