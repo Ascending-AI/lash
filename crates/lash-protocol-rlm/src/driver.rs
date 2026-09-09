@@ -296,7 +296,9 @@ mod catalogue_tests {
 
         assert!(prompt.contains("finish <value>"));
         assert!(prompt.contains("REQUIRED OUTPUT"));
-        assert!(prompt.contains("Every response performs its next step in a block"));
+        assert!(prompt.contains("Each response acts in a block"));
+        assert!(prompt.contains("Do not call `finish` until the answer is in hand"));
+        assert!(prompt.contains("the final response's block calls `finish <value>`"));
         assert!(prompt.contains("prose alone never ends this turn"));
         assert!(prompt.contains("Never announce an action without the block that performs it"));
     }

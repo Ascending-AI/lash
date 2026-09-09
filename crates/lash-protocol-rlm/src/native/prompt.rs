@@ -59,6 +59,10 @@ pub(super) fn transport_copy(original: &str, dialect: &dyn RlmDialect) -> String
         .replace("TypeScript block", "`execute_code` call")
         .replace("a <lashlang> block", "an `execute_code` call")
         .replace("in a block", "in an `execute_code` call")
+        .replace(
+            "response's block calls",
+            "response's `execute_code` call runs",
+        )
         .replace("the block", "the `execute_code` call")
         .replace("no block", "no code call")
         .replace("A block without", "A program without")
