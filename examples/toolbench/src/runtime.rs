@@ -201,17 +201,27 @@ async fn run_turn(
     let builder = match channel {
         crate::ChannelSelection::Standard => LashCore::standard_builder(budget),
         crate::ChannelSelection::Cell | crate::ChannelSelection::Native => {
+            let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
+                .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                .wall_clock(lash::rlm::WallClockBound::secs(30))
+                .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                .build()
+                .with_channel(if channel == crate::ChannelSelection::Cell {
+                    lash::rlm::RlmChannel::Cell
+                } else {
+                    lash::rlm::RlmChannel::NativeTool
+                });
+            config.prompt_features.images = false;
+            config.prompt_features.type_literals = false;
+            config.prompt_features.decomposition = false;
+            config.lashlang_language_features.label_annotations = false;
+            config.lashlang_abilities.processes = false;
+            config.lashlang_abilities.sleep = false;
+            config.lashlang_abilities.process_signals = false;
+            config.lashlang_abilities.triggers = false;
+            config.continue_as_soft_warn_tokens = None;
             let factory = lash::rlm::RlmProtocolPluginFactory::new(
-                lash::rlm::RlmProtocolPluginConfig::builder()
-                    .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-                    .wall_clock(lash::rlm::WallClockBound::secs(30))
-                    .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-                    .build()
-                    .with_channel(if channel == crate::ChannelSelection::Cell {
-                        lash::rlm::RlmChannel::Cell
-                    } else {
-                        lash::rlm::RlmChannel::NativeTool
-                    }),
+                config,
                 Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
             );
             LashCore::rlm_builder(budget, factory)

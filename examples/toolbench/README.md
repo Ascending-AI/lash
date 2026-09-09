@@ -99,7 +99,7 @@ evidence. A provider call interrupted before its ledger is sealed gets an
 `interrupted` attempt row with observed usage (or null if unavailable) and attempt ordinal. Summary rows have `kind: "summary"` for each model/cohort. The Markdown tables print to
 stdout and are saved at `<results-file>.summary.md`.
 
-Tables show pass/rows, rounds, total prompt tokens, cache reads and writes,
+Tables show pass/rows, Attempts, total prompt tokens, cache reads and writes,
 completion and reasoning tokens, provider cost, summed/median task wall time,
 and per-task means. Every attempt, including retries and failures, contributes.
 Missing metering makes the corresponding total `n/a`. Probe usage is separately
@@ -114,8 +114,8 @@ Easy tasks retain their original prompts and expected answers. Hard tasks ask
 for an outcome, with at most two task sentences, and require intermediate
 inspection. The hard pack deliberately supersedes the easy pack's 1–3-call
 limit: oracle solutions use 5–10 host calls. Counts exclude submit and are
-metrics, not pass/fail limits. Live validation targets 30 seconds per task on
-every channel/dialect; run models concurrently with a one-hour external budget.
+metrics, not pass/fail limits. The harness deadline is 120 seconds per task;
+run models concurrently with a one-hour external budget.
 
 | Task (prefix `hard-`) | Domain | Source | Oracle calls | Inspection / branch |
 |---|---|---|---:|---|
@@ -174,6 +174,8 @@ is 300 seconds. There is no whole-task retry and no change to world grading.
 
 Lash decides whether a failure is retryable and charge-safe. Transient transport
 errors and throttles can retry; 400/422 request-shape errors never retry.
+Upstream transport failures at the recorder surface to Lash as HTTP 502 JSON
+(`recorder_upstream_transport`), so retry classification follows the HTTP path.
 The adapter can refuse malformed/empty responses or other errors, and Lash can
 refuse retries after a response/output was observed without an idempotency
 or resume guarantee. Toolbench preserves these verdicts instead of overriding
@@ -206,7 +208,8 @@ the adapter omits the partial response. A run with no provider invocations costs
 with unavailable cost stays unknown. If cancellation interrupts a backoff, the
 row retains observed calls and their partial costs even though Lash has not
 sealed the call ledger. Such rows explicitly mark the retry decision unavailable.
-Summary tables include Retries. Probe calls remain outside cohort cost totals.
+Summary tables label provider invocations Attempts and include Retries. Probe
+calls remain outside cohort cost totals.
 
 ## Accounting and forensic capture
 
@@ -248,6 +251,30 @@ baseline for protocol overhead, not a tokenizer measurement of the system
 message alone. The cohort summary reports its mean. Later prompt totals can
 be compared with that baseline to measure round-by-round growth.
 
+The RLM host explicitly disables image/type-literal/decomposition prompt
+features, label annotations, processes, sleep, process signals and triggers,
+and disables continuation soft warnings. This removes what the current
+renderer gates; the `control.continue_as` catalogue entry and the lashlang
+label/process/sleep teaching are gated separately by FIG-2750 (#1172) and
+still appear on renderers before that change.
+
+One-task `kv-read` smoke on `z-ai/glm-5.3-flash`, medium reasoning, paired all
+channels and both dialects, one repetition, concurrency 8 (2026-09-09):
+
+| Cohort | First-call prompt before | First-call prompt after | Change |
+|---|---:|---:|---:|
+| standard/none | 1064 | 1064 | 0 |
+| cell/lashlang | 5114 | 4467 | -647 |
+| native/lashlang | 5143 | 4506 | -637 |
+| cell/typescript | 4527 | 4527 | 0 |
+| native/typescript | 4590 | 4590 | 0 |
+
+These are whole-prompt usage counts, not isolated system-message tokens.
+Both runs used main `367b35ceefeb2944995b55d74a2677f50d4ad151` as their base;
+#1172 (additional host-capability prompt gating) was still open. TypeScript's
+counts were unchanged with the prompt renderer on that base. All five tasks
+passed in each run; the largest task wall time was 11.387 seconds.
+
 `messages_chars`/`messages_bytes` measure the compact JSON message array;
 `system_prompt_chars`/`system_prompt_bytes` sum compact JSON content values for
 system/developer messages, and `tool_result_chars`/`tool_result_bytes` do the
@@ -261,7 +288,8 @@ chunk, with contextual model/task/repetition/channel/dialect in `--trace-log`.
 `--dump-requests DIR` additionally writes redacted request JSON and response
 capture JSON (including ordered wire chunks, raw usage, normalized response
 and errors) named by model/task/channel/dialect/repetition/turn/round. Response
-captures are updated on each chunk to retain interrupted calls. Credential
+captures are written once at provider completion or cancellation to retain
+interrupted calls without repeatedly serializing accumulated chunks. Credential
 values and sensitive object keys are redacted; request bodies are no longer
 truncated to 4096 bytes. Dump errors are carried on attempt rows.
 
@@ -271,9 +299,13 @@ request projection and 4 KB failure excerpt limits. It uses the fixed OpenRouter
 origin, forwards authentication only in headers, and shuts down with the task.
 Every cohort uses this same recorder. Its local hop and synchronous capture I/O
 are included in wall timings. `http-response.json` files preserve the received
-HTTP body text (including SSE framing), updated on each chunk; normalized
+HTTP body text (including SSE framing), written once at stream end; normalized
 `response.json` files retain parsed chunks and usage. Interrupted streams are
-explicitly partial. This avoids pretending a normalized request is wire evidence.
+marked `partial: true`, including outer task deadlines. Raw bytes accumulate
+losslessly (including split UTF-8); per-chunk logging and one final dump keep
+capture work linear in response size. A bounded in-memory bridge owns each
+accepted connection; task teardown aborts these connection tasks and closes
+their sockets. This avoids pretending a normalized request is wire evidence.
 
 ```sh
 target/debug/toolbench --model z-ai/glm-5.3-flash --paired --channel-set all \
@@ -285,18 +317,20 @@ target/debug/toolbench --reconcile results.jsonl
 Reconciliation writes `results.jsonl.reconcile.md` and
 `results.jsonl.reconcile.jsonl` (`kind: "reconcile"`). It randomly samples at
 least 30 attempts, balanced across the model/channel/dialect groups present
-in the input, and queries the [OpenRouter generation endpoint](https://openrouter.ai/docs/api/api-reference/generations/get-generation).
+in the input (or all attempts when fewer than 30 exist), and queries the [OpenRouter generation endpoint](https://openrouter.ai/docs/api/api-reference/generations/get-generation).
 Both `tokens_prompt`/`tokens_completion` and their `native_tokens_*` counterparts
 are compared, without silently replacing differently tokenized counters.
-Token tolerance is exact; cost tolerance is 0.000001 USD. Missing IDs, unavailable
-fields and mismatches are recorded per row with both values and produce a
-nonzero exit. The report retains `cache_discount` as money; it cannot establish
+Native token tolerance is exact; cost tolerance is 0.000001 USD. Missing IDs,
+unavailable native/cost evidence, native prompt/completion/cached/reasoning
+mismatches and cost mismatches beyond that tolerance produce a nonzero exit.
+Normalized `tokens_prompt`/`tokens_completion` differences are informational:
+`normalized_mismatch` counts differing normalized fields per JSONL row, and
+the Markdown report shows their per-field column and total count. They never
+affect exit status; neither does a sample smaller than 30 attempts. The report
+retains `cache_discount` as money; it cannot establish
 cache-read token equality when `native_tokens_cached` is absent. See also
 [OpenRouter prompt caching](https://openrouter.ai/docs/guides/best-practices/prompt-caching).
 
-The validation sample from 2026-09-09 matched all native token/cache-read/reasoning
-counts and costs across 60 calls. Normalized generation counters differed in
-119 of 120 comparisons; this is a tokenizer distinction, not permission to
-replace the native prompt counts. The reconcile reports deliberately retain
-those mismatches and exit nonzero. OpenRouter documents the distinction in
-[its native-versus-normalized billing explanation](https://openrouter.zendesk.com/hc/en-us/articles/51691717731483-Why-was-I-charged-more-per-token-than-the-price-shown-on-the-model-page).
+Normalized generation counters can use a different tokenizer from native
+usage; they are never substituted for the native prompt counts. See
+[OpenRouter's native-versus-normalized billing explanation](https://openrouter.zendesk.com/hc/en-us/articles/51691717731483-Why-was-I-charged-more-per-token-than-the-price-shown-on-the-model-page).

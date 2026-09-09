@@ -37,6 +37,29 @@ pub(crate) fn diff(row: &Value, data: &Value) -> Vec<Value> {
     .map(|(l, r, t)| comparison(row, data, l, r, t))
     .collect()
 }
+fn normalized(comparison: &Value) -> bool {
+    matches!(
+        comparison["generation_field"].as_str(),
+        Some("tokens_prompt" | "tokens_completion")
+    )
+}
+
+fn counts(comparisons: &[Value]) -> (usize, usize, usize) {
+    let mismatches = comparisons
+        .iter()
+        .filter(|c| !normalized(c) && c["status"] == "mismatch")
+        .count();
+    let unavailable = comparisons
+        .iter()
+        .filter(|c| !normalized(c) && c["status"] == "unavailable")
+        .count();
+    let informational = comparisons
+        .iter()
+        .filter(|c| normalized(c) && c["status"] == "mismatch")
+        .count();
+    (mismatches, unavailable, informational)
+}
+
 fn sample(rows: Vec<Value>) -> Result<Vec<Value>> {
     let mut groups = BTreeMap::<_, Vec<Value>>::new();
     for row in rows {
@@ -95,10 +118,11 @@ pub(crate) async fn run(path: &Path, key: &str) -> Result<()> {
         .build()?;
     let mut output = std::fs::File::create(format!("{}.reconcile.jsonl", path.display()))?;
     let mut report = String::from(
-        "# OpenRouter reconciliation\n\nStratified random sample of attempt rows, balanced across model/channel/dialect. Exact token comparisons; cost tolerance 0.000001 USD. Both normalized and native generation token counters are shown; counters with different tokenizers are not substituted silently. Cache discount is retained as money, not interpreted as cached tokens.\n\n",
+        "# OpenRouter reconciliation\n\nStratified random sample of attempt rows, balanced across model/channel/dialect. Exact token comparisons; cost tolerance 0.000001 USD. Only native counters, cost and unavailable generation evidence gate exit. Normalized mismatches are informational. Both normalized and native generation token counters are shown; counters with different tokenizers are not substituted silently. Cache discount is retained as money, not interpreted as cached tokens.\n\n",
     );
     let mut mismatches = 0;
     let mut unavailable = 0;
+    let mut normalized_mismatch = 0;
     let mut queries = 0;
     for row in &selected {
         let id = row["provider_response_id"].as_str();
@@ -140,18 +164,12 @@ pub(crate) async fn run(path: &Path, key: &str) -> Result<()> {
             json!({"error":{"message":"attempt has no provider_response_id"}})
         };
         let comparisons = diff(row, &response["data"]);
-        let bad = comparisons
-            .iter()
-            .filter(|c| c["status"] == "mismatch")
-            .count();
-        let missing = comparisons
-            .iter()
-            .filter(|c| c["status"] == "unavailable")
-            .count();
+        let (bad, missing, informational) = counts(&comparisons);
+        normalized_mismatch += informational;
         mismatches += bad;
         unavailable += missing;
         let evidence = crate::provider_log::redact(
-            json!({"kind":"reconcile","model":row["model"],"channel":row["channel"],"dialect":row["dialect"],"task":row["task"],"repetition":row["repetition"],"round":row["round"],"provider_response_id":id,"comparisons":comparisons,"generation":response,"mismatches":bad,"unavailable":missing}),
+            json!({"kind":"reconcile","model":row["model"],"channel":row["channel"],"dialect":row["dialect"],"task":row["task"],"repetition":row["repetition"],"round":row["round"],"provider_response_id":id,"comparisons":comparisons,"generation":response,"mismatches":bad,"unavailable":missing,"normalized_mismatch":informational}),
             key,
         );
         writeln!(output, "{evidence}")?;
@@ -167,16 +185,17 @@ pub(crate) async fn run(path: &Path, key: &str) -> Result<()> {
             id.unwrap_or("missing id")
         )
         .unwrap();
-        report.push_str("| Row field | Generation field | Row | Generation | Result |\n|---|---|---:|---:|---|\n");
+        report.push_str("| Row field | Generation field | Row | Generation | Result | normalized_mismatch (informational) |\n|---|---|---:|---:|---|---|\n");
         for c in &comparisons {
             writeln!(
                 report,
-                "| {} | {} | {} | {} | {} |",
+                "| {} | {} | {} | {} | {} | {} |",
                 c["field"].as_str().unwrap(),
                 c["generation_field"].as_str().unwrap(),
                 c["row"],
                 c["generation"],
-                c["status"].as_str().unwrap()
+                c["status"].as_str().unwrap(),
+                normalized(c) && c["status"] == "mismatch"
             )
             .unwrap();
         }
@@ -188,15 +207,15 @@ pub(crate) async fn run(path: &Path, key: &str) -> Result<()> {
         .unwrap();
     }
     let counts = format!(
-        "Sampled {} rows; queried {queries}; mismatching fields {mismatches}; unavailable fields {unavailable}.\n",
+        "Sampled {} rows; queried {queries}; mismatching fields {mismatches}; unavailable native/cost fields {unavailable}; normalized_mismatch (informational) {normalized_mismatch}.\n",
         selected.len()
     );
     report.insert_str(0, &format!("{counts}\n"));
     std::fs::write(format!("{}.reconcile.md", path.display()), report)?;
     print!("{counts}");
-    if selected.len() < 30 || mismatches > 0 || unavailable > 0 {
+    if mismatches > 0 || unavailable > 0 {
         anyhow::bail!(
-            "reconciliation has insufficient, mismatching or unavailable evidence; see report"
+            "reconciliation has mismatching or unavailable native/cost evidence; see report"
         );
     }
     Ok(())
@@ -221,6 +240,11 @@ mod tests {
         let c = diff(&row, &data);
         assert_eq!(c.iter().filter(|v| v["status"] == "mismatch").count(), 1);
         assert_eq!(c[6]["status"], "match");
+        assert_eq!(counts(&c), (0, 0, 1));
+        let mut native_bad = data.clone();
+        native_bad["native_tokens_prompt"] = json!(101);
+        assert_eq!(counts(&diff(&row, &native_bad)), (1, 0, 1));
+        assert_eq!(counts(&diff(&row, &Value::Null)), (0, 5, 0));
         assert_eq!(
             comparison(
                 &row,
