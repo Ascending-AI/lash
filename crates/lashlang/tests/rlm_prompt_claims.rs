@@ -1222,6 +1222,22 @@ finish items"#,
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn prompt_claim_comprehension_of_tool_calls_fans_out_like_a_literal_list() {
+    let host = MockHost::default()
+        .with_file("Cargo.toml", "abc")
+        .with_file("README.md", "abcdef");
+    let Value::List(items) = run(
+        &host,
+        r#"texts = await [files.read({ path: path })? for path in ["Cargo.toml", "README.md"]]
+finish [len(text) for text in texts]"#,
+    ) else {
+        panic!("expected list");
+    };
+
+    assert_eq!(&items[..], [Value::Number(3.0), Value::Number(6.0)]);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn prompt_example_prints_targeted_slice_for_large_values() {
     let host = MockHost::default().with_file("Cargo.toml", "abcdef");
     let (outcome, _) = run_continued(

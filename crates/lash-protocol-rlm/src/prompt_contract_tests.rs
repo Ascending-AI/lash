@@ -226,11 +226,13 @@ fn toolbench_shaped_prompt_has_no_process_vocabulary() {
         for forbidden in [",s.", "process", "defineProcess", "waitSignal"] {
             assert!(!prompt.contains(forbidden), "{forbidden}: {prompt}");
         }
-        assert!(
-            !prompt
-                .split(|c: char| !c.is_alphanumeric() && c != '_')
+        // E2 uses the ordinary verb "run" for comprehension clauses and
+        // separate awaits. The unsupported process identifier stays absent
+        // from code examples; the process prose is covered above.
+        assert!(!prompt.split('`').skip(1).step_by(2).any(|code| {
+            code.split(|c: char| !c.is_alphanumeric() && c != '_')
                 .any(|word| word == "run")
-        );
+        }));
         if let Ok(directory) = std::env::var("LASH_PROMPT_CAPTURE_DIR") {
             std::fs::write(
                 std::path::Path::new(&directory)

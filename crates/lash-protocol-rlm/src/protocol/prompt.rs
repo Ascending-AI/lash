@@ -377,7 +377,7 @@ fn assignment_language_bullet() -> String {
 }
 
 fn list_comprehension_language_bullet() -> String {
-    r#"- Comprehensions: `[expr for x in xs if cond]`; multiple for/if clauses execute left-to-right. Bindings are local. Use loops for mutation, break or continue."#.to_string()
+    r#"- Comprehensions: `[expr for x in xs if cond]`; clauses run left-to-right, bindings are local. A comprehension of tool calls fans out like a literal list: `results = await [m.op({ id: x })? for x in xs]`. Use loops for mutation, `break` or `continue`."#.to_string()
 }
 
 fn functions_language_bullet() -> String {
@@ -422,7 +422,7 @@ fn operation_scheduling_language_bullet(processes: bool) -> String {
         ""
     };
     format!(
-        "- Aggregate await: `results = await {{ a: module.a({{}})?, b: module.b({{}})?, label: \"kept\" }}` fans out direct operation leaves in nested lists/records, retaining shape and pure values. `?` unwraps each leaf; all siblings settle before the first source-order failure. Consecutive awaits serialize.{process_note}"
+        "- Fan-out: `await {{ a: m.a({{}})?, b: m.b({{}})? }}` or `await [m.a({{}})?, m.b({{}})?]` runs the literal calls concurrently and returns the same shape with results in place. All calls settle before the first failure (in source order) is raised; separate `await`s run one after another.{process_note}"
     )
 }
 

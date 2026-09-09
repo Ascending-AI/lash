@@ -496,8 +496,14 @@ fn execution_section_documents_list_comprehensions() {
     );
 
     assert!(section.contains("[expr for x in xs if cond]"));
-    assert!(section.contains("multiple for/if clauses execute left-to-right"));
-    assert!(section.contains("Bindings are local"));
+    assert!(section.contains("clauses run left-to-right, bindings are local"));
+    assert!(section.contains(
+        "A comprehension of tool calls fans out like a literal list: `results = await [m.op({ id: x })? for x in xs]`"
+    ));
+    assert!(section.contains(
+        "- Fan-out: `await { a: m.a({})?, b: m.b({})? }` or `await [m.a({})?, m.b({})?]`"
+    ));
+    assert!(!section.contains("Aggregate await:"));
     assert!(!section.contains("Do not use comprehensions"));
 }
 
