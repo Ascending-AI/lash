@@ -7,6 +7,7 @@ use crate::world::{MailMessage, World};
 #[serde(rename_all = "snake_case", tag = "kind", content = "expected")]
 pub(crate) enum FinishMatcher {
     Exact(Value),
+    UnorderedSet(Vec<Value>),
     Normalized(String),
     Numeric(f64),
 }
@@ -15,6 +16,10 @@ impl FinishMatcher {
     pub(crate) fn matches(&self, actual: Option<&Value>) -> bool {
         match (self, actual) {
             (Self::Exact(expected), Some(actual)) => expected == actual,
+            (Self::UnorderedSet(expected), Some(Value::Array(actual))) => {
+                actual.iter().all(|v| expected.contains(v))
+                    && expected.iter().all(|v| actual.contains(v))
+            }
             (Self::Normalized(expected), Some(Value::String(actual))) => {
                 normalize(expected) == normalize(actual)
             }
@@ -31,6 +36,7 @@ impl FinishMatcher {
     pub(crate) fn describe(&self) -> String {
         match self {
             Self::Exact(value) => format!("finish exactly {value}"),
+            Self::UnorderedSet(values) => format!("finish set equal to {}", json!(values)),
             Self::Normalized(value) => format!("normalized finish equals {value:?}"),
             Self::Numeric(value) => format!("numeric value equal to {value}"),
         }
@@ -68,7 +74,31 @@ impl Task {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Pack {
+    Easy,
+    Hard,
+    All,
+}
+
+impl Task {
+    pub(crate) fn pack(&self) -> Pack {
+        if self.id.starts_with("hard-") {
+            Pack::Hard
+        } else {
+            Pack::Easy
+        }
+    }
+}
+
 pub(crate) fn task_pack() -> Vec<Task> {
+    let mut tasks = easy_pack();
+    tasks.extend(hard_pack());
+    tasks
+}
+
+pub(crate) fn easy_pack() -> Vec<Task> {
     vec![
         read_task(
             "weather-temperature",
@@ -201,7 +231,14 @@ fn write_task(
     tool_calls: usize,
     mutate_expected: impl FnOnce(&mut World),
 ) -> Task {
-    let seed = World::seeded();
+    let mut seed = World::seeded();
+    seed.catalog = if id.starts_with("hard-retail-") {
+        crate::world::Catalog::Retail
+    } else if id.starts_with("hard-ops-") {
+        crate::world::Catalog::Ops
+    } else {
+        crate::world::Catalog::Easy
+    };
     let mut expected_world = seed.clone();
     mutate_expected(&mut expected_world);
     Task {
@@ -291,7 +328,7 @@ mod tests {
     #[test]
     fn shared_prompts_only_append_completion_and_world_constraints() {
         let tasks = task_pack();
-        assert_eq!(tasks.len(), 16);
+        assert_eq!(tasks.len(), 28);
         for task in tasks {
             assert_eq!(
                 task.prompt_for(false),
@@ -304,7 +341,11 @@ mod tests {
                     standard_tool_names(&task.prompt, true)
                 )
             );
-            assert!((1..=3).contains(&task.tool_calls));
+            assert!(match task.pack() {
+                Pack::Easy => (1..=3).contains(&task.tool_calls),
+                Pack::Hard => (4..=10).contains(&task.tool_calls),
+                Pack::All => false,
+            });
         }
     }
 
@@ -412,3 +453,103 @@ mod tests {
         }
     }
 }
+
+pub(crate) fn hard_pack() -> Vec<Task> {
+    vec![
+        write_task(
+            "hard-retail-refund",
+            "Refund all of Mira's delivered orders within the 30-day return window. Finish with only the total refunded cents verified in those orders, nothing else.",
+            FinishMatcher::Numeric(4000.0),
+            9,
+            |w| {
+                w.retail.orders[0].refunded_cents = 2200;
+                w.retail.orders[2].refunded_cents = 1800;
+            },
+        ),
+        write_task(
+            "hard-retail-exchange",
+            "For order R7, attempt the requested replacement P2; if it is out of stock, use the cheapest other product in the original category with enough stock for the entire order. Finish with only the verified replacement sku field value, nothing else.",
+            FinishMatcher::Exact(json!("P5")),
+            6,
+            |w| {
+                w.retail.orders[6].sku = "P5".into();
+                w.retail.products[4].stock = 0;
+            },
+        ),
+        write_task(
+            "hard-retail-reschedule",
+            "Move Sana's earliest pending delivery to day 22 only if she has no pending payment; shipped orders must stay unchanged. Finish with only the verified delivery_day field value of the moved order, or PAYMENT_PENDING if payment blocks it, nothing else.",
+            FinishMatcher::Numeric(22.0),
+            7,
+            |w| {
+                w.retail.orders[6].delivery_day = 22;
+            },
+        ),
+        read_task(
+            "hard-retail-reprice",
+            "How many cents more would Mira pay at current product prices for the quantities in her delivered orders still within the 30-day return window, compared with what she actually paid for those orders? Finish with only the difference in cents, nothing else.",
+            FinishMatcher::Numeric(500.0),
+            7,
+        ),
+        read_task(
+            "hard-retail-lamps",
+            "Which of Mira's delivered orders contain products in category lamp? Finish with only their order IDs, nothing else, without changing anything.",
+            FinishMatcher::UnorderedSet(vec![json!("R1"), json!("R2")]),
+            8,
+        ),
+        read_task(
+            "hard-retail-best-return",
+            "Which of Mira's delivered orders still within the 30-day return window has the greatest paid amount per unit? Break ties by the earlier order ID and finish with only that order ID, nothing else.",
+            FinishMatcher::Exact(json!("R1")),
+            5,
+        ),
+        write_task(
+            "hard-ops-deploy-recovery",
+            "Attempt Beacon's newest release with passed checks; if capacity prevents it, deploy the newest passed release that fits. Finish with only the verified deployed_release field value, nothing else.",
+            FinishMatcher::Exact(json!("V2")),
+            8,
+            |w| {
+                w.ops.services[0].deployed_release = "V2".into();
+            },
+        ),
+        write_task(
+            "hard-ops-resolve-chain",
+            "Resolve incident I2 and its open prerequisites with their required fixes deployed on Beacon. Finish with only I2's verified status field value, nothing else.",
+            FinishMatcher::Exact(json!("resolved")),
+            9,
+            |w| {
+                w.ops.services[0].deployed_release = "V2".into();
+                w.ops.tickets[0].status = "resolved".into();
+                w.ops.tickets[1].status = "resolved".into();
+            },
+        ),
+        read_task(
+            "hard-ops-impact",
+            "What is the sum of affected users on Beacon's open incidents of severity 1 or 2? Exclude resolved incidents and finish with only the total, nothing else.",
+            FinishMatcher::Numeric(200.0),
+            5,
+        ),
+        read_task(
+            "hard-ops-oncall",
+            "For the highest-severity open incident across Beacon and Harbor, finish with only the owning team's available primary email, or its backup email when the primary is unavailable. Break severity ties by the larger affected-user count and include nothing besides that email.",
+            FinishMatcher::Exact(json!("nia@example.test")),
+            10,
+        ),
+        read_task(
+            "hard-ops-ready",
+            "Which of Beacon's open incidents have no open prerequisites and a fix release whose checks passed and capacity fits Beacon? Finish with only the incident IDs, nothing else, without deploying or resolving anything.",
+            FinishMatcher::UnorderedSet(vec![json!("I1")]),
+            6,
+        ),
+        read_task(
+            "hard-ops-blocked-impact",
+            "Among incident I2 and all of Harbor's incidents, how many affected users belong to open incidents whose required fix release has failed checks? Finish with only the total, nothing else.",
+            FinishMatcher::Numeric(290.0),
+            7,
+        ),
+    ]
+}
+
+#[cfg(test)]
+#[path = "hard_tests.rs"]
+mod hard_tests;
