@@ -8,9 +8,9 @@ FIG-2766 requires `Promise.all` and `Promise.allSettled` to accept array-valued 
 
 ## Decision
 
-TypeScript tool calls in expression position create pending tool handles. Evaluating the argument array captures each call's receiver, arguments, and source site. Aggregate await builds a batch from those handles and passes it through the existing settlement-order validation and rejection selection. Non-handle elements retain their values. Direct async maps retain their existing callback driver.
+TypeScript tool calls in expression position create pending tool handles. Evaluating the argument array captures each call's receiver, arguments, and source site. Aggregate await builds a batch from those handles and passes it through the existing settlement-order validation and rejection selection. Non-handle elements retain their values. Direct async maps retain their existing callback driver. Process promises retain their explicit separate-await requirement: their host operation is not a resource-operation batch, which cannot currently express settlement order across a mixed process/tool aggregate.
 
-Pending tool requests are VM roots and continuation state. Each pending request is consumed by await; an abandoned request at cell end and an await of a settled non-handle produce a typed runtime error. The continuation format, VM ABI, and semantic hash versions change together.
+Pending tool requests are VM roots and continuation state. Each pending request is consumed by await; an abandoned request at cell end and an await of a settled non-handle produce a typed runtime error. The bytecode format advances from 10 to 11, continuation format from 8 to 9, VM ABI from v6 to v7, and semantic hash from v3 to v4.
 
 Lashlang literal aggregates keep their source-order rejection rule and their existing language teaching. This decision does not implement FIG-2764.
 
