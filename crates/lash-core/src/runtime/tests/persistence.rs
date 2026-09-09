@@ -962,7 +962,8 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
             crate::AgentFrameReason::new("review"),
         ),
         &crate::testing::TestClock::new(1000),
-    );
+    )
+    .expect("open a fresh review frame");
     assert_ne!(replacement.current_frame_node_id, old_frame);
     replacement
         .session_graph
