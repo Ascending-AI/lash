@@ -638,7 +638,10 @@ async fn facade_final_value_execution_inner(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-            .build(),
+            .build()
+            .with_lashlang_language_features(
+                lash_protocol_rlm::RlmLanguageFeatures::default().with_label_annotations(),
+            ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
@@ -967,7 +970,10 @@ fn agent_process_contract_core_with_options_and_effect_host(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-            .build(),
+            .build()
+            .with_lashlang_language_features(
+                lash_protocol_rlm::RlmLanguageFeatures::default().with_label_annotations(),
+            ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     )
     .with_lashlang_execution_sink(Arc::clone(&graph_store) as Arc<dyn lash::tracing::TraceSink>);
