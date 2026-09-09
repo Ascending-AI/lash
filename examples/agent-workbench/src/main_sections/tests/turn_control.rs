@@ -426,7 +426,11 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
     let (driver, acknowledge) = expiring_terminal_driver(&state);
     let receipts = tokio::time::timeout(Duration::from_secs(1), async {
         tokio::join!(
-            state.cancel_turns_for_session_with_driver(&session_id, &driver),
+            state.cancel_turns_for_session_with_driver(
+                &session_id,
+                &driver,
+                WorkbenchTurnCancelMode::Abort
+            ),
             acknowledge
         )
         .0
@@ -479,8 +483,11 @@ async fn live_restate_turn_timeout_retains_routing_as_pending_inner() {
         tokio::join!(
             cancel_turn_with_driver(
                 state.clone(),
-                SessionQuery {
-                    session_id: Some(session_id.clone())
+                TurnCancelQuery {
+                    session: SessionQuery {
+                        session_id: Some(session_id.clone())
+                    },
+                    mode: WorkbenchTurnCancelMode::Abort,
                 },
                 &driver,
             ),
@@ -517,7 +524,7 @@ async fn live_restate_turn_timeout_retains_routing_as_pending_inner() {
     );
     assert_eq!(
         cancellation["cancellation"]["cancellation"]["reason"],
-        "workbench Stop control"
+        "workbench Abort control"
     );
     assert!(
         cancellation["cancellation"]["cancellation"]
@@ -697,8 +704,11 @@ finish (await handle)?
 
     let (status, Json(receipt)) = cancel_turn(
         State(state.clone()),
-        Query(SessionQuery {
-            session_id: Some(session_id.clone()),
+        Query(TurnCancelQuery {
+            session: SessionQuery {
+                session_id: Some(session_id.clone()),
+            },
+            mode: WorkbenchTurnCancelMode::Abort,
         }),
     )
     .await
@@ -771,6 +781,8 @@ impl lash::TurnAttach for ConcurrentCancelTerminal {
             origin: request.origin,
             reason: request.reason,
             undelivered: request.undelivered,
+            mode: request.mode,
+            honoured_after_step: None,
         };
         // Exercise the product terminal publisher used by turn execution,
         // exactly once, while both cancellation handlers are attached.
@@ -806,8 +818,11 @@ fn concurrent_stops_publish_one_done_and_trace_winning_request() {
         let cancel = || {
             cancel_turn_with_driver(
                 state.clone(),
-                SessionQuery {
-                    session_id: Some(session_id.clone()),
+                TurnCancelQuery {
+                    session: SessionQuery {
+                        session_id: Some(session_id.clone()),
+                    },
+                    mode: WorkbenchTurnCancelMode::Abort,
                 },
                 &driver,
             )
@@ -861,4 +876,193 @@ fn concurrent_stops_publish_one_done_and_trace_winning_request() {
             );
         }
     });
+}
+
+#[test]
+fn turn_cancel_query_maps_stop_and_abort_onto_lash_modes() {
+    let parse = |query: &str| {
+        let uri: axum::http::Uri = format!("/api/turn/cancel?{query}")
+            .parse()
+            .expect("cancel route uri");
+        axum::extract::Query::<TurnCancelQuery>::try_from_uri(&uri)
+            .expect("cancel query parses")
+            .0
+    };
+    let stop = parse("session_id=s-1&mode=stop");
+    assert_eq!(stop.session.session_id.as_deref(), Some("s-1"));
+    assert_eq!(stop.mode, WorkbenchTurnCancelMode::Stop);
+    assert_eq!(stop.mode.lash_mode(), lash::TurnCancelMode::AfterStep);
+    let abort = parse("session_id=s-1&mode=abort");
+    assert_eq!(abort.mode, WorkbenchTurnCancelMode::Abort);
+    assert_eq!(abort.mode.lash_mode(), lash::TurnCancelMode::Immediate);
+    let legacy = parse("session_id=s-1");
+    assert_eq!(
+        legacy.mode,
+        WorkbenchTurnCancelMode::Abort,
+        "an unqualified Stop control keeps today's immediate abort"
+    );
+    assert!(ui::INDEX_HTML.contains("id=\"abort\""));
+    assert!(ui::INDEX_HTML.contains("stop after step"));
+    assert!(ui::INDEX_HTML.contains("\"/api/turn/cancel?mode=\" + mode"));
+    assert!(ui::INDEX_HTML.contains("stopTurn(\"stop\")"));
+    assert!(ui::INDEX_HTML.contains("stopTurn(\"abort\")"));
+    assert!(ui::INDEX_HTML.contains("STOP_ESCALATION_MS"));
+    assert!(ui::INDEX_HTML.contains("escalated"));
+}
+
+#[test]
+fn stop_control_requests_after_step_and_abort_escalates_the_durable_record() {
+    run_async_test_on_stack_budget("workbench-stop-mode-test", || {
+        stop_control_requests_after_step_and_abort_escalates_the_durable_record_inner()
+    });
+}
+
+async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record_inner() {
+    let data_dir = std::env::temp_dir().join(format!(
+        "agent-workbench-stop-mode-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
+    let admin_url = spawn_restate_admin_with_workflow_status(None).await;
+    let state = turn_cancel_test_state(&data_dir, admin_url).await;
+    let session_id = state.current_session_id();
+    let session = state
+        .core
+        .session(&session_id)
+        .open()
+        .await
+        .expect("open stop-mode session");
+
+    // Stop before the turn starts: the start gate honours the after-step
+    // request; the route forwards the same strength and attaches to the
+    // stopped terminal.
+    state.track_turn(&session_id, "stop-mode-turn");
+    let seeded = state
+        .core
+        .turn_work_driver()
+        .request_cancel(
+            lash::TurnCancelRequest::new(
+                session.turn_address("stop-mode-turn"),
+                "host-stop-first",
+                Some("user".to_string()),
+            )
+            .mode(lash::TurnCancelMode::AfterStep),
+        )
+        .await
+        .expect("seed the after-step request");
+    assert!(matches!(
+        seeded.outcome,
+        lash::TurnCancelOutcome::Requested(ref evidence)
+            if evidence.mode == lash::TurnCancelMode::AfterStep
+    ));
+    let (stopped, turn) = tokio::join!(
+        cancel_turn(
+            State(state.clone()),
+            Query(TurnCancelQuery {
+                session: SessionQuery {
+                    session_id: Some(session_id.clone()),
+                },
+                mode: WorkbenchTurnCancelMode::Stop,
+            }),
+        ),
+        session
+            .turn(lash::TurnInput::text("stop after the step"))
+            .turn_id("stop-mode-turn")
+            .run(),
+    );
+    let (status, Json(stopped)) = stopped.expect("stop route");
+    let turn = turn.expect("stopped turn commits");
+    assert_eq!(status, StatusCode::OK);
+    assert!(stopped.accepted);
+    match stopped.cancellations.as_slice() {
+        [
+            TurnCancelReceipt::TerminalAttached {
+                cancellation: RecordedTurnCancellation::AlreadyRequested(evidence),
+                terminal:
+                    lash::TurnTerminal::Committed {
+                        outcome:
+                            lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled {
+                                evidence: committed,
+                            }),
+                        ..
+                    },
+                ..
+            },
+        ] => {
+            assert_eq!(evidence.request_id, "host-stop-first");
+            assert_eq!(evidence.mode, lash::TurnCancelMode::AfterStep);
+            assert_eq!(committed.mode, lash::TurnCancelMode::AfterStep);
+            assert_eq!(committed.honoured_after_step, None);
+        }
+        other => panic!("stop route must attach an after-step cancellation: {other:?}"),
+    }
+    assert!(matches!(
+        turn.result.outcome,
+        lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { ref evidence })
+            if evidence.mode == lash::TurnCancelMode::AfterStep
+    ));
+
+    // Escalate: a routed turn already holding an after-step request is
+    // upgraded in place by the Abort control.
+    state.track_turn(&session_id, "escalate-turn");
+    let seeded = state
+        .core
+        .turn_work_driver()
+        .request_cancel(
+            lash::TurnCancelRequest::new(
+                session.turn_address("escalate-turn"),
+                "host-stop",
+                Some("user".to_string()),
+            )
+            .mode(lash::TurnCancelMode::AfterStep),
+        )
+        .await
+        .expect("seed the after-step request");
+    assert!(matches!(
+        seeded.outcome,
+        lash::TurnCancelOutcome::Requested(_)
+    ));
+    let (driver, acknowledge) = expiring_terminal_driver(&state);
+    let receipts = tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::join!(
+            state.cancel_turns_for_session_with_driver(
+                &session_id,
+                &driver,
+                WorkbenchTurnCancelMode::Abort
+            ),
+            acknowledge
+        )
+        .0
+    })
+    .await
+    .expect("Abort must not hang on a routed turn")
+    .expect("escalate routed turn");
+    match receipts.as_slice() {
+        [
+            TurnCancelReceipt::CancellationRecordedTerminalPending {
+                cancellation: RecordedTurnCancellation::Escalated(evidence),
+                ..
+            },
+        ] => {
+            assert_eq!(evidence.mode, lash::TurnCancelMode::Immediate);
+            assert_eq!(evidence.reason.as_deref(), Some("workbench Abort control"));
+        }
+        other => panic!("Abort after Stop must report an escalation: {other:?}"),
+    }
+    let durable = state
+        .session_store_factory
+        .open_existing_store_by_id(&session_id)
+        .await
+        .expect("open store")
+        .expect("store exists")
+        .turn_cancel_request(&session.turn_address("escalate-turn"))
+        .await
+        .expect("read durable request")
+        .expect("durable request recorded");
+    assert_eq!(durable.request.mode, lash::TurnCancelMode::Immediate);
+    assert_eq!(
+        durable.request.reason.as_deref(),
+        Some("workbench Abort control")
+    );
+    let _ = std::fs::remove_dir_all(data_dir);
 }

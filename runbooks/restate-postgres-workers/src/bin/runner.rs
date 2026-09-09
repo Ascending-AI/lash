@@ -2353,7 +2353,9 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
         .context("attach to completion/cancel race terminal")?;
     report_workflow_progress(&race.workflow_id, "terminal-attached");
     match race_outcome.outcome {
-        TurnCancelOutcome::Requested(_) | TurnCancelOutcome::AlreadyRequested(_) => {
+        TurnCancelOutcome::Requested(_)
+        | TurnCancelOutcome::AlreadyRequested(_)
+        | TurnCancelOutcome::Escalated(_) => {
             assert_cancelled_terminal(&race_terminal, race_evidence_id)?;
         }
         TurnCancelOutcome::CompletionWonRace => assert_non_cancel_terminal(&race_terminal)?,

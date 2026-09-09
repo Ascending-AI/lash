@@ -406,14 +406,19 @@ impl AppState {
         &self,
         session_id: &str,
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
-        self.cancel_turns_for_session_with_driver(session_id, &self.core.turn_work_driver())
-            .await
+        self.cancel_turns_for_session_with_driver(
+            session_id,
+            &self.core.turn_work_driver(),
+            WorkbenchTurnCancelMode::Abort,
+        )
+        .await
     }
 
     pub(crate) async fn cancel_turns_for_session_with_driver(
         &self,
         session_id: &str,
         driver: &lash::TurnWorkDriver,
+        mode: WorkbenchTurnCancelMode,
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
         let active = self.active_turns.for_session(session_id);
         let mut policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
@@ -452,7 +457,8 @@ impl AppState {
                         request_id.clone(),
                         Some("user".to_string()),
                     )
-                    .with_reason("workbench Stop control"),
+                    .with_reason(mode.reason())
+                    .mode(mode.lash_mode()),
                 )
                 .await
                 // Audited: revoked turn-cancel gates become an UnknownOrRevoked outcome; remaining failures are untyped control errors.
@@ -471,6 +477,14 @@ impl AppState {
                         driver,
                         address.clone(),
                         RecordedTurnCancellation::AlreadyRequested(evidence),
+                    )
+                    .await?
+                }
+                lash::TurnCancelOutcome::Escalated(evidence) => {
+                    attach_recorded_cancel_terminal(
+                        driver,
+                        address.clone(),
+                        RecordedTurnCancellation::Escalated(evidence),
                     )
                     .await?
                 }

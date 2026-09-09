@@ -834,7 +834,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         .await
         .expect("seed cancellation request");
     let (cancelled, turn) = tokio::join!(
-        cancel_turn(State(state.clone()), Query(SessionQuery::default())),
+        cancel_turn(State(state.clone()), Query(TurnCancelQuery::default())),
         session
             .turn(lash::TurnInput::text("already cancelled"))
             .turn_id("turn-cancel")

@@ -2541,7 +2541,8 @@
         </div>
         <div class="topbar-right">
           <button id="reset" class="ghost-btn" type="button" title="Clear the conversation and reset the session">reset</button>
-          <button id="stop" class="stop" type="button" hidden title="Cancel the running turn (Esc).">stop turn</button>
+          <button id="stop" class="stop" type="button" hidden title="Stop after the current step: the response finishes, its tool calls complete and commit, then the turn ends (Esc).">stop after step</button>
+          <button id="abort" class="stop" type="button" hidden title="Abort now: cancel the running turn immediately and drop uncommitted work (Shift+Esc).">abort</button>
           <span id="busyPill" class="pill pending"><span id="busyDot" class="dot"></span><span id="busyText" aria-live="polite">connecting</span></span>
           <button id="helpBtn" class="help" type="button" aria-expanded="false" aria-controls="helpPanel"
                   aria-label="Help and keyboard shortcuts">?</button>
@@ -3385,6 +3386,8 @@
         : "ask the agent — enter to send, shift + enter for a newline";
       syncCommandAvailability();
       stopButton.hidden = !next;
+      document.getElementById("abort").hidden = !next;
+      if (!next && typeof clearStopEscalation === "function") clearStopEscalation();
       timeline.setAttribute("aria-busy", String(next));
       clearInterval(turnTimer);
       turnTimer = 0;
@@ -4772,18 +4775,50 @@
     // END WORKBENCH_REMOTE_STREAM_RECOVERY
 
     // BEGIN WORKBENCH_STOP_TURN
-    function stopTurn() {
-      if (controller) controller.abort();
-      fetch("/api/turn/cancel", { method: "POST" })
+    // Stop (after-step) lets the running step finish and commit; Abort
+    // (immediate) cancels now. Lash ships no escalation timer, so the
+    // "escalate after N seconds" policy is host code right here: a Stop that
+    // is still pending after STOP_ESCALATION_MS is upgraded to an Abort.
+    const STOP_ESCALATION_MS = 20000;
+    let stopEscalationTimer = 0;
+    const abortButton = document.getElementById("abort");
+    function clearStopEscalation() {
+      clearTimeout(stopEscalationTimer);
+      stopEscalationTimer = 0;
+      stopButton.textContent = "stop after step";
+      stopButton.disabled = false;
+    }
+    function stopTurn(mode) {
+      mode = mode === "abort" ? "abort" : "stop";
+      if (mode === "abort") {
+        if (controller) controller.abort();
+        clearStopEscalation();
+      } else if (!stopEscalationTimer) {
+        stopButton.textContent = "stopping after step…";
+        stopButton.disabled = true;
+        stopEscalationTimer = setTimeout(() => {
+          if (!busy) return;
+          renderNote("step still running after " + (STOP_ESCALATION_MS / 1000) + "s · escalating to abort");
+          stopTurn("abort");
+        }, STOP_ESCALATION_MS);
+      }
+      fetch("/api/turn/cancel?mode=" + mode, { method: "POST" })
         .then(async response => {
           if (!response.ok) throw new Error("stop request failed (" + response.status + ")");
           const receipt = await response.json();
-          const committed = (receipt.cancellations || []).find(item => item.terminal?.status === "committed");
+          const cancellations = receipt.cancellations || [];
+          const committed = cancellations.find(item => item.terminal?.status === "committed");
           const evidence = committed?.terminal?.outcome?.stopped?.cancelled?.evidence;
-          const unresolved = (receipt.cancellations || []).find(item =>
+          const escalated = cancellations.find(item => item.cancellation?.outcome === "escalated");
+          const unresolved = cancellations.find(item =>
             item.status === "cancellation_recorded_terminal_pending");
-          if (evidence) renderNote("turn stopped · request " + evidence.request_id);
-          else if (unresolved) renderNote("turn route cleared · terminal outcome unknown");
+          if (evidence) {
+            const where = evidence.mode === "after_step"
+              ? " after step " + (evidence.honoured_after_step ?? "0")
+              : " (aborted)";
+            renderNote("turn stopped" + where + " · request " + evidence.request_id);
+          } else if (escalated) renderNote("stop escalated to abort · request " + escalated.cancellation.cancellation.request_id);
+          else if (unresolved) renderNote(mode === "stop" ? "stop recorded · waiting for the step boundary" : "turn route cleared · terminal outcome unknown");
           else if (!receipt.accepted) renderNote("turn already finished");
         })
         .catch(() => renderError("the turn could not be stopped"))
@@ -4792,7 +4827,8 @@
         });
     }
     // END WORKBENCH_STOP_TURN
-    stopButton.addEventListener("click", stopTurn);
+    stopButton.addEventListener("click", () => stopTurn("stop"));
+    abortButton.addEventListener("click", () => stopTurn("abort"));
 
     /* reset — replaces the server-side session and clears the transcript, with a two-step confirm */
     const resetButton = document.getElementById("reset");
@@ -4958,7 +4994,7 @@
       if (event.key !== "Escape") return;
       if (!executionExplorer.hidden) { event.preventDefault(); closeExecutionExplorer(); return; }
       if (!helpPanel.hidden) { setHelp(false); helpBtn.focus(); return; }
-      if (busy) { event.preventDefault(); stopTurn(); }
+      if (busy) { event.preventDefault(); stopTurn(event.shiftKey ? "abort" : "stop"); }
     });
 
     let lastUserText = "";

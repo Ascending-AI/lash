@@ -499,7 +499,16 @@ fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict() {
             ),
             (
                 "POST /api/turn/cancel",
-                Box::pin(cancel_turn(State(state.clone()), Query(query())).map_ok(drop)),
+                Box::pin(
+                    cancel_turn(
+                        State(state.clone()),
+                        Query(TurnCancelQuery {
+                            session: query(),
+                            mode: WorkbenchTurnCancelMode::Abort,
+                        }),
+                    )
+                    .map_ok(drop),
+                ),
             ),
             (
                 "DELETE /api/session",
