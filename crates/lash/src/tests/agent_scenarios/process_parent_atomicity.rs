@@ -659,16 +659,16 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                 identity: lash_core::ToolIntentIdentity {
                     session_id: "process-env:pg-segmented-process-parent".to_string(),
                     execution_scope_id: "pg-segmented-process-parent".to_string(),
-                    tool_call_id: "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1".to_string(),
+                    tool_call_id: "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:e40da3f2b8761589017c5112:1".to_string(),
                     intent_index: 0,
-                    replay_key: "tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3".to_string(),
+                    replay_key: "tool-intent:v2:blake3:64a047f62b28ffd39e7508c046d1dffa51a9ef0c8ddb1abbb60ebf5bb94767e7".to_string(),
                     minting_emission_replay_key: Some(
-                        "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1:attempt:1"
+                        "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:e40da3f2b8761589017c5112:1:attempt:1"
                             .to_string(),
                     ),
                 },
                 parent_end: lash_core::ToolIntentParentEnd {
-                    process_id: "tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3".to_string(),
+                    process_id: "tool-intent:v2:blake3:64a047f62b28ffd39e7508c046d1dffa51a9ef0c8ddb1abbb60ebf5bb94767e7".to_string(),
                     policy: lash_core::ProcessParentEndPolicy::Cancel,
                 },
             },
@@ -676,16 +676,16 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                 identity: lash_core::ToolIntentIdentity {
                     session_id: "process-env:pg-segmented-process-parent".to_string(),
                     execution_scope_id: "pg-segmented-process-parent".to_string(),
-                    tool_call_id: "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:bafd89a81de63475643c98aa:1".to_string(),
+                    tool_call_id: "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:1663ca87cb28a1a9eec86405:1".to_string(),
                     intent_index: 0,
-                    replay_key: "tool-intent:v2:blake3:03f6d6a878730a682be12709db67df8e0252f3639fef420ee533753ba800e9de".to_string(),
+                    replay_key: "tool-intent:v2:blake3:a0eb945411c4f05df5aee97a02f44861560f5787943a701c53473b012d2f5fcf".to_string(),
                     minting_emission_replay_key: Some(
-                        "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:bafd89a81de63475643c98aa:1:attempt:1"
+                        "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:1663ca87cb28a1a9eec86405:1:attempt:1"
                             .to_string(),
                     ),
                 },
                 parent_end: lash_core::ToolIntentParentEnd {
-                    process_id: "tool-intent:v2:blake3:03f6d6a878730a682be12709db67df8e0252f3639fef420ee533753ba800e9de".to_string(),
+                    process_id: "tool-intent:v2:blake3:a0eb945411c4f05df5aee97a02f44861560f5787943a701c53473b012d2f5fcf".to_string(),
                     policy: lash_core::ProcessParentEndPolicy::Cancel,
                 },
             },
@@ -779,7 +779,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                     "scope": {"session_id": "process-env:pg-segmented-process-parent"},
                     "subject": {
                         "type": "effect",
-                        "effect_id": "process:parent-end:tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3",
+                        "effect_id": "process:parent-end:tool-intent:v2:blake3:64a047f62b28ffd39e7508c046d1dffa51a9ef0c8ddb1abbb60ebf5bb94767e7",
                         "kind": "process"
                     },
                     "caused_by": {
@@ -788,16 +788,16 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                         "effect_id": "tool-intent-parent-end:0"
                     },
                     "replay": {
-                        "key": "tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3:parent-end:process:parent-end:tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3",
+                        "key": "tool-intent:v2:blake3:64a047f62b28ffd39e7508c046d1dffa51a9ef0c8ddb1abbb60ebf5bb94767e7:parent-end:process:parent-end:tool-intent:v2:blake3:64a047f62b28ffd39e7508c046d1dffa51a9ef0c8ddb1abbb60ebf5bb94767e7",
                         "attribution": {
                             "kind": "tool_intent",
                             "identity": {
                                 "session_id": "process-env:pg-segmented-process-parent",
                                 "execution_scope_id": "pg-segmented-process-parent",
-                                "tool_call_id": "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1",
+                                "tool_call_id": "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:e40da3f2b8761589017c5112:1",
                                 "intent_index": 0,
-                                "minting_emission_replay_key": "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1:attempt:1",
-                                "replay_key": "tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3"
+                                "minting_emission_replay_key": "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:e40da3f2b8761589017c5112:1:attempt:1",
+                                "replay_key": "tool-intent:v2:blake3:64a047f62b28ffd39e7508c046d1dffa51a9ef0c8ddb1abbb60ebf5bb94767e7"
                             }
                         }
                     }
@@ -809,12 +809,12 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                         "identity": {
                             "session_id": "process-env:pg-segmented-process-parent",
                             "execution_scope_id": "pg-segmented-process-parent",
-                            "tool_call_id": "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1",
+                            "tool_call_id": "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:e40da3f2b8761589017c5112:1",
                             "intent_index": 0,
-                            "minting_emission_replay_key": "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1:attempt:1",
-                            "replay_key": "tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3"
+                            "minting_emission_replay_key": "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:e40da3f2b8761589017c5112:1:attempt:1",
+                            "replay_key": "tool-intent:v2:blake3:64a047f62b28ffd39e7508c046d1dffa51a9ef0c8ddb1abbb60ebf5bb94767e7"
                         },
-                        "process_id": "tool-intent:v2:blake3:a0333c2d19675bdac9c81b790813e9ef8d837d2cff4c37a5fc54bfb4833378e3",
+                        "process_id": "tool-intent:v2:blake3:64a047f62b28ffd39e7508c046d1dffa51a9ef0c8ddb1abbb60ebf5bb94767e7",
                         "policy": "cancel",
                         "reason": "recorded start intent parent ended with cancel policy"
                     }
@@ -911,19 +911,25 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
             *outcome
         })
         .collect::<Vec<_>>();
+    // The query reads `ORDER BY replay_key`, and every ParentEnd replay key
+    // ends in its child's `tool-intent:v2:blake3:` digest, so the recorded
+    // order is the lexicographic order of those digests rather than the plan
+    // order. Under the current Lashlang semantic hash `actions[0]`
+    // (`64a047f6…`) sorts before `actions[1]` (`a0eb9454…`); a semantic-hash
+    // bump can flip this pair without changing any behaviour.
     assert_eq!(
         recorded_outcomes,
         vec![
             lash_core::ToolIntentParentEndOutcome::Cancelled {
-                identity: literal_segmented_plan.actions[1].identity.clone(),
-                process_id: literal_segmented_plan.actions[1]
+                identity: literal_segmented_plan.actions[0].identity.clone(),
+                process_id: literal_segmented_plan.actions[0]
                     .parent_end
                     .process_id
                     .clone(),
             },
             lash_core::ToolIntentParentEndOutcome::Cancelled {
-                identity: literal_segmented_plan.actions[0].identity.clone(),
-                process_id: literal_segmented_plan.actions[0]
+                identity: literal_segmented_plan.actions[1].identity.clone(),
+                process_id: literal_segmented_plan.actions[1]
                     .parent_end
                     .process_id
                     .clone(),
