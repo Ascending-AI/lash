@@ -1,11 +1,16 @@
 # Toolbench
 
-Toolbench runs 16 deterministic weather, string extraction, KV, mail and
-world-update tasks against real OpenRouter models. Every task owns an isolated
+Toolbench runs 16 easy tasks and 12 hard tasks against real OpenRouter models.
+The easy pack covers weather, string extraction, KV, mail and world updates;
+the hard pack covers chained retail and operations workflows. Every task owns an isolated
 seeded world; the model is the source of variance. Set `OPENROUTER_API_KEY`
 (or load the repository `.env`). Credentials are never printed.
 
 ## Cohorts and flags
+
+- `--pack easy|hard|all` selects tasks (default: `all`). Task and attempt JSONL
+  rows identify their concrete `pack`; summary and exclusion rows identify the
+  selected pack. `--task` IDs must belong to that selection.
 
 - `--channel cell|native|standard` selects one channel (default: cell).
 - `--paired` pairs cell and native in randomized order for each task/dialect.
@@ -24,8 +29,9 @@ seeded world; the model is the source of variance. Set `OPENROUTER_API_KEY`
 - Repeat `--task ID` to select tasks; duplicate selections run once and unknown
   IDs are errors. `--allow-partial` permits failed tasks or excluded cohorts.
 
-All channels, one repetition, both dialects: 16 × 5 = 80 task rows per model.
-The two-model comparison uses medium reasoning and 160 task rows:
+All channels, one repetition, both dialects: easy gives 80 rows/model, hard
+gives 60, and the default combined pack gives 140. The two-model default
+comparison uses medium reasoning and 280 task rows:
 
 ```sh
 timeout 1h target/debug/toolbench --model z-ai/glm-5.3-flash --model openai/gpt-5.6-sol \
@@ -102,9 +108,59 @@ standard using per-task means of the same quantity; zero or unknown baselines
 produce `n/a`. Wall totals sum task durations, not concurrent elapsed time.
 See the field mapping below for exact definitions.
 
-Keep new tasks small: one to three host calls and at most three prompt sentences.
-Validate every channel/dialect against a 30-second target before adding a task. Cohort runs should run concurrently
-across models with an approximately one-hour external wall budget.
+## Tasks
+
+Easy tasks retain their original prompts and expected answers. Hard tasks ask
+for an outcome, with at most two task sentences, and require intermediate
+inspection. The hard pack deliberately supersedes the easy pack's 1–3-call
+limit: oracle solutions use 5–10 host calls. Counts exclude submit and are
+metrics, not pass/fail limits. Live validation targets 30 seconds per task on
+every channel/dialect; run models concurrently with a one-hour external budget.
+
+| Task (prefix `hard-`) | Domain | Source | Oracle calls | Inspection / branch |
+|---|---|---|---:|---|
+| retail-refund | Retail | [τ-bench][tau] | 9 | Delivery status and return age; refund and read back |
+| retail-exchange | Retail | [τ-bench][tau] | 6 | Structured stock refusal; affordable stocked alternative; verify |
+| retail-reschedule | Retail | [τ-bench][tau] | 7 | Payment policy, pending status and earliest day; verify |
+| retail-reprice | Retail | [NESTFUL][nestful] | 7 | Return-window filter; quantity/price join and difference |
+| retail-lamps | Retail | [NESTFUL][nestful] | 8 | SKU/category join and delivered filter; unordered IDs |
+| retail-best-return | Retail | [τ-bench][tau] | 5 | Return-window filter; paid-per-unit ranking with tie rule |
+| ops-deploy-recovery | Operations | [NESTFUL][nestful] | 8 | Capacity refusal; newest compatible passed release; verify |
+| ops-resolve-chain | Operations | [NESTFUL][nestful] | 9 | Open prerequisites and required fixes; resolve and verify |
+| ops-impact | Operations | [NESTFUL][nestful] | 5 | Open status and severity filter before aggregation |
+| ops-oncall | Operations | [NESTFUL][nestful] | 10 | Cross-service ranking, owner join and contact availability |
+| ops-ready | Operations | [NESTFUL][nestful] | 6 | Open-dependency exclusion and release compatibility |
+| ops-blocked-impact | Operations | [NESTFUL][nestful] | 7 | Incident groups joined to failed release checks |
+
+[tau]: https://github.com/sierra-research/tau-bench
+[nestful]: https://github.com/IBM/NESTFUL
+
+These are original tasks inspired by benchmark ideas, not imported benchmark
+samples. τ-bench is [MIT licensed](https://github.com/sierra-research/tau-bench/blob/main/LICENSE);
+NESTFUL is [Apache-2.0 licensed](https://github.com/IBM/NESTFUL/blob/main/LICENSE).
+No upstream prompts, schemas, data or code are copied; operations translates
+NESTFUL's nested-argument idea into an original deployment/incident world.
+
+Retail has 16 records (3 customers, 7 orders, 6 products); operations has 18
+(3 services, 6 incidents, 6 releases, 3 teams). Each hard task exposes its domain's eight tools with strict input/output
+schemas and identical deterministic handlers in every cohort; easy tasks keep
+their original seven-tool catalog. Unrelated domain tools are excluded from
+the prompt to avoid spending the latency budget on irrelevant schemas. Lists of IDs require detail lookups; mutation receipts require readback
+for current state. Domain refusals return `{"error":{"code":"..."}}` as JSON
+in all channels and do not mutate state. Pending orders are unallocated; an
+exchange reserves only the replacement stock. Refunds are idempotent.
+
+`hard_tests.rs` supplies an independent Rust oracle closure for every task,
+checks call counts and exact end state through the common grader, and rejects
+unrequested writes. Unordered ID answers use structural set equality (duplicates
+have set semantics); object answers use exact structural equality. Tests also
+pin refusal atomicity, payment/return/dependency policies and strict arguments.
+
+Calibration uses both requested models, standard plus native/TypeScript with
+two repetitions (four observations/model/task). Acceptance targets are Sol
+≥3/4 and GLM ≥1/4, followed by all five cohorts with one repetition. Do not
+interpret correct multi-step executions as trivial solely because both models
+succeed; inspect the observed dependent tool use.
 
 ## Provider logs and retries
 

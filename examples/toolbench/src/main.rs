@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
 use crate::grading::grade;
-use crate::tasks::{Task, task_pack};
+use crate::tasks::{Pack, Task, task_pack};
 use crate::world::World;
 
 const DEFAULT_MODEL: &str = "z-ai/glm-5.3-flash";
@@ -85,6 +85,9 @@ impl ReasoningEffort {
 #[derive(Debug, Parser)]
 #[command(about = "Deterministic Lash RLM tool-calling bench")]
 struct Args {
+    /// Select the easy, hard, or combined task pack.
+    #[arg(long, value_enum, default_value_t = Pack::All)]
+    pack: Pack,
     #[arg(long, env = "LASH_RLM_CHANNEL", value_enum, default_value_t = ChannelSelection::Cell)]
     channel: ChannelSelection,
     /// Pair the same task/model/dialect in randomized channel order.
@@ -201,7 +204,7 @@ async fn main() -> Result<()> {
     });
     tracing::subscriber::set_global_default(provider_log::trace_subscriber(&trace_path)?)
         .context("install trace subscriber")?;
-    let tasks = selected_tasks(&args.task)?;
+    let tasks = selected_tasks(args.pack, &args.task)?;
     let writer =
         Mutex::new(std::fs::File::create(&args.results_file).context("create results JSONL")?);
     let mut random = std::fs::File::open("/dev/urandom").context("open random order source")?;
@@ -265,7 +268,7 @@ async fn main() -> Result<()> {
             match outcome {
                 Ok(()) => Ok(None),
                 Err(reason) => {
-                    write_row(&mut file, &serde_json::json!({"usage":summary::Usage::from_attempts(&all_attempts),"provider_calls":all_attempts.len(),"kind":"excluded_route","route":"openrouter","model":model,"channel":item.channel.name(),"dialect":item.dialect_name(),"reasoning_effort":args.reasoning_effort,"rounds":all_attempts.len(),"reason":reason}))?;
+                    write_row(&mut file, &serde_json::json!({"usage":summary::Usage::from_attempts(&all_attempts),"provider_calls":all_attempts.len(),"kind":"excluded_route","pack":args.pack,"route":"openrouter","model":model,"channel":item.channel.name(),"dialect":item.dialect_name(),"reasoning_effort":args.reasoning_effort,"rounds":all_attempts.len(),"reason":reason}))?;
                     Ok(Some((item.model_index, item.channel)))
                 }
             }
@@ -296,7 +299,7 @@ async fn main() -> Result<()> {
             let mut file = writer.lock().await;
             for attempt in &evidence.attempts {
                 let mut row = attempt.clone();
-                row.as_object_mut().expect("attempt object").extend(serde_json::json!({"kind":"attempt","task":task.id,"model":model,"route":"openrouter","dialect":item.dialect_name(),"channel":item.channel.name(),"reasoning_effort":args.reasoning_effort,"rounds":evidence.rounds,"repetition":item.run,"success":grade.passed,"grade":grade,"task_wall_ms":evidence.wall_ms,"executions":evidence.executions,"failed_exec_iterations":evidence.failed_execution_errors.len(),"tool_call_count":evidence.tool_call_count,"expected_tool_call_count":task.tool_calls}).as_object().expect("metadata object").clone());
+                row.as_object_mut().expect("attempt object").extend(serde_json::json!({"kind":"attempt","pack":task.pack(),"task":task.id,"model":model,"route":"openrouter","dialect":item.dialect_name(),"channel":item.channel.name(),"reasoning_effort":args.reasoning_effort,"rounds":evidence.rounds,"repetition":item.run,"success":grade.passed,"grade":grade,"task_wall_ms":evidence.wall_ms,"executions":evidence.executions,"failed_exec_iterations":evidence.failed_execution_errors.len(),"tool_call_count":evidence.tool_call_count,"expected_tool_call_count":task.tool_calls}).as_object().expect("metadata object").clone());
                 write_row(&mut file, &row)?;
             }
             let result = TaskResult {
@@ -311,7 +314,7 @@ async fn main() -> Result<()> {
                 checker: format!("{}; cost <= ${:.6} (n/a if unknown); {} s harness deadline{}", task.checker_description(), args.max_task_cost_usd, args.turn_wall_limit_secs, if item.channel == ChannelSelection::Standard { "; identical submit values" } else { "" }), usage,
             };
             let mut row = serde_json::to_value(&result)?;
-            row.as_object_mut().expect("result object").extend(serde_json::json!({"kind":"task_result","task":task.id,"route":"openrouter","repetition":item.run,"success":result.passed,"grade":{"passed":result.passed,"failure_reason":result.failure_reason}}).as_object().expect("metadata object").clone());
+            row.as_object_mut().expect("result object").extend(serde_json::json!({"kind":"task_result","pack":task.pack(),"task":task.id,"route":"openrouter","repetition":item.run,"success":result.passed,"grade":{"passed":result.passed,"failure_reason":result.failure_reason}}).as_object().expect("metadata object").clone());
             write_row(&mut file, &provider_log::redact(row, api_key))?;
             file.flush()?;
             Ok(result)
@@ -325,6 +328,7 @@ async fn main() -> Result<()> {
     for summary in &summaries {
         let mut row = serde_json::to_value(summary)?;
         row["kind"] = "summary".into();
+        row["pack"] = serde_json::to_value(args.pack)?;
         write_row(&mut *writer.lock().await, &row)?;
     }
     let markdown = summary::markdown(&summaries);
@@ -449,8 +453,11 @@ async fn run_work_list<T, F: std::future::Future<Output = Result<T>>>(
     Ok(results)
 }
 
-fn selected_tasks(task_ids: &[String]) -> Result<Vec<Task>> {
-    let tasks = task_pack();
+fn selected_tasks(pack: Pack, task_ids: &[String]) -> Result<Vec<Task>> {
+    let tasks = task_pack()
+        .into_iter()
+        .filter(|task| pack == Pack::All || task.pack() == pack)
+        .collect::<Vec<_>>();
     for task_id in task_ids {
         if !tasks.iter().any(|task| task.id == task_id) {
             bail!("unknown task `{task_id}`");
@@ -526,14 +533,17 @@ mod tests {
             || Ok(false),
         )
         .unwrap();
-        assert_eq!(work.len(), 16);
+        assert_eq!(work.len(), 28);
         assert!(work.iter().all(|item| item.dialect_name() == "none"));
     }
 
     #[test]
     fn task_selection_defaults_to_full_pack_and_accepts_repeated_flags() {
         let defaults = Args::parse_from(["toolbench"]);
-        assert_eq!(selected_tasks(&defaults.task).unwrap().len(), 16);
+        assert_eq!(
+            selected_tasks(defaults.pack, &defaults.task).unwrap().len(),
+            28
+        );
         let args = Args::parse_from([
             "toolbench",
             "--task",
@@ -543,12 +553,14 @@ mod tests {
             "--task",
             "kv-read",
         ]);
-        let selected = selected_tasks(&args.task).unwrap();
+        let selected = selected_tasks(args.pack, &args.task).unwrap();
         assert_eq!(
             selected.iter().map(|task| task.id).collect::<Vec<_>>(),
             ["weather-condition", "kv-read"]
         );
-        assert!(selected_tasks(&["kv-read".to_string(), "unknown".to_string()]).is_err());
+        assert!(
+            selected_tasks(Pack::All, &["kv-read".to_string(), "unknown".to_string()]).is_err()
+        );
     }
 
     #[test]
