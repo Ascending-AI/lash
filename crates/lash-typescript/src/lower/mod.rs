@@ -456,43 +456,6 @@ impl Lowerer {
     /// declaration that a lexical scope hoists — the same resolution `binding`
     /// performs, against the same scope stack, so the fact lands on the
     /// binding the reads will find and dies when its scope pops.
-    /// What a `const` initializer binds, when it binds an array a Promise
-    /// aggregate may later read by name.
-    ///
-    /// Only the two shapes the aggregate rule grants are recognised: an array
-    /// literal, and an `xs.map(callback)` whose elements are whatever the
-    /// callback returns. Anything else stays `Plain`, so the aggregate
-    /// refuses the name exactly as it refuses the expression inline — a
-    /// number bound to a `const` is not an array and must not be aggregated.
-    fn array_binding_contents(&self, init: &Expr) -> Option<ArrayContents> {
-        let holds_handle = match init {
-            Expr::Array(items) => items.iter().any(|item| match item {
-                ArrayElement::Value(value) | ArrayElement::Spread(value) => {
-                    self.expr_may_be_process_handle(value)
-                }
-            }),
-            _ => {
-                let (_, function) = array_map::promise_map_parts(init)?;
-                let returned = match &function.body {
-                    FunctionBody::Expression(value) => value.as_ref(),
-                    FunctionBody::Block(statements) => match statements.as_slice() {
-                        [Stmt::Return(Some(value))] => value,
-                        // A callback this pass cannot read is not vouched for.
-                        _ => return None,
-                    },
-                };
-                self.expr_may_be_process_handle(returned)
-                    || matches!(returned, Expr::Call { callee, .. }
-                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "start" && !self.has_binding(name)))
-            }
-        };
-        Some(if holds_handle {
-            ArrayContents::ProcessHandles
-        } else {
-            ArrayContents::SettledValues
-        })
-    }
-
     fn set_role(&mut self, name: &str, role: BindingRole) -> Result<(), Diagnostic> {
         let binding = self
             .scopes
