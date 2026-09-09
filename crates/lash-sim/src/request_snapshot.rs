@@ -127,6 +127,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
                                     "properties": {
                                         "parameters": {
                                             "additionalProperties": true,
+                                            "properties": {},
                                             "type": "object"
                                         },
                                         "tool": { "type": "string" }
@@ -148,9 +149,9 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
             }]
         })
     );
-    assert_eq!(requests[1]["event"]["body_len"], 1266);
+    assert_eq!(requests[1]["event"]["body_len"], 1202);
     assert_eq!(
         requests[1]["event"]["body_sha256"],
-        "154d52c5cba6a3a7f2981503e22adf0682604326bc9918f46e21bacd12711ea3"
+        "38b714af125879f7f019f6b8348bb7b9c3bd0750ca6e6bf1e875e738c32895c4"
     );
 }

@@ -128,7 +128,7 @@ fn nested_reserved_word_operation_declares_the_tail_as_nested_properties() {
     );
 }
 
-/// `type`, `get`, `any`, `string` and friends are reserved only where
+/// `type`, `any`, `string` and friends are conservatively reserved where
 /// TypeScript expects a declaration name; a cell writes them as ordinary
 /// identifiers. Mangling a module path spelled with one advertised a callable
 /// nothing for a path the lowerer accepts as written.
@@ -144,7 +144,7 @@ fn contextual_keyword_module_paths_are_advertised_as_written() {
     );
     assert_eq!(
         advertise("get.thing"),
-        "declare const get: { thing(input: { id: string }): Promise<string> };"
+        "declare namespace get { function thing(input: { id: string }): Promise<string>; }"
     );
     assert_eq!(
         dispatch("get.thing", &["get"], "thing"),
