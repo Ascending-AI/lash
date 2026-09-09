@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 79.
+-- lash-postgres-store schema, component version 80.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS lash_turn_cancel_requests (
     origin TEXT,
     reason TEXT,
     disposition TEXT NOT NULL DEFAULT 'defer',
+    mode TEXT NOT NULL DEFAULT 'immediate',
     affected_input_ids TEXT[] NOT NULL DEFAULT '{}',
     affected_dispositions TEXT[] NOT NULL DEFAULT '{}',
     PRIMARY KEY (session_id, turn_id)

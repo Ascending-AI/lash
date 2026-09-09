@@ -668,7 +668,8 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_requests (
     reason text,
     disposition text DEFAULT 'defer'::text NOT NULL,
     affected_input_ids text[] DEFAULT '{}'::text[] NOT NULL,
-    affected_dispositions text[] DEFAULT '{}'::text[] NOT NULL
+    affected_dispositions text[] DEFAULT '{}'::text[] NOT NULL,
+    mode text DEFAULT 'immediate'::text NOT NULL
 );
 
 

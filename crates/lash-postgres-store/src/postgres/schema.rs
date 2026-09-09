@@ -129,6 +129,7 @@ const TURN_CANCEL_REQUESTS_DDL: &str = r#"CREATE TABLE lash_turn_cancel_requests
     origin TEXT,
     reason TEXT,
     disposition TEXT NOT NULL DEFAULT 'defer',
+    mode TEXT NOT NULL DEFAULT 'immediate',
     affected_input_ids TEXT[] NOT NULL DEFAULT '{}',
     affected_dispositions TEXT[] NOT NULL DEFAULT '{}',
     PRIMARY KEY (session_id, turn_id)

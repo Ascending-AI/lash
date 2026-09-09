@@ -237,6 +237,8 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
              ADD CONSTRAINT lash_runtime_turn_commits_append_identity_all_or_none
                  CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL)
                      AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL));
+         ALTER TABLE lash_turn_cancel_requests
+             ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'immediate';
          UPDATE lash_schema_versions
             SET version = 80
           WHERE component = 'lash-postgres-store';",

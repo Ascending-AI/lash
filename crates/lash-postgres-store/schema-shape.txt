@@ -383,6 +383,7 @@ table lash_turn_cancel_requests
   column affected_dispositions text[] not-null default
   column affected_input_ids text[] not-null default
   column disposition text not-null default
+  column mode text not-null default
   column origin text nullable
   column reason text nullable
   column request_id text not-null
