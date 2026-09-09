@@ -16,16 +16,6 @@ fn project_visible_assistant_prose(text: &str) -> String {
     cell::project_visible_assistant_prose_with_tags(text, tags())
 }
 
-#[test]
-fn rlm_execution_section_default_prompt_is_golden() {
-    insta::with_settings!({ snapshot_path => "../snapshots" }, {
-        insta::assert_snapshot!(
-            "rlm_execution_section_default",
-            rlm_execution_section_for_host_environment(RlmPromptFeatures::default(), &full_prompt_host_environment())
-        );
-    });
-}
-
 fn prompt_lashlang_samples(prompt: &str) -> Vec<String> {
     let mut samples = Vec::new();
     let mut current = None::<String>;

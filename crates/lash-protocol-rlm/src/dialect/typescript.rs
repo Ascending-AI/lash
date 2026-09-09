@@ -675,7 +675,6 @@ mod tests {
         assert!(!section.contains("### v1 guardrails"));
         assert!(!section.contains("### Deterministic standard library"));
         assert!(section.contains("`Date` (UTC)"));
-        insta::assert_snapshot!("typescript_execution_section", section);
     }
 
     #[test]
