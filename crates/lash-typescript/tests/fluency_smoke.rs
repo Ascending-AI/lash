@@ -23,10 +23,13 @@ impl ExecutionHost for FluencyHost {
             AbilityOp::ResourceOperation(call) => {
                 Ok(AbilityResult::Value(resource_operation_value(&call, 0)))
             }
-            AbilityOp::StartProcess(_) => {
-                Ok(AbilityResult::Value(Value::String("fluency-run".into())))
-            }
-            AbilityOp::Await(Value::String(handle)) if handle.as_str() == "fluency-run" => {
+            AbilityOp::StartProcess(_) => Ok(AbilityResult::Value(lashlang::from_json(
+                serde_json::json!({"__handle__": "process", "id": "fluency-run"}),
+            ))),
+            AbilityOp::Await(Value::Record(handle))
+                if handle.get("__handle__") == Some(&Value::String("process".into()))
+                    && handle.get("id") == Some(&Value::String("fluency-run".into())) =>
+            {
                 Ok(AbilityResult::Value(Value::Number(2.0)))
             }
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
