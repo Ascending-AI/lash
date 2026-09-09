@@ -210,6 +210,11 @@ mod prompt_diet_tests {
             } else {
                 lashlang::LashlangAbilities::default()
             },
+            language_features: if enabled {
+                lashlang::LashlangLanguageFeatures::default().with_label_annotations()
+            } else {
+                lashlang::LashlangLanguageFeatures::default()
+            },
             ..LashlangSurface::default()
         };
         if typescript {
