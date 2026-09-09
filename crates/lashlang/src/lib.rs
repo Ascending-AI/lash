@@ -102,7 +102,7 @@ pub use runtime::{DEFAULT_HOST_MEMORY_LIMIT_BYTES, DEFAULT_MAX_VM_FRAME_DEPTH};
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
-pub const BYTECODE_FORMAT_VERSION: u32 = 11;
+pub const BYTECODE_FORMAT_VERSION: u32 = 12;
 pub use source::{
     CanonicalSourceError, canonical_assign_target_source, canonical_expression_source,
     canonical_process_source, canonical_process_source_with_requirements, canonical_program_source,
@@ -234,6 +234,9 @@ fn runtime_hint(error: &RuntimeError) -> Option<&'static str> {
     match error {
         RuntimeError::UnwrappedToolResultFailed { .. } => {
             Some("remove `?` and inspect `.ok` or `.error` when you need to handle failures")
+        }
+        RuntimeError::AwaitExpectsHandle { .. } => {
+            Some("value is already resolved; remove `await`, or await the call directly")
         }
         RuntimeError::ReadOnlyProjectedBinding { .. } => {
             Some("copy the projected value into a new variable before changing it")

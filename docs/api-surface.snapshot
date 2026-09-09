@@ -2776,6 +2776,7 @@ lash::persistence::StoreError::Contended
 lash::persistence::StoreError::CurrentFrameNodeMismatch
 lash::persistence::StoreError::CurrentFrameNodeMismatch::claimed
 lash::persistence::StoreError::CurrentFrameNodeMismatch::derived
+lash::persistence::StoreError::ExecutionStateBodiesReleased
 lash::persistence::StoreError::ExecutionStateCaptureFailed
 lash::persistence::StoreError::ExecutionStateCaptureFailed::message
 lash::persistence::StoreError::ForeignQueuedWorkCompletion

@@ -22,8 +22,8 @@ right = start child(value: "right")
 joined = await { left: left, right: right }
 sleep for "0ms"
 finish {
-  left: joined.left.lookup,
-  right: joined.right.lookup,
+  left: joined.left.value.lookup,
+  right: joined.right.value.lookup,
   final: "stack-budget"
 }
 "#,
@@ -47,14 +47,8 @@ finish {
             assert_eq!(
                 serde_json::to_value(&value).expect("value json"),
                 serde_json::json!({
-                    "left": {
-                        "ok": true,
-                        "value": "lookup:left",
-                    },
-                    "right": {
-                        "ok": true,
-                        "value": "lookup:right",
-                    },
+                    "left": "lookup:left",
+                    "right": "lookup:right",
                     "final": "stack-budget",
                 })
             );
@@ -279,6 +273,17 @@ impl ExecutionHost for StackBudgetHost {
                 else {
                     return Err(ExecutionHostError::new("expected string value"));
                 };
+                // A started process is a handle record; the finished value
+                // only appears once the guest awaits it.
+                let mut handle = Record::new();
+                handle.insert("__handle__".to_string(), Value::String("process".into()));
+                handle.insert("value".to_string(), Value::String(value));
+                Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
+            }
+            AbilityOp::Await(Value::Record(handle)) => {
+                let Some(Value::String(value)) = handle.get("value").cloned() else {
+                    return Err(ExecutionHostError::new("expected handle value"));
+                };
                 let mut record = Record::new();
                 record.insert("value".to_string(), Value::String(value.clone()));
                 record.insert(
@@ -287,7 +292,7 @@ impl ExecutionHost for StackBudgetHost {
                 );
                 Ok(AbilityResult::Value(Value::Record(Arc::new(record))))
             }
-            AbilityOp::Await(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Await(_) => Err(ExecutionHostError::new("expected handle record")),
             AbilityOp::Sleep(_) => Ok(AbilityResult::Value(Value::Null)),
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
             _ => Err(ExecutionHostError::new(

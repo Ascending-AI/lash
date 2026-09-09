@@ -1,5 +1,19 @@
 use super::*;
 
+/// What an awaited-comprehension loop appends per accepted element.
+#[derive(Clone, Copy)]
+pub(super) enum ListComprehensionElement<'a> {
+    /// The ordinary comprehension: evaluate the element and append its value.
+    Value(&'a Expr),
+    /// The aggregate-await comprehension: evaluate the call's receiver and
+    /// arguments, append them as one `(receiver, args...)` tuple, and let the
+    /// list batch after the loop start every call together.
+    DeferredCall {
+        receiver: &'a Expr,
+        args: &'a [Expr],
+    },
+}
+
 impl Compiler {
     pub(crate) fn compile_program(program: &Program) -> (Chunk, CompileStats) {
         Self::compile_program_with_dialect(program, CompilationDialect::Lashlang)
@@ -95,6 +109,7 @@ impl Compiler {
             compiled_schemas: Vec::new(),
             assign_paths: Vec::new(),
             resource_operation_batches: Vec::new(),
+            resource_operation_list_batches: Vec::new(),
             compile_stats,
             const_slots: Vec::new(),
             loop_contexts: Vec::new(),
@@ -143,6 +158,7 @@ impl Compiler {
             compiled_schemas: self.compiled_schemas,
             assign_paths: self.assign_paths,
             resource_operation_batches: self.resource_operation_batches,
+            resource_operation_list_batches: self.resource_operation_list_batches,
             functions: self.functions,
             handler_scopes: {
                 let mut scopes = self.handler_scope_extents;
@@ -319,6 +335,15 @@ impl Compiler {
     ) -> usize {
         let index = self.resource_operation_batches.len();
         self.resource_operation_batches.push(batch);
+        index
+    }
+
+    pub(super) fn push_resource_operation_list_batch(
+        &mut self,
+        batch: CompiledResourceOperationListBatch,
+    ) -> usize {
+        let index = self.resource_operation_list_batches.len();
+        self.resource_operation_list_batches.push(batch);
         index
     }
 
@@ -800,7 +825,7 @@ impl Compiler {
 
     pub(super) fn compile_list_comprehension(
         &mut self,
-        element: &Expr,
+        element: ListComprehensionElement<'_>,
         clauses: &[ListComprehensionClause],
     ) {
         self.code.push(Instruction::BuildList(0));
@@ -810,12 +835,21 @@ impl Compiler {
 
     fn compile_list_comprehension_clause(
         &mut self,
-        element: &Expr,
+        element: ListComprehensionElement<'_>,
         clauses: &[ListComprehensionClause],
         index: usize,
     ) {
         let Some(clause) = clauses.get(index) else {
-            self.compile_expr(element);
+            match element {
+                ListComprehensionElement::Value(element) => self.compile_expr(element),
+                ListComprehensionElement::DeferredCall { receiver, args } => {
+                    self.compile_expr(receiver);
+                    for arg in args {
+                        self.compile_expr(arg);
+                    }
+                    self.code.push(Instruction::BuildTuple(args.len() + 1));
+                }
+            }
             self.emit_isolation();
             self.code.push(Instruction::ListAppend);
             return;
@@ -839,7 +873,7 @@ impl Compiler {
         &mut self,
         binding: &str,
         iterable: &Expr,
-        element: &Expr,
+        element: ListComprehensionElement<'_>,
         clauses: &[ListComprehensionClause],
         next_clause: usize,
     ) {
@@ -869,7 +903,7 @@ impl Compiler {
 
     fn compile_list_comprehension_for_body(
         &mut self,
-        element: &Expr,
+        element: ListComprehensionElement<'_>,
         clauses: &[ListComprehensionClause],
         next_clause: usize,
         binding: usize,

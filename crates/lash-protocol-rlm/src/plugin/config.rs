@@ -19,7 +19,11 @@ pub struct RlmProtocolPluginConfig {
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     #[serde(default)]
     pub lashlang_abilities: RlmAbilities,
-    #[serde(default)]
+    /// Lashlang language features offered to the model. Absent from a host's
+    /// config means the RLM default (label annotations on); a host that spells
+    /// a feature `false` gets it off end to end — the plugin never re-enables
+    /// it (FIG-2768).
+    #[serde(default = "default_lashlang_language_features")]
     pub lashlang_language_features: RlmLanguageFeatures,
     #[serde(default = "default_max_output_chars")]
     pub max_output_chars: usize,
@@ -33,6 +37,13 @@ fn default_max_output_chars() -> usize {
 
 fn default_continue_as_soft_warn_tokens() -> Option<usize> {
     Some(100_000)
+}
+
+/// The RLM protocol's default language-feature set. This is the single site
+/// that decides the default: the builder and serde both read it, and the
+/// plugin factory applies the host's value verbatim.
+fn default_lashlang_language_features() -> RlmLanguageFeatures {
+    RlmLanguageFeatures::default().with_label_annotations()
 }
 
 /// A builder slot that has not been filled in yet. [`RlmProtocolPluginConfigBuilder::build`]
@@ -100,7 +111,7 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound, MemoryBoun
             memory_limit: self.memory_limit,
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
             lashlang_abilities: RlmAbilities::default(),
-            lashlang_language_features: RlmLanguageFeatures::default(),
+            lashlang_language_features: default_lashlang_language_features(),
             max_output_chars: default_max_output_chars(),
             continue_as_soft_warn_tokens: default_continue_as_soft_warn_tokens(),
         }

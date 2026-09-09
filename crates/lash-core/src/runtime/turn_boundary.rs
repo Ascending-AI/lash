@@ -517,7 +517,9 @@ impl TurnBoundary {
             )
             .await
         } else {
-            state.discard_runtime_snapshots();
+            // No store will ever rehydrate this commit: the accepted execution
+            // stays resident for the next same-frame restore (FIG-2521).
+            state.discard_runtime_snapshots_retaining_accepted_execution();
             Ok((
                 Vec::new(),
                 usage_deltas

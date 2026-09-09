@@ -1187,6 +1187,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::ResourceOperationBatch(batch) => {
                 return Ok(VmStep::Effect(VmEffect::ResourceOperationBatch(batch)));
             }
+            Instruction::ResourceOperationListBatch(batch) => {
+                return Ok(VmStep::Effect(VmEffect::ResourceOperationListBatch(batch)));
+            }
             Instruction::StartProcess { process, keys } => {
                 return Ok(VmStep::Effect(VmEffect::StartProcess { process, keys }));
             }

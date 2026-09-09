@@ -11,12 +11,15 @@ pub(crate) const LANGUAGE_ID: &str = "lashlang";
 
 #[derive(Clone)]
 pub(crate) struct LashlangDialectServices {
-    pub(crate) channel: crate::plugin::RlmChannel,
     pub(crate) projection_resolver: Arc<dyn ProjectionResolver>,
     pub(crate) artifact_store: Arc<dyn LashlangArtifactStore>,
     pub(crate) deferred_tool_resolver: Option<SharedDeferredToolResolver>,
     pub(crate) execution_trace_config: RlmLashlangExecutionTraceConfig,
     pub(crate) execution_bounds: crate::plugin::ExecutionBounds,
+    /// The session-pinned transport programs arrive on. Carried with the
+    /// services because the executor needs it to decide whether cell-delimiter
+    /// advice is true of the source the model actually wrote (FIG-2769).
+    pub(crate) channel: crate::plugin::RlmChannel,
 }
 
 pub(crate) struct LashlangDialect {

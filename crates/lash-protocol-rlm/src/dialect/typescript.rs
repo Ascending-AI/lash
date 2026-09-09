@@ -25,7 +25,6 @@ impl TypescriptDialect {
         Self {
             surface,
             services: LashlangDialectServices {
-                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: std::sync::Arc::new(
                     crate::projection::ProjectionRegistry::new(),
                 ),
@@ -33,6 +32,7 @@ impl TypescriptDialect {
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         }
     }
@@ -522,12 +522,12 @@ mod tests {
         let dialect = TypescriptDialect::new(
             LashlangSurface::default(),
             LashlangDialectServices {
-                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         );
         assert_eq!(dialect.language_id(), "typescript");
@@ -580,12 +580,12 @@ mod tests {
                 resources,
             },
             LashlangDialectServices {
-                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         );
         let section = dialect
@@ -641,12 +641,12 @@ mod tests {
         let dialect = TypescriptDialect::new(
             LashlangSurface::default(),
             LashlangDialectServices {
-                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         );
         let tool = lash_core::ToolDefinition::raw(
@@ -693,12 +693,12 @@ mod tests {
                 ..LashlangSurface::default()
             },
             LashlangDialectServices {
-                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         );
         let prompt = dialect
@@ -732,12 +732,12 @@ mod tests {
                 ..LashlangSurface::default()
             },
             LashlangDialectServices {
-                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         );
         let prompt = dialect
@@ -793,12 +793,12 @@ mod tests {
         let dialect = TypescriptDialect::new(
             LashlangSurface::default(),
             LashlangDialectServices {
-                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         );
         let prompt = dialect
@@ -929,13 +929,13 @@ mod tests {
                 let dialect = TypescriptDialect::new(
                     LashlangSurface::default(),
                     LashlangDialectServices {
-                        channel: crate::plugin::RlmChannel::Cell,
                         projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                         artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                         deferred_tool_resolver: None,
                         execution_trace_config:
                             crate::executor::RlmLashlangExecutionTraceConfig::default(),
                         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                        channel: crate::plugin::RlmChannel::Cell,
                     },
                 );
                 let mut session = dialect.create_session().expect("typescript session");

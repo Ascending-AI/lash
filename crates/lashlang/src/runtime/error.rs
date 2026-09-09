@@ -431,6 +431,12 @@ pub enum RuntimeError {
     /// ordering of its own results.
     #[error("resource operation batch settlement order is unusable: {problem}")]
     ResourceBatchSettlementOrder { problem: String },
+    /// `await` was applied to a value that is not a process handle.
+    #[error("`await` expects a process handle but found {found}; the value is already resolved")]
+    AwaitExpectsHandle { found: String },
+    /// An awaited list comprehension left something other than call tuples for its batch.
+    #[error("resource operation list batch found malformed call entries")]
+    ResourceListBatchMalformed,
     /// Aggregate-await bytecode referenced a missing leaf.
     #[error("aggregate await leaf index out of range")]
     AggregateAwaitLeafOutOfRange,
@@ -582,6 +588,8 @@ impl RuntimeError {
             Self::ResourceBatchFailed { .. } => ErrorTaxonomy::EffectFailure,
             Self::ResourceBatchResultCount { .. } => ErrorTaxonomy::Catchable,
             Self::ResourceBatchSettlementOrder { .. } => ErrorTaxonomy::Catchable,
+            Self::AwaitExpectsHandle { .. } => ErrorTaxonomy::Catchable,
+            Self::ResourceListBatchMalformed => ErrorTaxonomy::Catchable,
             Self::AggregateAwaitLeafOutOfRange => ErrorTaxonomy::Catchable,
             Self::AggregateAwaitValueOutOfRange => ErrorTaxonomy::Catchable,
             Self::InvalidAggregateAwaitRecordShape => ErrorTaxonomy::Catchable,
@@ -711,6 +719,8 @@ impl RuntimeError {
             Self::ResourceBatchFailed { .. } => "ResourceBatchFailed",
             Self::ResourceBatchResultCount { .. } => "ResourceBatchResultCount",
             Self::ResourceBatchSettlementOrder { .. } => "ResourceBatchSettlementOrder",
+            Self::AwaitExpectsHandle { .. } => "AwaitExpectsHandle",
+            Self::ResourceListBatchMalformed => "ResourceListBatchMalformed",
             Self::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",
             Self::AggregateAwaitValueOutOfRange => "AggregateAwaitValueOutOfRange",
             Self::InvalidAggregateAwaitRecordShape => "InvalidAggregateAwaitRecordShape",
@@ -1018,6 +1028,10 @@ mod tests {
             RuntimeError::ResourceBatchSettlementOrder {
                 problem: "settled position 5 is out of range for 3 results".to_string(),
             },
+            RuntimeError::AwaitExpectsHandle {
+                found: "number".to_string(),
+            },
+            RuntimeError::ResourceListBatchMalformed,
             RuntimeError::AggregateAwaitLeafOutOfRange,
             RuntimeError::AggregateAwaitValueOutOfRange,
             RuntimeError::InvalidAggregateAwaitRecordShape,
@@ -1325,6 +1339,12 @@ mod tests {
                 RuntimeError::ResourceBatchSettlementOrder { .. } => {
                     "resource operation batch settlement order is unusable: settled position 5 is out of range for 3 results"
                 }
+                RuntimeError::AwaitExpectsHandle { .. } => {
+                    "`await` expects a process handle but found number; the value is already resolved"
+                }
+                RuntimeError::ResourceListBatchMalformed => {
+                    "resource operation list batch found malformed call entries"
+                }
                 RuntimeError::AggregateAwaitLeafOutOfRange => {
                     "aggregate await leaf index out of range"
                 }
@@ -1352,7 +1372,7 @@ mod tests {
     /// Every guest-facing code, in declaration order. The list is the pin's
     /// completeness half: `expected_code` forces each variant to declare one,
     /// this forces each declared one to be exercised.
-    const RUNTIME_ERROR_CODES: [&str; 116] = [
+    const RUNTIME_ERROR_CODES: [&str; 118] = [
         "FrameDepthExceeded",
         "FunctionIndexOverflow",
         "NonFunctionCall",
@@ -1461,6 +1481,8 @@ mod tests {
         "ResourceBatchFailed",
         "ResourceBatchResultCount",
         "ResourceBatchSettlementOrder",
+        "AwaitExpectsHandle",
+        "ResourceListBatchMalformed",
         "AggregateAwaitLeafOutOfRange",
         "AggregateAwaitValueOutOfRange",
         "InvalidAggregateAwaitRecordShape",
@@ -1593,6 +1615,8 @@ mod tests {
             RuntimeError::ResourceBatchFailed { .. } => "ResourceBatchFailed",
             RuntimeError::ResourceBatchResultCount { .. } => "ResourceBatchResultCount",
             RuntimeError::ResourceBatchSettlementOrder { .. } => "ResourceBatchSettlementOrder",
+            RuntimeError::AwaitExpectsHandle { .. } => "AwaitExpectsHandle",
+            RuntimeError::ResourceListBatchMalformed => "ResourceListBatchMalformed",
             RuntimeError::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",
             RuntimeError::AggregateAwaitValueOutOfRange => "AggregateAwaitValueOutOfRange",
             RuntimeError::InvalidAggregateAwaitRecordShape => "InvalidAggregateAwaitRecordShape",

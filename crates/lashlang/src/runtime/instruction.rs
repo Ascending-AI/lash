@@ -32,6 +32,7 @@ pub(crate) struct Chunk {
     pub(crate) compiled_schemas: Vec<ValidationPlan>,
     pub(crate) assign_paths: Vec<CompiledAssignPath>,
     pub(crate) resource_operation_batches: Vec<CompiledResourceOperationBatch>,
+    pub(crate) resource_operation_list_batches: Vec<CompiledResourceOperationListBatch>,
     pub(crate) functions: Vec<CompiledFunction>,
     /// Every structured-exception scope the compiler emitted a `PushHandler`
     /// for, sorted by handler target. It is what makes an impossible durable
@@ -167,6 +168,21 @@ pub(crate) struct CompiledResourceOperationBatchLeaf {
     pub(crate) argc: usize,
     pub(crate) receiver_stack_index: usize,
     pub(crate) unwrap: bool,
+    pub(crate) site: Option<LashlangExecutionSite>,
+    pub(crate) source_span: Option<Span>,
+}
+
+/// The batch behind an awaited list comprehension of module operations,
+/// `await [op(x)? for x in xs]`. Every leaf shares the comprehension element's
+/// operation, arity and `?`, so only the leaf count is decided at run time: the
+/// comprehension leaves one `(receiver, args...)` tuple per accepted element in
+/// a list on the stack, and this batch starts all of them together.
+#[derive(Clone)]
+pub(crate) struct CompiledResourceOperationListBatch {
+    pub(crate) operation: usize,
+    pub(crate) argc: usize,
+    pub(crate) unwrap: bool,
+    pub(crate) aggregate_unwrap: bool,
     pub(crate) site: Option<LashlangExecutionSite>,
     pub(crate) source_span: Option<Span>,
 }
@@ -310,6 +326,7 @@ pub(crate) enum Instruction {
     },
     AwaitPending,
     ResourceOperationBatch(usize),
+    ResourceOperationListBatch(usize),
     StartProcess {
         process: usize,
         keys: usize,
@@ -529,7 +546,8 @@ impl Instruction {
             Instruction::PendingTool { .. }
             | Instruction::AwaitArray { .. }
             | Instruction::AwaitPending
-            | Instruction::ResourceOperationBatch(_) => InstructionProfileTag::ResourceCall,
+            | Instruction::ResourceOperationBatch(_)
+            | Instruction::ResourceOperationListBatch(_) => InstructionProfileTag::ResourceCall,
             Instruction::StartProcess { .. } => InstructionProfileTag::StartProcess,
             Instruction::AwaitHandle
             | Instruction::AwaitHandleUnwrap

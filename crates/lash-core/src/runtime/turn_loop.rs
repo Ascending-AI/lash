@@ -987,7 +987,11 @@ impl LashRuntime {
                     )
                 })?;
 
-            durable_state.discard_runtime_snapshots();
+            if store.is_some() {
+                durable_state.discard_runtime_snapshots();
+            } else {
+                durable_state.discard_runtime_snapshots_retaining_accepted_execution();
+            }
             session
                 .plugins()
                 .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
