@@ -20,7 +20,7 @@ An outer `await` over a comprehension of operation calls captures each iteration
 
 Awaiting settled scalars or containers raises `AwaitedSettledValue`, including the value kind and supported call/handle forms; it never substitutes error records into ordinary fields. Statically visible settled expressions are rejected by the linker. Literal aggregates containing calls still preserve their pure fields.
 
-This extension advances bytecode 11 to 12, VM ABI v7 to v8, and semantic hash v4 to v5 on top of FIG-2766. Continuation format 9 is unchanged because its wire shape is unchanged; artifact and cache identities change with the bytecode/ABI/semantic versions, and continuation callers must supply the same content-addressed compiled program.
+This extension advances bytecode 11 to 12, VM ABI v7 to v8, and semantic hash v4 to v5 on top of #1175 (FIG-2766). #1175 is unreleased, so this stack retains one continuation-format bump from 8 to 9. The v9 wire includes `AwaitedSettledValue` and `InvalidResourceComprehensionElement` in `RuntimeError`, reachable through a suspended finally’s `VmPendingErrorOriginContinuation.error`. The structural-validation test pins the complete serialized error-variant vocabulary, and the version guard covers the error shapes; artifact and cache identities change with the bytecode/ABI/semantic versions, and continuation callers must supply the same content-addressed compiled program.
 
 ## Consequences
 

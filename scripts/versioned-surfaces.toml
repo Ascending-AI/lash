@@ -777,6 +777,12 @@ must_cover = [
   "VmHandlerContinuation",
 ]
 
+# Runtime errors are serialized in a suspended finally's pending origin.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lashlang/src/runtime/error.rs"]
+must_cover = ["RuntimeError", "FormatError"]
+
 # Leaves the continuation reaches outside its own files: the execution mode it
 # resumes in and the span it blames a pending error on.
 [[surface.guard]]
