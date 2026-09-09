@@ -19,8 +19,9 @@ operators. `in` is an own-property query because dialect objects have no prototy
 URLSearchParams, Array, and Object.
 `console.log`, `console.warn`, `console.error`, `console.info`, and
 `console.debug` accept any arity and emit through the existing print-observation
-channel after ECMA `ToString` conversion, joined by one space; lexical bindings
-named `console` take precedence.
+channel, joining their arguments with one space; each argument is rendered for
+the observation — plain objects and arrays as compact JSON, every other value as
+its ECMA `ToString` — and lexical bindings named `console` take precedence.
 Accepted operations follow ECMA-262 coercion, truthiness, operand-return, and
 reference rules. Type-level TypeScript syntax is erased: annotations,
 interfaces, type aliases, generics and type arguments, `as`/angle-bracket

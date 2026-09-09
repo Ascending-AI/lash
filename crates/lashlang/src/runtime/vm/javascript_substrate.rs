@@ -648,18 +648,30 @@ pub(super) fn javascript_console_observation_text(
     let mut text = String::new();
     for (index, value) in values.iter().enumerate() {
         if index > 0 {
-            text.push(' ');
+            push_console_text(&mut text, " ")?;
         }
-        text.push_str(&javascript_console_argument_text(heap, value)?);
+        write_console_value(heap, value, &mut BTreeSet::new(), 1, true, &mut text)?;
     }
-    ensure_javascript_string_size(text.len())?;
     Ok(text)
 }
 
-fn javascript_console_argument_text(heap: &Heap, value: &Value) -> Result<String, RuntimeError> {
-    let mut text = String::new();
-    write_console_value(heap, value, &mut BTreeSet::new(), 1, true, &mut text)?;
-    Ok(text)
+/// Appends `text` to the observation, refusing the moment the byte budget is
+/// exceeded.
+///
+/// Every write in this walk goes through here, so the refusal lands while the
+/// string is still bounded rather than after it has been built. That is not a
+/// nicety: the `active` set below closes true cycles but pops on the way out,
+/// so a shared object graph — `a = { l: a, r: a }` repeated — re-expands
+/// exponentially in the output while staying shallow enough that
+/// `ensure_value_depth` never fires. Checking once at the end would let such a
+/// value allocate gigabytes before anything refused it. The error is the same
+/// `MemoryLimitExceeded` a post-hoc `ensure_javascript_string_size` produced,
+/// so callers see no new failure mode; only `attempted` differs, being the
+/// first size over the budget rather than the size the walk would have reached.
+fn push_console_text(out: &mut String, text: &str) -> Result<(), RuntimeError> {
+    ensure_javascript_string_size(out.len() + text.len())?;
+    out.push_str(text);
+    Ok(())
 }
 
 /// Writes one value in observation form.
@@ -675,7 +687,9 @@ fn javascript_console_argument_text(heap: &Heap, value: &Value) -> Result<String
 /// other coercion in this file is: the `active` set beside it only closes
 /// cycles, and a finite but deeply nested container would otherwise recurse
 /// until the thread stack is gone. The bound is the durable boundary's, so a
-/// value this refuses could never have been persisted either.
+/// value this refuses could never have been persisted either. The output size
+/// is bounded independently, inside the walk, by `push_console_text`: depth
+/// alone does not bound a shared graph.
 fn write_console_value(
     heap: &Heap,
     value: &Value,
@@ -686,24 +700,25 @@ fn write_console_value(
 ) -> Result<(), RuntimeError> {
     ensure_value_depth(depth)?;
     match value {
-        Value::Null => out.push_str("null"),
+        Value::Null => push_console_text(out, "null")?,
         // Only a bare `console.log(undefined)` can say `undefined`: inside a
         // container JSON has no spelling for it, and the containers below drop
         // or null it exactly as `JSON.stringify` does.
-        Value::Undefined => out.push_str(if top_level { "undefined" } else { "null" }),
-        Value::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
-        Value::Number(_) => out.push_str(&javascript_to_string(value)),
+        Value::Undefined => push_console_text(out, if top_level { "undefined" } else { "null" })?,
+        Value::Bool(value) => push_console_text(out, if *value { "true" } else { "false" })?,
+        Value::Number(_) => push_console_text(out, &javascript_to_string(value))?,
         Value::String(value) => {
             if top_level {
-                out.push_str(value);
+                push_console_text(out, value)?;
             } else {
-                write_json_string(value, out);
+                write_json_string(value, out)?;
             }
         }
-        Value::Image(_) | Value::Resource(_) => out.push_str(
+        Value::Image(_) | Value::Resource(_) => push_console_text(
+            out,
             &serde_json::to_string(&to_json_direct(value))
                 .map_err(|error| js_stdlib_error(format!("console rendering: {error}")))?,
-        ),
+        )?,
         // A projected handle is a host-side view of a value, not an object of
         // its own: describe what is behind it.
         Value::Projected(projected) => {
@@ -722,7 +737,7 @@ fn write_console_value(
         Value::Record(record) => write_console_record(heap, record, active, depth, out)?,
         Value::Ref(id) => {
             if !active.insert(*id) {
-                out.push_str("\"[Circular]\"");
+                push_console_text(out, "\"[Circular]\"")?;
                 return Ok(());
             }
             let result = write_console_heap_object(heap, *id, value, active, depth, top_level, out);
@@ -757,20 +772,18 @@ fn write_console_heap_object(
         HeapObject::Closure { .. } => {
             let text = "[Function]";
             if top_level {
-                out.push_str(text);
+                push_console_text(out, text)
             } else {
-                write_json_string(text, out);
+                write_json_string(text, out)
             }
-            Ok(())
         }
         _ => {
             let text = heap.javascript_to_string(value)?;
             if top_level {
-                out.push_str(&text);
+                push_console_text(out, &text)
             } else {
-                write_json_string(&text, out);
+                write_json_string(&text, out)
             }
-            Ok(())
         }
     }
 }
@@ -782,14 +795,14 @@ fn write_console_sequence(
     depth: usize,
     out: &mut String,
 ) -> Result<(), RuntimeError> {
-    out.push('[');
+    push_console_text(out, "[")?;
     for (index, value) in values.iter().enumerate() {
         if index > 0 {
-            out.push(',');
+            push_console_text(out, ",")?;
         }
         write_console_value(heap, value, active, depth + 1, false, out)?;
     }
-    out.push(']');
+    push_console_text(out, "]")?;
     Ok(())
 }
 
@@ -800,24 +813,27 @@ fn write_console_record(
     depth: usize,
     out: &mut String,
 ) -> Result<(), RuntimeError> {
-    out.push('{');
+    push_console_text(out, "{")?;
     let mut written = 0usize;
     for (key, value) in ecma_record_entries(record) {
         if matches!(value, Value::Undefined) {
             continue;
         }
         if written > 0 {
-            out.push(',');
+            push_console_text(out, ",")?;
         }
-        write_json_string(key, out);
-        out.push(':');
+        write_json_string(key, out)?;
+        push_console_text(out, ":")?;
         write_console_value(heap, value, active, depth + 1, false, out)?;
         written += 1;
     }
-    out.push('}');
+    push_console_text(out, "}")?;
     Ok(())
 }
 
-fn write_json_string(value: &str, out: &mut String) {
-    out.push_str(&serde_json::to_string(value).expect("strings are JSON strings"));
+fn write_json_string(value: &str, out: &mut String) -> Result<(), RuntimeError> {
+    push_console_text(
+        out,
+        &serde_json::to_string(value).expect("strings are JSON strings"),
+    )
 }
