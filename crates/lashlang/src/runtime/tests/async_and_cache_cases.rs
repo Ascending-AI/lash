@@ -824,7 +824,7 @@ async fn result_unwrap_extracts_awaited_handles_and_joined_results() {
 }
 
 /// A process handle written next to module operations in one `await [...]`
-/// is awaited after the tool batch, in written order (ADR 0086): the leaf
+/// is awaited after the tool batch, in written order (ADR 0087): the leaf
 /// yields the same result record a direct `await handle` does, never the raw
 /// handle record.
 #[tokio::test(flavor = "current_thread")]

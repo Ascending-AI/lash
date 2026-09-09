@@ -67,7 +67,7 @@ impl Lowerer {
             // lowered as plain calls whose `{ok:false,error}` envelopes the
             // aggregate then reported as fulfilled values, so `try/catch`
             // never fired. Process handles in the array are values here; the
-            // runtime awaits them after the tool batch settles (ADR 0086).
+            // runtime awaits them after the tool batch settles (ADR 0087).
             let array = self.at_top_level_await_depth(|lowerer| lowerer.lower_expr(value))?;
             let aggregate = LashExpr::BuiltinCall {
                 name: "__typescript_await_array".into(),

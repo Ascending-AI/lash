@@ -1327,3 +1327,6 @@ mod exception_control_flow_cases;
 mod exception_review_cases;
 mod exception_wire_cases;
 mod typescript_exotic_cases;
+
+#[path = "tests/wrapup_await_cases.rs"]
+mod wrapup_await_cases;

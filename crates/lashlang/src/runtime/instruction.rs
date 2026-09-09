@@ -189,6 +189,10 @@ pub(crate) struct CompiledResourceOperationListBatch {
 
 #[derive(Clone)]
 pub(crate) enum CompiledAggregateAwaitShape {
+    Comprehension {
+        stack_index: usize,
+        template: Box<CompiledResourceOperationBatch>,
+    },
     BatchLeaf(usize),
     Value(usize),
     Tuple(Box<[CompiledAggregateAwaitShape]>),

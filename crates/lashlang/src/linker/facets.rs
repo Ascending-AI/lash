@@ -53,6 +53,7 @@ impl LinkError {
             Self::UnknownType { .. } => "unknown_type",
             Self::IncompatibleConstructorInput { .. } => "incompatible_constructor_input",
             Self::IncompatibleOperationInput { .. } => "incompatible_operation_input",
+            Self::AwaitedSettledExpression { .. } => "awaited_settled_expression",
             Self::IncompatibleExpectedLiteral { .. } => "incompatible_expected_literal",
             Self::IncompatibleProcessReturn { .. } => "incompatible_process_return",
             Self::IncompatibleFunctionReturn { .. } => "incompatible_function_return",

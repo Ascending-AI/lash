@@ -61,7 +61,7 @@ fn a_restored_process_handle_is_awaitable_from_a_later_cell() {
 fn a_restored_process_handle_links_inside_promise_aggregates() {
     // A restored process handle may sit in the same aggregate as tool calls:
     // the VM settles the tool batch first and then awaits each process handle
-    // in array order (ADR 0086), so neither aggregate form is refused at link.
+    // in array order (ADR 0087), so neither aggregate form is refused at link.
     let process_environment = environment(["handle"]).with_process_handles(["handle"]);
     for method in ["all", "allSettled"] {
         let source = format!("finish(await Promise.{method}([handle]));");

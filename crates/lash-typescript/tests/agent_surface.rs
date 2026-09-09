@@ -2244,7 +2244,7 @@ fn runtime_array_rejections_use_recorded_settlement_order() {
 fn pending_tool_handles_survive_durable_process_park() {
     // The aggregate mixes a pending tool handle, a plain value and a child
     // process handle; the park lands between minting them and settling them,
-    // so every kind of leaf crosses the continuation (ADR 0086).
+    // so every kind of leaf crosses the continuation (ADR 0087).
     for mode in ["all", "allSettled"] {
         let source = format!(
             r#"const child = defineProcess({{

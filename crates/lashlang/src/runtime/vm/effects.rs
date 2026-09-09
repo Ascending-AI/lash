@@ -10,7 +10,8 @@ use super::super::host::{
 };
 use super::super::ops::value_type_name;
 use super::super::{
-    CompiledAggregateAwaitShape, ExecutionHost, RuntimeError, Value, error_value,
+    CompiledAggregateAwaitShape, CompiledResourceOperationBatch,
+    CompiledResourceOperationBatchLeaf, ExecutionHost, RuntimeError, Value, error_value,
     is_process_handle, is_runtime_process_handle, record_with_capacity, success,
     unwrap_tool_result,
 };
@@ -334,13 +335,29 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let batch = &self.chunk.resource_operation_batches[batch];
         let start = self.stack_drain_start(batch.stack_value_count)?;
         let values = self.stack.drain(start..).collect::<Vec<_>>();
-        self.resolve_batch_spec(batch, values, ProcessLeafSettlement::Result)
+        let mut leaves = Vec::new();
+        let mut expanded_values = Vec::new();
+        let shape = expand_aggregate_await_shape(
+            &batch.shape,
+            batch,
+            &values,
+            &mut leaves,
+            &mut expanded_values,
+        )?;
+        let expanded = CompiledResourceOperationBatch {
+            leaves: leaves.into_boxed_slice(),
+            shape,
+            stack_value_count: expanded_values.len(),
+            aggregate_unwrap: batch.aggregate_unwrap,
+            first_settled_rejection: batch.first_settled_rejection,
+        };
+        self.resolve_batch_spec(&expanded, expanded_values, ProcessLeafSettlement::Result)
             .await
     }
 
     /// Settles one aggregate await in two phases: every tool leaf as one host
     /// batch, then every process handle among the plain values in written
-    /// order (ADR 0086). The shape is built once both phases are in.
+    /// order (ADR 0087). The shape is built once both phases are in.
     pub(super) async fn resolve_batch_spec(
         &mut self,
         batch: &super::super::CompiledResourceOperationBatch,
@@ -639,19 +656,34 @@ impl<H: ExecutionHost> Vm<'_, H> {
         handle: Value,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + Send + '_>>
     {
+        self.await_value_at(handle, String::new())
+    }
+
+    fn await_value_at(
+        &self,
+        handle: Value,
+        path: String,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + Send + '_>>
+    {
         Box::pin(async move {
             match handle {
                 Value::Tuple(handles) => {
                     let mut values = Vec::with_capacity(handles.len());
-                    for handle in handles.iter().cloned() {
-                        values.push(self.await_value(handle).await?);
+                    for (index, handle) in handles.iter().cloned().enumerate() {
+                        values.push(
+                            self.await_value_at(handle, format!("{path}[{index}]"))
+                                .await?,
+                        );
                     }
                     Ok(Value::Tuple(values.into()))
                 }
                 Value::List(handles) => {
                     let mut values = Vec::with_capacity(handles.len());
-                    for handle in handles.iter().cloned() {
-                        values.push(self.await_value(handle).await?);
+                    for (index, handle) in handles.iter().cloned().enumerate() {
+                        values.push(
+                            self.await_value_at(handle, format!("{path}[{index}]"))
+                                .await?,
+                        );
                     }
                     Ok(Value::List(values.into()))
                 }
@@ -677,13 +709,25 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         record.insert_symbolized(
                             entry.symbol,
                             entry.name.clone(),
-                            self.await_value(entry.value.clone()).await?,
+                            self.await_value_at(
+                                entry.value.clone(),
+                                if path.is_empty() {
+                                    entry.name.to_string()
+                                } else {
+                                    format!("{path}.{}", entry.name)
+                                },
+                            )
+                            .await?,
                         );
                     }
                     Ok(Value::Record(Arc::new(record)))
                 }
                 resolved => Err(RuntimeError::AwaitExpectsHandle {
-                    found: value_type_name(&resolved).to_string(),
+                    found: if path.is_empty() {
+                        value_type_name(&resolved).to_string()
+                    } else {
+                        format!("{} at `{path}`", value_type_name(&resolved))
+                    },
                 }),
             }
         })
@@ -719,6 +763,9 @@ struct SettledResourceOperationBatch {
 /// Every stack-value position an aggregate shape reads, in written order.
 fn collect_value_positions(shape: &CompiledAggregateAwaitShape, positions: &mut Vec<usize>) {
     match shape {
+        CompiledAggregateAwaitShape::Comprehension { .. } => {
+            unreachable!("batch shape expands before settlement")
+        }
         CompiledAggregateAwaitShape::BatchLeaf(_) => {}
         CompiledAggregateAwaitShape::Value(index) => positions.push(*index),
         CompiledAggregateAwaitShape::Tuple(values)
@@ -731,6 +778,89 @@ fn collect_value_positions(shape: &CompiledAggregateAwaitShape, positions: &mut 
     }
 }
 
+/// Expand captured comprehension lists recursively, preserving source traversal
+/// order for both the host batch and its rejection policy. Each element uses
+/// its own packed receiver/argument values; no operation executes here.
+fn expand_aggregate_await_shape(
+    shape: &CompiledAggregateAwaitShape,
+    template: &CompiledResourceOperationBatch,
+    captured: &[Value],
+    leaves: &mut Vec<CompiledResourceOperationBatchLeaf>,
+    values: &mut Vec<Value>,
+) -> Result<CompiledAggregateAwaitShape, RuntimeError> {
+    Ok(match shape {
+        CompiledAggregateAwaitShape::Comprehension {
+            stack_index,
+            template,
+        } => {
+            let Some(Value::List(elements)) = captured.get(*stack_index) else {
+                return Err(RuntimeError::ResourceListBatchMalformed);
+            };
+            let mut shapes = Vec::with_capacity(elements.len());
+            for element in elements.iter() {
+                let Value::Tuple(packed) = element else {
+                    return Err(RuntimeError::ResourceListBatchMalformed);
+                };
+                if packed.len() != template.stack_value_count {
+                    return Err(RuntimeError::ResourceListBatchMalformed);
+                }
+                shapes.push(expand_aggregate_await_shape(
+                    &template.shape,
+                    template,
+                    packed,
+                    leaves,
+                    values,
+                )?);
+            }
+            CompiledAggregateAwaitShape::List(shapes.into_boxed_slice())
+        }
+        CompiledAggregateAwaitShape::BatchLeaf(index) => {
+            let leaf = &template.leaves[*index];
+            let start = leaf.receiver_stack_index;
+            let packed = captured
+                .get(start..start + leaf.argc + 1)
+                .ok_or(RuntimeError::ResourceBatchArgumentOutOfRange)?;
+            let index = leaves.len();
+            leaves.push(CompiledResourceOperationBatchLeaf {
+                receiver_stack_index: values.len(),
+                ..leaf.clone()
+            });
+            values.extend_from_slice(packed);
+            CompiledAggregateAwaitShape::BatchLeaf(index)
+        }
+        CompiledAggregateAwaitShape::Value(index) => {
+            let value = captured
+                .get(*index)
+                .ok_or(RuntimeError::AggregateAwaitValueOutOfRange)?;
+            let index = values.len();
+            values.push(value.clone());
+            CompiledAggregateAwaitShape::Value(index)
+        }
+        CompiledAggregateAwaitShape::Tuple(items) => CompiledAggregateAwaitShape::Tuple(
+            items
+                .iter()
+                .map(|item| expand_aggregate_await_shape(item, template, captured, leaves, values))
+                .collect::<Result<_, _>>()?,
+        ),
+        CompiledAggregateAwaitShape::List(items) => CompiledAggregateAwaitShape::List(
+            items
+                .iter()
+                .map(|item| expand_aggregate_await_shape(item, template, captured, leaves, values))
+                .collect::<Result<_, _>>()?,
+        ),
+        CompiledAggregateAwaitShape::Record {
+            keys,
+            values: items,
+        } => CompiledAggregateAwaitShape::Record {
+            keys: *keys,
+            values: items
+                .iter()
+                .map(|item| expand_aggregate_await_shape(item, template, captured, leaves, values))
+                .collect::<Result<_, _>>()?,
+        },
+    })
+}
+
 fn build_aggregate_await_shape<H: ExecutionHost>(
     shape: &CompiledAggregateAwaitShape,
     stack_values: &[Value],
@@ -738,6 +868,9 @@ fn build_aggregate_await_shape<H: ExecutionHost>(
     vm: &Vm<'_, H>,
 ) -> Result<Value, RuntimeError> {
     match shape {
+        CompiledAggregateAwaitShape::Comprehension { .. } => {
+            Err(RuntimeError::ResourceListBatchMalformed)
+        }
         CompiledAggregateAwaitShape::BatchLeaf(index) => leaf_values
             .get(*index)
             .cloned()

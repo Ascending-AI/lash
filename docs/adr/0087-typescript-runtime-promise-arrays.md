@@ -18,6 +18,8 @@ Pending tool requests and the execution nonce are VM roots and continuation stat
 
 Lashlang literal aggregates keep their source-order rejection rule and their existing language teaching. FIG-2764 direct comprehension batching is owned by ADR 0086; nested composition shares this decision's two-phase settlement.
 
+Nested Lashlang comprehensions in tuples, lists, records, or another comprehension capture their receiver and argument values recursively before expanding to one batch. Main's direct-call comprehension instruction remains in place. The expanded batch uses the same two-phase process/tool settlement as literal aggregates. Visibly settled awaits fail during linking; dynamically settled leaves retain `AwaitExpectsHandle` and identify their type and nested path. The continuation guard also covers the serialized `RuntimeError` vocabulary, independently pinned by a serde variant-list test and a suspended-finally round trip.
+
 ## Consequences
 
 Array shape is determined at runtime rather than by syntax. The host still receives one resource-operation batch for the tool leaves, and all of them settle before TypeScript reports the first-settled rejection; process leaves are awaited only after that batch succeeded. Existing continuation blobs require their original format and compiled program; this version does not reinterpret them.

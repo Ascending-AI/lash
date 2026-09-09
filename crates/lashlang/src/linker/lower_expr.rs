@@ -727,6 +727,21 @@ impl<'module> Linker<'module> {
         expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Option<Binding>), LinkError> {
         let (inner, binding) = self.lower_expr_expected(inner, scope, expected)?;
+        if let Some(actual) = settled_literal_kind(&inner).or_else(|| {
+            // A comprehension binding retains its inferred element type even
+            // after its local iteration bindings leave scope. Calls are excluded:
+            // their settled output types do not describe aggregate-await inputs.
+            if !contains_awaitable_expression(&inner) {
+                settled_type_kind(&binding_type(binding.as_ref()))
+            } else {
+                None
+            }
+        }) {
+            return Err(LinkError::AwaitedSettledExpression {
+                actual: actual.to_string(),
+                span: scope.span,
+            });
+        }
         Ok((Expr::Await(Box::new(inner)), binding))
     }
 
@@ -1291,4 +1306,71 @@ impl<'module> Linker<'module> {
         }
         Ok(())
     }
+}
+
+/// The kind of a literal that can never hold a handle - a scalar literal, or a
+/// list/tuple/record/comprehension built only from such literals. Awaiting one
+/// is a shape error visible at link time. Inferred types cover computed
+/// expressions separately; uncertain shapes are left to the runtime check.
+fn settled_literal_kind(expr: &Expr) -> Option<&'static str> {
+    match expr {
+        Expr::Null => Some("null"),
+        Expr::Undefined => Some("undefined"),
+        Expr::Bool(_) => Some("bool"),
+        Expr::Number(_) => Some("number"),
+        Expr::String(_) => Some("string"),
+        Expr::List(items) => items
+            .iter()
+            .all(|item| settled_literal_kind(item).is_some())
+            .then_some("list"),
+        Expr::Tuple(items) => items
+            .iter()
+            .all(|item| settled_literal_kind(item).is_some())
+            .then_some("tuple"),
+        Expr::Record(entries) => (!is_handle_shape(entries.iter().map(|(name, _)| name.as_str()))
+            && entries
+                .iter()
+                .all(|(_, value)| settled_literal_kind(value).is_some()))
+        .then_some("record"),
+        Expr::ListComprehension { element, .. } => {
+            settled_literal_kind(element).is_some().then_some("list")
+        }
+        Expr::LabelAnnotated { expr, .. } => settled_literal_kind(expr),
+        _ => None,
+    }
+}
+
+fn contains_awaitable_expression(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::ReceiverCall { .. } | Expr::Await(_) | Expr::StartProcess(_)
+    ) || expr.children().any(contains_awaitable_expression)
+}
+
+fn settled_type_kind(ty: &TypeExpr) -> Option<&'static str> {
+    match ty {
+        TypeExpr::Int | TypeExpr::Float => Some("number"),
+        TypeExpr::Str | TypeExpr::Enum(_) => Some("string"),
+        TypeExpr::Bool => Some("bool"),
+        TypeExpr::Null => Some("null"),
+        TypeExpr::List(item) => settled_type_kind(item).map(|_| "list"),
+        TypeExpr::Object(fields) => {
+            (!is_handle_shape(fields.iter().map(|field| field.name.as_str()))
+                && fields
+                    .iter()
+                    .all(|field| settled_type_kind(&field.ty).is_some()))
+            .then_some("record")
+        }
+        _ => None,
+    }
+}
+
+// Ask the runtime's handle authority about the known keys rather than
+// independently defining which record shapes are handles in the linker.
+fn is_handle_shape<'a>(names: impl Iterator<Item = &'a str>) -> bool {
+    let mut record = crate::runtime::Record::new();
+    for name in names {
+        record.insert(name.to_string(), crate::runtime::Value::Null);
+    }
+    crate::runtime::is_process_handle(&record)
 }

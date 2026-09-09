@@ -1406,6 +1406,7 @@ mod tests {
     }
 
     mod program_validation;
+    mod structural_validation;
 
     /// The version fence refuses the format one step behind the current one,
     /// not just an absurd number.

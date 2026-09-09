@@ -113,7 +113,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// rejection `Promise.all` reports), then every process handle in array
     /// order through the host's process-await seam. A tool rejection therefore
     /// always wins over a process failure; among processes the first written
-    /// wins (ADR 0086).
+    /// wins (ADR 0087).
     pub(super) async fn await_pending_array(&mut self, settle: bool) -> Result<(), RuntimeError> {
         use super::super::{CompiledResourceOperationBatch, CompiledResourceOperationBatchLeaf};
         let Value::List(items) = self.pop_stack()? else {
