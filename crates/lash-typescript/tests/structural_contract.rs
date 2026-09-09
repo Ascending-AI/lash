@@ -34,7 +34,7 @@ fn parameter_defaults_and_rest_are_accepted_while_declare_stays_rejected() {
 }
 
 #[test]
-fn console_methods_accept_zero_and_multiple_arguments_with_to_string_joining() {
+fn console_methods_accept_zero_and_multiple_arguments_with_json_joining() {
     let program = lash_typescript::compile(
         "console.log(); console.warn(1, null, [2, 3]); console.error('e'); console.info('i'); console.debug('d'); finish(0);",
     )
@@ -46,7 +46,7 @@ fn console_methods_accept_zero_and_multiple_arguments_with_to_string_joining() {
         *host.0.lock().expect("print journal"),
         vec![
             Value::String("".into()),
-            Value::String("1 null 2,3".into()),
+            Value::String("1 null [2,3]".into()),
             Value::String("e".into()),
             Value::String("i".into()),
             Value::String("d".into()),
