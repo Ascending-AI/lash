@@ -89,7 +89,8 @@ pub use cold_process::{
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
 const OUTCOME_TABLE: &str = include_str!("turn_crash_outcomes.json");
-const RECOVERY_TTL: Duration = Duration::from_millis(300);
+// 10x the renewal cadence leaves stall margin on loaded runners; fencing is unchanged.
+const RECOVERY_TTL: Duration = Duration::from_secs(3);
 const RECOVERY_RENEW: Duration = Duration::from_millis(100);
 const NOMINAL_RECOVERY_TTL: Duration = Duration::from_secs(5);
 const CRASHED_TURN_TTL: Duration = Duration::from_secs(60);
@@ -1218,7 +1219,7 @@ impl crate::ToolProvider for TraceTool {
 
 fn recovery_timings() -> crate::LeaseTimings {
     crate::LeaseTimings::new(RECOVERY_TTL, RECOVERY_RENEW)
-        .expect("300ms TTL / 100ms renew satisfies ttl >= 3x renew")
+        .expect("3s TTL / 100ms renew satisfies ttl >= 3x renew")
 }
 
 /// Lease timings for a scripted turn that is about to be crashed.

@@ -2,7 +2,8 @@
 
 use std::io::Write as _;
 
-pub const RECOVERY_TTL: std::time::Duration = std::time::Duration::from_millis(300);
+// 10x the renewal cadence leaves stall margin on loaded runners; fencing is unchanged.
+pub const RECOVERY_TTL: std::time::Duration = std::time::Duration::from_secs(3);
 pub const RECOVERY_RENEW: std::time::Duration = std::time::Duration::from_millis(100);
 
 pub async fn run_effect_action<C>(
