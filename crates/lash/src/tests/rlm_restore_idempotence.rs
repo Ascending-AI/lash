@@ -5,8 +5,12 @@
 //! plugin already holds — resident reload after a follow-on failure, reopen-seed
 //! receipt replay, and append rollback — must rebuild execution state and
 //! projected bindings from the restore view instead of rejecting the seed the
-//! plugin already bound. Each path is witnessed on the memory, SQLite and
-//! PostgreSQL backends with the shipped RLM plugin, not a test protocol.
+//! plugin already bound, and nothing the failed operation left in the live
+//! execution (a never-persisted binding or global, a follow-on turn's
+//! assignment whose commit was refused) may reach the next prompt, the next
+//! execution result, or the next durable checkpoint. Each path is witnessed on
+//! the memory, SQLite and PostgreSQL backends with the shipped RLM plugin, not
+//! a test protocol.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -14,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use lash_core::facade_support::{
     EmbeddedRuntimeHost, InMemorySessionStoreFactory, LashRuntime, NativeRuntimeEffectController,
     PersistentRuntimeServices, PluginHost, PluginSession, RuntimeHostConfig,
-    SingleProviderResolver, TurnOutcome,
+    SingleProviderResolver, TurnFinish, TurnOutcome,
 };
 use lash_core::plugin::{
     PluginFactory, PromptHookContext, RecordedSessionConfig, SessionStateService,
@@ -96,7 +100,9 @@ fn policy() -> SessionPolicy {
     }
 }
 
-fn seed_nodes(label: &str) -> Vec<SessionAppendNode> {
+/// A seed defaulting the globals `payload` and `baton` and binding the
+/// projected entry `projected_<label>`.
+fn seed(label: &str) -> RlmSeed {
     let mut seed = RlmSeed::from_seed_value(&serde_json::json!({
         "payload": (0..64).collect::<Vec<_>>(),
         "baton": label,
@@ -106,7 +112,77 @@ fn seed_nodes(label: &str) -> Vec<SessionAppendNode> {
         format!("projected_{label}"),
         lash_rlm_types::RlmProjectedSeedEntry::Materialized(serde_json::json!({ "value": label })),
     );
-    rlm_seed_initial_nodes(seed)
+    seed
+}
+
+fn seed_nodes(label: &str) -> Vec<SessionAppendNode> {
+    rlm_seed_initial_nodes(seed(label))
+}
+
+fn lashlang_block(code: &str) -> String {
+    format!("<lashlang>\n{code}\n</lashlang>")
+}
+
+/// The persisted RLM snapshot root, decoded far enough to name its globals and
+/// read one back through its inline body or leaf component.
+#[derive(Debug, serde::Deserialize)]
+struct RlmExecutionSnapshotRoot {
+    globals: std::collections::BTreeMap<String, RlmPersistedValueProbe>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum RlmPersistedValueProbe {
+    Inline {
+        #[serde(with = "serde_bytes")]
+        body: Vec<u8>,
+    },
+    Leaf {
+        component: String,
+    },
+}
+
+/// The global names and one named global's rendered value in an execution
+/// snapshot.
+fn snapshot_globals(
+    state: &lash_core::plugin::HydratedExecutionState,
+    name: &str,
+) -> (Vec<String>, Option<String>) {
+    let root: RlmExecutionSnapshotRoot =
+        rmp_serde::from_slice(&state.root).expect("decode the RLM snapshot root");
+    let value = root.globals.get(name).map(|persisted| {
+        let body = match persisted {
+            RlmPersistedValueProbe::Inline { body } => body.as_slice(),
+            RlmPersistedValueProbe::Leaf { component } => state
+                .components
+                .get(component)
+                .unwrap_or_else(|| panic!("leaf `{component}` must be hydrated"))
+                .as_slice(),
+        };
+        let snapshot = lashlang::Snapshot::from_canonical_bytes(body).expect("decode the global");
+        format!("{:?}", snapshot.globals().get("value"))
+    });
+    (root.globals.keys().cloned().collect(), value)
+}
+
+/// The execution root the durable head carries right now, if any.
+async fn durable_execution_state(
+    store: &FaultStore,
+) -> Option<lash_core::plugin::HydratedExecutionState> {
+    lash_core::store::load_persisted_session_state(store.inner.as_ref())
+        .await
+        .expect("load the durable head")
+        .expect("the session is persisted")
+        .execution_state_hydration()
+        .expect("hydrate the durable execution state")
+}
+
+/// The global names and `baton`'s rendered value in the durable checkpoint.
+async fn durable_globals(store: &FaultStore, name: &str) -> (Vec<String>, Option<String>) {
+    let state = durable_execution_state(store)
+        .await
+        .expect("the durable head carries an execution root");
+    snapshot_globals(&state, name)
 }
 
 fn plugin_host() -> PluginHost {
@@ -551,12 +627,13 @@ async fn reopen_seed_receipt_replay(backend: Backend) {
     );
 }
 
-/// (c) A faulted append rolls the protocol session back on the same frame;
-/// the never-persisted `projected_discarded` binding must not survive into the
-/// next prompt.
+/// (c) A faulted append rolls the protocol session back on the same frame:
+/// the never-persisted `projected_discarded` binding and the never-persisted
+/// `rolled_back_global` global must not survive into the next prompt, the next
+/// execution result, or the next durable checkpoint.
 async fn faulted_append_rollback(backend: Backend) {
     let script = Arc::new(Script {
-        responses: vec!["after rollback".to_string()],
+        responses: vec![lashlang_block("finish baton")],
         ..Script::default()
     });
     let SeededSession {
@@ -566,13 +643,30 @@ async fn faulted_append_rollback(backend: Backend) {
         snapshot,
         prompt,
     } = Box::pin(backend.seeded_session("append-rollback", Arc::clone(&script))).await;
+    assert!(
+        runtime
+            .export_persistence_state()
+            .execution_state_hydration()
+            .expect("hydration")
+            .is_none(),
+        "{}: the rollback must run without a resident execution body (discarded post-commit)",
+        backend.label
+    );
 
+    // The discarded seed carries a global the durable history never names, so
+    // a rollback that keeps the live execution is visible as a global with no
+    // originating event.
+    let mut discarded = seed("discarded");
+    discarded.globals.insert(
+        "rolled_back_global".to_string(),
+        serde_json::json!("UNCOMMITTED-GLOBAL"),
+    );
     store.arm(CommitFault::FailNext);
     let error = runtime
         .append_session_nodes(AppendSessionNodesRequest {
             operation_id: "fig2521-discarded".to_string(),
             requires_ancestor_node_id: None,
-            nodes: seed_nodes("discarded"),
+            nodes: rlm_seed_initial_nodes(discarded),
         })
         .await
         .expect_err("the faulted append must fail");
@@ -596,7 +690,17 @@ async fn faulted_append_rollback(backend: Backend) {
         .await
         .expect("snapshot")
         .expect("execution state");
-    assert_eq!(rolled_back_snapshot, snapshot, "{}", backend.label);
+    assert_eq!(
+        rolled_back_snapshot, snapshot,
+        "{}: rollback must restore exactly the committed execution",
+        backend.label
+    );
+    let (live_globals, _) = snapshot_globals(&rolled_back_snapshot, "baton");
+    assert!(
+        !live_globals.iter().any(|name| name == "rolled_back_global"),
+        "{}: the rolled-back append's global must not survive in the live execution: {live_globals:?}",
+        backend.label
+    );
 
     let run = runtime
         .run_turn_assembled(
@@ -606,10 +710,13 @@ async fn faulted_append_rollback(backend: Backend) {
         )
         .await
         .unwrap_or_else(|error| panic!("{}: turn after rollback: {error:?}", backend.label));
-    assert!(
-        matches!(run.outcome, TurnOutcome::Finished(_)),
-        "{:?}",
-        run.outcome
+    assert_eq!(
+        run.outcome,
+        TurnOutcome::Finished(TurnFinish::FinalValue {
+            value: serde_json::json!("original")
+        }),
+        "{}: the next execution must see the committed globals only",
+        backend.label
     );
     let last_request = script.requests.lock_recover().last().cloned().unwrap();
     assert_eq!(
@@ -619,9 +726,115 @@ async fn faulted_append_rollback(backend: Backend) {
         backend.label
     );
     assert_eq!(
+        count(&last_request, "rolled_back_global"),
+        0,
+        "{}: the rolled-back global must not reach the next prompt: {last_request}",
+        backend.label
+    );
+    assert_eq!(
         count(&last_request, "`projected_original`"),
         1,
         "{last_request}"
+    );
+    let (durable_names, durable_baton) = durable_globals(&store, "baton").await;
+    assert!(
+        !durable_names
+            .iter()
+            .any(|name| name == "rolled_back_global"),
+        "{}: the rolled-back global must not become durable: {durable_names:?}",
+        backend.label
+    );
+    assert_eq!(
+        durable_baton.as_deref(),
+        Some("Some(String(\"original\"))"),
+        "{}",
+        backend.label
+    );
+}
+
+/// (d) A follow-on turn assigns a global, then its commit is refused; the
+/// invalidated resident state reloads on the frame the plugin already holds,
+/// whose durable head carries no execution root (the frame switch cleared it).
+/// The next execution must see the committed seed value, never the refused
+/// turn's assignment, and the next durable checkpoint must persist the
+/// committed value.
+async fn follow_on_failure_discards_the_uncommitted_execution(backend: Backend) {
+    let script = Arc::new(Script {
+        responses: vec![
+            continue_as_response(),
+            lashlang_block("baton = \"UNCOMMITTED-FOLLOW-ON\"\nfinish baton"),
+            lashlang_block("finish baton"),
+        ],
+        ..Script::default()
+    });
+    *script.arm_before_call.lock_recover() = Some((1, CommitFault::FailNext));
+    let SeededSession {
+        mut runtime, store, ..
+    } = Box::pin(backend.seeded_session("follow-on-execution", Arc::clone(&script))).await;
+
+    let run = runtime
+        .run_turn_assembled(
+            TurnInput::text("switch"),
+            tokio_util::sync::CancellationToken::new(),
+            turn_scope(&runtime, "fig2521-switch-mutating"),
+        )
+        .await
+        .expect("a follow-on failure is reported on the committed switch turn");
+    assert!(
+        matches!(run.outcome, TurnOutcome::AgentFrameSwitch { .. }),
+        "{}: {:?}",
+        backend.label,
+        run.outcome
+    );
+    assert!(
+        !run.errors.is_empty(),
+        "{}: the follow-on commit failure must be recorded on the switch turn",
+        backend.label
+    );
+    assert_eq!(script.calls.load(Ordering::SeqCst), 2, "{}", backend.label);
+    assert_eq!(*store.fault.lock_recover(), CommitFault::None);
+    assert!(
+        durable_execution_state(&store).await.is_none(),
+        "{}: the switch commit leaves the new frame without a durable execution root",
+        backend.label
+    );
+
+    let run = runtime
+        .run_turn_assembled(
+            TurnInput::text("read"),
+            tokio_util::sync::CancellationToken::new(),
+            turn_scope(&runtime, "fig2521-after-follow-on-failure"),
+        )
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "{}: resident reload on the same frame must succeed: {error:?}",
+                backend.label
+            )
+        });
+    assert_eq!(script.calls.load(Ordering::SeqCst), 3, "{}", backend.label);
+    assert_eq!(
+        run.outcome,
+        TurnOutcome::Finished(TurnFinish::FinalValue {
+            value: serde_json::json!("switched")
+        }),
+        "{}: the reloaded execution must hold the committed seed value, not the refused \
+         turn's assignment",
+        backend.label
+    );
+    let last_request = script.requests.lock_recover().last().cloned().unwrap();
+    assert_eq!(
+        count(&last_request, "UNCOMMITTED-FOLLOW-ON"),
+        0,
+        "{}: {last_request}",
+        backend.label
+    );
+    let (durable_names, durable_baton) = durable_globals(&store, "baton").await;
+    assert_eq!(
+        durable_baton.as_deref(),
+        Some("Some(String(\"switched\"))"),
+        "{}: the next checkpoint must persist the committed value: {durable_names:?}",
+        backend.label
     );
 }
 
@@ -673,5 +886,31 @@ async fn rlm_faulted_append_rollback_discards_the_unpersisted_binding_on_sqlite(
 async fn rlm_faulted_append_rollback_discards_the_unpersisted_binding_on_postgres() {
     if let Some(backend) = Backend::postgres().await {
         Box::pin(faulted_append_rollback(backend)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_follow_on_failure_discards_the_uncommitted_execution_on_memory() {
+    Box::pin(follow_on_failure_discards_the_uncommitted_execution(
+        Backend::memory(),
+    ))
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_follow_on_failure_discards_the_uncommitted_execution_on_sqlite() {
+    Box::pin(follow_on_failure_discards_the_uncommitted_execution(
+        Backend::sqlite(),
+    ))
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_follow_on_failure_discards_the_uncommitted_execution_on_postgres() {
+    if let Some(backend) = Backend::postgres().await {
+        Box::pin(follow_on_failure_discards_the_uncommitted_execution(
+            backend,
+        ))
+        .await;
     }
 }

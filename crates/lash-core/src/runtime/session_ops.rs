@@ -104,6 +104,17 @@ impl LashRuntime {
         )
         .map_err(|err| SessionError::Protocol(err.to_string()))?;
         let state_before_append = self.state.clone();
+        // The plugin append below patches the live execution with the request's
+        // seed and globals events. A rollback restores the protocol session to
+        // the committed execution, and the resident body of that state is
+        // discarded after every commit, so the live executor is captured here,
+        // before the append touches it, as the rollback view's snapshot
+        // (FIG-2521). One hydrated copy, alive for the append only.
+        let execution_before_append = if history_store.is_some() {
+            self.hydrated_live_execution_state().await?
+        } else {
+            None
+        };
         let draft_namespace = operation
             .storage_key()
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
@@ -133,7 +144,10 @@ impl LashRuntime {
                     let mut context =
                         "failed to derive persisted session graph node identities".to_string();
                     if let Err(rollback_err) = self
-                        .restore_protocol_session_from_state(state_before_append)
+                        .restore_protocol_session_from_state(
+                            state_before_append,
+                            execution_before_append,
+                        )
                         .await
                     {
                         context.push_str(&format!(
@@ -188,7 +202,10 @@ impl LashRuntime {
                 Ok(result) => result,
                 Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
                     if let Err(rollback_err) = self
-                        .restore_protocol_session_from_state(state_before_append)
+                        .restore_protocol_session_from_state(
+                            state_before_append,
+                            execution_before_append,
+                        )
                         .await
                     {
                         return Err(SessionError::Protocol(format!(
@@ -199,7 +216,10 @@ impl LashRuntime {
                 }
                 Err(err) => {
                     if let Err(rollback_err) = self
-                        .restore_protocol_session_from_state(state_before_append)
+                        .restore_protocol_session_from_state(
+                            state_before_append,
+                            execution_before_append,
+                        )
                         .await
                     {
                         let context = format!(
@@ -223,7 +243,10 @@ impl LashRuntime {
                         let mut context =
                             "append receipt contains an invalid stored node-id result".to_string();
                         if let Err(rollback_err) = self
-                            .restore_protocol_session_from_state(state_before_append.clone())
+                            .restore_protocol_session_from_state(
+                                state_before_append.clone(),
+                                execution_before_append.clone(),
+                            )
                             .await
                         {
                             context.push_str(&format!(
@@ -247,7 +270,10 @@ impl LashRuntime {
                     let mut context =
                         "failed to refresh resident state after append receipt replay".to_string();
                     if let Err(rollback_err) = self
-                        .restore_protocol_session_from_state(state_before_append)
+                        .restore_protocol_session_from_state(
+                            state_before_append,
+                            execution_before_append,
+                        )
                         .await
                     {
                         context.push_str(&format!(
@@ -256,7 +282,7 @@ impl LashRuntime {
                     }
                     return Err(SessionError::Store { context, source });
                 }
-                self.restore_protocol_session_from_state(durable_state)
+                self.restore_protocol_session_from_state(durable_state, None)
                     .await?;
             } else {
                 super::state::apply_graph_commit_node_id_mapping(&mut self.state, &node_id_mapping)
@@ -284,24 +310,87 @@ impl LashRuntime {
         })
     }
 
+    /// Adopt `state` as the resident state and restore the protocol session to
+    /// it.
+    ///
+    /// The restore view carries `state`'s execution root when the resident
+    /// bodies hold one; otherwise it carries `execution_before_append`, the
+    /// live executor's capture from before the append, so the protocol session
+    /// rebuilds the committed execution instead of keeping what the failed
+    /// append applied (FIG-2521). A capture restored this way is staged into
+    /// the resident checkpoint components exactly as an explicit
+    /// [`Self::restore_execution_state`] stages its snapshot: the executor now
+    /// treats the capture's leaves as its persisted baseline, and the next
+    /// commit can only reference them as unchanged if the resident set carries
+    /// them.
     async fn restore_protocol_session_from_state(
         &mut self,
-        state_before_append: RuntimeSessionState,
+        state: RuntimeSessionState,
+        execution_before_append: Option<crate::plugin::HydratedExecutionState>,
     ) -> Result<(), SessionError> {
-        self.state = state_before_append;
+        self.state = state;
         let state_for_restore = self.state.clone();
+        let mut staged_capture = None;
         if let Some(session) = self.session.as_mut() {
             let protocol_session = Arc::clone(session.plugins().protocol_session());
             let session_id = state_for_restore.session_id.clone();
+            let mut view = crate::plugin::ProtocolSessionRestoreView::new(&state_for_restore);
+            if let (Ok(None), Some(snapshot)) = (&view.execution_state, execution_before_append) {
+                staged_capture = Some(snapshot.clone());
+                view.execution_state = Ok(Some(snapshot));
+            }
             protocol_session
                 .restore_session(
                     crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                    crate::plugin::ProtocolSessionRestoreView::new(&state_for_restore),
+                    view,
                 )
                 .await?;
         }
+        if let Some(snapshot) = staged_capture {
+            self.state
+                .set_execution_state_components(
+                    crate::plugin::ExecutionStateSnapshot::from_hydrated(snapshot),
+                )
+                .map_err(|source| SessionError::Store {
+                    context: "failed to stage the rolled-back execution-state components"
+                        .to_string(),
+                    source,
+                })?;
+        }
         self.stamp_live_plugin_state();
         Ok(())
+    }
+
+    /// Roll a plugin runtime-event append back. Those events never reach the
+    /// protocol session, so the live execution is still the state the append
+    /// found and serves as the rollback view's snapshot (FIG-2521).
+    async fn rollback_plugin_runtime_event_append(
+        &mut self,
+        state_before_append: RuntimeSessionState,
+    ) -> Result<(), SessionError> {
+        let execution = self.hydrated_live_execution_state().await?;
+        self.restore_protocol_session_from_state(state_before_append, execution)
+            .await
+    }
+
+    /// The code executor's complete live execution state, or `None` when the
+    /// session has no code executor. Reads live state and stages nothing.
+    async fn hydrated_live_execution_state(
+        &mut self,
+    ) -> Result<Option<crate::plugin::HydratedExecutionState>, SessionError> {
+        let Some(session) = self.session.as_mut() else {
+            return Ok(None);
+        };
+        let Some(code_executor) = session.plugins().code_executor() else {
+            return Ok(None);
+        };
+        let session_id = self.state.session_id.clone();
+        code_executor
+            .hydrated_execution_state(crate::plugin::ProtocolSessionContext::new(
+                session,
+                &session_id,
+            ))
+            .await
     }
 
     pub async fn apply_protocol_session_extension(
@@ -719,7 +808,7 @@ impl LashRuntime {
                         let mut context =
                             format!("failed to derive plugin runtime event identity: {err}");
                         if let Err(rollback_err) = self
-                            .restore_protocol_session_from_state(state_before_append.clone())
+                            .rollback_plugin_runtime_event_append(state_before_append.clone())
                             .await
                         {
                             context.push_str(&format!(
@@ -760,7 +849,7 @@ impl LashRuntime {
                     let persistence_error =
                         format!("failed to persist plugin runtime events: {err}");
                     if let Err(rollback_err) = self
-                        .restore_protocol_session_from_state(state_before_append)
+                        .rollback_plugin_runtime_event_append(state_before_append)
                         .await
                     {
                         return Err(PluginOperationInvokeError::Failed(format!(
