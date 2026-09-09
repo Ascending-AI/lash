@@ -185,13 +185,13 @@ impl TypescriptDialect {
         {
             return Ok(String::new());
         }
-        let mut section = String::from("\n\n### Host surface");
+        let mut section = String::from("\n\n### Host Surface");
         if !operations.is_empty() {
             let lines = operations
                 .iter()
                 .map(|operation| {
                     format!(
-                        "declare function {}_{}(input: {}): Promise<{}>; // await {}.{}(input)\n{}",
+                        "{}_{}(input: {}): Promise<{}>; // await {}.{}(input)\n{}",
                         operation.alias,
                         operation.operation,
                         typescript_type(operation.input).replace("Record<string, never>", "{}"),
@@ -266,19 +266,19 @@ pub(crate) fn typescript_process_prompt(abilities: &lashlang::LashlangAbilities)
     let mut lines = Vec::new();
     if abilities.processes {
         lines.push(r#"interface Process<Input = unknown, Output = unknown> { readonly name: string }
-declare function defineProcess(c: {name: string; run: Function; signals?: Record<string, null>}): Process;
-declare function start(p: Process, args?: Record<string, unknown>): Promise<unknown> & {id: string};
-declare function wake(value: unknown): void;
+defineProcess(c: {name: string; run: Function; signals?: Record<string, null>}): Process;
+start(p: Process, args?: Record<string, unknown>): Promise<unknown> & {id: string};
+wake(value: unknown): void;
 Use top-level const, literal name, async run; start keys match run parameter names. Return succeeds after finally; throw fails."#);
         if abilities.process_signals {
             lines.push(
-                r#"declare function waitSignal(name: string): Promise<unknown>;
-declare function wake(handle: {id: string}, signal: string, payload: unknown): void;
+                r#"waitSignal(name: string): Promise<unknown>;
+wake(handle: {id: string}, signal: string, payload: unknown): void;
 Signals: {go: null}; waitSignal is run-only."#,
             );
         }
         if abilities.triggers {
-            lines.push(r#"declare function registerTrigger(c: {source: unknown; target: Process; inputs: Record<string, unknown>; name?: string}): Promise<unknown>;
+            lines.push(r#"registerTrigger(c: {source: unknown; target: Process; inputs: Record<string, unknown>; name?: string}): Promise<unknown>;
 Literal target; inputs match run parameters."#);
         }
     }
@@ -390,11 +390,14 @@ impl RlmDialect for TypescriptDialect {
         let tools = if tools.is_empty() {
             String::new()
         } else {
-            format!(
-                "\n\n### Tools\n\nCall each tool with one object matching its declared input: `await module.op({{ id: value }})`; empty inputs take `{{}}`. These declarations describe the host; do not execute them.\n\n{tools}"
-            )
+            format!("\n\n### Tools\n\n{tools}")
         };
         let host_surface = self.render_host_surface_section(tool_catalog)?;
+        let allowed_sections = if host_surface.is_empty() {
+            "**Tools**"
+        } else {
+            "**Tools** or **Host Surface**"
+        };
         let response_shape = super::cell_response_shape(self.cell_tags(), self.prompt_vocabulary());
         let environment = self
             .surface
@@ -425,7 +428,7 @@ impl RlmDialect for TypescriptDialect {
         let example =
             "### Example cell\n\n<typescript>\nconst total = 1 + 2;\nfinish(total);\n</typescript>";
         Ok(format!(
-            "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under **Tools**.\n\n{response_shape}\n{example}\n\n{host_api}\n\n{tools}{host_surface}"
+            "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under {allowed_sections}.\n\n{response_shape}\n{example}\n\n{host_api}\n\n{tools}{host_surface}"
         ))
     }
 
@@ -595,7 +598,7 @@ mod tests {
             )
             .expect("render execution section");
 
-        assert!(section.contains("### Host surface"), "{section}");
+        assert!(section.contains("### Host Surface"), "{section}");
         assert!(
             section.contains(
                 "cron.Schedule(input: { expr: string; tz?: string }): TriggerSource<cron_Tick>"
@@ -667,9 +670,7 @@ mod tests {
             .render_execution_section(crate::protocol::RlmPromptFeatures::default(), &catalog)
             .expect("render execution section");
         assert!(
-            section.contains(
-                "declare namespace web { function fetch(input: { url: string }): Promise<string>; }"
-            ),
+            section.contains("web.fetch({ url: string }): Promise<string>"),
             "{section}"
         );
         assert!(
@@ -1111,74 +1112,31 @@ mod tests {
         }
     }
 
-    /// The declarations inside the rendered `### Tools` block, one per tool.
+    /// Read each method signature from the actual catalogue text.
     fn tool_declarations(section: &str) -> Vec<String> {
-        let tools = section
+        section
             .split_once("### Tools")
-            .expect("a catalog with tools renders a Tools section")
-            .1;
-        let mut root = None;
-        let mut declarations = Vec::new();
-        for line in tools.split("\n### ").next().unwrap().lines().map(str::trim) {
-            if line.starts_with("declare namespace ") && line.ends_with('{') {
-                root = Some(line.to_string());
-            } else if line == "}" {
-                root = None;
-            } else if line.starts_with("declare ") {
-                declarations.push(line.to_string());
-            } else if line.starts_with("function ") || line.starts_with("namespace ") {
-                declarations.push(format!(
-                    "{} {line} }}",
-                    root.as_ref().expect("function's namespace")
-                ));
-            }
-        }
-        declarations
+            .expect("Tools section")
+            .1
+            .split("\n### ")
+            .next()
+            .unwrap()
+            .lines()
+            .filter_map(|line| {
+                line.strip_prefix('`')
+                    .and_then(|line| line.strip_suffix('`'))
+            })
+            .filter(|line| line.contains("): Promise<"))
+            .map(str::to_string)
+            .collect()
     }
 
-    /// The call path a rendered declaration advertises.
-    ///
-    /// Deliberately parses the rendered text rather than asking the renderer
-    /// what it meant: the sweep's whole claim is that the text a model reads
-    /// names something callable, and a shape this does not recognize is a new
-    /// advertisement form that has to be judged, not skipped.
-    fn advertised_call_path(declaration: &str) -> String {
-        let mut rest = declaration
-            .trim()
-            .strip_prefix("declare ")
-            .unwrap_or_else(|| panic!("unrecognized declaration: {declaration}"));
-        let mut segments = Vec::new();
-        while let Some(tail) = rest.strip_prefix("namespace ") {
-            let (module, tail) = tail
-                .split_once(" {")
-                .unwrap_or_else(|| panic!("unrecognized namespace: {declaration}"));
-            segments.push(module.trim().to_string());
-            rest = tail.trim_start();
-        }
-        if let Some(tail) = rest.strip_prefix("function ") {
-            let (operation, _) = tail
-                .split_once('(')
-                .unwrap_or_else(|| panic!("unrecognized function: {declaration}"));
-            segments.push(operation.trim().to_string());
-        } else if let Some(tail) = rest.strip_prefix("const ") {
-            // `const root: { module: { … { operation(input: …): … } } };` — the
-            // tail is a chain of property levels ending in a callable member.
-            let mut rest = tail;
-            loop {
-                let member = rest
-                    .find([':', '('])
-                    .unwrap_or_else(|| panic!("unrecognized const member: {declaration}"));
-                let (name, tail) = rest.split_at(member);
-                segments.push(name.trim().trim_matches('"').to_string());
-                if tail.starts_with('(') {
-                    break;
-                }
-                rest = tail[1..].trim_start().trim_start_matches('{').trim_start();
-            }
-        } else {
-            panic!("unrecognized declaration shape: {declaration}");
-        }
-        segments.join(".")
+    fn advertised_call_path(signature: &str) -> String {
+        signature
+            .split_once('(')
+            .expect("method signature")
+            .0
+            .to_string()
     }
 
     /// Links and runs the advertised call against a host binding for

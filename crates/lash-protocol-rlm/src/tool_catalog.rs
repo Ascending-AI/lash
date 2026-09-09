@@ -64,36 +64,28 @@ pub(crate) fn rlm_prompt_tool_docs(
             render_doc_field_prose(vocabulary, &mut compact.parameters);
             render_doc_field_prose(vocabulary, &mut compact.return_fields);
             compact.parameters.retain(has_field_description);
-            compact.return_fields.retain(has_field_description);
-            let markdown = compact.render_markdown();
-            if dialect.renders_tool_catalogue_inline() {
-                let signature = lash_typescript::render_tool_signature(
-                    &call_path,
-                    contract.input_schema.canonical(),
-                    Some(contract.output_schema.canonical()),
-                )
-                .replace("input: Record<string, never>", "input: {}");
-                let notes = markdown
-                    .lines()
-                    .skip(1)
-                    .map(|line| format!(" * {}", line.replace("*/", "* /")))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                Some(format!("/**\n{notes}\n */\n{signature}"))
-            } else {
-                let (_, notes) = markdown.split_once('\n').unwrap_or((&markdown, ""));
-                Some(format!(
-                    "### `await {}? -> {}`\n{notes}",
-                    compact.signature, compact.returns
-                ))
+            if !schema_nests(contract.output_schema.canonical(), 0) {
+                compact.return_fields.retain(has_field_description);
             }
+            let markdown = compact.render_markdown();
+            let (_, notes) = markdown.split_once('\n').unwrap_or((&markdown, ""));
+            let signature = if dialect.renders_tool_catalogue_inline() {
+                let input = lash_typescript::render_schema_type(contract.input_schema.canonical());
+                let input = if input == "Record<string, never>" {
+                    "{}"
+                } else {
+                    &input
+                };
+                let output =
+                    lash_typescript::render_schema_type(contract.output_schema.canonical());
+                format!("{call_path}({input}): Promise<{output}>")
+            } else {
+                format!("await {}? -> {}", compact.signature, compact.returns)
+            };
+            Some(format!("`{signature}`\n{notes}"))
         })
         .collect::<Vec<_>>();
-    if dialect.renders_tool_catalogue_inline() {
-        group_typescript_namespaces(entries)
-    } else {
-        entries.join("\n\n")
-    }
+    entries.join("\n\n")
 }
 
 fn has_field_description(row: &serde_json::Value) -> bool {
@@ -102,47 +94,34 @@ fn has_field_description(row: &serde_json::Value) -> bool {
         .is_some_and(|description| !description.trim().is_empty())
 }
 
-fn group_typescript_namespaces(entries: Vec<String>) -> String {
-    let mut namespaces = std::collections::BTreeMap::<String, Vec<String>>::new();
-    let mut other = Vec::new();
-    for entry in entries {
-        let Some((notes, declaration)) = entry.split_once("declare namespace ") else {
-            other.push(entry);
-            continue;
-        };
-        let Some((namespace, body)) = declaration.split_once(" { ") else {
-            other.push(entry);
-            continue;
-        };
-        let body = body
-            .strip_suffix(" }")
-            .expect("namespace renderer closes the declaration");
-        namespaces
-            .entry(namespace.to_string())
-            .or_default()
-            .push(format!(
-                "{}{}",
-                notes.trim_end(),
-                if notes.trim().is_empty() {
-                    body.to_string()
-                } else {
-                    format!("\n{body}")
-                }
-            ));
+fn schema_nests(schema: &serde_json::Value, depth: usize) -> bool {
+    let container = schema.get("properties").is_some() || schema.get("items").is_some();
+    if container && depth >= 1 {
+        return true;
     }
-    for (namespace, entries) in namespaces {
-        if entries.len() == 1 {
-            let entry = &entries[0];
-            let (notes, body) = entry.rsplit_once("\n").unwrap_or(("", entry));
-            other.push(format!(
-                "{notes}\ndeclare namespace {namespace} {{ {body} }}"
-            ));
-        } else {
-            let body = entries.join("\n");
-            other.push(format!("declare namespace {namespace} {{\n{body}\n}}"));
-        }
+    if schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|properties| {
+            properties
+                .values()
+                .any(|field| schema_nests(field, depth + 1))
+        })
+    {
+        return true;
     }
-    other.join("\n\n")
+    if schema
+        .get("items")
+        .is_some_and(|items| schema_nests(items, depth + 1))
+    {
+        return true;
+    }
+    ["anyOf", "oneOf", "allOf"].iter().any(|key| {
+        schema
+            .get(key)
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|variants| variants.iter().any(|variant| schema_nests(variant, depth)))
+    })
 }
 
 /// Resolve the dialect tokens in one rendered doc row's `description`.

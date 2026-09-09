@@ -55,26 +55,10 @@ fn console_methods_accept_zero_and_multiple_arguments_with_json_joining() {
 }
 
 #[test]
-fn tool_signatures_are_async_reserved_safe_and_collision_proof() {
-    let signature = lash_typescript::render_tool_signature(
-        "search-docs",
-        &json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": { "delete": { "type": "string" } },
-            "required": ["delete"]
-        }),
-        Some(&json!({ "type": "number" })),
-    );
-    assert_eq!(
-        signature,
-        "declare function __lash_tool_7365617263682d646f6373(input: { \"delete\": string }): Promise<number>;"
-    );
-    assert!(signature.contains("Promise"));
-
-    let reserved = lash_typescript::render_tool_signature("delete", &json!({}), None);
-    let prefix_collision =
-        lash_typescript::render_tool_signature("__lash_tool_64656c657465", &json!({}), None);
-    assert!(reserved.starts_with("declare function __lash_tool_64656c657465("));
-    assert_ne!(reserved, prefix_collision);
+fn tool_schema_uses_typescript_field_spelling() {
+    let ty = lash_typescript::render_schema_type(&json!({
+        "type": "object", "additionalProperties": false,
+        "properties": { "delete": { "type": "string" } }, "required": ["delete"]
+    }));
+    assert_eq!(ty, r#"{ "delete": string }"#);
 }

@@ -414,12 +414,11 @@ fn each_lashlang_capability_gates_its_own_vocabulary() {
                         .unwrap()
                 };
                 for needle in needles {
-                    if !enabled {
-                        assert!(
-                            !text.contains(needle),
-                            "off capability={capability} needle={needle}: {text}"
-                        );
-                    }
+                    assert_eq!(
+                        text.contains(needle),
+                        enabled,
+                        "capability={capability} needle={needle}: {text}"
+                    );
                 }
                 assert_eq!(
                     text.contains(needles[0]),
@@ -455,7 +454,13 @@ fn tool_signatures_cover_every_operation_parameter_and_return_shape() {
         assert!(!docs.contains("Parameters:"));
         assert!(!docs.contains("Return fields:"));
         if typescript {
-            assert_eq!(docs.matches("declare namespace lookup").count(), 1);
+            assert!(!docs.contains("declare"), "{docs}");
+            assert_eq!(
+                docs.lines()
+                    .filter(|line| line.starts_with("`lookup."))
+                    .count(),
+                2
+            );
             assert!(docs.contains("optional_limit?: number"));
         }
     }
@@ -506,4 +511,91 @@ fn typescript_capabilities_gate_in_both_assembled_channels() {
             }
         }
     }
+}
+
+#[test]
+fn wrapup_nested_return_rows_and_plain_signatures() {
+    use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![lash_core::ToolDefinition::raw("get", "get", "Read a nested record.", serde_json::json!({"type":"object","properties":{},"additionalProperties":false}), serde_json::json!({"type":"object","properties":{"outer":{"type":"object","properties":{"inner":{"type":"string"}},"required":["inner"]}},"required":["outer"]})).with_tool_binding(ToolBinding::new(["kv"], "get"))]);
+    for typescript in [false, true] {
+        let dialect = dialect(typescript, false);
+        let docs = crate::tool_catalog::rlm_prompt_tool_docs(
+            &catalog,
+            dialect.as_ref(),
+            Default::default(),
+        );
+        assert!(docs.contains("Return fields:"), "{docs}");
+        assert!(docs.contains("outer.inner"), "{docs}");
+        assert_eq!(docs.matches("Read a nested record.").count(), 1);
+        if typescript {
+            assert!(docs.starts_with("`kv.get({}): Promise<"), "{docs}");
+            for forbidden in [
+                "declare",
+                "namespace",
+                "const ",
+                "function ",
+                "/**",
+                "await ",
+                " -> ",
+            ] {
+                assert!(!docs.contains(forbidden), "{forbidden}: {docs}");
+            }
+        }
+    }
+}
+
+#[test]
+fn opening_line_names_exactly_the_available_sections_in_both_dialects() {
+    for typescript in [false, true] {
+        for host_surface in [false, true] {
+            let mut surface = LashlangSurface::default();
+            if host_surface {
+                surface
+                    .resources
+                    .add_module_operation(
+                        ["host"],
+                        "host",
+                        "read",
+                        "read",
+                        lashlang::TypeExpr::Str,
+                        lashlang::TypeExpr::Str,
+                    )
+                    .unwrap();
+            }
+            let dialect: Box<dyn RlmDialect> = if typescript {
+                Box::new(crate::dialect::typescript::TypescriptDialect::prompt_only(
+                    surface,
+                ))
+            } else {
+                Box::new(crate::dialect::lashlang::LashlangDialect::prompt_only(
+                    surface,
+                ))
+            };
+            let text = dialect
+                .render_execution_section(Default::default(), &catalog())
+                .unwrap();
+            let expected = match (typescript, host_surface) {
+                (true, false) => {
+                    "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({ ... })`, only those listed under **Tools**."
+                }
+                (true, true) => {
+                    "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({ ... })`, only those listed under **Tools** or **Host Surface**."
+                }
+                (false, false) => {
+                    "Use prose for conversation; use a paired `<lashlang>` block for action or computation. Call tools as `await module.operation({ ... })?`, only those listed under **Tools**."
+                }
+                (false, true) => {
+                    "Use prose for conversation; use a paired `<lashlang>` block for action or computation. Call tools as `await module.operation({ ... })?`, only those listed under **Tools** or **Host Surface**."
+                }
+            };
+            assert_eq!(text.lines().next(), Some(expected));
+            assert_eq!(text.contains("### Host Surface"), host_surface);
+        }
+    }
+}
+
+#[test]
+fn print_finish_has_one_short_verification_cue() {
+    let text = system(dialect(false, false).as_ref(), false, false);
+    assert_eq!(text.matches("Inspect results before finishing.").count(), 1);
 }

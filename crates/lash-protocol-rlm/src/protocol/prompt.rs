@@ -299,6 +299,8 @@ fn render_execution_intro(has_operations: bool) -> String {
 
 ### `print` vs `finish`
 
+Inspect results before finishing.
+
 - `print <expr>` shows the value in the next step and continues; print the field or slice you need, not whole results.
 - `finish <expr>` ends the turn: strings pass through, other values render as JSON. Return exactly the value and type the task asks for; do not finish an unexamined whole tool result.
 
@@ -358,7 +360,7 @@ fn render_language_section(
 fn push_value_language_bullets(bullets: &mut Vec<String>, images: bool) {
     if images {
         bullets.push("- Values: null, booleans, numbers, strings, lists, records, and immutable `Image` handles. Literals: `[a, b]`, `{ a: 1, b: 2 }`.".to_string());
-        bullets.push("- Images: image-producing tools may return an `Image` value. Read metadata with `.id`, `.label`, `.size`, `.width`, `.height`; fields are read-only. `print(image)` or `print` on a list/record containing images sends both descriptor text and the actual image attachment to the next model call. `finish image`, `to_string(image)` and JSON serialize as `{ type: \"image\", id, label, size, width, height }`. `len(image)` is invalid; use `.size`.".to_string());
+        bullets.push("- Images: image-producing tools may return an `Image` value. Read metadata with `.id`, `.label`, `.size`, `.width`, `.height`; fields are read-only. `print(image)` or `print` on a list/record containing images sends both descriptor text and the actual image attachment to the next model call. `finish image`, `to_string(image)` and JSON serialize as `{ type: \"image\", id, label, size, width, height }`. `len(image)` is invalid; use `image.size`.".to_string());
     } else {
         bullets.push("- Values: null, booleans, numbers, strings, lists, and records. Literals: `[a, b]`, `{ a: 1, b: 2 }`.".to_string());
     }

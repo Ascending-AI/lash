@@ -284,69 +284,9 @@ pub fn stdlib_name_count() -> usize {
     STATIC_STDLIB_SIGNATURES.len() + INSTANCE_STDLIB_SIGNATURES.len()
 }
 
-/// Renders one tool's JSON schemas as a TypeScript declaration using the
-/// shared Lash type engine's schema importer.
-pub fn render_tool_signature(
-    name: &str,
-    input_schema: &Value,
-    output_schema: Option<&Value>,
-) -> String {
-    let input = json_schema_to_type_expr(input_schema);
-    let output = output_schema.map_or(TypeExpr::Any, json_schema_to_type_expr);
-    let segments = name.split('.').collect::<Vec<_>>();
-    let (operation, modules) = segments.split_last().expect("split never yields nothing");
-    // Only the root of a call path is written in expression position; a cell
-    // spells every segment after it as a property name, where ECMAScript accepts
-    // reserved words. A path whose root is a word no cell can write cannot be
-    // advertised honestly at all — registration refuses those, see
-    // [`ensure_tool_call_path_addressable`].
-    if segments.len() > 1
-        && segments.iter().all(|segment| is_identifier(segment))
-        && !is_expression_reserved_word(modules[0])
-    {
-        let signature = format!(
-            "(input: {}): Promise<{}>",
-            render_type(&input),
-            render_type(&output)
-        );
-        // `get` and `set` are contextual accessor words, legal function names.
-        if segments
-            .iter()
-            .all(|segment| !is_reserved_word(segment) || matches!(*segment, "get" | "set"))
-        {
-            let mut declaration = format!("function {operation}{signature};");
-            // Only the outermost wrapper may carry `declare`: a nested one is
-            // already inside an ambient context, and `declare namespace a {
-            // declare namespace b { … } }` is not valid TypeScript. This is
-            // prompt text the model reads as ground truth.
-            for module in modules.iter().rev() {
-                declaration = format!("namespace {module} {{ {declaration} }}");
-            }
-            format!("declare {declaration}")
-        } else {
-            // A namespace or function *name* is a declaration position, which
-            // admits no reserved word, so `inbox.delete` had no namespace
-            // spelling and was advertised as the mangled `__lash_tool_<hex>`
-            // identifier — a callable no binding provides, which rejected with
-            // `TS_UNKNOWN_BINDING` for itself while the dotted path the catalog
-            // never mentioned worked (FIG-1444). Declaring the tail as nested
-            // properties of the root moves every reserved name into the position
-            // a cell actually writes it in, so the declaration spells the call.
-            let (root, inner) = modules.split_first().expect("checked len above");
-            let mut declaration = format!("{operation}{signature}");
-            for module in inner.iter().rev() {
-                declaration = format!("{module}: {{ {declaration} }}");
-            }
-            format!("declare const {root}: {{ {declaration} }};")
-        }
-    } else {
-        format!(
-            "declare function {}(input: {}): Promise<{}>;",
-            render_identifier(name),
-            render_type(&input),
-            render_type(&output)
-        )
-    }
+/// Spells a JSON schema as a TypeScript type using the shared type engine.
+pub fn render_schema_type(schema: &Value) -> String {
+    render_type(&json_schema_to_type_expr(schema))
 }
 
 /// Confirms a TypeScript cell can address `call_path` verbatim as a tool call.
@@ -588,67 +528,6 @@ pub fn reserved_words() -> &'static [&'static str] {
     RESERVED_WORDS
 }
 
-/// The subset of [`RESERVED_WORDS`] ECMAScript also forbids as an *expression*
-/// identifier, so a cell cannot write it as the root of a call path at all.
-///
-/// The rest of the table — `type`, `get`, `any`, `string`, … — is reserved only
-/// where TypeScript expects a declaration name; a cell writes those as plain
-/// identifiers and the parser accepts them. Keeping the two apart is what lets
-/// a module path spelled with a contextual keyword be advertised the way it is
-/// actually called.
-const EXPRESSION_RESERVED_WORDS: &[&str] = &[
-    "await",
-    "break",
-    "case",
-    "catch",
-    "class",
-    "const",
-    "continue",
-    "debugger",
-    "default",
-    "delete",
-    "do",
-    "else",
-    "enum",
-    "export",
-    "extends",
-    "false",
-    "finally",
-    "for",
-    "function",
-    "if",
-    "implements",
-    "import",
-    "in",
-    "instanceof",
-    "interface",
-    "let",
-    "new",
-    "null",
-    "package",
-    "private",
-    "protected",
-    "public",
-    "return",
-    "static",
-    "super",
-    "switch",
-    "this",
-    "throw",
-    "true",
-    "try",
-    "typeof",
-    "var",
-    "void",
-    "while",
-    "with",
-    "yield",
-];
-
-fn is_expression_reserved_word(name: &str) -> bool {
-    EXPRESSION_RESERVED_WORDS.contains(&name)
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -657,35 +536,12 @@ mod tests {
 
     #[test]
     fn renders_schema_through_shared_type_engine() {
-        let signature = render_tool_signature(
-            "search-docs",
-            &json!({
-                "type": "object",
-                "additionalProperties": false,
-                "properties": { "query": { "type": "string" }, "limit": { "type": "integer" } },
-                "required": ["query"]
-            }),
-            Some(&json!({ "type": "array", "items": { "type": "string" } })),
-        );
-        assert_eq!(
-            signature,
-            "declare function __lash_tool_7365617263682d646f6373(input: { limit?: number; query: string }): Promise<Array<string>>;"
-        );
-    }
-
-    /// The expression-position table is a *subset* of the declaration-position
-    /// one. A word only ECMAScript forbids would otherwise be rendered as a
-    /// namespace name TypeScript rejects, and a word missing from the wider
-    /// table would be advertised as a `const` whose name no cell can write.
-    #[test]
-    fn expression_reserved_words_are_a_subset_of_reserved_words() {
-        for word in EXPRESSION_RESERVED_WORDS {
-            assert!(
-                is_reserved_word(word),
-                "`{word}` is reserved in expression position but not in declaration position"
-            );
-        }
-        assert!(EXPRESSION_RESERVED_WORDS.len() < RESERVED_WORDS.len());
+        let ty = render_schema_type(&json!({
+            "type": "object", "additionalProperties": false,
+            "properties": { "query": { "type": "string" }, "limit": { "type": "integer" } },
+            "required": ["query"]
+        }));
+        assert_eq!(ty, "{ limit?: number; query: string }");
     }
 
     /// The literal-receiver matrix the hand-written arms in the lowerer used to
