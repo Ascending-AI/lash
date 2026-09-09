@@ -320,7 +320,6 @@ impl SessionBuilder {
             process_work,
             process_phase_probe_slot: self.core.substrate_slot.phase_probe_slot(),
             turn_cancels: crate::turn::TurnCancelRegistry::default(),
-            deferred_scope_retirements: crate::admin::DeferredScopeRetirements::default(),
         })
     }
 
@@ -503,10 +502,6 @@ pub struct LashSession {
     pub(crate) process_work: Option<Arc<dyn lash_core::ProcessWorkSubstrate>>,
     pub(crate) process_phase_probe_slot: Option<lash_core::runtime::RuntimeTurnPhaseProbeSlot>,
     pub(crate) turn_cancels: crate::turn::TurnCancelRegistry,
-    /// Facade operation scopes whose retirement was deferred because the
-    /// scope still had live effects when its receipt returned; retried before
-    /// each later plugin operation on this session.
-    pub(crate) deferred_scope_retirements: crate::admin::DeferredScopeRetirements,
 }
 
 /// Lightweight, consuming handle returned by [`LashSession::park`].
@@ -784,7 +779,6 @@ impl LashSession {
         SessionAdmin {
             runtime: self.runtime.clone(),
             process_work: self.process_work.clone(),
-            deferred_scope_retirements: self.deferred_scope_retirements.clone(),
         }
     }
 

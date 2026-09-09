@@ -10,6 +10,9 @@
 
 use crate::plugin::PluginError;
 use std::num::NonZeroUsize;
+use std::sync::{Arc, Weak};
+
+use crate::{EffectHost, ExecutionScope};
 
 use super::ProcessCompletionOutcome;
 use super::events::{
@@ -187,11 +190,32 @@ pub trait ProcessRegistrar: Send + Sync {
     }
 
     /// Atomically register the process and its explicit initial observer set.
+    ///
+    /// Registration is the owner of a process scope coming back, so it also
+    /// lifts the scope-retirement fence a prune left behind (ADR 0049). A
+    /// backend whose fence rows share its database clears the fence in the
+    /// registration transaction itself; every backend additionally lifts the
+    /// fence of each host bound through [`Self::bind_effect_host`] before
+    /// registration reports success, so a registration that fails leaves the
+    /// id fenced and unregistered exactly as before.
     async fn register_process_with_observers(
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
     ) -> Result<ProcessRecord, PluginError>;
+
+    /// Bind the effect host whose scope-retirement fence this registry lifts
+    /// when a process id is registered again (ADR 0049).
+    ///
+    /// The facade binds the effect host it was built with; a host that wires
+    /// a registry and an effect host together by hand binds them the same
+    /// way. Binding is idempotent and the registry holds the host weakly, so
+    /// a host that also owns the registry does not leak. A registry whose
+    /// backend can reach the host's fence rows in its own registration
+    /// transaction (the PostgreSQL registry, or the SQLite registry attaching
+    /// the host's journal file reported by
+    /// [`EffectHost::effect_scope_fence_database`]) also clears them there.
+    fn bind_effect_host(&self, effect_host: &Arc<dyn EffectHost>);
 
     /// Attach a durable backend reference to a registered process.
     ///
@@ -1139,5 +1163,70 @@ mod concern_isolation_tests {
             .expect("list observed");
         assert_eq!(observed.len(), 1);
         assert_eq!(observed[0].id, "proc-observer-isolation");
+    }
+}
+
+/// The effect hosts a process registry lifts scope fences on at registration.
+///
+/// Shared by every registry backend: [`bind`](Self::bind) is idempotent and
+/// weak, [`reinstate_process_scope`](Self::reinstate_process_scope) lifts the
+/// fence of one process scope on every bound host that is still alive. Clones
+/// share the same binding set, so a clock-rebound registry copy keeps the
+/// bindings of the registry it was derived from.
+#[derive(Clone, Default)]
+pub struct ProcessScopeFenceHosts {
+    hosts: Arc<std::sync::Mutex<Vec<Weak<dyn EffectHost>>>>,
+}
+
+impl ProcessScopeFenceHosts {
+    /// Bind `effect_host`; binding the same host twice is a no-op.
+    pub fn bind(&self, effect_host: &Arc<dyn EffectHost>) {
+        let mut hosts = self
+            .hosts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        hosts.retain(|host| host.strong_count() > 0);
+        let weak = Arc::downgrade(effect_host);
+        if hosts.iter().any(|host| Weak::ptr_eq(host, &weak)) {
+            return;
+        }
+        hosts.push(weak);
+    }
+
+    /// Whether any live host is bound.
+    pub fn is_empty(&self) -> bool {
+        self.hosts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .all(|host| host.strong_count() == 0)
+    }
+
+    /// Lift the scope-retirement fence of `process_id` on every bound host.
+    pub async fn reinstate_process_scope(&self, process_id: &str) -> Result<(), PluginError> {
+        let hosts: Vec<Arc<dyn EffectHost>> = self
+            .hosts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .filter_map(Weak::upgrade)
+            .collect();
+        let scope = ExecutionScope::process(process_id);
+        for host in hosts {
+            host.reinstate_effect_scope(&scope)
+                .await
+                .map_err(|error| {
+                    PluginError::Session(format!(
+                        "process `{process_id}` registration could not lift its effect-scope fence: {error}"
+                    ))
+                })?;
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for ProcessScopeFenceHosts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ProcessScopeFenceHosts(..)")
     }
 }

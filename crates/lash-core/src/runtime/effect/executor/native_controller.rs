@@ -160,6 +160,13 @@ impl AwaitEventResolver for NativeRuntimeEffectController {
         self.await_events.retire_scope(scope)
     }
 
+    async fn retire_await_events_for_scope_if_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        self.await_events.retire_scope_if_quiescent(scope)
+    }
+
     async fn reinstate_await_event_scope(
         &self,
         scope: &ExecutionScope,

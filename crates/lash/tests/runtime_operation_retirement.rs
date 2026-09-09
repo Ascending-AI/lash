@@ -147,7 +147,8 @@ impl SessionPlugin for JournalSessionPlugin {
                 Ok(json!({ "ok": true }))
             })?;
         reg.operations()
-            .typed_task_value::<DrainingTaskOp, _, _>(|ctx, _args| async move {
+            .typed_task_value::<DrainingTaskOp, _, _>(|ctx, args| async move {
+                let gate = drain_gate(args["gate"].as_str().expect("the task names its gate"));
                 let scope = ctx.scoped_effect_controller.execution_scope().clone();
                 let scope_key = scope
                     .journal_identity()
@@ -179,7 +180,7 @@ impl SessionPlugin for JournalSessionPlugin {
                 assert_eq!(first.position, 0, "the fast child wins");
                 // The loser is already running when the group closes: the
                 // close hands it to the drain instead of cancelling it.
-                drain_gate().started.notified().await;
+                gate.started.notified().await;
                 controller
                     .close_effect_group(handle, lash_core::LoserPolicy::RunToCompletion)
                     .await
@@ -196,17 +197,29 @@ struct DrainGate {
     release: tokio::sync::Notify,
 }
 
-fn drain_gate() -> &'static DrainGate {
-    static GATE: std::sync::OnceLock<DrainGate> = std::sync::OnceLock::new();
-    GATE.get_or_init(|| DrainGate {
-        started: tokio::sync::Notify::new(),
-        release: tokio::sync::Notify::new(),
-    })
+/// One gate per test run, named so backends running in parallel in this
+/// binary never share a gate.
+fn drain_gate(name: &str) -> Arc<DrainGate> {
+    static GATES: std::sync::OnceLock<Mutex<std::collections::HashMap<String, Arc<DrainGate>>>> =
+        std::sync::OnceLock::new();
+    GATES
+        .get_or_init(Default::default)
+        .lock_recover()
+        .entry(name.to_string())
+        .or_insert_with(|| {
+            Arc::new(DrainGate {
+                started: tokio::sync::Notify::new(),
+                release: tokio::sync::Notify::new(),
+            })
+        })
+        .clone()
 }
 
-/// Group executors for the SQLite host: the draining child waits on its gate,
-/// everything else settles at once.
-struct DrainExecutors;
+/// Group executors for a durable host: the draining child waits on the named
+/// gate, everything else settles at once.
+struct DrainExecutors {
+    gate: String,
+}
 
 impl lash_core::GroupExecutors for DrainExecutors {
     fn executor_for(
@@ -218,12 +231,16 @@ impl lash_core::GroupExecutors for DrainExecutors {
             RuntimeEffectCommand::LanguageRuntimeValue { operation } if operation == "draining-child"
         );
         Some(if draining {
-            RuntimeEffectLocalExecutor::testing(|_| async {
-                drain_gate().started.notify_one();
-                drain_gate().release.notified().await;
-                Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
-                    value: json!({ "drained": true }),
-                })
+            let gate = drain_gate(&self.gate);
+            RuntimeEffectLocalExecutor::testing(move |_| {
+                let gate = Arc::clone(&gate);
+                async move {
+                    gate.started.notify_one();
+                    gate.release.notified().await;
+                    Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
+                        value: json!({ "drained": true }),
+                    })
+                }
             })
         } else {
             executor()
@@ -299,6 +316,15 @@ fn executor() -> RuntimeEffectLocalExecutor<'static> {
 }
 
 fn core_with_host(effect_host: Arc<dyn EffectHost>) -> LashCore {
+    core_with_host_and_store(effect_host, None)
+}
+
+/// A core over `effect_host`; with a store factory the session's receipts
+/// persist, which is what the reclaim sweep reads as its proof.
+fn core_with_host_and_store(
+    effect_host: Arc<dyn EffectHost>,
+    store_factory: Option<Arc<dyn lash::persistence::SessionStoreFactory>>,
+) -> LashCore {
     let provider = lash_core::testing::TestProvider::builder()
         .complete(|_request| async {
             Ok(lash::provider::LlmResponse {
@@ -312,7 +338,7 @@ fn core_with_host(effect_host: Arc<dyn EffectHost>) -> LashCore {
         })
         .build()
         .into_handle();
-    LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    let builder = LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(provider)
         .model(
@@ -320,7 +346,12 @@ fn core_with_host(effect_host: Arc<dyn EffectHost>) -> LashCore {
                 .context_window_tokens(16_000)
                 .build()
                 .expect("valid model spec"),
-        )
+        );
+    let builder = match store_factory {
+        Some(store_factory) => builder.store_factory(store_factory),
+        None => builder,
+    };
+    builder
         .effect_host(effect_host)
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -658,24 +689,126 @@ impl EffectHost for RetirementFailsHost {
     }
 }
 
+/// The durable journal a sweep test observes: row counts by scope key.
+enum Journal {
+    Sqlite(std::path::PathBuf),
+    Postgres(sqlx::PgPool),
+}
+
+impl Journal {
+    async fn count(&self, table: &str, scope_key: &str, extra: &str) -> i64 {
+        match self {
+            Journal::Sqlite(path) => rusqlite::Connection::open(path)
+                .expect("open the effect journal")
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE scope_id = ?1 {extra}"),
+                    [scope_key],
+                    |row| row.get(0),
+                )
+                .expect("count rows"),
+            Journal::Postgres(pool) => sqlx::query_scalar(&format!(
+                "SELECT COUNT(*) FROM lash_{table} WHERE scope_id = $1 {extra}"
+            ))
+            .bind(scope_key)
+            .fetch_one(pool)
+            .await
+            .expect("count rows"),
+        }
+    }
+
+    async fn effects(&self, scope_key: &str) -> i64 {
+        self.count("runtime_effect_replay", scope_key, "").await
+    }
+
+    async fn in_progress(&self, scope_key: &str) -> i64 {
+        self.count(
+            "runtime_effect_replay",
+            scope_key,
+            "AND status = 'in_progress'",
+        )
+        .await
+    }
+
+    async fn fences(&self, scope_key: &str) -> i64 {
+        self.count("effect_scope_retirements", scope_key, "").await
+    }
+}
+
 /// A task that returns while a run-to-completion loser is still draining
 /// keeps its journal: the receipt is not proof that the scope is quiescent,
-/// so retirement is deferred, and the next plugin operation on the session
-/// retires the scope once the drain has settled (FIG-2499 review round 1).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn plugin_task_with_a_draining_group_keeps_its_journal_until_quiescent() {
+/// so the facade leaves the scope alone and the reclaim sweep — the durable
+/// owner of deferred retirement (ADR 0067) — retires it once the recorded
+/// receipt is joined by quiescence. The sweep refuses while the loser is
+/// live, survives the facade and session going away, and never touches a
+/// scope without a recorded receipt (FIG-2499 fix round 2, ruling 2).
+async fn draining_task_is_retired_by_the_reclaim_sweep(pg: bool) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("drain-retirement.db");
-    let sqlite = SqliteEffectHost::open(&path)
+    let gate = format!("drain-{}", if pg { "postgres" } else { "sqlite" });
+    let mut postgres = None;
+    let (host, journal, store_factory): (
+        Arc<dyn EffectHost>,
+        Journal,
+        Arc<dyn lash::persistence::SessionStoreFactory>,
+    ) = if pg {
+        let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
+            assert!(
+                std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
+                "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
+            );
+            eprintln!(
+                "skipping Postgres sweep retirement test: LASH_POSTGRES_DATABASE_URL is not set"
+            );
+            return;
+        };
+        let admin = sqlx::PgPool::connect(&url).await.expect("connect postgres");
+        let name = format!("sweep_retirement_{}", uuid::Uuid::new_v4().simple());
+        sqlx::query(&format!("CREATE DATABASE {name}"))
+            .execute(&admin)
+            .await
+            .expect("create a private database");
+        admin.close().await;
+        let (base, _) = url.rsplit_once('/').expect("database url has a path");
+        let storage = lash_postgres_store::PostgresStorage::connect(&format!("{base}/{name}"))
+            .await
+            .expect("connect the private database");
+        let host = storage.effect_host();
+        host.register_group_executors(Arc::new(DrainExecutors { gate: gate.clone() }))
+            .expect("register group executors");
+        let factory = storage.session_store_factory_with_shared_process_registry();
+        let pool = storage.pool().clone();
+        postgres = Some(storage);
+        (Arc::new(host), Journal::Postgres(pool), Arc::new(factory))
+    } else {
+        let path = dir.path().join("drain-retirement.db");
+        let host = SqliteEffectHost::open(&path)
+            .await
+            .expect("SQLite effect host");
+        host.register_group_executors(Arc::new(DrainExecutors { gate: gate.clone() }))
+            .expect("register group executors");
+        let factory =
+            lash_sqlite_store::SqliteSessionStoreFactory::new(dir.path().join("sessions"));
+        (Arc::new(host), Journal::Sqlite(path), Arc::new(factory))
+    };
+    let _postgres = postgres.take();
+
+    // A runtime operation nobody recorded a receipt for: the sweep has no
+    // proof it is unreachable and must leave it alone.
+    let in_flight = ExecutionScope::runtime_operation(format!("{gate}-in-flight"));
+    host.scoped(in_flight.clone())
+        .expect("in-flight scope binds")
+        .controller()
+        .execute_effect(envelope("in-flight-effect"), executor())
         .await
-        .expect("SQLite effect host");
-    sqlite
-        .register_group_executors(Arc::new(DrainExecutors))
-        .expect("register group executors");
-    let host: Arc<dyn EffectHost> = Arc::new(sqlite);
-    let core = core_with_host(Arc::clone(&host));
+        .expect("in-flight operation journals");
+    let in_flight_key = in_flight
+        .journal_identity()
+        .expect("runtime-operation journal identity")
+        .key()
+        .to_string();
+
+    let core = core_with_host_and_store(Arc::clone(&host), Some(Arc::clone(&store_factory)));
     let session = core
-        .session("drain-retirement")
+        .session(format!("{gate}-session"))
         .plugin::<JournalPlugin>(JournalConfig {
             host: Arc::clone(&host),
             minted: Minted::default(),
@@ -683,57 +816,91 @@ async fn plugin_task_with_a_draining_group_keeps_its_journal_until_quiescent() {
         .open()
         .await
         .expect("session");
-    let operations = session.plugin_operations();
-    let receipt = operations
-        .run_task::<DrainingTaskOp>(json!({}))
+    let receipt = session
+        .plugin_operations()
+        .run_task::<DrainingTaskOp>(json!({ "gate": gate }))
         .await
         .expect("the task returns while its loser drains");
     let scope_key = receipt.output["scope"]
         .as_str()
         .expect("the receipt names its scope")
         .to_string();
-
-    let conn = rusqlite::Connection::open(&path).expect("open the effect journal");
-    let count = |sql: &str| -> i64 {
-        conn.query_row(sql, [&scope_key], |row| row.get(0))
-            .expect("count rows")
-    };
-    let effects = "SELECT COUNT(*) FROM runtime_effect_replay WHERE scope_id = ?1";
-    let in_progress =
-        "SELECT COUNT(*) FROM runtime_effect_replay WHERE scope_id = ?1 AND status = 'in_progress'";
-    let fences = "SELECT COUNT(*) FROM effect_scope_retirements WHERE scope_id = ?1";
     assert_eq!(
-        count(effects),
+        journal.effects(&scope_key).await,
         2,
         "the receipt returned with the loser still draining; its journal survives"
     );
+    assert_eq!(journal.in_progress(&scope_key).await, 1);
     assert_eq!(
-        count(in_progress),
-        1,
-        "the loser is journaled as in progress"
+        journal.fences(&scope_key).await,
+        0,
+        "a live scope is not fenced"
     );
-    assert_eq!(count(fences), 0, "a live scope is not fenced");
 
-    drain_gate().release.notify_one();
+    let sweep = || async {
+        store_factory
+            .reclaim_retained_evidence(lash::persistence::RetentionBound {
+                committed_before_epoch_ms: 0,
+            })
+            .await
+            .expect("the sweep commits")
+    };
+    let report = sweep().await;
+    assert_eq!(
+        report.retired_effect_scope_count, 0,
+        "the sweep refuses a scope whose loser is still live: {report:?}"
+    );
+    assert_eq!(journal.effects(&scope_key).await, 2);
+    assert_eq!(journal.fences(&scope_key).await, 0);
+
+    // The facade and the session go away before the drain settles: whatever
+    // retires the scope later cannot live in either of them.
+    drop(session);
+    drop(core);
+    drain_gate(&gate).release.notify_one();
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        while count(in_progress) != 0 {
+        while journal.in_progress(&scope_key).await != 0 {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     })
     .await
     .expect("the drain settles the loser");
     assert_eq!(
-        count(effects),
+        journal.effects(&scope_key).await,
         2,
         "settling the drain retires nothing by itself"
     );
 
-    // The next plugin operation on the session retries the deferred
-    // retirement first; the scope is quiescent now, so it goes.
-    operations
-        .run_command::<JournalCommandOp>(json!({}))
-        .await
-        .expect("a later operation runs");
-    assert_eq!(count(effects), 0, "the quiescent scope's rows are retired");
-    assert_eq!(count(fences), 1, "the quiescent scope is fenced");
+    let report = sweep().await;
+    assert_eq!(
+        report.retired_effect_scope_count, 1,
+        "the sweep retires the now-quiescent scope with a recorded receipt: {report:?}"
+    );
+    assert_eq!(
+        journal.effects(&scope_key).await,
+        0,
+        "the scope's rows are gone"
+    );
+    assert_eq!(journal.fences(&scope_key).await, 1, "the scope is fenced");
+    assert_eq!(
+        journal.effects(&in_flight_key).await,
+        1,
+        "a scope without a recorded receipt is never swept"
+    );
+    assert_eq!(journal.fences(&in_flight_key).await, 0);
+    assert_eq!(
+        sweep().await.retired_effect_scope_count,
+        0,
+        "a second sweep finds nothing left to retire"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_draining_task_is_retired_by_the_reclaim_sweep() {
+    draining_task_is_retired_by_the_reclaim_sweep(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_draining_task_is_retired_by_the_reclaim_sweep() {
+    draining_task_is_retired_by_the_reclaim_sweep(true).await;
 }

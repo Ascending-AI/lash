@@ -1509,6 +1509,21 @@ pub trait AwaitEventResolver: Send + Sync {
         ))
     }
 
+    /// [`retire_await_events_for_scope`](Self::retire_await_events_for_scope)
+    /// only when no waiter is parked on a promise under `scope`, answering
+    /// whether it retired: `Ok(false)` leaves the scope untouched and unfenced.
+    /// The proof and the fence must land under one lock. Resolvers that prove
+    /// quiescence elsewhere (a durable journal reads its wait rows in the
+    /// retirement transaction) retire unconditionally here and answer `true`.
+    async fn retire_await_events_for_scope_if_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        self.retire_await_events_for_scope(scope)
+            .await
+            .map(|()| true)
+    }
+
     /// Lift the fence
     /// [`retire_await_events_for_scope`](Self::retire_await_events_for_scope)
     /// left on a non-session `scope`, because its owner is registered again.
@@ -1640,6 +1655,16 @@ pub trait EffectHost: AwaitEventResolver {
             return Err(await_event_scope_not_retirable(scope));
         }
         Ok(())
+    }
+
+    /// The SQLite database file holding this host's scope-retirement fence,
+    /// when the fence lives in a file of its own that a process registry can
+    /// attach and clear inside its registration transaction (ADR 0049). A
+    /// host whose fence shares the registry's database, keeps it in memory, or
+    /// never fences answers `None`; registration then lifts the fence through
+    /// [`Self::reinstate_effect_scope`] once the registration write is made.
+    fn effect_scope_fence_database(&self) -> Option<std::path::PathBuf> {
+        None
     }
 }
 

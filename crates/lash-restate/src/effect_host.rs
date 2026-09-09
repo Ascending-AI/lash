@@ -127,6 +127,15 @@ impl AwaitEventResolver for RestateEffectHost {
         self.controller.retire_await_events_for_scope(scope).await
     }
 
+    async fn retire_await_events_for_scope_if_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        self.controller
+            .retire_await_events_for_scope_if_quiescent(scope)
+            .await
+    }
+
     async fn reinstate_await_event_scope(
         &self,
         scope: &ExecutionScope,
@@ -198,17 +207,35 @@ impl EffectHost for RestateEffectHost {
     /// which survives restarts and redeploys. Session retirements stay a
     /// no-op: session promises are revoked through the session lever the
     /// host already calls. A [`EffectRetirementGate::WhenQuiescent`] request
-    /// needs no proof here: the only Lash-owned rows under a scope are its
-    /// promises, and effects in flight complete under Restate's own journal.
+    /// is refused with `effect_scope_not_quiescent` while a durable wait under
+    /// the scope is unresolved: the only Lash-owned rows under a scope are its
+    /// promises (effects in flight complete under Restate's own journal), and
+    /// the scope's index object proves and revokes in one serialized step.
     async fn retire_effect_journal(
         &self,
         retirement: lash_core::EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
-        if let Some(scope) = retirement.retired_scope() {
-            self.controller
-                .retire_await_events_for_scope(&scope)
-                .await?;
+        let Some(scope) = retirement.retired_scope() else {
+            return Ok(0);
+        };
+        if retirement.gate() == Some(lash_core::EffectRetirementGate::WhenQuiescent) {
+            if !self
+                .controller
+                .retire_await_events_for_scope_if_quiescent(&scope)
+                .await?
+            {
+                let identity = scope.journal_identity()?;
+                return Err(
+                    lash_core::facade_support::effect_replay_driver::scope_not_quiescent(
+                        identity.key(),
+                    ),
+                );
+            }
+            return Ok(0);
         }
+        self.controller
+            .retire_await_events_for_scope(&scope)
+            .await?;
         Ok(0)
     }
 
@@ -316,6 +343,15 @@ impl AwaitEventResolver for FencedRestateController {
         scope: &ExecutionScope,
     ) -> Result<(), RuntimeError> {
         self.controller.retire_await_events_for_scope(scope).await
+    }
+
+    async fn retire_await_events_for_scope_if_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        self.controller
+            .retire_await_events_for_scope_if_quiescent(scope)
+            .await
     }
 
     async fn reinstate_await_event_scope(
@@ -675,6 +711,34 @@ impl AwaitEventResolver for RestateEffectHostController {
             return Err(restate_scope_not_retirable(scope));
         }
         update_restate_scope_waits_via_ingress(&self.await_event_ingress, scope, "revoke_all").await
+    }
+
+    /// Revoke and fence the scope's index only if no durable wait under it is
+    /// unresolved; the index object decides both in one serialized step.
+    async fn retire_await_events_for_scope_if_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        scope.validate()?;
+        if scope.session_id().is_some() {
+            return Err(restate_scope_not_retirable(scope));
+        }
+        let index_key = durable_wait_index_key_for_scope(scope);
+        self.await_event_ingress
+            .ingress
+            .call_object_json::<_, bool>(
+                "LashDurableWaitIndex",
+                &index_key,
+                "revoke_all_if_quiescent",
+                &(),
+            )
+            .await
+            .map_err(|err| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                    err.to_string(),
+                )
+            })
     }
 
     async fn reinstate_await_event_scope(

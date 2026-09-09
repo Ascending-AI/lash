@@ -73,7 +73,8 @@ The durable reference-edge inventory includes:
 | Row class | Exactly-one owner | Reclaim trigger |
 | --- | --- | --- |
 | `checkpoint_blob_refs` / `lash_checkpoint_blob_refs` | Session: the session whose head or anchor owns the checkpoint root identified by `checkpoint_ref`; components may be shared, but each edge belongs to that session-owned root. | Owner-delete cascade: owner-scoped session delete or process prune deletes the unreferenced checkpoint root, cascading its projection edges in the same transaction. The host-invoked global GC additionally severs the outgoing edges of any root retaining neither a live session head nor a node anchor — content-aliased dead roots outside that cascade — and every such severance completes before any blob delete. |
-| `effect_scope_retirements` / `lash_effect_scope_retirements` | Scope: the process or runtime operation whose journal was retired as unreachable; written by the scope-exact retirement in the same transaction as the journal deletions. | Permanent for runtime-operation scopes (used-once ids). A process fence is released only by the host registering the same process id again (`Processes::start` reinstates the scope before the registry insert, ADR 0049); no retention or vacuum sweep removes either. |
+| `effect_scope_retirements` / `lash_effect_scope_retirements` | Scope: the process or runtime operation whose journal was retired as unreachable; written by the scope-exact retirement in the same transaction as the journal deletions. | Permanent for runtime-operation scopes (used-once ids). A process fence is released only by the same process id being registered again, and the release is the registry insert's own write: the row is deleted in the same transaction as the insert (PostgreSQL) or inside the registry's write transaction over the attached journal (SQLite), never by a caller, so a failed insert rolls the release back (ADR 0049); no retention or vacuum sweep removes either. |
+| Session-free rows of `runtime_effect_replay` / `runtime_effect_group` / `await_event_waits` (`lash_` on PostgreSQL) | Scope: the runtime operation the facade minted for one plugin command or task; the operation's receipt (`runtime_turn_commits` keyed by the operation) is the proof it will never run again. | Receipt-at-quiescence: the facade retires the scope `when_quiescent` as the receipt returns. A scope still live at that moment (an in-progress child, an open group, an awaited unresolved promise) is left alone and owned by the host-invoked evidence sweep (`reclaim_retained_evidence`), which under the same fence lock retires every session-free operation scope whose receipt is recorded and that is quiescent at sweep time, and never one without a recorded receipt. The sweep also keeps the receipt of a still-live scope past the host's horizon, so the proof outlives the drain it waits for. |
 
 #### Reclaim is severance, not sweeping
 
@@ -249,7 +250,10 @@ reachable:
    far the sweep got.
 
 A conformance law reds any backend that swallows an injected failure into a
-clean report. (Seam ticket: FIG-1505.)
+clean report. (Seam ticket: FIG-1505.) The evidence sweep's report names each
+phase it ran: receipts, usage deltas, attachment roots, and the runtime
+operation scopes it retired (`retired_effect_scope_count`), so a refused
+retirement is a zero with a name rather than an absence.
 
 ### 5. Witnessed emptiness
 

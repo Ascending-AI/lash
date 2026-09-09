@@ -51,6 +51,7 @@ impl Default for TestLocalProcessRegistry {
             worklist_page_error_plan: Arc::new(Mutex::new(None)),
             worklist_page_pause: Arc::new(std::sync::Mutex::new(None)),
             clock: Arc::new(crate::SystemClock),
+            scope_fence_hosts: super::super::ProcessScopeFenceHosts::default(),
         }
     }
 }

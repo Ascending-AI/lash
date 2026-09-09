@@ -184,6 +184,7 @@ where
     effect_host_await_event_revokes_session_scope(make()).await;
     effect_host_await_event_retires_non_session_scopes(make()).await;
     effect_host_await_event_reinstate_lifts_process_scope_fence(make()).await;
+    effect_host_await_event_when_quiescent_waits_for_live_waits(make()).await;
     effect_host_await_event_session_cancel_resolves_outstanding_waits(make()).await;
     effect_host_await_event_rejects_tampered_keys(make()).await;
 }
@@ -1173,6 +1174,84 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
         .await
         .expect_err("session scopes are fenced by revocation, not the scope lever");
     assert_eq!(refused.code.as_str(), "await_event_scope_not_retirable");
+}
+
+/// A scope with an actively awaited, unresolved promise is not quiescent:
+/// `WhenQuiescent` refuses it with `effect_scope_not_quiescent` and leaves
+/// it unfenced, and retires it once the wait has resolved (FIG-2499 fix
+/// round 2, ruling 3).
+pub(crate) async fn effect_host_await_event_when_quiescent_waits_for_live_waits(
+    host: Arc<dyn EffectHost>,
+) {
+    let suffix = uuid::Uuid::new_v4().simple();
+    let scope = ExecutionScope::runtime_operation(format!("await-event-live-wait-{suffix}"));
+    let key = host
+        .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("call-live"))
+        .await
+        .expect("the operation mints");
+    let waiter_host = Arc::clone(&host);
+    let waiter_key = key.clone();
+    let waiter = crate::task::spawn(async move {
+        waiter_host
+            .await_await_event(
+                &waiter_key,
+                tokio_util::sync::CancellationToken::new(),
+                None,
+            )
+            .await
+    });
+    // The spawned waiter parks asynchronously; give it the scheduler before
+    // asking for quiescence.
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(!waiter.is_finished(), "the wait is still open");
+
+    let refused = host
+        .retire_effect_journal(
+            crate::EffectJournalRetirement::for_scope(&scope)
+                .expect("runtime operations are retirable")
+                .when_quiescent(),
+        )
+        .await
+        .expect_err("an actively awaited unresolved promise is not quiescent");
+    assert_eq!(refused.code.as_str(), "effect_scope_not_quiescent");
+    assert_eq!(
+        host.peek_await_event(&key)
+            .await
+            .expect("the refused retirement left the scope unfenced"),
+        None
+    );
+
+    assert_eq!(
+        host.resolve_await_event(&key, Resolution::Ok(serde_json::json!("settled")))
+            .await
+            .expect("resolve the live wait"),
+        ResolveOutcome::Accepted
+    );
+    let waited = tokio::time::timeout(std::time::Duration::from_secs(5), waiter)
+        .await
+        .expect("the parked wait returns once resolved")
+        .expect("waiter task joins")
+        .expect("the wait resolves rather than erroring");
+    assert_eq!(waited, Resolution::Ok(serde_json::json!("settled")));
+
+    host.retire_effect_journal(
+        crate::EffectJournalRetirement::for_scope(&scope)
+            .expect("runtime operations are retirable")
+            .when_quiescent(),
+    )
+    .await
+    .expect("the scope is quiescent once its wait has resolved");
+    let fenced = host
+        .await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion("call-after"),
+        )
+        .await
+        .expect_err("the retired scope mints nothing");
+    assert_eq!(fenced.code.as_str(), "await_event_unknown_or_revoked");
 }
 
 /// refused by the scope lever: their promises die with their session.

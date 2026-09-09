@@ -364,6 +364,8 @@ impl SqliteProcessRegistry {
             clock,
             process_session_store_root: Some(process_session_store_root),
             wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
+            scope_fence_hosts: lash_core::ProcessScopeFenceHosts::default(),
+            effect_journal: Arc::new(EffectJournalAttachment::default()),
         })
     }
 
@@ -382,6 +384,8 @@ impl SqliteProcessRegistry {
             clock,
             process_session_store_root: None,
             wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
+            scope_fence_hosts: lash_core::ProcessScopeFenceHosts::default(),
+            effect_journal: Arc::new(EffectJournalAttachment::default()),
         })
     }
 

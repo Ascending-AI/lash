@@ -593,34 +593,25 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             // The quiescence proof is read under the same scope lock the
             // fence is written under, so no child can start between the
             // proof and the deletions.
-            if retirement.gate() == Some(lash_core::EffectRetirementGate::WhenQuiescent)
-                && !scope_is_quiescent(&mut tx, &key)
-                    .await
-                    .map_err(retirement_error)?
-            {
-                tx.rollback().await.map_err(retirement_error)?;
-                return Err(effect_replay_driver::scope_not_quiescent(&key));
-            }
             let scope_json = serde_json::to_string(scope).map_err(|err| {
                 RuntimeError::new(
                     lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
                     err.to_string(),
                 )
             })?;
-            sqlx::query(
-                "INSERT INTO lash_effect_scope_retirements (scope_id, retired_at_ms)
-                 VALUES ($1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT)
-                 ON CONFLICT (scope_id) DO NOTHING",
-            )
-            .bind(&key)
-            .execute(&mut *tx)
-            .await
-            .map_err(retirement_error)?;
-            sqlx::query("DELETE FROM lash_await_event_waits WHERE scope_json = $1")
-                .bind(&scope_json)
-                .execute(&mut *tx)
+            if retirement.gate() == Some(lash_core::EffectRetirementGate::WhenQuiescent)
+                && !scope_is_quiescent(&mut tx, &key, &scope_json)
+                    .await
+                    .map_err(retirement_error)?
+            {
+                tx.rollback().await.map_err(retirement_error)?;
+                return Err(effect_replay_driver::scope_not_quiescent(&key));
+            }
+            let children = retire_scope_rows_tx(&mut tx, &key, &scope_json)
                 .await
                 .map_err(retirement_error)?;
+            tx.commit().await.map_err(retirement_error)?;
+            return Ok(children);
         }
         let children = sqlx::query(children_sql)
             .bind(&key)
@@ -657,13 +648,16 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
     }
 }
 
-/// Whether nothing under `scope_id` is still live: no `in_progress` effect row
-/// and no group row still waiting for a child that has not been journaled
+/// Whether nothing under `scope_id` is still live: no `in_progress` effect
+/// row, no group row still waiting for a child that has not been journaled
 /// (an open group, or a run-to-completion close whose drain has not yet
-/// claimed every loser).
-async fn scope_is_quiescent(
+/// claimed every loser), and no unresolved promise under the scope (a wait
+/// row is a continuation's durable wait: it stays unresolved until the
+/// promise settles or the wait is cancelled). Read under the scope lock.
+pub(crate) async fn scope_is_quiescent(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     scope_id: &str,
+    scope_json: &str,
 ) -> Result<bool, sqlx::Error> {
     let live: bool = sqlx::query_scalar(
         "SELECT EXISTS(
@@ -676,12 +670,48 @@ async fn scope_is_quiescent(
                   SELECT COUNT(*) FROM lash_runtime_effect_replay AS child
                   WHERE child.scope_id = $1 AND child.group_key = grp.group_key
               )
+         ) OR EXISTS(
+            SELECT 1 FROM lash_await_event_waits
+            WHERE scope_json = $2 AND terminal_json IS NULL
          )",
     )
     .bind(scope_id)
+    .bind(scope_json)
     .fetch_one(&mut **tx)
     .await?;
     Ok(!live)
+}
+
+/// Scope-exact retirement (N4) of one non-session scope under the caller's
+/// scope lock: the permanent fence first, then the scope's promise rows,
+/// effect rows, and group rows. Returns the effect rows deleted.
+pub(crate) async fn retire_scope_rows_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    scope_id: &str,
+    scope_json: &str,
+) -> Result<usize, sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO lash_effect_scope_retirements (scope_id, retired_at_ms)
+         VALUES ($1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT)
+         ON CONFLICT (scope_id) DO NOTHING",
+    )
+    .bind(scope_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query("DELETE FROM lash_await_event_waits WHERE scope_json = $1")
+        .bind(scope_json)
+        .execute(&mut **tx)
+        .await?;
+    let children = sqlx::query("DELETE FROM lash_runtime_effect_replay WHERE scope_id = $1")
+        .bind(scope_id)
+        .execute(&mut **tx)
+        .await?
+        .rows_affected();
+    sqlx::query("DELETE FROM lash_runtime_effect_group WHERE scope_id = $1")
+        .bind(scope_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(children as usize)
 }
 
 impl PostgresEffectReplayRowStore {

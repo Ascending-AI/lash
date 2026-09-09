@@ -92,20 +92,38 @@ the ids the registry's own eligibility survey returns — never a process the
 registry keeps because of a projection watermark, a pending wake delivery, or
 a parent-end plan. A receipt returning is not proof: the facade retires its
 plugin-command and plugin-task scopes `when_quiescent`, and the store refuses
-(`effect_scope_not_quiescent`) while a child is still in progress or a group
-still waits for one, leaving the journal untouched until a later retry.
+(`effect_scope_not_quiescent`) while a child is still in progress, a group
+still waits for one, or a promise under the scope is still awaited and
+unresolved (an `await_event_waits` row without a terminal; an open wait gate
+on the in-process host; an indexed wait or live awakeable on Restate). A
+refused retirement leaves the journal untouched and the facade simply
+returns: it keeps no queue of deferred scopes, because that queue would die
+with the process. The durable owner of deferred retirement is the reclaim
+sweep (`SessionStoreFactory::reclaim_retained_evidence`, ADR 0067): under the
+same fence lock it retires every session-free runtime-operation scope whose
+owning operation has a recorded receipt and that is quiescent at sweep time,
+and leaves any scope without a recorded receipt alone — no receipt, no proof.
 
 A runtime-operation fence is permanent: those ids are used once. A process
 fence lasts until the host registers the same id again. Host-named process ids
 are reusable by contract, and the fence exists to cover the interval between
-the prune and that re-registration; the registration lifts it
-(`EffectHost::reinstate_effect_scope`, called by `Processes::start` before the
-registry insert) so the new incarnation starts unfenced with the empty journal
-the prune left. The registry and the effect journal are separate stores on
-SQLite and in memory, so the lift is ordered before the insert rather than
-sharing one transaction with it; the ordering is safe because a fence only
-exists where no live row exists, and a start that fails after the lift leaves
-an empty, unfenced, unregistered scope — exactly a never-used id. On Restate
+the prune and that re-registration; the registration lifts it. The lift
+lives in the registry insert, not in any caller: every registrant — a direct
+registration, `Processes::start`, a session-scoped start, a trigger delivery,
+a tool-intent `StartProcess`, the Restate scheduler — ends in
+`ProcessRegistrar::register_process_with_observers`, and that write deletes
+the scope's `effect_scope_retirements` row in the same transaction as the
+registry insert (PostgreSQL: same database, under the scope's advisory lock;
+SQLite: the registry attaches the bound effect journal and writes both inside
+its one write transaction), or in the same critical section on the in-memory
+registry. A registration that fails at the insert rolls the fence release back
+with it, so the id stays fenced and unregistered and a cold host over the same
+journal admits nothing under it. Hosts whose fence lives outside the registry's
+store — the in-process host's fence set, Restate's per-scope index object —
+bind to the registry (`ProcessRegistrar::bind_effect_host`, done by
+`LashCore::build`) and are reinstated from the same seam once the insert has
+committed; `EffectHost::reinstate_effect_scope` remains the host-facing lever
+that seam drives, and nothing else calls it. On Restate
 the fence is the scope's own `LashDurableWaitIndex` object, revoked on
 retirement and reinstated on registration; keying session-free waits by scope
 is a durable-wait identity epoch cutover (epoch 5) and a tool-intent journal

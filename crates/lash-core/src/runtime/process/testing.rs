@@ -330,7 +330,14 @@ impl super::registry::ProcessRegistrar for TestLocalProcessRegistry {
                 )
                 .await?;
             }
-            Ok(record.record.clone())
+            let record = record.record.clone();
+            drop(managed);
+            // Same critical section as the insert: a fence that cannot be
+            // lifted fails the registration and the maps roll back below.
+            self.scope_fence_hosts
+                .reinstate_process_scope(&process_id)
+                .await?;
+            Ok(record)
         }
         .await;
         if result.is_err() {
@@ -339,6 +346,10 @@ impl super::registry::ProcessRegistrar for TestLocalProcessRegistry {
             *self.wake_targets.lock().await = wake_targets_before;
         }
         result
+    }
+
+    fn bind_effect_host(&self, effect_host: &Arc<dyn crate::EffectHost>) {
+        self.scope_fence_hosts.bind(effect_host);
     }
 
     async fn set_external_ref(

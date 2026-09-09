@@ -13,7 +13,7 @@
 //! [`Clock`](lash_core::Clock): this store runs in the same clock domain as its
 //! host, and every other durable stamp in the crate already comes from there.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lash_core::facade_support::effect_replay_driver;
@@ -57,6 +57,9 @@ pub struct SqliteEffectReplayOptions {
 #[derive(Clone)]
 pub struct SqliteEffectHost {
     inner: Arc<SqliteEffectReplay>,
+    /// The journal file, when the host is file-backed: a process registry
+    /// attaches it to clear the scope fence inside its registration write.
+    fence_database: Option<PathBuf>,
 }
 
 /// Scoped SQLite-backed runtime effect controller.
@@ -77,7 +80,11 @@ impl effect_replay_driver::StoreReplayAdapter for SqliteEffectHost {
     }
 }
 
-impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {}
+impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
+    fn effect_scope_fence_database(&self) -> Option<PathBuf> {
+        self.fence_database.clone()
+    }
+}
 
 impl effect_replay_driver::StoreReplayAdapter for SqliteRuntimeEffectController {
     type Persistence = SqliteEffectReplayRowStore;
@@ -125,6 +132,7 @@ impl SqliteEffectHost {
         validate_effect_host_path(path)?;
         Ok(Self {
             inner: open_effect_replay_driver(path, StoreBacking::File, options, clock).await?,
+            fence_database: Some(path.to_path_buf()),
         })
     }
 
@@ -779,29 +787,17 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                     // fence is written under, so no child can start between
                     // the proof and the deletions.
                     if retirement.gate() == Some(EffectRetirementGate::WhenQuiescent)
-                        && !scope_is_quiescent(tx, identity.key())?
+                        && !scope_is_quiescent(tx, "main", identity.key(), &scope_json)?
                     {
                         return Ok(None);
                     }
-                    tx.execute(
-                        "INSERT INTO effect_scope_retirements (scope_id, retired_at_ms)
-                         VALUES (?1, ?2)
-                         ON CONFLICT(scope_id) DO NOTHING",
-                        params![identity.key(), now_ms as i64],
-                    )?;
-                    let deleted = tx.execute(
-                        "DELETE FROM runtime_effect_replay WHERE scope_id = ?1",
-                        params![identity.key()],
-                    )?;
-                    tx.execute(
-                        "DELETE FROM runtime_effect_group WHERE scope_id = ?1",
-                        params![identity.key()],
-                    )?;
-                    tx.execute(
-                        "DELETE FROM await_event_waits WHERE scope_json = ?1",
-                        params![scope_json],
-                    )?;
-                    Ok(Some(deleted))
+                    Ok(Some(retire_scope_rows(
+                        tx,
+                        "main",
+                        identity.key(),
+                        &scope_json,
+                        now_ms,
+                    )?))
                 }
             })
             .await
@@ -839,27 +835,76 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
     }
 }
 
-/// Whether nothing under `scope_id` is still live: no `in_progress` effect row
-/// and no group row still waiting for a child that has not been journaled
+/// Whether nothing under `scope_id` is still live: no `in_progress` effect
+/// row, no group row still waiting for a child that has not been journaled
 /// (an open group, or a run-to-completion close whose drain has not yet
-/// claimed every loser).
-fn scope_is_quiescent(tx: &rusqlite::Transaction<'_>, scope_id: &str) -> rusqlite::Result<bool> {
+/// claimed every loser), and no unresolved promise under the scope (a wait
+/// row is a continuation's durable wait: it stays unresolved until the
+/// promise settles or the wait is cancelled).
+///
+/// `schema` names the database the journal tables live in: `main` on the
+/// journal's own connection, the attached name on a connection that reaches
+/// the journal file from another database (the retention sweep).
+pub(crate) fn scope_is_quiescent(
+    tx: &rusqlite::Transaction<'_>,
+    schema: &str,
+    scope_id: &str,
+    scope_json: &str,
+) -> rusqlite::Result<bool> {
     let live: bool = tx.query_row(
-        "SELECT EXISTS(
-            SELECT 1 FROM runtime_effect_replay
-            WHERE scope_id = ?1 AND status = 'in_progress'
-         ) OR EXISTS(
-            SELECT 1 FROM runtime_effect_group AS grp
-            WHERE grp.scope_id = ?1
-              AND grp.children > (
-                  SELECT COUNT(*) FROM runtime_effect_replay AS child
-                  WHERE child.scope_id = ?1 AND child.group_key = grp.group_key
-              )
-         )",
-        params![scope_id],
+        &format!(
+            "SELECT EXISTS(
+                SELECT 1 FROM {schema}.runtime_effect_replay
+                WHERE scope_id = ?1 AND status = 'in_progress'
+             ) OR EXISTS(
+                SELECT 1 FROM {schema}.runtime_effect_group AS grp
+                WHERE grp.scope_id = ?1
+                  AND grp.children > (
+                      SELECT COUNT(*) FROM {schema}.runtime_effect_replay AS child
+                      WHERE child.scope_id = ?1 AND child.group_key = grp.group_key
+                  )
+             ) OR EXISTS(
+                SELECT 1 FROM {schema}.await_event_waits
+                WHERE scope_json = ?2 AND terminal_json IS NULL
+             )"
+        ),
+        params![scope_id, scope_json],
         |row| row.get(0),
     )?;
     Ok(!live)
+}
+
+/// Scope-exact retirement (N4) of one non-session scope: the permanent fence
+/// first, then the scope's effect rows, group rows, and promise rows, all in
+/// the caller's transaction. Returns the effect rows deleted.
+pub(crate) fn retire_scope_rows(
+    tx: &rusqlite::Transaction<'_>,
+    schema: &str,
+    scope_id: &str,
+    scope_json: &str,
+    now_ms: u64,
+) -> rusqlite::Result<usize> {
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.effect_scope_retirements (scope_id, retired_at_ms)
+             VALUES (?1, ?2)
+             ON CONFLICT(scope_id) DO NOTHING"
+        ),
+        params![scope_id, now_ms as i64],
+    )?;
+    let deleted = tx.execute(
+        &format!("DELETE FROM {schema}.runtime_effect_replay WHERE scope_id = ?1"),
+        params![scope_id],
+    )?;
+    tx.execute(
+        &format!("DELETE FROM {schema}.runtime_effect_group WHERE scope_id = ?1"),
+        params![scope_id],
+    )?;
+    tx.execute(
+        &format!("DELETE FROM {schema}.await_event_waits WHERE scope_json = ?1"),
+        params![scope_json],
+    )?;
+    Ok(deleted)
 }
 
 fn select_effect_row(

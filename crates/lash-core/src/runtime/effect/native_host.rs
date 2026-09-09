@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -18,6 +19,77 @@ use crate::RuntimeError;
 pub struct NativeEffectHost {
     controller: Arc<dyn RuntimeEffectController>,
     allow_process_lifetime_completion_keys: Arc<std::sync::atomic::AtomicBool>,
+    /// Effects executing and groups open under each non-session scope, by
+    /// journal key: the in-process twin of a journal's `in_progress` rows and
+    /// open group rows, which a quiescent-gated retirement must not cut under.
+    live: Arc<ScopeLiveness>,
+}
+
+/// Admission bookkeeping shared by a host and every scoped controller it
+/// hands out. `admission` orders "check the fence, then count as live"
+/// against "prove nothing is live, then fence", so a quiescent-gated
+/// retirement and an effect starting under the same scope cannot interleave.
+#[derive(Default)]
+struct ScopeLiveness {
+    admission: tokio::sync::Mutex<()>,
+    counts: std::sync::Mutex<HashMap<String, usize>>,
+}
+
+impl ScopeLiveness {
+    fn is_live(&self, scope_key: &str) -> bool {
+        self.counts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(scope_key)
+            .is_some_and(|count| *count > 0)
+    }
+
+    fn enter(self: &Arc<Self>, scope_key: String) -> LiveScopeGuard {
+        *self
+            .counts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entry(scope_key.clone())
+            .or_insert(0) += 1;
+        LiveScopeGuard {
+            live: Some(Arc::clone(self)),
+            scope_key,
+        }
+    }
+
+    fn leave(&self, scope_key: &str) {
+        let mut counts = self
+            .counts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(count) = counts.get_mut(scope_key) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                counts.remove(scope_key);
+            }
+        }
+    }
+}
+
+struct LiveScopeGuard {
+    live: Option<Arc<ScopeLiveness>>,
+    scope_key: String,
+}
+
+impl LiveScopeGuard {
+    /// Keep the scope counted as live past this guard; the holder releases it
+    /// with [`ScopeLiveness::leave`].
+    fn keep(mut self) {
+        self.live = None;
+    }
+}
+
+impl Drop for LiveScopeGuard {
+    fn drop(&mut self) {
+        if let Some(live) = self.live.take() {
+            live.leave(&self.scope_key);
+        }
+    }
 }
 
 impl NativeEffectHost {
@@ -27,6 +99,7 @@ impl NativeEffectHost {
             allow_process_lifetime_completion_keys: Arc::new(std::sync::atomic::AtomicBool::new(
                 false,
             )),
+            live: Arc::new(ScopeLiveness::default()),
         }
     }
 
@@ -123,6 +196,15 @@ impl AwaitEventResolver for NativeEffectHost {
         self.controller.retire_await_events_for_scope(scope).await
     }
 
+    async fn retire_await_events_for_scope_if_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        self.controller
+            .retire_await_events_for_scope_if_quiescent(scope)
+            .await
+    }
+
     async fn reinstate_await_event_scope(
         &self,
         scope: &ExecutionScope,
@@ -171,15 +253,35 @@ impl EffectHost for NativeEffectHost {
     /// and the scope is fenced, mirroring what the durable hosts do in one
     /// transaction. Session retirements stay a no-op: session promises are
     /// revoked through the session lever the host already calls.
+    ///
+    /// A `WhenQuiescent` retirement is refused with `effect_scope_not_quiescent`
+    /// while an effect is executing or a group is open under the scope through
+    /// a controller this host handed out, or while a waiter is parked on one
+    /// of the scope's promises; the proof and the fence are taken under the
+    /// admission lock every scoped controller enters through.
     async fn retire_effect_journal(
         &self,
         retirement: EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
-        if let Some(scope) = retirement.retired_scope() {
-            self.controller
-                .retire_await_events_for_scope(&scope)
-                .await?;
+        let Some(scope) = retirement.retired_scope() else {
+            return Ok(0);
+        };
+        if retirement.gate() == Some(super::EffectRetirementGate::WhenQuiescent) {
+            let key = scope.journal_identity()?.key().to_string();
+            let _admission = self.live.admission.lock().await;
+            if self.live.is_live(&key)
+                || !self
+                    .controller
+                    .retire_await_events_for_scope_if_quiescent(&scope)
+                    .await?
+            {
+                return Err(super::effect_replay_driver::scope_not_quiescent(&key));
+            }
+            return Ok(0);
         }
+        self.controller
+            .retire_await_events_for_scope(&scope)
+            .await?;
         Ok(0)
     }
 
@@ -208,7 +310,12 @@ struct FencedNativeController {
 }
 
 impl FencedNativeController {
-    async fn refuse_if_retired(&self) -> Result<(), RuntimeEffectControllerError> {
+    /// Refuse a retired scope, else count the caller as live under it for as
+    /// long as the returned guard lives. Both happen under the admission lock
+    /// a quiescent-gated retirement takes, so the fence and the liveness
+    /// count cannot cross.
+    async fn admit(&self) -> Result<Option<LiveScopeGuard>, RuntimeEffectControllerError> {
+        let _admission = self.host.live.admission.lock().await;
         if self
             .host
             .controller
@@ -218,7 +325,11 @@ impl FencedNativeController {
             let identity = self.scope.journal_identity()?;
             return Err(super::effect_replay_driver::scope_retired(identity.key()));
         }
-        Ok(())
+        if self.scope.session_id().is_some() {
+            return Ok(None);
+        }
+        let key = self.scope.journal_identity()?.key().to_string();
+        Ok(Some(self.host.live.enter(key)))
     }
 }
 
@@ -282,6 +393,15 @@ impl AwaitEventResolver for FencedNativeController {
         self.host.retire_await_events_for_scope(scope).await
     }
 
+    async fn retire_await_events_for_scope_if_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        self.host
+            .retire_await_events_for_scope_if_quiescent(scope)
+            .await
+    }
+
     async fn reinstate_await_event_scope(
         &self,
         scope: &ExecutionScope,
@@ -333,7 +453,7 @@ impl RuntimeEffectController for FencedNativeController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        self.refuse_if_retired().await?;
+        let _live = self.admit().await?;
         self.host.execute_effect(envelope, local_executor).await
     }
 
@@ -345,8 +465,14 @@ impl RuntimeEffectController for FencedNativeController {
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        self.refuse_if_retired().await?;
-        self.host.open_effect_group(group).await
+        let live = self.admit().await?;
+        let handle = self.host.open_effect_group(group).await?;
+        // An open group stays live until it is closed through this
+        // controller; the guard is released in `close_effect_group`.
+        if let Some(live) = live {
+            live.keep();
+        }
+        Ok(handle)
     }
 
     async fn await_next_settlement(
@@ -362,7 +488,13 @@ impl RuntimeEffectController for FencedNativeController {
         handle: EffectGroupHandle,
         disposition: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
-        self.host.close_effect_group(handle, disposition).await
+        let result = self.host.close_effect_group(handle, disposition).await;
+        if self.scope.session_id().is_none()
+            && let Ok(identity) = self.scope.journal_identity()
+        {
+            self.host.live.leave(identity.key());
+        }
+        result
     }
 }
 

@@ -487,6 +487,10 @@ pub trait LashDurableWaitIndex {
     ) -> HandlerResult<Json<()>>;
     async fn cancel_all() -> HandlerResult<Json<()>>;
     async fn revoke_all() -> HandlerResult<Json<()>>;
+    /// [`revoke_all`](Self::revoke_all) only when no durable wait or awakeable
+    /// under this index is still unresolved, answering whether it revoked.
+    /// Object serialization makes the proof and the revocation one step.
+    async fn revoke_all_if_quiescent(request: Json<()>) -> HandlerResult<Json<bool>>;
     /// Lift a revocation because the scope's owner is registered again: a
     /// pruned process id the host reuses (ADR 0049). State stays cleared; only
     /// the fence goes.
@@ -704,6 +708,33 @@ fn mirror_resolve_outcome(
     ctx.set(&durable_wait_index_resolution_key(address), Json(terminal));
 }
 
+/// Revoke the index: fence it, revoke its awakeables, and cancel its waits.
+/// With `only_if_quiescent`, an unresolved wait or a live awakeable leaves
+/// the index untouched and answers `false`.
+async fn revoke_index(
+    ctx: &ObjectContext<'_>,
+    only_if_quiescent: bool,
+) -> HandlerResult<Json<bool>> {
+    let mut metadata = load_durable_wait_index_metadata(ctx).await?;
+    let waits = load_indexed_waits(ctx).await?;
+    if only_if_quiescent && (!waits.is_empty() || !metadata.awakeables.is_empty()) {
+        return Ok(Json(false));
+    }
+    let awakeables = std::mem::take(&mut metadata.awakeables);
+    metadata.revoked = true;
+    ctx.clear_all();
+    ctx.set(
+        DURABLE_WAIT_INDEX_EPOCH_KEY,
+        Json(DURABLE_WAIT_INDEX_IDENTITY_EPOCH),
+    );
+    ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
+    for entry in awakeables {
+        revoke_durable_wait_awakeable(ctx, &entry);
+    }
+    resolve_indexed_waits(ctx, waits, false).await?;
+    Ok(Json(true))
+}
+
 pub(crate) fn split_cancellable_waits(
     waits: Vec<AwaitEventKey>,
 ) -> (Vec<AwaitEventKey>, Vec<AwaitEventKey>) {
@@ -880,21 +911,16 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
     }
 
     async fn revoke_all(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
-        let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
-        let waits = load_indexed_waits(&ctx).await?;
-        let awakeables = std::mem::take(&mut metadata.awakeables);
-        metadata.revoked = true;
-        ctx.clear_all();
-        ctx.set(
-            DURABLE_WAIT_INDEX_EPOCH_KEY,
-            Json(DURABLE_WAIT_INDEX_IDENTITY_EPOCH),
-        );
-        ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
-        for entry in awakeables {
-            revoke_durable_wait_awakeable(&ctx, &entry);
-        }
-        resolve_indexed_waits(&ctx, waits, false).await?;
+        revoke_index(&ctx, false).await?;
         Ok(Json(()))
+    }
+
+    async fn revoke_all_if_quiescent(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(()): Json<()>,
+    ) -> HandlerResult<Json<bool>> {
+        revoke_index(&ctx, true).await
     }
 
     async fn reinstate(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {

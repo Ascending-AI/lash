@@ -331,20 +331,9 @@ impl Processes {
         let observers = request.observers.clone();
         let registration = request.into_registration(env_ref);
         // A host-named process id may be one the registry pruned earlier: its
-        // scope fence has been refusing every redrive since. Registration is
-        // the owner coming back, so the fence is lifted first; the journal the
-        // prune deleted stays empty, which is what a new incarnation expects
-        // (ADR 0049). Lifting before the insert is safe: a fence exists only
-        // where no live row exists, and a start that then fails leaves an
-        // unfenced but empty and unregistered scope, exactly like a never-used
-        // id.
-        self.core
-            .env
-            .core
-            .control
-            .effect_host
-            .reinstate_effect_scope(&lash_core::ExecutionScope::process(registration.id.clone()))
-            .await?;
+        // scope fence has been refusing every redrive since. The registry
+        // lifts that fence inside the registration write itself (ADR 0049),
+        // so this route, like every other registrant, only registers.
         let command = lash_core::ProcessCommand::Start {
             registration,
             observers,

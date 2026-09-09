@@ -274,6 +274,21 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
         .execute(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
+        // The owner is back: lift the scope fence a prune left in the journal,
+        // in this same transaction, so a registration that fails keeps the id
+        // fenced (ADR 0049). The scope lock serializes this against a
+        // concurrent retirement of the same scope.
+        let fence_key = lash_core::ExecutionScope::process(record.id.as_str())
+            .journal_identity()
+            .map_err(|error| PluginError::Session(error.to_string()))?;
+        crate::await_event::lock_scope(&mut tx, fence_key.key())
+            .await
+            .map_err(plugin_sqlx_error)?;
+        sqlx::query("DELETE FROM lash_effect_scope_retirements WHERE scope_id = $1")
+            .bind(fence_key.key())
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
         let process_id = record.id.clone();
         for session_id in observers {
             sqlx::query(
@@ -300,7 +315,17 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
             .await?;
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
+        // Hosts whose fence is not this journal's table (a process-local or
+        // engine-held fence) are lifted now that the row is durable; the call
+        // is idempotent for this journal's own host.
+        self.scope_fence_hosts
+            .reinstate_process_scope(&record.id)
+            .await?;
         Ok(record)
+    }
+
+    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+        self.scope_fence_hosts.bind(effect_host);
     }
 
     async fn set_external_ref(

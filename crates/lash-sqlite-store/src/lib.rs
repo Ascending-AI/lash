@@ -194,6 +194,12 @@ pub struct SqliteProcessRegistry {
     clock: Arc<dyn lash_core::Clock>,
     process_session_store_root: Option<PathBuf>,
     wake_delivery_config: lash_core::WakeDeliveryConfig,
+    /// Effect hosts whose scope fence registration lifts (ADR 0049).
+    scope_fence_hosts: lash_core::ProcessScopeFenceHosts,
+    /// The bound host's journal file attached to the registry connection so a
+    /// registration clears the fence row in its own transaction; shared by
+    /// every clock-rebound copy because they share the connection.
+    effect_journal: Arc<process_registry::EffectJournalAttachment>,
 }
 
 fn sqlite_error(err: rusqlite::Error) -> StoreError {
@@ -583,6 +589,10 @@ pub struct SqliteSessionStoreFactory {
     clock: Arc<dyn lash_core::Clock>,
     #[cfg(feature = "testing")]
     fault_injector: Option<testing::SqliteFaultInjector>,
+    /// The bound effect host's journal file: the retained-evidence sweep
+    /// attaches it to retire quiescent operation scopes whose receipt this
+    /// catalog holds (ADR 0067). Shared by every clone of the factory.
+    effect_journal_path: Arc<std::sync::Mutex<Option<PathBuf>>>,
 }
 
 impl SqliteSessionStoreFactory {
@@ -596,6 +606,7 @@ impl SqliteSessionStoreFactory {
             clock: Arc::new(lash_core::facade_support::SystemClock),
             #[cfg(feature = "testing")]
             fault_injector: None,
+            effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -609,6 +620,7 @@ impl SqliteSessionStoreFactory {
             clock: Arc::new(lash_core::facade_support::SystemClock),
             #[cfg(feature = "testing")]
             fault_injector: None,
+            effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -626,6 +638,7 @@ impl SqliteSessionStoreFactory {
             clock: Arc::new(lash_core::facade_support::SystemClock),
             #[cfg(feature = "testing")]
             fault_injector: None,
+            effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -641,6 +654,7 @@ impl SqliteSessionStoreFactory {
             clock: Arc::new(lash_core::facade_support::SystemClock),
             #[cfg(feature = "testing")]
             fault_injector: None,
+            effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -789,6 +803,15 @@ impl SqliteSessionStoreFactory {
 
 #[async_trait::async_trait]
 impl SessionStoreFactory for SqliteSessionStoreFactory {
+    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+        if let Some(path) = effect_host.effect_scope_fence_database() {
+            *self
+                .effect_journal_path
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(path);
+        }
+    }
+
     async fn reclaim_retained_evidence(
         &self,
         bound: lash_core::store::RetentionBound,

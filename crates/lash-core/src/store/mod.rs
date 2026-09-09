@@ -69,7 +69,10 @@ pub use queued_work::{
     TurnWorkClaimSelection,
 };
 pub use realization::commit_runtime_state_verified;
-pub use retention::{RetentionBound, RetentionReport};
+pub use retention::{
+    PLUGIN_OPERATION_STATE_RECEIPT_KEY, RetentionBound, RetentionReport,
+    plugin_operation_receipt_storage_key,
+};
 pub use runtime_commit::{
     AppendRequestIdentity, RuntimeCommit, RuntimeCommitReceipt, RuntimeTurnCommitStamp,
     RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SemanticBoundaryOperation,

@@ -1319,6 +1319,7 @@ lash::durability::DurableProcessWorkerConfig::with_turn_phase_probe_slot
 lash::durability::DurableProcessWorkerConfig::with_worker_slot_supplier
 lash::durability::EffectHost
 lash::durability::EffectHost::await_event_resolver
+lash::durability::EffectHost::effect_scope_fence_database
 lash::durability::EffectHost::prepare_tool_intent
 lash::durability::EffectHost::record_tool_intent_outcome
 lash::durability::EffectHost::reinstate_effect_scope
@@ -2298,6 +2299,7 @@ lash::persistence::RetentionReport
 lash::persistence::RetentionReport::removed_attachment_root_count
 lash::persistence::RetentionReport::removed_receipt_count
 lash::persistence::RetentionReport::removed_usage_delta_count
+lash::persistence::RetentionReport::retired_effect_scope_count
 lash::persistence::RuntimeCheckpointComponents
 lash::persistence::RuntimeCheckpointComponents::complete_refs_for_testing
 lash::persistence::RuntimeCommit
@@ -2721,6 +2723,7 @@ lash::persistence::SessionStoreCreateRequest::policy
 lash::persistence::SessionStoreCreateRequest::relation
 lash::persistence::SessionStoreCreateRequest::session_id
 lash::persistence::SessionStoreFactory
+lash::persistence::SessionStoreFactory::bind_effect_host
 lash::persistence::SessionStoreFactory::create_store
 lash::persistence::SessionStoreFactory::delete_session
 lash::persistence::SessionStoreFactory::fork_at
@@ -5219,6 +5222,7 @@ lash::process::ProcessRef::incarnation
 lash::process::ProcessRef::new
 lash::process::ProcessRef::process_id
 lash::process::ProcessRegistrar
+lash::process::ProcessRegistrar::bind_effect_host
 lash::process::ProcessRegistrar::register_process
 lash::process::ProcessRegistrar::register_process_with_observers
 lash::process::ProcessRegistrar::set_external_ref
@@ -7732,6 +7736,7 @@ lash::runtime::AwaitEventResolver::prepare_completion_key
 lash::runtime::AwaitEventResolver::reinstate_await_event_scope
 lash::runtime::AwaitEventResolver::resolve_await_event
 lash::runtime::AwaitEventResolver::retire_await_events_for_scope
+lash::runtime::AwaitEventResolver::retire_await_events_for_scope_if_quiescent
 lash::runtime::AwaitEventResolver::revoke_await_events_for_session
 lash::runtime::AwaitEventResolver::wait_out_crashed_lane_holder
 lash::runtime::CheckpointClaimSet

@@ -34,6 +34,9 @@ struct AwaitEventEntry {
     verified_key: AwaitEventKey,
     terminal: Option<Resolution>,
     notify: Arc<Notify>,
+    /// Waiters currently parked on this promise. A scope with a parked waiter
+    /// is not quiescent: retiring it would strand a live continuation.
+    waiters: usize,
 }
 
 impl AwaitEventEntry {
@@ -42,6 +45,22 @@ impl AwaitEventEntry {
             verified_key: key.clone(),
             terminal: None,
             notify: Arc::new(Notify::new()),
+            waiters: 0,
+        }
+    }
+}
+
+/// Counts one parked waiter on an entry for as long as it is parked.
+struct ParkedWaiter {
+    shard: AwaitEventRegistryShard,
+    key_id: String,
+}
+
+impl Drop for ParkedWaiter {
+    fn drop(&mut self) {
+        let mut state = self.shard.lock_recover();
+        if let Some(entry) = state.entries.get_mut(&self.key_id) {
+            entry.waiters = entry.waiters.saturating_sub(1);
         }
     }
 }
@@ -395,7 +414,7 @@ impl AwaitEventRegistry {
     ) -> Result<Resolution, RuntimeError> {
         let shard = self.shard_for_scope(&key.scope);
         loop {
-            let mut notified = {
+            let notified = {
                 let mut state = Self::locked_state(&shard);
                 if state.revoked || self.scope_is_retired(&key.scope)? {
                     return Err(Self::unknown_or_revoked());
@@ -421,7 +440,7 @@ impl AwaitEventRegistry {
                 }
                 let entry = state
                     .entries
-                    .get(&key.key_id)
+                    .get_mut(&key.key_id)
                     .expect("await-event entry inserted above");
                 if let Some(terminal) = entry.terminal.clone() {
                     return Ok(terminal);
@@ -431,8 +450,16 @@ impl AwaitEventRegistry {
                 // subscription would otherwise leave a completed promise parked.
                 let mut notified = Box::pin(Arc::clone(&entry.notify).notified_owned());
                 notified.as_mut().enable();
-                notified
+                entry.waiters += 1;
+                (
+                    notified,
+                    ParkedWaiter {
+                        shard: Arc::clone(&shard),
+                        key_id: key.key_id.clone(),
+                    },
+                )
             };
+            let (mut notified, _parked) = notified;
             #[cfg(test)]
             if let Some(after_pending) = self.after_pending.lock_recover().take() {
                 after_pending(self, key);
@@ -515,6 +542,24 @@ impl AwaitEventRegistry {
     /// permanent fence rejects later mints, resolves, peeks, and waits under
     /// the scope. The in-process twin of the durable scope-retirement fence.
     pub(super) fn retire_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
+        self.retire_scope_gated(scope, false).map(|_| ())
+    }
+
+    /// [`retire_scope`](Self::retire_scope) only if no waiter is parked on a
+    /// promise under `scope`. The proof and the fence happen under one lock,
+    /// so no waiter can park between them. Answers whether the scope retired.
+    pub(super) fn retire_scope_if_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeError> {
+        self.retire_scope_gated(scope, true)
+    }
+
+    fn retire_scope_gated(
+        &self,
+        scope: &ExecutionScope,
+        only_if_quiescent: bool,
+    ) -> Result<bool, RuntimeError> {
         scope.validate()?;
         if scope.session_id().is_some() {
             return Err(super::executor::await_event_scope_not_retirable(scope));
@@ -522,6 +567,14 @@ impl AwaitEventRegistry {
         let scope_id = scope.journal_identity()?.key().to_string();
         {
             let mut state = Self::locked_state(&self.unscoped_shard);
+            if only_if_quiescent
+                && state
+                    .entries
+                    .values()
+                    .any(|entry| entry.verified_key.scope == *scope && entry.waiters > 0)
+            {
+                return Ok(false);
+            }
             state.entries.retain(|_, entry| {
                 if entry.verified_key.scope == *scope {
                     entry.notify.notify_waiters();
@@ -540,9 +593,11 @@ impl AwaitEventRegistry {
             } = &mut *state;
             completed_turn_control_order
                 .retain(|key_id| completed_turn_control.contains_key(key_id));
+            // Fence while the shard lock still excludes new waiters: the
+            // quiescence proof above and the fence land together.
+            self.retired_scopes.lock_recover().insert(scope_id);
         }
-        self.retired_scopes.lock_recover().insert(scope_id);
-        Ok(())
+        Ok(true)
     }
 
     /// Lift the fence on a non-session `scope` whose owner is registered

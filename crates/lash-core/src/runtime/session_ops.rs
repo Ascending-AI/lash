@@ -789,7 +789,10 @@ impl LashRuntime {
             return Ok(());
         };
         self.stamp_live_plugin_state();
-        let operation = crate::OperationId::new(operation_scope, "plugin-operation-state");
+        let operation = crate::OperationId::new(
+            operation_scope,
+            crate::store::PLUGIN_OPERATION_STATE_RECEIPT_KEY,
+        );
         let (commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 &mut self.state,

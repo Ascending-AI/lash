@@ -37,7 +37,14 @@ pub trait StoreReplayAdapter: Send + Sync {
 /// Marks a store's deployment-level host: the type that mints scoped
 /// controllers. Gets [`EffectHost`] for free.
 #[doc(hidden)]
-pub trait StoreReplayHost: StoreReplayAdapter {}
+pub trait StoreReplayHost: StoreReplayAdapter {
+    /// See [`EffectHost::effect_scope_fence_database`]: the file a process
+    /// registry attaches to clear this host's fence rows in its own
+    /// registration transaction, when the fence lives in a file of its own.
+    fn effect_scope_fence_database(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+}
 
 /// Marks a store's scoped controller and names the scope it executes against.
 /// Gets [`RuntimeEffectController`] for free.
@@ -215,6 +222,10 @@ impl<T: StoreReplayHost> EffectHost for T {
 
     async fn reinstate_effect_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
         self.replay_driver().reinstate_effect_scope(scope).await
+    }
+
+    fn effect_scope_fence_database(&self) -> Option<std::path::PathBuf> {
+        StoreReplayHost::effect_scope_fence_database(self)
     }
 }
 

@@ -3,6 +3,7 @@ use lash_core::ProcessQuery as _;
 use lash_core::facade_support;
 #[path = "process_registry/continuation_store.rs"]
 mod continuation_store;
+mod effect_journal;
 mod leases;
 #[cfg(test)]
 mod list_tests;
@@ -19,6 +20,8 @@ mod tool_intent_submission;
 mod wake_delivery;
 mod worklist;
 
+pub(crate) use effect_journal::EffectJournalAttachment;
+use effect_journal::process_scope_fence_key;
 use support::process_status_label;
 pub(crate) use support::{ProcessEventAppendArm, ProcessEventWriteAuthorization, tx_outcome};
 use wake_delivery::{load_wake_delivery_conn, update_wake_delivery_state, wake_delivery_report};
@@ -291,6 +294,7 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
         let wake_session_id = registration.wake_session_id.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
+        let fence_schema = self.effect_journal.ensure_attached(&self.conn).await?;
         let record = self
             .conn
             .write_flow(move |tx| {
@@ -339,6 +343,18 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                         ],
                     )
                     .map_err(process_sqlite_error)?;
+                    // The owner is back: lift the scope fence a prune left in
+                    // the attached journal, in this same transaction, so a
+                    // registration that fails keeps the id fenced (ADR 0049).
+                    if let Some(schema) = fence_schema {
+                        tx.execute(
+                            &format!(
+                                "DELETE FROM {schema}.effect_scope_retirements WHERE scope_id = ?1"
+                            ),
+                            params![process_scope_fence_key(&record.id)?],
+                        )
+                        .map_err(process_sqlite_error)?;
+                    }
                     let mut record = record;
                     let process_id = record.id.clone();
                     for session_id in &observers {
@@ -365,7 +381,20 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
             })
             .await
             .map_err(process_sqlite_error)??;
+        // Hosts whose fence is not in the attached journal (a process-local or
+        // engine-held fence) are lifted now that the row is durable; the call
+        // is idempotent for the attached journal's own host.
+        self.scope_fence_hosts
+            .reinstate_process_scope(&record.id)
+            .await?;
         Ok(record)
+    }
+
+    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+        self.scope_fence_hosts.bind(effect_host);
+        if let Some(path) = effect_host.effect_scope_fence_database() {
+            self.effect_journal.request(path);
+        }
     }
 
     async fn set_external_ref(
@@ -1504,6 +1533,8 @@ impl lash_core::ProcessClockRebind for SqliteProcessRegistry {
             clock,
             process_session_store_root: self.process_session_store_root.clone(),
             wake_delivery_config: self.wake_delivery_config,
+            scope_fence_hosts: self.scope_fence_hosts.clone(),
+            effect_journal: Arc::clone(&self.effect_journal),
         }))
     }
 }

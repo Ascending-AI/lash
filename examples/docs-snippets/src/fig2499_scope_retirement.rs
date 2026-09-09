@@ -42,8 +42,9 @@ pub async fn retire_when_quiescent(
     }
 }
 
-/// A host that reuses process ids lifts the fence a prune left before the
-/// new incarnation runs; the facade does this inside `Processes::start`.
+/// The fence a prune left is lifted by the registry insert that registers
+/// the same id again; hosts whose fence lives outside the registry's store
+/// are reinstated from that seam through this lever.
 pub async fn reinstate_reused_process_id(
     host: &dyn EffectHost,
     process_id: &str,
