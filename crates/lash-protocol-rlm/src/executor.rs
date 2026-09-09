@@ -1857,11 +1857,11 @@ mod tests {
             };
             assert_eq!(
                 without_trace_key.as_str(),
-                "frame-key/v2/36468bb73b95be8fbefc0d063cf60aeb68332484d1b8764e367b68ecbb6ae6a4"
+                "frame-key/v2/c201c72710b48bd0f234f5c163c4f9d85f5d34813d2b65714ebe7a4388363be9"
             );
             assert_eq!(
                 with_trace_key.as_str(),
-                "frame-key/v2/36468bb73b95be8fbefc0d063cf60aeb68332484d1b8764e367b68ecbb6ae6a4"
+                "frame-key/v2/c201c72710b48bd0f234f5c163c4f9d85f5d34813d2b65714ebe7a4388363be9"
             );
         });
     }
