@@ -1150,6 +1150,7 @@ fn lashlang_dialect_pins_snapshot_engine_id() {
             deferred_tool_resolver: None,
             execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
             execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+            channel: crate::plugin::RlmChannel::Cell,
         },
     );
 

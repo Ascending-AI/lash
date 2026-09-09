@@ -321,6 +321,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
             deferred_tool_resolver: self.deferred_tool_resolver.clone(),
             execution_trace_config: self.lashlang_execution_trace_config.clone(),
             execution_bounds: config.execution_bounds(),
+            channel: config.channel,
         };
         let lashlang: Arc<dyn RlmDialect> = Arc::new(LashlangDialect::new(
             lashlang_surface.clone(),

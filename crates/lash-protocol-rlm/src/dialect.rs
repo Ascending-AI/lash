@@ -25,6 +25,35 @@ pub(crate) enum SourceDialect {
     Typescript,
 }
 
+/// Where one program came from: the dialect it is written in, and the channel
+/// it arrived on.
+///
+/// The two facts travel together because a diagnostic needs both. The dialect
+/// decides how the source is parsed; the channel decides what syntax surrounded
+/// it when the model wrote it, and therefore which advice about that syntax is
+/// true. Cell-channel programs sit between `<lashlang>` delimiters that a
+/// standalone `</lashlang>` line can close early; native `execute_code` calls
+/// (ADR 0083) carry the program as a tool argument with no delimiters at all,
+/// so delimiter advice there names a construct the model never wrote.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RlmSourceContext {
+    pub(crate) dialect: SourceDialect,
+    pub(crate) channel: crate::plugin::RlmChannel,
+}
+
+impl RlmSourceContext {
+    pub(crate) fn new(dialect: SourceDialect, channel: crate::plugin::RlmChannel) -> Self {
+        Self { dialect, channel }
+    }
+
+    /// Cell-channel context. Spelled out at every call site rather than
+    /// defaulted, so a new execution path has to say which channel it is.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn cell(dialect: SourceDialect) -> Self {
+        Self::new(dialect, crate::plugin::RlmChannel::Cell)
+    }
+}
+
 impl SourceDialect {
     /// The language id an execution trace record carries.
     ///
@@ -232,7 +261,7 @@ impl RlmDialectSession for DialectSession {
             Arc::clone(&self.services.projection_resolver),
             self.services.execution_trace_config.clone(),
             self.services.execution_bounds.into_engine(),
-            self.dialect,
+            RlmSourceContext::new(self.dialect, self.services.channel),
         )
         .await;
         self.state.mark_code_execution_response_returned();
@@ -645,6 +674,45 @@ impl RlmDialectRegistry {
 mod tests {
     use super::*;
 
+    /// The channel reaches the parse diagnostic through the production session
+    /// seam, not just through the formatter's own argument: the session reads
+    /// it off the services the plugin factory fills from the session-pinned
+    /// config, so a native-channel session never sees cell-delimiter advice.
+    #[tokio::test]
+    async fn the_session_channel_decides_the_cell_delimiter_hint() {
+        async fn parse_failure_feedback(channel: crate::plugin::RlmChannel) -> String {
+            let mut services = test_dialect_services();
+            services.channel = channel;
+            let mut session = DialectSession::new(
+                SourceDialect::Lashlang,
+                SourceDialect::Lashlang.language_id(),
+                lash_lashlang_runtime::LashlangSurface::default(),
+                services,
+            );
+            let response = session
+                .execute(
+                    lash_core::testing::code_execution_context(),
+                    ExecRequest {
+                        language: "lashlang".to_string(),
+                        code: "payload = \"\"\"".to_string(),
+                    },
+                    crate::projection::RlmProjectedBindings::default(),
+                )
+                .await
+                .expect("the cell runs and reports its own failure");
+            response
+                .error
+                .expect("an unterminated multiline string fails to parse")
+                .message
+        }
+
+        let native = parse_failure_feedback(crate::plugin::RlmChannel::NativeTool).await;
+        assert!(!native.contains("</lashlang>"), "{native}");
+
+        let cell = parse_failure_feedback(crate::plugin::RlmChannel::Cell).await;
+        assert!(cell.contains("standalone `</lashlang>` line"), "{cell}");
+    }
+
     #[test]
     fn registry_resolves_registered_typescript_language() {
         let dialect: Arc<dyn RlmDialect> = Arc::new(TypescriptDialect::new(
@@ -655,6 +723,7 @@ mod tests {
                 deferred_tool_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
             },
         ));
         let registry = RlmDialectRegistry::new([dialect]);
@@ -714,6 +783,7 @@ pub(crate) fn test_dialect_services() -> LashlangDialectServices {
         deferred_tool_resolver: None,
         execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+        channel: crate::plugin::RlmChannel::Cell,
     }
 }
 

@@ -31,7 +31,7 @@ use lashlang::{
 use self::host_bridge::{
     CollectedExecutionOutput, HostBridge, HostBridgeConfig, LashlangExecutionTrace,
 };
-pub(crate) use crate::dialect::SourceDialect;
+pub(crate) use crate::dialect::{RlmSourceContext, SourceDialect};
 use crate::projection::{
     ProjectionResolver, RLM_TURN_INPUT_PLUGIN_ID, RlmProjectedBindings, RlmProjectionExtension,
     flow_to_json_value, json_to_flow_value, projected_bindings, prune_projected_binding_names,
@@ -108,7 +108,7 @@ pub(crate) async fn execute_code_with_bounds(
         projection_resolver,
         lashlang_execution_trace_config,
         execution_bounds,
-        SourceDialect::Lashlang,
+        RlmSourceContext::cell(SourceDialect::Lashlang),
     )
     .await
 }
@@ -125,7 +125,7 @@ pub(crate) async fn execute_code_with_dialect_and_bounds(
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
-    source_dialect: SourceDialect,
+    source: RlmSourceContext,
 ) -> ExecResponse {
     let start = std::time::Instant::now();
     let clean_code = clean_model_code(&request.code);
@@ -141,7 +141,7 @@ pub(crate) async fn execute_code_with_dialect_and_bounds(
         projection_resolver,
         lashlang_execution_trace_config,
         execution_bounds,
-        source_dialect,
+        source,
     ))
     .await
 }
@@ -259,7 +259,7 @@ async fn execute_code_inner(
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
-    source_dialect: SourceDialect,
+    source: RlmSourceContext,
 ) -> ExecResponse {
     state.mark_execution_started();
     let execution_checkpoint = state.execution_checkpoint();
@@ -294,7 +294,7 @@ async fn execute_code_inner(
     // none and this is a no-op.
     if deferred_tool_resolver.is_some() || !state.deferred_resolutions.is_empty() {
         let _phase = ctx.named_phase("rlm_lashlang.deferred_resolve");
-        let program = match source_dialect {
+        let program = match source.dialect {
             SourceDialect::Lashlang => lashlang::parse(code).ok(),
             SourceDialect::Typescript => lash_typescript::parse(code).ok(),
         };
@@ -334,14 +334,14 @@ async fn execute_code_inner(
     // forbidden construct both fail here and need opposite advice.
     let compile_result: Result<_, (lash_core::CellFailureKind, String)> = {
         let _phase = ctx.named_phase("rlm_lashlang.compile_link");
-        match source_dialect {
+        match source.dialect {
             SourceDialect::Lashlang => state
                 .linked_programs
                 .get_or_compile(code, &host_environment)
                 .map_err(|error| match error {
                     lashlang::LinkedProgramCacheError::Parse(error) => (
                         lashlang_parse_feedback_kind(&error),
-                        format_rlm_parse_diagnostic(code, &error),
+                        format_rlm_parse_diagnostic(code, &error, source.channel),
                     ),
                     lashlang::LinkedProgramCacheError::Link(error) => (
                         lashlang_link_feedback_kind(&error),
@@ -525,7 +525,7 @@ async fn execute_code_inner(
         &ctx,
         &linked_module.artifact,
         &lashlang_execution_trace_config,
-        source_dialect.language_id(),
+        source.dialect.language_id(),
     );
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_started(trace, &linked_module.artifact);
@@ -788,11 +788,32 @@ fn lashlang_link_feedback_kind(error: &lashlang::LinkError) -> lash_core::CellFa
     }
 }
 
-fn format_rlm_parse_diagnostic(code: &str, error: &lashlang::ParseError) -> String {
-    format!(
-        "{}\n\nA standalone `</lashlang>` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line.",
-        lashlang::format_parse_diagnostic(code, error)
-    )
+/// Render a parse failure for the model, with the cell-delimiter warning only
+/// where a cell delimiter exists.
+///
+/// The warning explains a truncation the model cannot see: a `</lashlang>` line
+/// inside a multiline string closes the cell early, so the executor receives a
+/// program that stops mid-literal. Native `execute_code` calls (ADR 0083) carry
+/// the program as a tool argument, where no delimiter can truncate anything —
+/// there the sentence names syntax the model never wrote and sends it looking
+/// for a cause that does not exist.
+///
+/// Gated on the channel alone, not on the source containing `</lashlang>`:
+/// by the time the executor sees the code, cell extraction has already consumed
+/// the delimiter that truncated it, so an implicated delimiter is exactly the
+/// case where the source cannot mention one.
+fn format_rlm_parse_diagnostic(
+    code: &str,
+    error: &lashlang::ParseError,
+    channel: crate::plugin::RlmChannel,
+) -> String {
+    let diagnostic = lashlang::format_parse_diagnostic(code, error);
+    match channel {
+        crate::plugin::RlmChannel::Cell => format!(
+            "{diagnostic}\n\nA standalone `</lashlang>` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line."
+        ),
+        crate::plugin::RlmChannel::NativeTool => diagnostic,
+    }
 }
 
 fn select_deferred_resolution_link(
@@ -1158,7 +1179,7 @@ mod tests {
                 trace_context: TraceContext::default(),
             },
             lashlang::ExecutionBounds::unbounded(),
-            dialect,
+            RlmSourceContext::cell(dialect),
         )
         .await;
         assert_eq!(
@@ -1265,7 +1286,7 @@ mod tests {
                     Arc::new(ProjectionRegistry::new()),
                     RlmLashlangExecutionTraceConfig::default(),
                     lashlang::ExecutionBounds::unbounded(),
-                    source_dialect,
+                    RlmSourceContext::cell(source_dialect),
                 )
                 .await;
                 assert_eq!(successful.error, None, "{language}: first cell");
@@ -1286,7 +1307,7 @@ mod tests {
                         Arc::new(ProjectionRegistry::new()),
                         RlmLashlangExecutionTraceConfig::default(),
                         lashlang::ExecutionBounds::unbounded(),
-                        source_dialect,
+                        RlmSourceContext::cell(source_dialect),
                     ),
                 )
                 .await
@@ -1356,7 +1377,7 @@ mod tests {
                     Arc::new(ProjectionRegistry::new()),
                     RlmLashlangExecutionTraceConfig::default(),
                     lashlang::ExecutionBounds::unbounded(),
-                    source_dialect,
+                    RlmSourceContext::cell(source_dialect),
                 )
                 .await;
 
@@ -1405,7 +1426,7 @@ mod tests {
                         Arc::new(ProjectionRegistry::new()),
                         RlmLashlangExecutionTraceConfig::default(),
                         lashlang::ExecutionBounds::unbounded(),
-                        source_dialect,
+                        RlmSourceContext::cell(source_dialect),
                     )
                     .await;
                     assert_eq!(response.error, None, "{language}: `{code}`");
@@ -1466,7 +1487,7 @@ mod tests {
                         Arc::new(ProjectionRegistry::new()),
                         RlmLashlangExecutionTraceConfig::default(),
                         lashlang::ExecutionBounds::unbounded(),
-                        source_dialect,
+                        RlmSourceContext::cell(source_dialect),
                     )
                     .await;
                     assert_eq!(first.error, None, "{language}: large first cell");
@@ -1492,7 +1513,7 @@ mod tests {
                         Arc::new(ProjectionRegistry::new()),
                         RlmLashlangExecutionTraceConfig::default(),
                         lashlang::ExecutionBounds::unbounded(),
-                        source_dialect,
+                        RlmSourceContext::cell(source_dialect),
                     )
                     .await;
                     assert_eq!(tail.error, None, "{language}: tail cell");
@@ -1521,10 +1542,53 @@ mod tests {
     fn parse_diagnostic_warns_about_multiline_cell_delimiters() {
         let code = "payload = \"\"\"";
         let error = lashlang::parse(code).expect_err("unterminated multiline string");
-        let diagnostic = format_rlm_parse_diagnostic(code, &error);
+        let diagnostic = format_rlm_parse_diagnostic(code, &error, crate::plugin::RlmChannel::Cell);
 
         assert!(diagnostic.contains("standalone `</lashlang>` line"));
         assert!(diagnostic.contains("inside multiline source text"));
+    }
+
+    /// The native `execute_code` channel (ADR 0083) has no cell tags, so the
+    /// delimiter sentence would send the model hunting for syntax it never
+    /// wrote. It gets the positioned diagnostic alone — the same diagnostic the
+    /// cell channel is given, without the cell-only advice appended.
+    #[test]
+    fn native_channel_parse_diagnostic_omits_the_cell_delimiter_hint() {
+        let code = "payload = \"\"\"";
+        let error = lashlang::parse(code).expect_err("unterminated multiline string");
+        let positioned = lashlang::format_parse_diagnostic(code, &error);
+
+        let native =
+            format_rlm_parse_diagnostic(code, &error, crate::plugin::RlmChannel::NativeTool);
+        assert_eq!(native, positioned);
+        assert!(!native.contains("</lashlang>"), "{native}");
+        assert!(!native.contains("standalone delimiter line"), "{native}");
+
+        let cell = format_rlm_parse_diagnostic(code, &error, crate::plugin::RlmChannel::Cell);
+        assert_eq!(
+            cell.strip_prefix(positioned.as_str())
+                .expect("the cell diagnostic is the same diagnostic plus the hint")
+                .trim(),
+            "A standalone `</lashlang>` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line."
+        );
+    }
+
+    /// The channel reaches the formatter from the session's pinned config, not
+    /// from a default at the executor's door: an `RlmSourceContext` carries the
+    /// dialect and the channel together, so a new execution path cannot reach
+    /// the formatter without saying which channel it is.
+    #[test]
+    fn source_context_carries_the_channel_alongside_the_dialect() {
+        let cell = RlmSourceContext::cell(SourceDialect::Typescript);
+        assert_eq!(cell.dialect, SourceDialect::Typescript);
+        assert_eq!(cell.channel, crate::plugin::RlmChannel::Cell);
+
+        let native = RlmSourceContext::new(
+            SourceDialect::Lashlang,
+            crate::plugin::RlmChannel::NativeTool,
+        );
+        assert_eq!(native.dialect, SourceDialect::Lashlang);
+        assert_eq!(native.channel, crate::plugin::RlmChannel::NativeTool);
     }
 
     /// A typo is not a policy refusal.
@@ -2513,7 +2577,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
-                SourceDialect::Typescript,
+                RlmSourceContext::cell(SourceDialect::Typescript),
             )
             .await;
 
@@ -2713,7 +2777,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
-                SourceDialect::Typescript,
+                RlmSourceContext::cell(SourceDialect::Typescript),
             )
             .await;
             assert!(response.error.is_none(), "{:?}", response.error);
@@ -3134,7 +3198,7 @@ mod tests {
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
-            SourceDialect::Typescript,
+            RlmSourceContext::cell(SourceDialect::Typescript),
         )
         .await;
         assert!(response.error.is_none(), "{:?}", response.error);
@@ -3274,7 +3338,7 @@ mod tests {
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
-            SourceDialect::Typescript,
+            RlmSourceContext::cell(SourceDialect::Typescript),
         )
         .await;
         assert!(turn_n.error.is_none(), "{:?}", turn_n.error);
@@ -3296,7 +3360,7 @@ mod tests {
                     Arc::new(ProjectionRegistry::new()),
                     RlmLashlangExecutionTraceConfig::default(),
                     lashlang::ExecutionBounds::unbounded(),
-                    SourceDialect::Typescript,
+                    RlmSourceContext::cell(SourceDialect::Typescript),
                 ),
                 worker.drive_pending_processes()
             )
@@ -3416,7 +3480,7 @@ mod tests {
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
-            SourceDialect::Typescript,
+            RlmSourceContext::cell(SourceDialect::Typescript),
         )
         .await;
 
@@ -3615,7 +3679,7 @@ mod tests {
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
-            SourceDialect::Typescript,
+            RlmSourceContext::cell(SourceDialect::Typescript),
         )
         .await
     }
@@ -5798,7 +5862,7 @@ finish final_ids"#;
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
-            SourceDialect::Typescript,
+            RlmSourceContext::cell(SourceDialect::Typescript),
         )
         .await;
         (state, response)
