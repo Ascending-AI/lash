@@ -185,6 +185,7 @@ where
     effect_host_await_event_retires_non_session_scopes(make()).await;
     effect_host_await_event_reinstate_lifts_process_scope_fence(make()).await;
     effect_host_await_event_when_quiescent_waits_for_live_waits(make()).await;
+    effect_host_when_quiescent_waits_for_executing_effects(make()).await;
     effect_host_await_event_session_cancel_resolves_outstanding_waits(make()).await;
     effect_host_await_event_rejects_tampered_keys(make()).await;
 }
@@ -1180,6 +1181,13 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
 /// `WhenQuiescent` refuses it with `effect_scope_not_quiescent` and leaves
 /// it unfenced, and retires it once the wait has resolved (FIG-2499 fix
 /// round 2, ruling 3).
+///
+/// The law holds the waiter alive on purpose. Memory waits are not durable:
+/// a wait whose waiter was dropped before resolution stays a live entry in
+/// every durable host's index or rows and refuses retirement there, while
+/// the in-process host keeps no record of a dropped waiter and retires the
+/// scope. That is the one memory-versus-durable differential in quiescence
+/// (ADR 0049), and a law over the dropped case would assert two answers.
 pub(crate) async fn effect_host_await_event_when_quiescent_waits_for_live_waits(
     host: Arc<dyn EffectHost>,
 ) {
@@ -1248,6 +1256,115 @@ pub(crate) async fn effect_host_await_event_when_quiescent_waits_for_live_waits(
         .await_event_key(
             &scope,
             AwaitEventWaitIdentity::tool_completion("call-after"),
+        )
+        .await
+        .expect_err("the retired scope mints nothing");
+    assert_eq!(fenced.code.as_str(), "await_event_unknown_or_revoked");
+}
+
+/// A scope with an executing effect is not quiescent: `WhenQuiescent`
+/// refuses it with `effect_scope_not_quiescent` while the effect's executor
+/// is still running, leaves the scope unfenced, and retires it once the
+/// effect has completed (FIG-2499 fix round 3, ruling 4).
+///
+/// A deployment-level host that runs no local executor of its own — the
+/// Restate host outside a handler answers every non-AwaitEvent effect with
+/// `restate_effect_host_requires_handler_scope` — cannot be held to this law
+/// through this seam; its handler-side controller is held to it by the live
+/// end-to-end harness instead.
+pub(crate) async fn effect_host_when_quiescent_waits_for_executing_effects(
+    host: Arc<dyn EffectHost>,
+) {
+    let suffix = uuid::Uuid::new_v4().simple();
+    let scope = ExecutionScope::runtime_operation(format!("executing-effect-{suffix}"));
+    let started = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let executor_started = Arc::clone(&started);
+    let executor_release = Arc::clone(&release);
+    let executor = RuntimeEffectLocalExecutor::testing(move |_| {
+        let started = Arc::clone(&executor_started);
+        let release = Arc::clone(&executor_release);
+        async move {
+            started.notify_one();
+            release.notified().await;
+            Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
+                value: serde_json::json!("completed"),
+            })
+        }
+    });
+    let envelope = RuntimeEffectEnvelope::new(
+        RuntimeInvocation::effect(
+            RuntimeScope::new("executing-effect"),
+            "work",
+            RuntimeEffectKind::LanguageRuntimeValue,
+            format!("executing-effect-{suffix}"),
+        ),
+        RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: "executing-effect".to_string(),
+        },
+    );
+    let executing_host = Arc::clone(&host);
+    let executing_scope = scope.clone();
+    let mut executing = crate::task::spawn(async move {
+        executing_host
+            .scoped(executing_scope)
+            .expect("the operation scope binds")
+            .controller()
+            .execute_effect(envelope, executor)
+            .await
+    });
+    let started = tokio::time::timeout(std::time::Duration::from_secs(5), started.notified());
+    tokio::pin!(started);
+    tokio::select! {
+        _ = &mut started => {}
+        outcome = &mut executing => {
+            let outcome = outcome.expect("the effect task joins");
+            match outcome {
+                Err(error)
+                    if error.code == lash_core::RuntimeErrorCode::RestateEffectHostRequiresHandlerScope =>
+                {
+                    // Not a local executor host: see the doc comment.
+                    return;
+                }
+                other => panic!("the effect neither started nor was refused as handler-only: {other:?}"),
+            }
+        }
+    }
+
+    let refused = host
+        .retire_effect_journal(
+            crate::EffectJournalRetirement::for_scope(&scope)
+                .expect("runtime operations are retirable")
+                .when_quiescent(),
+        )
+        .await
+        .expect_err("an executing effect is not quiescent");
+    assert_eq!(refused.code.as_str(), "effect_scope_not_quiescent");
+    host.await_event_key(
+        &scope,
+        AwaitEventWaitIdentity::tool_completion("still-open"),
+    )
+    .await
+    .expect("the refused retirement left the scope unfenced");
+
+    release.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(5), executing)
+        .await
+        .expect("the released effect completes")
+        .expect("the effect task joins")
+        .expect("the effect completes");
+
+    host.retire_effect_journal(
+        crate::EffectJournalRetirement::for_scope(&scope)
+            .expect("runtime operations are retirable")
+            .when_quiescent(),
+    )
+    .await
+    .expect("the scope is quiescent once its effect has completed");
+    let fenced = host
+        .await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion("after-retirement"),
         )
         .await
         .expect_err("the retired scope mints nothing");

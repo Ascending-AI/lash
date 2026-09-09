@@ -72,13 +72,11 @@ mod process_tool_replay;
 mod replay_corpus;
 mod tool_context_conformance;
 use endpoint_protocol::{
-    encode_call_replay, encode_captured_run_and_call_replay,
+    durable_wait_index_call_response, encode_call_replay, encode_captured_run_and_call_replay,
     encode_captured_run_and_interrupted_call_replay, encode_captured_run_command_replay,
-    encode_completed_captured_sleep_replay, encode_completed_gate_sleep_replay,
-    encode_completed_intent_drain_replay, encode_completed_sleep_replay,
-    encode_effectful_process_terminal_replay, encode_one_way_call_replay,
-    encode_pending_sleep_replay, encode_process_segment_send_replay,
-    encode_process_terminal_delivery_replay, encode_run_replay,
+    encode_completed_gate_sleep_replay, encode_completed_intent_drain_replay,
+    encode_completed_sleep_replay, encode_one_way_call_replay, encode_process_segment_send_replay,
+    encode_process_terminal_delivery_replay, encode_recorded_commands_replay, encode_run_replay,
     encode_two_one_way_calls_and_call_replay, invoke_endpoint, invoke_endpoint_body,
     invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
     invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
@@ -1549,6 +1547,72 @@ async fn fig779_sleep_suspension_and_cancellation_preserve_recorded_precedence()
     );
 }
 
+/// FIG-2499: a process handler records its process-scope effect in the
+/// scope's index before journaling it, so the deployed first attempt parks
+/// on the `begin_effect` call; once the index admits the effect the attempt
+/// journals its timer and parks on that. Returns both legs' output, whose
+/// commands are the deployed journal: the call, then the timer.
+async fn park_process_on_its_timer(
+    endpoint: &Endpoint,
+    process_id: &str,
+    input: &RestateProcessWorkflowInput,
+) -> Vec<u8> {
+    let recording = invoke_endpoint(endpoint, "LashProcessWorkflow", "run", process_id, input)
+        .await
+        .expect("first process attempt should park on recording its effect");
+    let calls = restate_call_frames(&recording).expect("decode effect-recording calls");
+    assert_eq!(
+        calls
+            .iter()
+            .map(|call| (call.service.as_str(), call.handler.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("LashDurableWaitIndex", "begin_effect")],
+        "the effect is recorded in the scope's index before its timer is journaled"
+    );
+    assert_eq!(
+        restate_message_types(&recording).expect("decode recording frames"),
+        vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+    let admitted = encode_call_replay(
+        process_id,
+        input,
+        &[(calls[0].clone(), Some(serde_json::json!(true)))],
+        None,
+    )
+    .expect("splice the admitted effect recording");
+    let parked = invoke_endpoint_body(endpoint, "LashProcessWorkflow", "run", admitted)
+        .await
+        .expect("admitted process attempt should park on its timer");
+    assert_eq!(
+        restate_message_types(&parked).expect("decode parked process frames"),
+        vec![
+            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+    let mut journal = recording.to_vec();
+    journal.extend_from_slice(&parked);
+    journal
+}
+
+/// Completions for a replayed process journal: the scope index answers its
+/// effect-recording calls, every other call answers `null`, and the timer is
+/// fired or left pending.
+fn process_journal_completion(
+    fire_timer: bool,
+) -> impl Fn(&endpoint_protocol::RecordedCommand) -> Option<serde_json::Value> {
+    move |command| match command.message_type {
+        RESTATE_SLEEP_COMMAND_MESSAGE_TYPE => fire_timer.then_some(serde_json::Value::Null),
+        RESTATE_CALL_COMMAND_MESSAGE_TYPE => command.call.as_ref().map(|(service, handler)| {
+            durable_wait_index_call_response(service, handler).unwrap_or(serde_json::Value::Null)
+        }),
+        _ => None,
+    }
+}
+
 #[tokio::test]
 async fn fig779_suspended_process_redrive_observes_durable_cancellation() {
     let process_id = "fig779-durable-cancel-redrive";
@@ -1583,16 +1647,7 @@ async fn fig779_suspended_process_redrive_observes_durable_cancellation() {
         execution_id: None,
     };
 
-    let suspended = invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
-        .await
-        .expect("first process attempt should suspend on its durable timer");
-    assert_eq!(
-        restate_message_types(&suspended).expect("decode suspended process frames"),
-        vec![
-            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
-            RESTATE_SUSPENSION_MESSAGE_TYPE
-        ]
-    );
+    let parked = park_process_on_its_timer(&endpoint, process_id, &input).await;
 
     registry
         .append_event(
@@ -1604,14 +1659,26 @@ async fn fig779_suspended_process_redrive_observes_durable_cancellation() {
         )
         .await
         .expect("record durable process cancellation");
-    let replay = encode_pending_sleep_replay(process_id, &input, &suspended)
-        .expect("encode suspended process redrive");
-    let cancelled = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
-        .await
-        .expect("redrive should replay the timer command before observing cancellation");
+    let replay = encode_recorded_commands_replay(
+        process_id,
+        &input,
+        &[&parked],
+        process_journal_completion(false),
+    )
+    .expect("encode suspended process redrive");
+    let cancelled = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        replay,
+        vec![serde_json::Value::Null],
+    )
+    .await
+    .expect("redrive should replay the timer command before observing cancellation");
     assert_eq!(
         restate_message_types(&cancelled).expect("decode cancelled redrive frames"),
         vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
             RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
             RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE,
@@ -1655,16 +1722,7 @@ async fn fig788_terminal_outcome_landing_preserves_the_suspended_command_prefix(
         execution_id: None,
     };
 
-    let suspended = invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
-        .await
-        .expect("first process attempt should suspend");
-    assert_eq!(
-        restate_message_types(&suspended).expect("decode suspended process frames"),
-        vec![
-            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
-            RESTATE_SUSPENSION_MESSAGE_TYPE
-        ]
-    );
+    let parked = park_process_on_its_timer(&endpoint, process_id, &input).await;
 
     let stored = process_cancellation("terminal outcome landed between attempts", None);
     registry
@@ -1675,11 +1733,22 @@ async fn fig788_terminal_outcome_landing_preserves_the_suspended_command_prefix(
         )
         .await
         .expect("store terminal outcome between attempts");
-    let replay = encode_completed_captured_sleep_replay(process_id, &input, &suspended)
-        .expect("splice the deployed suspended journal");
-    let output = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
-        .await
-        .expect("terminal redrive must preserve the deployed command prefix");
+    let replay = encode_recorded_commands_replay(
+        process_id,
+        &input,
+        &[&parked],
+        process_journal_completion(true),
+    )
+    .expect("splice the deployed suspended journal");
+    let output = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        replay,
+        vec![serde_json::Value::Null],
+    )
+    .await
+    .expect("terminal redrive must preserve the deployed command prefix");
 
     assert_eq!(
         restate_output_json::<RestateProcessWorkflowOutput>(&output),
@@ -1923,28 +1992,49 @@ async fn fig811_effectful_post_terminal_redrive_replays_the_complete_prefix() {
         execution_id: Some("fig811-effectful-terminal-execution".to_string()),
     };
 
-    let effect_suspension =
-        invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
-            .await
-            .expect("effectful attempt should suspend on its journaled effect");
-    assert_eq!(
-        restate_message_types(&effect_suspension).expect("decode effect suspension"),
-        vec![
-            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
-            RESTATE_SUSPENSION_MESSAGE_TYPE
-        ]
-    );
+    let effect_suspension = park_process_on_its_timer(&endpoint, process_id, &input).await;
     assert!(trace_sink.records.lock_recover().iter().any(|record| {
         record.event.kind() == "durable_timer_started"
             && record.context.run_id.as_deref() == Some("fig811-workflow-trace")
             && record.context.session_id.as_deref() == Some("session")
     }));
 
-    let completed_effect =
-        encode_completed_captured_sleep_replay(process_id, &input, &effect_suspension)
-            .expect("splice completed effect prefix");
-    let terminal_delivery_suspension =
+    let completed_effect = encode_recorded_commands_replay(
+        process_id,
+        &input,
+        &[&effect_suspension],
+        process_journal_completion(true),
+    )
+    .expect("splice completed effect prefix");
+    let effect_cleared =
         invoke_endpoint_body(&endpoint, "LashProcessWorkflow", "run", completed_effect)
+            .await
+            .expect("effect completion should clear the effect from the scope's index");
+    assert_eq!(
+        restate_call_frames(&effect_cleared)
+            .expect("decode effect-clearing calls")
+            .iter()
+            .map(|call| (call.service.as_str(), call.handler.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("LashDurableWaitIndex", "end_effect")],
+        "the completed effect is cleared from the scope's index before terminal delivery"
+    );
+    assert_eq!(
+        restate_message_types(&effect_cleared).expect("decode effect-clearing frames"),
+        vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+    let cleared_replay = encode_recorded_commands_replay(
+        process_id,
+        &input,
+        &[&effect_suspension, &effect_cleared],
+        process_journal_completion(true),
+    )
+    .expect("splice the cleared effect prefix");
+    let terminal_delivery_suspension =
+        invoke_endpoint_body(&endpoint, "LashProcessWorkflow", "run", cleared_replay)
             .await
             .expect("effect completion should reach terminal delivery");
     assert_eq!(
@@ -1957,11 +2047,15 @@ async fn fig811_effectful_post_terminal_redrive_replays_the_complete_prefix() {
         ]
     );
 
-    let complete_replay = encode_effectful_process_terminal_replay(
+    let complete_replay = encode_recorded_commands_replay(
         process_id,
         &input,
-        &effect_suspension,
-        &terminal_delivery_suspension,
+        &[
+            &effect_suspension,
+            &effect_cleared,
+            &terminal_delivery_suspension,
+        ],
+        process_journal_completion(true),
     )
     .expect("splice the complete effectful terminal prefix");
     let completed = invoke_endpoint_body_open(
@@ -4902,8 +4996,12 @@ fn live_restate_effect_group_conformance() {
                     "RESTATE_CONFORMANCE effect_group_cancelled_child_terminal_is_durable PASS"
                 );
                 harness.run_design_witnesses().await;
-                println!("EFFECT_GROUP_CONFORMANCE 18/18 PASS");
+                println!("EFFECT_GROUP_CONFORMANCE 19/19 PASS");
                 println!("EFFECT_GROUP_WITNESSES h-m PASS");
+                harness.run_executing_effect_quiescence_witness().await;
+                println!("RESTATE_QUIESCENCE executing_handler_effect PASS");
+                let registries = harness.run_cold_reopen_witnesses().await;
+                println!("RESTATE_COLD_REOPEN registries={registries} PASS");
                 lash_conformance::effect_host_await_events_cold_instance(
                     harness.effect_host_factory(),
                 )

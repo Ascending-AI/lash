@@ -543,9 +543,24 @@ pub enum ResolveOutcome {
     UnknownOrRevoked,
 }
 
+/// A controller built for one scope that can build itself for another: what
+/// an engine-side controller that must know the scope of every effect it runs
+/// hands to [`ScopedEffectController::owned`], so the runtime's rescoping (a
+/// turn under a process, a child under its parent) keeps the scope exact.
+pub trait ScopeBoundController: RuntimeEffectController {
+    /// This controller, bound to `scope` instead; it lives as long as this one does.
+    fn for_scope<'a>(&self, scope: ExecutionScope) -> Arc<dyn ScopeBoundController + 'a>
+    where
+        Self: 'a;
+}
+
 pub(super) enum ScopedEffectControllerInner<'run> {
     Borrowed(&'run dyn RuntimeEffectController),
     Shared(Arc<dyn RuntimeEffectController>),
+    /// A controller built for this scope alone and living no longer than the
+    /// borrow it wraps: an engine-side controller that records the scope's
+    /// executing effects under the scope (FIG-2499).
+    Owned(Arc<dyn ScopeBoundController + 'run>),
 }
 
 impl Clone for ScopedEffectControllerInner<'_> {
@@ -553,6 +568,7 @@ impl Clone for ScopedEffectControllerInner<'_> {
         match self {
             Self::Borrowed(controller) => Self::Borrowed(*controller),
             Self::Shared(controller) => Self::Shared(Arc::clone(controller)),
+            Self::Owned(controller) => Self::Owned(Arc::clone(controller)),
         }
     }
 }
@@ -591,11 +607,26 @@ impl<'run> ScopedEffectController<'run> {
         })
     }
 
+    /// Validates a scope and binds a controller built for that scope and bounded by the borrow it
+    /// wraps, for effect-host implementors whose engine-side controller must know the scope of
+    /// every effect it runs.
+    pub fn owned(
+        controller: Arc<dyn ScopeBoundController + 'run>,
+        scope: ExecutionScope,
+    ) -> Result<Self, RuntimeError> {
+        scope.validate()?;
+        Ok(Self {
+            controller: ScopedEffectControllerInner::Owned(controller),
+            scope,
+        })
+    }
+
     /// Exposes controller to effect-host implementors while scoping and journaling durable effects.
     pub fn controller(&self) -> &dyn RuntimeEffectController {
         match &self.controller {
             ScopedEffectControllerInner::Borrowed(controller) => *controller,
             ScopedEffectControllerInner::Shared(controller) => controller.as_ref(),
+            ScopedEffectControllerInner::Owned(controller) => controller.as_ref(),
         }
     }
 
@@ -636,7 +667,9 @@ impl<'run> ScopedEffectController<'run> {
     pub(crate) fn owned_controller(&self) -> Option<Arc<dyn RuntimeEffectController>> {
         match &self.controller {
             ScopedEffectControllerInner::Shared(controller) => Some(Arc::clone(controller)),
-            ScopedEffectControllerInner::Borrowed(_) => None,
+            ScopedEffectControllerInner::Borrowed(_) | ScopedEffectControllerInner::Owned(_) => {
+                None
+            }
         }
     }
 }
@@ -1657,15 +1690,30 @@ pub trait EffectHost: AwaitEventResolver {
         Ok(())
     }
 
-    /// The SQLite database file holding this host's scope-retirement fence,
-    /// when the fence lives in a file of its own that a process registry can
-    /// attach and clear inside its registration transaction (ADR 0049). A
-    /// host whose fence shares the registry's database, keeps it in memory, or
-    /// never fences answers `None`; registration then lifts the fence through
-    /// [`Self::reinstate_effect_scope`] once the registration write is made.
+    /// The SQLite database file holding this host's effect journal, when the
+    /// journal lives in a file of its own that a session-store factory
+    /// attaches for the retention sweep (ADR 0067). A host whose journal
+    /// shares the store's database, keeps it in memory, or has no durable
+    /// journal answers `None`.
     fn effect_scope_fence_database(&self) -> Option<std::path::PathBuf> {
         None
     }
+
+    /// Bind the process registry that owns the process-scope fence
+    /// (ADR 0049). Called by [`ProcessRegistrar::bind_effect_host`]
+    /// (crate::ProcessRegistrar::bind_effect_host); idempotent.
+    ///
+    /// A host with a durable journal of its own in a file beside the
+    /// registry's attaches [`ProcessRegistryBinding::fence_database`]
+    /// (crate::ProcessRegistryBinding::fence_database) and reads and writes
+    /// process-scope fences there, so registration's commit point and
+    /// retirement's commit point are the same file. A host whose fence is a
+    /// cache (the Restate durable-wait index) keeps
+    /// [`ProcessRegistryBinding::registrations`]
+    /// (crate::ProcessRegistryBinding::registrations) and treats a fence
+    /// on a registered process scope as stale. A host that never fences
+    /// ignores the binding.
+    fn bind_process_registry(&self, _binding: crate::ProcessRegistryBinding) {}
 }
 
 /// Boundary for nondeterministic runtime work.

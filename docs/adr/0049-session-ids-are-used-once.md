@@ -113,24 +113,73 @@ registration, `Processes::start`, a session-scoped start, a trigger delivery,
 a tool-intent `StartProcess`, the Restate scheduler — ends in
 `ProcessRegistrar::register_process_with_observers`, and that write deletes
 the scope's `effect_scope_retirements` row in the same transaction as the
-registry insert (PostgreSQL: same database, under the scope's advisory lock;
-SQLite: the registry attaches the bound effect journal and writes both inside
-its one write transaction), or in the same critical section on the in-memory
-registry. A registration that fails at the insert rolls the fence release back
-with it, so the id stays fenced and unregistered and a cold host over the same
-journal admits nothing under it. Hosts whose fence lives outside the registry's
-store — the in-process host's fence set, Restate's per-scope index object —
-bind to the registry (`ProcessRegistrar::bind_effect_host`, done by
-`LashCore::build`) and are reinstated from the same seam once the insert has
-committed; `EffectHost::reinstate_effect_scope` remains the host-facing lever
-that seam drives, and nothing else calls it. On Restate
-the fence is the scope's own `LashDurableWaitIndex` object, revoked on
-retirement and reinstated on registration; keying session-free waits by scope
-is a durable-wait identity epoch cutover (epoch 5) and a tool-intent journal
-cutover (corpus v3): pre-cutover state and journals refuse loudly before any
-effect re-executes; the in-process host keeps an
-unbounded fence set for the same reason the durable rows are permanent.
-Retention of these rows is a host lever on the terms of ADR 0023.
+registry insert, or in the same critical section on the in-memory registry.
+
+Each store has exactly one commit point per registration and one per
+retirement, and the fence row lives where that commit point is. On
+PostgreSQL both live in one database: the registration transaction deletes the
+fence and inserts the record under the scope's advisory lock, and the
+retirement transaction proves quiescence, inserts the fence, and deletes the
+journal rows. On SQLite the process registry is its own file, and a
+multi-database write that modifies more than one file commits per file, so
+the process fence of a registered host lives in the registry file
+(`effect_scope_retirements` in `PROCESS_SCHEMA`). Registration is then a
+single-file transaction: fence delete and registry insert commit together or
+not at all, so a crash leaves the id either fenced-and-unregistered or
+registered-and-unfenced, never both and never neither. Retirement commits the
+fence into the registry file first — the quiescence proof and the fence
+insert are one transaction over the attached files under one `BEGIN
+IMMEDIATE` — and only then purges the journal rows in a second transaction on
+the journal file. A crash between the two leaves a fenced scope with stale
+journal rows, which is safe: admission reads the fence from the registry file
+(the effect host attaches it for reads once the registry is bound), so a cold
+host over that journal admits nothing under the scope, and the leftover rows
+are idempotent cleanup that the next host bind or reclaim sweep purges
+(`purge_rows_under_fenced_scopes`). Runtime-operation fences, and process
+fences written while no registry is bound, stay in the journal file and retire
+in one transaction with their rows; when a registry binds it repairs the
+journal file's leftovers — rows under any fence, and journal-file process
+fences of ids the registry already holds — before the first admission.
+
+The fence and the registry can also be two different stores. The in-process
+host keeps a fence set, and Restate keeps a per-scope `LashDurableWaitIndex`
+object that is revoked on retirement. Both bind to the registry
+(`ProcessRegistrar::bind_effect_host`, done by `LashCore::build`), and the
+binding runs both ways: the registry reinstates the host's fence from the same
+seam once its insert has committed (`EffectHost::reinstate_effect_scope`
+remains the host-facing lever that seam drives, and nothing else calls it),
+and the host receives a `ProcessRegistryBinding` — the registry's own
+"is this process registered" probe. On Restate that probe makes the index's
+revoked flag a cache of the registry's truth rather than a second source of
+it: a revoked index over a process the registry holds is a registration that
+committed after its reinstate was lost (a crash between the insert and the
+ingress call, or a reopen without the reinstate ever reaching the engine), and
+the host's admission reads through to the registry, reinstates the index, and
+admits — no explicit re-registration, on a SQLite- or PostgreSQL-backed
+registry alike. The read-through was chosen over re-driving every registered
+process's reinstate at bind time because binding is synchronous inside
+`LashCore::build` and a bind-time scan is one ingress call per registered
+process on every open; the read-through costs one registry probe per revoked
+admission and nothing on the hot path.
+
+Keying session-free waits by scope on Restate is a durable-wait identity
+epoch cutover (epoch 5) and a tool-intent journal cutover (corpus v3):
+pre-cutover state and journals refuse loudly before any effect re-executes;
+the in-process host keeps an unbounded fence set for the same reason the
+durable rows are permanent. Retention of these rows is a host lever on the
+terms of ADR 0023.
+
+Quiescence is measured on durable ground: an executing effect and a live
+child of an open effect group count as live on every host, and on Restate
+both are entries of the scope's `LashDurableWaitIndex` (`begin_effect` /
+`end_effect` around every scoped effect the handler-side controller runs,
+`record_group` when a group opens; a recorded group is live while its
+`EffectGroupIndex` reports unsettled children). Memory waits are not durable:
+a wait whose waiter was dropped before resolution stays a live entry in every
+durable index and refuses retirement there, but the in-process host has no
+record of a dropped waiter and retires the scope. That is the one
+memory-versus-durable differential in the quiescence law, and it is stated
+in the shared conformance law rather than papered over.
 
 > **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
 

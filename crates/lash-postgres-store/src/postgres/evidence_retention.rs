@@ -2,10 +2,19 @@
 //! and the durable owner of deferred effect-scope retirement (ADR 0067).
 use crate::*;
 
+/// The sweep's outcome, boxed on the failure side: `MaintenanceFailure`
+/// carries the partial report beside the stop, so the `Err` arm is several
+/// times the size of the report alone (`clippy::result_large_err`); the
+/// factory's trait method, whose signature the trait fixes, unboxes it.
+pub(crate) type ReclaimResult = Result<
+    lash_core::store::RetentionReport,
+    Box<lash_core::MaintenanceFailure<lash_core::store::RetentionReport>>,
+>;
+
 pub(crate) async fn reclaim(
     factory: &PostgresSessionStoreFactory,
     bound: lash_core::store::RetentionBound,
-) -> lash_core::MaintenanceResult<lash_core::store::RetentionReport> {
+) -> ReclaimResult {
     async {
         let mut tx = factory.pool.begin().await.map_err(store_sqlx_error)?;
         // One cross-worker fence for this host-invoked, atomic multi-phase sweep.
@@ -68,13 +77,16 @@ pub(crate) async fn reclaim(
         })
     }
     .await
-    .map_err(lash_core::MaintenanceFailure::failed_before_any_work)
+    .map_err(|error| Box::new(lash_core::MaintenanceFailure::failed_before_any_work(error)))
 }
 
-/// Retire every session-free runtime-operation scope whose operation has
-/// recorded its receipt and that is quiescent now. Returns the number retired
-/// and the receipt keys of the scopes that are still live, which the receipt
-/// sweep must keep.
+/// Retire every session-free runtime-operation scope that the facade minted
+/// (`is_facade_minted_operation_id`), whose operation has recorded its
+/// receipt, and that is quiescent now. Caller-supplied scopes are never the
+/// sweep's to retire: a host that names its own operation id may retry it
+/// after a lost response and expects the receipt to replay (ADR 0067).
+/// Returns the number retired and the receipt keys of the scopes that are
+/// still live, which the receipt sweep must keep.
 async fn retire_quiescent_operation_scopes(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<(usize, Vec<String>), sqlx::Error> {
@@ -98,7 +110,13 @@ async fn retire_quiescent_operation_scopes(
                 .iter()
                 .filter_map(|scope_json| serde_json::from_str(scope_json).ok()),
         )
-        .filter(|scope| matches!(scope, lash_core::ExecutionScope::RuntimeOperation { .. }))
+        .filter(|scope| {
+            matches!(
+                scope,
+                lash_core::ExecutionScope::RuntimeOperation { operation_id }
+                    if lash_core::store::is_facade_minted_operation_id(operation_id)
+            )
+        })
         .collect();
     scopes.sort_by(|left, right| left.id().cmp(right.id()));
     scopes.dedup();

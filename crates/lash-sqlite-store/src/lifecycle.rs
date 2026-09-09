@@ -122,55 +122,8 @@ impl Store {
         let conn = SqliteConnection::open_with_policy(path, options.connection_policy).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
         let process_registry_attached = if let Some(process_registry_path) = process_registry_path {
-            if !process_registry_path.exists() {
-                return Err(tokio_rusqlite::Error::Error(
-                    rusqlite::Error::SqliteFailure(
-                        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
-                        Some(format!(
-                            "configured Lash process registry does not exist: {}",
-                            process_registry_path.display()
-                        )),
-                    ),
-                ));
-            }
-            let path = process_registry_path.to_string_lossy().into_owned();
-            conn.call(move |conn| {
-                conn.execute("ATTACH DATABASE ?1 AS process_registry", params![path])?;
-                let expected_version = crate::schema::PROCESS_SCHEMA_VERSION;
-                let deadline = std::time::Instant::now()
-                    + options.connection_policy.busy_timeout;
-                loop {
-                    let version: i32 = conn.query_row(
-                        "PRAGMA process_registry.user_version",
-                        [],
-                        |row| row.get(0),
-                    )?;
-                    let has_processes = conn
-                        .query_row(
-                            "SELECT 1 FROM process_registry.sqlite_master
-                             WHERE type = 'table' AND name = 'processes'",
-                            [],
-                            |_| Ok(()),
-                        )
-                        .optional()?
-                        .is_some();
-                    if version == expected_version && has_processes {
-                        break;
-                    }
-                    if version == 0 && !has_processes && std::time::Instant::now() < deadline {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                        continue;
-                    }
-                    return Err(rusqlite::Error::SqliteFailure(
-                        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_MISMATCH),
-                        Some(format!(
-                            "configured database is not a Lash process registry: expected schema version {expected_version} with table `processes`, found version {version}"
-                        )),
-                    ));
-                }
-                Ok(())
-            })
-            .await?;
+            attach_process_registry(&conn, process_registry_path, options.connection_policy)
+                .await?;
             true
         } else {
             false
@@ -352,4 +305,61 @@ impl Store {
         }
         Ok(meta)
     }
+}
+
+/// Attach the configured process registry file as `process_registry` and
+/// verify it is a Lash process registry at this build's schema version. A
+/// registry still being created (version 0, no tables) is waited for up to
+/// the connection's busy timeout.
+pub(crate) async fn attach_process_registry(
+    conn: &SqliteConnection,
+    process_registry_path: &Path,
+    policy: SqliteConnectionPolicy,
+) -> rusqlite::Result<()> {
+    if !process_registry_path.exists() {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+            Some(format!(
+                "configured Lash process registry does not exist: {}",
+                process_registry_path.display()
+            )),
+        ));
+    }
+    let path = process_registry_path.to_string_lossy().into_owned();
+    conn.call(move |conn| {
+        conn.execute("ATTACH DATABASE ?1 AS process_registry", params![path])?;
+        let expected_version = crate::schema::PROCESS_SCHEMA_VERSION;
+        let deadline = std::time::Instant::now() + policy.busy_timeout;
+        loop {
+            let version: i32 = conn.query_row(
+                "PRAGMA process_registry.user_version",
+                [],
+                |row| row.get(0),
+            )?;
+            let has_processes = conn
+                .query_row(
+                    "SELECT 1 FROM process_registry.sqlite_master
+                     WHERE type = 'table' AND name = 'processes'",
+                    [],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if version == expected_version && has_processes {
+                break;
+            }
+            if version == 0 && !has_processes && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                continue;
+            }
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_MISMATCH),
+                Some(format!(
+                    "configured database is not a Lash process registry: expected schema version {expected_version} with table `processes`, found version {version}"
+                )),
+            ));
+        }
+        Ok(())
+    })
+    .await
 }

@@ -9,6 +9,7 @@
 pub(crate) mod context;
 pub(crate) mod journal_budget;
 mod journaled_effect;
+mod scope_recording;
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -393,12 +394,23 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx>,
 {
+    /// The controller bound to `scope`. A non-session scope gets a view that
+    /// records every effect it executes and every group it opens in the
+    /// scope's durable-wait index, so a `WhenQuiescent` retirement of the
+    /// scope refuses while they are live (FIG-2499); a session scope's
+    /// effects complete under Restate's own journal and need no record.
     pub fn scoped_effect_controller<'run>(
         &'run self,
         scope: ExecutionScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
         scope.validate()?;
-        ScopedEffectController::borrowed(self, scope)
+        ScopedEffectController::owned(
+            Arc::new(scope_recording::ScopeRecordingController {
+                inner: self,
+                scope: scope.clone(),
+            }),
+            scope,
+        )
     }
 }
 

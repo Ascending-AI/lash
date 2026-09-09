@@ -904,3 +904,205 @@ async fn sqlite_draining_task_is_retired_by_the_reclaim_sweep() {
 async fn postgres_draining_task_is_retired_by_the_reclaim_sweep() {
     draining_task_is_retired_by_the_reclaim_sweep(true).await;
 }
+
+/// The sweep retires facade-minted scopes only. A caller-supplied
+/// runtime-operation id with a recorded receipt is the caller's replay proof
+/// for as long as the caller may retry it, so the sweep leaves it alone and
+/// an identical retry after the sweep still replays the receipt; a
+/// facade-minted scope in the same state is retired (FIG-2499 fix round 3,
+/// ruling 3; ADR 0067).
+async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let label = if pg { "postgres" } else { "sqlite" };
+    let mut postgres = None;
+    let mut catalog = None;
+    let (host, journal, store_factory): (
+        Arc<dyn EffectHost>,
+        Journal,
+        Arc<dyn lash::persistence::SessionStoreFactory>,
+    ) = if pg {
+        let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
+            assert!(
+                std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
+                "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
+            );
+            eprintln!(
+                "skipping Postgres caller-scope sweep test: LASH_POSTGRES_DATABASE_URL is not set"
+            );
+            return;
+        };
+        let admin = sqlx::PgPool::connect(&url).await.expect("connect postgres");
+        let name = format!("sweep_caller_{}", uuid::Uuid::new_v4().simple());
+        sqlx::query(&format!("CREATE DATABASE {name}"))
+            .execute(&admin)
+            .await
+            .expect("create a private database");
+        admin.close().await;
+        let (base, _) = url.rsplit_once('/').expect("database url has a path");
+        let storage = lash_postgres_store::PostgresStorage::connect(&format!("{base}/{name}"))
+            .await
+            .expect("connect the private database");
+        let host = storage.effect_host();
+        let factory = storage.session_store_factory_with_shared_process_registry();
+        let pool = storage.pool().clone();
+        postgres = Some(storage);
+        (Arc::new(host), Journal::Postgres(pool), Arc::new(factory))
+    } else {
+        let path = dir.path().join("caller-sweep.db");
+        let host = SqliteEffectHost::open(&path)
+            .await
+            .expect("SQLite effect host");
+        let factory =
+            lash_sqlite_store::SqliteSessionStoreFactory::new(dir.path().join("sessions"));
+        catalog = Some(factory.catalog_path());
+        (Arc::new(host), Journal::Sqlite(path), Arc::new(factory))
+    };
+    let _postgres = postgres.take();
+    store_factory.bind_effect_host(&host);
+    let core = core_with_host_and_store(Arc::clone(&host), Some(Arc::clone(&store_factory)));
+    let session_id = format!("caller-sweep-{label}");
+    // The catalog the sweep reads receipts from exists once a session does.
+    let session = core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("session");
+
+    let ran = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let run = |scope: ExecutionScope| {
+        let host = Arc::clone(&host);
+        let ran = Arc::clone(&ran);
+        async move {
+            host.scoped(scope)
+                .expect("the operation scope binds")
+                .controller()
+                .execute_effect(
+                    envelope("receipted-effect"),
+                    RuntimeEffectLocalExecutor::testing(move |_| {
+                        let ran = Arc::clone(&ran);
+                        async move {
+                            ran.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
+                                value: json!({ "ran": true }),
+                            })
+                        }
+                    }),
+                )
+                .await
+                .map(|_| ())
+                .map_err(|error| error.code)
+        }
+    };
+    let executions = || ran.load(std::sync::atomic::Ordering::SeqCst);
+    // Record the receipt fact the sweep selects on: the operation's receipt
+    // key in the session's commit ledger, as a completed operation leaves it.
+    let record_receipt = |scope: &ExecutionScope| {
+        let receipt = lash_core::store::plugin_operation_receipt_storage_key(scope)
+            .expect("receipt storage key");
+        let session_id = session_id.clone();
+        let journal = &journal;
+        let catalog = catalog.clone();
+        async move {
+            match journal {
+                Journal::Sqlite(_) => {
+                    rusqlite::Connection::open(catalog.expect("sqlite catalog"))
+                        .expect("open the catalog")
+                        .execute(
+                            "INSERT INTO runtime_turn_commits (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms) VALUES (?1, ?2, 'witness', '{}', 0)",
+                            rusqlite::params![session_id, receipt],
+                        )
+                        .expect("record the receipt");
+                }
+                Journal::Postgres(pool) => {
+                    sqlx::query(
+                        "INSERT INTO lash_runtime_turn_commits (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms) VALUES ($1, $2, 'witness', '{}', 0)",
+                    )
+                    .bind(session_id)
+                    .bind(receipt)
+                    .execute(pool)
+                    .await
+                    .expect("record the receipt");
+                }
+            }
+        }
+    };
+
+    let caller = ExecutionScope::runtime_operation("caller-supplied-stable-request");
+    let minted = ExecutionScope::runtime_operation(lash_core::store::mint_facade_operation_id(
+        &session_id,
+        lash_core::store::FacadePluginOperation::Task,
+        "sweep_task",
+    ));
+    let caller_key = caller
+        .journal_identity()
+        .expect("journal identity")
+        .key()
+        .to_string();
+    let minted_key = minted
+        .journal_identity()
+        .expect("journal identity")
+        .key()
+        .to_string();
+    for scope in [&caller, &minted] {
+        run(scope.clone()).await.expect("the operation journals");
+        record_receipt(scope).await;
+    }
+    assert_eq!(executions(), 2);
+    run(caller.clone())
+        .await
+        .expect("an identical retry replays before the sweep");
+    assert_eq!(executions(), 2, "the retry replayed the journal");
+
+    let report = store_factory
+        .reclaim_retained_evidence(lash::persistence::RetentionBound {
+            committed_before_epoch_ms: 0,
+        })
+        .await
+        .expect("the sweep commits");
+    assert_eq!(
+        report.retired_effect_scope_count, 1,
+        "the sweep retires the facade-minted scope and only it: {report:?}"
+    );
+    assert_eq!(
+        journal.effects(&caller_key).await,
+        1,
+        "the caller's journal survives"
+    );
+    assert_eq!(
+        journal.fences(&caller_key).await,
+        0,
+        "the caller's scope is not fenced"
+    );
+    assert_eq!(
+        journal.effects(&minted_key).await,
+        0,
+        "the minted scope's rows are gone"
+    );
+    assert_eq!(
+        journal.fences(&minted_key).await,
+        1,
+        "the minted scope is fenced"
+    );
+
+    run(caller.clone())
+        .await
+        .expect("the caller's identical retry replays its receipt after the sweep");
+    assert_eq!(executions(), 2, "the post-sweep retry re-executed nothing");
+    assert_eq!(
+        run(minted.clone()).await,
+        Err(lash_core::RuntimeErrorCode::EffectScopeRetired),
+        "the facade-minted scope is retired"
+    );
+    drop(session);
+    drop(core);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_caller_supplied_scope_survives_the_reclaim_sweep() {
+    caller_supplied_scope_survives_the_reclaim_sweep(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_caller_supplied_scope_survives_the_reclaim_sweep() {
+    caller_supplied_scope_survives_the_reclaim_sweep(true).await;
+}

@@ -210,11 +210,19 @@ pub trait ProcessRegistrar: Send + Sync {
     /// The facade binds the effect host it was built with; a host that wires
     /// a registry and an effect host together by hand binds them the same
     /// way. Binding is idempotent and the registry holds the host weakly, so
-    /// a host that also owns the registry does not leak. A registry whose
-    /// backend can reach the host's fence rows in its own registration
-    /// transaction (the PostgreSQL registry, or the SQLite registry attaching
-    /// the host's journal file reported by
-    /// [`EffectHost::effect_scope_fence_database`]) also clears them there.
+    /// a host that also owns the registry does not leak.
+    ///
+    /// Binding runs in both directions. The registry hands the host a
+    /// [`ProcessRegistryBinding`] through [`EffectHost::bind_process_registry`]:
+    /// the database that holds the process-scope fence when the registry
+    /// keeps it (the SQLite registry file, whose registration transaction
+    /// inserts the process row and deletes the fence row as one commit; the
+    /// PostgreSQL registry does the same inside its one database) and a probe
+    /// answering whether a process id is registered, which a host whose own
+    /// fence is a cache of the registry's (the Restate durable-wait index)
+    /// reads through to. A fence the host keeps where the registry cannot
+    /// reach it is lifted through [`EffectHost::reinstate_effect_scope`]
+    /// after the registration write.
     fn bind_effect_host(&self, effect_host: &Arc<dyn EffectHost>);
 
     /// Attach a durable backend reference to a registered process.
@@ -1166,6 +1174,37 @@ mod concern_isolation_tests {
     }
 }
 
+/// Answers whether a process id is currently registered: the registry's
+/// truth a host reads through to when its own scope fence is only a cache of
+/// the registry's (ADR 0049).
+#[async_trait::async_trait]
+pub trait ProcessRegistrationProbe: Send + Sync {
+    /// Whether `process_id` has a registration row now.
+    async fn process_is_registered(&self, process_id: &str) -> Result<bool, PluginError>;
+}
+
+/// What a registry hands the effect host it binds
+/// ([`EffectHost::bind_process_registry`]).
+#[derive(Clone)]
+pub struct ProcessRegistryBinding {
+    /// The SQLite database file in which the registry keeps the process-scope
+    /// fence beside the process rows, so registration deletes the fence and
+    /// inserts the row in one single-file commit and retirement's fence
+    /// insert is its one commit point. `None` for a registry with no file of
+    /// its own (in memory, or a database the host reaches through its own
+    /// connection).
+    pub fence_database: Option<std::path::PathBuf>,
+    /// The registry's registration truth.
+    pub registrations: Arc<dyn ProcessRegistrationProbe>,
+}
+
+impl std::fmt::Debug for ProcessRegistryBinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProcessRegistryBinding")
+            .field("fence_database", &self.fence_database)
+            .finish_non_exhaustive()
+    }
+}
 /// The effect hosts a process registry lifts scope fences on at registration.
 ///
 /// Shared by every registry backend: [`bind`](Self::bind) is idempotent and
@@ -1179,8 +1218,11 @@ pub struct ProcessScopeFenceHosts {
 }
 
 impl ProcessScopeFenceHosts {
-    /// Bind `effect_host`; binding the same host twice is a no-op.
-    pub fn bind(&self, effect_host: &Arc<dyn EffectHost>) {
+    /// Bind `effect_host` and hand it the registry's `binding`; binding the
+    /// same host twice keeps one entry, and the host's own binding is
+    /// idempotent.
+    pub fn bind(&self, effect_host: &Arc<dyn EffectHost>, binding: ProcessRegistryBinding) {
+        effect_host.bind_process_registry(binding);
         let mut hosts = self
             .hosts
             .lock()

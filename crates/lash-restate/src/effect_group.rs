@@ -769,6 +769,24 @@ impl EffectGroupIndex {
         Ok(Json(response))
     }
 
+    /// How many of this group's children have no settlement yet: the count
+    /// the owning scope's quiescence proof reads (FIG-2499). An absent or
+    /// retired group, or one whose live record is gone, has none.
+    #[handler]
+    async fn unsettled_children(&self, ctx: SharedObjectContext<'_>) -> HandlerResult<Json<usize>> {
+        let unsettled = match load_index_shared(&ctx).await? {
+            Some(record) if !matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) => {
+                record.live.as_ref().map_or(0, |live| {
+                    live.shape
+                        .children
+                        .saturating_sub(live.settled_positions.len())
+                })
+            }
+            _ => 0,
+        };
+        Ok(Json(unsettled))
+    }
+
     #[handler]
     async fn open(
         &self,

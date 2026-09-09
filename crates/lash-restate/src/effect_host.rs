@@ -53,6 +53,7 @@ impl RestateEffectHost {
                 await_event_ingress: RestateAwaitEventIngress {
                     ingress: RestateIngressClient::new(connection),
                 },
+                registrations: std::sync::Mutex::new(None),
             }),
         }
     }
@@ -242,6 +243,14 @@ impl EffectHost for RestateEffectHost {
     async fn reinstate_effect_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
         self.controller.reinstate_await_event_scope(scope).await
     }
+
+    fn bind_process_registry(&self, binding: lash_core::ProcessRegistryBinding) {
+        *self
+            .controller
+            .registrations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(binding.registrations);
+    }
 }
 
 impl RestateEffectHost {
@@ -419,6 +428,20 @@ impl RuntimeEffectController for FencedRestateController {
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         self.refuse_if_retired().await?;
+        // The group is a live child of this scope until its index reports
+        // every child settled: recorded in the scope's index so a
+        // `WhenQuiescent` retirement counts it (FIG-2499).
+        if self.scope.session_id().is_none()
+            && !self
+                .controller
+                .record_scope_group(&self.scope, group.group_key())
+                .await?
+        {
+            let identity = self.scope.journal_identity()?;
+            return Err(
+                lash_core::facade_support::effect_replay_driver::scope_retired(identity.key()),
+            );
+        }
         self.controller.open_effect_group(group).await
     }
 
@@ -599,6 +622,11 @@ async fn await_restate_await_event_via_ingress(
 }
 struct RestateEffectHostController {
     await_event_ingress: RestateAwaitEventIngress,
+    /// The bound process registry's registration truth (ADR 0049): a process
+    /// scope's index says `revoked` only as a cache of the registry's fence,
+    /// so a revoked index on a registered process is stale and is reinstated
+    /// on first use.
+    registrations: std::sync::Mutex<Option<Arc<dyn lash_core::ProcessRegistrationProbe>>>,
 }
 
 fn ingress_group_error(
@@ -636,9 +664,7 @@ impl AwaitEventResolver for RestateEffectHostController {
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
         scope.validate()?;
-        let ingress = &self.await_event_ingress;
-        let index_key = durable_wait_index_key_for_scope(scope);
-        if restate_index_is_revoked_via_ingress(ingress, &index_key).await? {
+        if !self.scope_admits_mint(scope).await? {
             return Err(restate_unknown_or_revoked());
         }
         restate_await_event_key(scope, wait)
@@ -660,7 +686,7 @@ impl AwaitEventResolver for RestateEffectHostController {
         key: &AwaitEventKey,
     ) -> Result<Option<Resolution>, RuntimeError> {
         let ingress = &self.await_event_ingress;
-        ensure_restate_key_access_via_ingress(ingress, key).await?;
+        self.ensure_key_access(key).await?;
         let workflow_key = RestateDurableWaitAddress::for_key(key).workflow_key;
         ingress
             .ingress
@@ -685,7 +711,7 @@ impl AwaitEventResolver for RestateEffectHostController {
         deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
         let ingress = &self.await_event_ingress;
-        ensure_restate_key_access_via_ingress(ingress, key).await?;
+        self.ensure_key_access(key).await?;
         await_restate_await_event_via_ingress(ingress, key, cancel, deadline, None).await
     }
 
@@ -760,7 +786,102 @@ impl AwaitEventResolver for RestateEffectHostController {
             return Ok(false);
         }
         let index_key = durable_wait_index_key_for_scope(scope);
-        restate_index_is_revoked_via_ingress(&self.await_event_ingress, &index_key).await
+        if !restate_index_is_revoked_via_ingress(&self.await_event_ingress, &index_key).await? {
+            return Ok(false);
+        }
+        // The durable store fence is the truth for a process scope: the index
+        // flag is its cache, and a registration that committed while no host
+        // was bound (or whose post-commit reinstate was lost) leaves the
+        // cache stale. Repair it here, on first use (ADR 0049).
+        if let ExecutionScope::Process { process_id } = scope
+            && self.process_is_registered(process_id).await?
+        {
+            update_restate_scope_waits_via_ingress(&self.await_event_ingress, scope, "reinstate")
+                .await?;
+            return Ok(false);
+        }
+        Ok(true)
+    }
+}
+
+impl RestateEffectHostController {
+    /// Whether `scope` still admits a mint: a session scope until its index
+    /// is revoked, a non-session scope until it is retired (read-through
+    /// above, since retirement is a non-session concept).
+    async fn scope_admits_mint(&self, scope: &ExecutionScope) -> Result<bool, RuntimeError> {
+        if scope.session_id().is_some() {
+            let index_key = durable_wait_index_key_for_scope(scope);
+            return Ok(!restate_index_is_revoked_via_ingress(
+                &self.await_event_ingress,
+                &index_key,
+            )
+            .await?);
+        }
+        Ok(!self.await_event_scope_is_retired(scope).await?)
+    }
+
+    /// The key's fence: a session key through its session index, a
+    /// non-session key through the scope read-through above.
+    async fn ensure_key_access(&self, key: &AwaitEventKey) -> Result<(), RuntimeError> {
+        if key.scope.session_id().is_some() {
+            return ensure_restate_key_access_via_ingress(&self.await_event_ingress, key).await;
+        }
+        if !restate_await_event_key_is_valid(key) {
+            return Err(restate_unknown_or_revoked());
+        }
+        if self.await_event_scope_is_retired(&key.scope).await? {
+            return Err(restate_unknown_or_revoked());
+        }
+        Ok(())
+    }
+
+    /// Whether the bound registry has `process_id` registered; `false` with no
+    /// registry bound, so an unbound host trusts its index alone.
+    async fn process_is_registered(&self, process_id: &str) -> Result<bool, RuntimeError> {
+        let probe = self
+            .registrations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let Some(probe) = probe else {
+            return Ok(false);
+        };
+        probe
+            .process_is_registered(process_id)
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RestateAwaitEventRevocationRead,
+                    format!("process registry read-through failed: {error}"),
+                )
+            })
+    }
+
+    /// Record `group_key` as opened under `scope`'s index; `false` when the
+    /// scope is retired.
+    async fn record_scope_group(
+        &self,
+        scope: &ExecutionScope,
+        group_key: &str,
+    ) -> Result<bool, RuntimeError> {
+        let index_key = durable_wait_index_key_for_scope(scope);
+        self.await_event_ingress
+            .ingress
+            .call_object_json::<_, bool>(
+                "LashDurableWaitIndex",
+                &index_key,
+                "record_group",
+                &crate::durable_wait::RestateDurableWaitGroupRequest {
+                    group_key: group_key.to_string(),
+                },
+            )
+            .await
+            .map_err(|err| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                    err.to_string(),
+                )
+            })
     }
 }
 

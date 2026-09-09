@@ -440,3 +440,28 @@ async fn finish_fixture_write<T>(
         }
     }
 }
+
+/// The registry's side of a host binding: no fence file (the in-memory fence
+/// set is the host's), and the managed map as registration truth.
+pub(super) fn registry_binding(
+    managed: &Arc<Mutex<super::types::ManagedProcessMap>>,
+) -> crate::ProcessRegistryBinding {
+    crate::ProcessRegistryBinding {
+        fence_database: None,
+        registrations: Arc::new(ManagedRegistrationProbe {
+            managed: Arc::clone(managed),
+        }),
+    }
+}
+
+/// The in-memory registry's registration truth for a bound effect host.
+struct ManagedRegistrationProbe {
+    managed: Arc<Mutex<super::types::ManagedProcessMap>>,
+}
+
+#[async_trait::async_trait]
+impl crate::ProcessRegistrationProbe for ManagedRegistrationProbe {
+    async fn process_is_registered(&self, process_id: &str) -> Result<bool, PluginError> {
+        Ok(self.managed.lock().await.contains_key(process_id))
+    }
+}

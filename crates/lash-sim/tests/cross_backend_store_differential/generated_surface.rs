@@ -1600,7 +1600,7 @@ fn read_sqlite_surface(
                 })))
             },
         )),
-        await_journal: Some(read_sqlite_await(&effect)),
+        await_journal: Some(read_sqlite_await(&effect, &process)),
     }
 }
 
@@ -1652,7 +1652,10 @@ fn read_sqlite_triggers(connection: &rusqlite::Connection) -> TriggerRows {
     }
 }
 
-fn read_sqlite_await(connection: &rusqlite::Connection) -> Vec<serde_json::Value> {
+fn read_sqlite_await(
+    connection: &rusqlite::Connection,
+    process_registry: &rusqlite::Connection,
+) -> Vec<serde_json::Value> {
     let mut rows = sqlite_simple_json_rows(
         connection,
         "SELECT key_id, scope_json, wait_json, session_id, turn_control, terminal_json, resolved_at_ms FROM await_event_waits ORDER BY key_id",
@@ -1674,13 +1677,29 @@ fn read_sqlite_await(connection: &rusqlite::Connection) -> Vec<serde_json::Value
     rows.extend(sqlite_simple_json_rows(connection, "SELECT session_id FROM await_event_revoked_sessions ORDER BY session_id", |row| {
         Ok(serde_json::json!({"kind": "revoked_session", "session_id": row.get::<_, String>(0)?}))
     }));
-    rows.extend(sqlite_simple_json_rows(
-        connection,
-        "SELECT scope_id FROM effect_scope_retirements ORDER BY scope_id",
-        |row| {
-            Ok(serde_json::json!({"kind": "retired_scope", "scope_id": row.get::<_, String>(0)?}))
-        },
-    ));
+    // A scope fence is one row in one of the two SQLite files — the journal
+    // for runtime operations and unbound process scopes, the registry for a
+    // registered process (ADR 0049) — while PostgreSQL holds them in one
+    // table; the surface reads the union in one order.
+    let mut fences: Vec<String> = Vec::new();
+    for reader in [connection, process_registry] {
+        fences.extend(
+            sqlite_simple_json_rows(
+                reader,
+                "SELECT scope_id FROM effect_scope_retirements ORDER BY scope_id",
+                |row| Ok(serde_json::Value::String(row.get::<_, String>(0)?)),
+            )
+            .into_iter()
+            .map(|value| value.as_str().expect("scope id").to_string()),
+        );
+    }
+    fences.sort();
+    fences.dedup();
+    rows.extend(
+        fences
+            .into_iter()
+            .map(|scope_id| serde_json::json!({"kind": "retired_scope", "scope_id": scope_id})),
+    );
     rows
 }
 

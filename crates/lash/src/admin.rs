@@ -512,10 +512,13 @@ impl SessionAdmin {
         let session_id = self.runtime.observe().session_id().to_string();
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
-        let operation_scope = lash_core::ExecutionScope::runtime_operation(format!(
-            "{session_id}:plugin_command:{name}:{}",
-            lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
-        ));
+        let operation_scope = lash_core::ExecutionScope::runtime_operation(
+            lash_core::store::mint_facade_operation_id(
+                &session_id,
+                lash_core::store::FacadePluginOperation::Command,
+                name,
+            ),
+        );
         let receipt = runtime
             .run_plugin_command(name, args, Some(session_id), operation_scope.clone())
             .await;
@@ -544,9 +547,10 @@ impl SessionAdmin {
         let session_id = self.runtime.observe().session_id().to_string();
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
-        let scope_id = format!(
-            "{session_id}:plugin_task:{name}:{}",
-            lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
+        let scope_id = lash_core::store::mint_facade_operation_id(
+            &session_id,
+            lash_core::store::FacadePluginOperation::Task,
+            name,
         );
         let operation_scope = lash_core::ExecutionScope::runtime_operation(scope_id);
         let scoped_effect_controller = runtime

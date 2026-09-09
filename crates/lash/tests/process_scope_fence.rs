@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 use lash::LashCore;
 use lash::durability::EffectHost;
+use lash::persistence::SessionStoreFactory as _;
+use lash_core::ProcessRegistrar as _;
 use lash_core::{
     AwaitEventWaitIdentity, ExecutionScope, Resolution, RuntimeEffectCommand,
     RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
@@ -53,6 +55,33 @@ fn core_with_triggers(
     registry: Arc<dyn lash_core::ProcessRegistry>,
     trigger_store: Arc<dyn lash_core::TriggerStore>,
 ) -> LashCore {
+    core_with_all(
+        effect_host,
+        registry,
+        trigger_store,
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+    )
+}
+
+fn core_with_store(
+    effect_host: Arc<dyn EffectHost>,
+    registry: Arc<dyn lash_core::ProcessRegistry>,
+    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+) -> LashCore {
+    core_with_all(
+        effect_host,
+        registry,
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+        store_factory,
+    )
+}
+
+fn core_with_all(
+    effect_host: Arc<dyn EffectHost>,
+    registry: Arc<dyn lash_core::ProcessRegistry>,
+    trigger_store: Arc<dyn lash_core::TriggerStore>,
+    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+) -> LashCore {
     let provider = lash_core::testing::TestProvider::builder()
         .complete(|_request| async {
             Ok(lash::provider::LlmResponse {
@@ -75,9 +104,7 @@ fn core_with_triggers(
                 .build()
                 .expect("valid model spec"),
         )
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
+        .store_factory(store_factory)
         .effect_host(effect_host)
         .process_registry(registry)
         .trigger_store(trigger_store)
@@ -117,6 +144,8 @@ struct Backend {
     cold_host: Option<ColdHost>,
     /// The SQLite registry database, for failure injection at the insert.
     sqlite_registry: Option<std::path::PathBuf>,
+    /// The SQLite effect journal, for the two-file layout witnesses.
+    sqlite_journal: Option<std::path::PathBuf>,
     _dir: tempfile::TempDir,
     _postgres: Option<lash_postgres_store::PostgresStorage>,
 }
@@ -136,6 +165,7 @@ async fn backend(kind: Kind) -> Option<Backend> {
             fences: None,
             cold_host: None,
             sqlite_registry: None,
+            sqlite_journal: None,
             _dir: dir,
             _postgres: None,
         },
@@ -151,34 +181,49 @@ async fn backend(kind: Kind) -> Option<Backend> {
             )
             .await
             .expect("SQLite process registry");
-            let fence_path = path.clone();
+            let fence_journal = path.clone();
+            let fence_registry = registry_path.clone();
             let cold_path = path.clone();
+            let cold_registry = registry_path.clone();
+            let cold_sessions = dir.path().join("sessions");
             Backend {
                 host: Arc::new(host),
                 registry: Arc::new(registry),
                 cold_host: Some(Box::new(move || {
                     let path = cold_path.clone();
+                    let registry_path = cold_registry.clone();
+                    let sessions = cold_sessions.clone();
                     Box::pin(async move {
-                        Arc::new(
+                        let host = Arc::new(
                             lash_sqlite_store::SqliteEffectHost::open(&path)
                                 .await
                                 .expect("cold SQLite effect host"),
-                        ) as Arc<dyn EffectHost>
+                        ) as Arc<dyn EffectHost>;
+                        // A registered process's fence lives in the registry
+                        // file; a cold host reads it once the registry binds
+                        // it, which `LashCore::build` does on every open.
+                        let registry = lash_sqlite_store::SqliteProcessRegistry::open(
+                            &registry_path,
+                            sessions,
+                        )
+                        .await
+                        .expect("cold SQLite process registry");
+                        registry.bind_effect_host(&host);
+                        host
                     })
                 })),
                 sqlite_registry: Some(registry_path),
+                sqlite_journal: Some(path),
                 fences: Some(Box::new(move |scope_id: &str| {
-                    let path = fence_path.clone();
+                    let journal = fence_journal.clone();
+                    let registry = fence_registry.clone();
                     let scope_id = scope_id.to_string();
                     Box::pin(async move {
-                        rusqlite::Connection::open(&path)
-                            .expect("open the effect journal")
-                            .query_row(
-                                "SELECT COUNT(*) FROM effect_scope_retirements WHERE scope_id = ?1",
-                                [scope_id],
-                                |row| row.get(0),
-                            )
-                            .expect("count fences")
+                        // The fence is one row in one of the two files:
+                        // count both so the witness reads the layout, not
+                        // an assumption about which file holds it.
+                        sqlite_fence_rows(&journal, &scope_id)
+                            + sqlite_fence_rows(&registry, &scope_id)
                     })
                 })),
                 _dir: dir,
@@ -217,6 +262,7 @@ async fn backend(kind: Kind) -> Option<Backend> {
                     Box::pin(async move { Arc::new(storage.effect_host()) as Arc<dyn EffectHost> })
                 })),
                 sqlite_registry: None,
+                sqlite_journal: None,
                 fences: Some(Box::new(move |scope_id: &str| {
                     let pool = pool.clone();
                     let scope_id = scope_id.to_string();
@@ -897,4 +943,298 @@ async fn sqlite_registration_reinstates_every_bound_host() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_registration_reinstates_every_bound_host() {
     registration_reinstates_every_bound_host(Kind::Postgres).await;
+}
+
+fn sqlite_fence_rows(path: &std::path::Path, scope_id: &str) -> i64 {
+    sqlite_count(
+        path,
+        "SELECT COUNT(*) FROM effect_scope_retirements WHERE scope_id = ?1",
+        scope_id,
+    )
+}
+
+fn sqlite_count(path: &std::path::Path, sql: &str, argument: &str) -> i64 {
+    rusqlite::Connection::open(path)
+        .expect("open the SQLite file")
+        .query_row(sql, [argument], |row| row.get(0))
+        .expect("count rows")
+}
+
+fn sqlite_execute(path: &std::path::Path, sql: &str, argument: &str) {
+    rusqlite::Connection::open(path)
+        .expect("open the SQLite file")
+        .execute(sql, [argument])
+        .expect("execute");
+}
+
+fn scope_key(scope: &ExecutionScope) -> String {
+    scope
+        .journal_identity()
+        .expect("process journal identity")
+        .key()
+        .to_string()
+}
+
+/// Runs `statements` against `path` inside one `BEGIN IMMEDIATE` transaction
+/// in a child process that kills itself with SIGKILL right after the last
+/// statement: with `commit` the transaction is durable when the process dies,
+/// without it the transaction is lost with the process. A real crash cut, at
+/// the granularity SQLite's WAL commits — one file (ADR 0049).
+fn crash_after(path: &std::path::Path, statements: &[String], commit: bool) {
+    use std::os::unix::process::ExitStatusExt;
+    let script = "import sqlite3, sys, os, signal\n\
+                  c = sqlite3.connect(sys.argv[1], isolation_level=None)\n\
+                  c.execute('BEGIN IMMEDIATE')\n\
+                  for statement in sys.argv[3:]:\n\
+                  \x20   c.execute(statement)\n\
+                  if sys.argv[2] == 'commit':\n\
+                  \x20   c.execute('COMMIT')\n\
+                  os.kill(os.getpid(), signal.SIGKILL)\n";
+    let status = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .arg(path)
+        .arg(if commit { "commit" } else { "cut" })
+        .args(statements)
+        .status()
+        .expect("spawn the crashing writer");
+    assert_eq!(status.signal(), Some(9), "the writer died by SIGKILL");
+}
+
+/// A pruned process id's fence and its registry row live in the same file,
+/// so registration — the fence delete and the process insert — is one
+/// single-file transaction. A crash cut after that transaction leaves the id
+/// registered and unfenced; a cut before it leaves the id fenced and
+/// unregistered; the journal file takes no part, so "unfenced and
+/// unregistered" is not a state a cut can produce (FIG-2499 fix round 3,
+/// ruling 1).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_registration_crash_cut_leaves_the_id_fenced_or_registered_never_neither() {
+    let backend = backend(Kind::Sqlite).await.expect("SQLite backend");
+    let registry_path = backend.sqlite_registry.clone().expect("registry file");
+    let journal_path = backend.sqlite_journal.clone().expect("journal file");
+    let core = core_with(Arc::clone(&backend.host), Arc::clone(&backend.registry));
+    let process_id = "crash-cut";
+    let scope = ExecutionScope::process(process_id);
+    let key = scope_key(&scope);
+    register_and_complete(backend.registry.as_ref(), process_id).await;
+    admission(backend.host.as_ref(), &scope, "first-incarnation")
+        .await
+        .expect("the first incarnation journals");
+    let report = core
+        .processes()
+        .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune");
+    assert_eq!(report.pruned_processes, 1);
+    assert_eq!(
+        sqlite_fence_rows(&registry_path, &key),
+        1,
+        "the fence of a process under a bound registry is a registry-file row"
+    );
+    assert_eq!(
+        sqlite_fence_rows(&journal_path, &key),
+        0,
+        "the journal file holds no copy of it: there is nothing for a journal-only commit to lose"
+    );
+
+    // Capture an authentic registration row, then put the pre-registration
+    // state back so the crashing writer can replay the registration itself.
+    backend
+        .registry
+        .register_process(external_registration(process_id))
+        .await
+        .expect("register the pruned id once to capture its row");
+    let (columns, values) = {
+        let conn = rusqlite::Connection::open(&registry_path).expect("open the registry");
+        let columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(processes)")
+            .expect("describe processes")
+            .query_map([], |row| row.get(1))
+            .expect("columns")
+            .collect::<Result<_, _>>()
+            .expect("column names");
+        let values: Vec<String> = columns
+            .iter()
+            .map(|column| {
+                conn.query_row(
+                    &format!("SELECT quote({column}) FROM processes WHERE process_id = ?1"),
+                    [process_id],
+                    |row| row.get(0),
+                )
+                .expect("quoted value")
+            })
+            .collect();
+        (columns, values)
+    };
+    let registration = vec![
+        format!("DELETE FROM effect_scope_retirements WHERE scope_id = '{key}'"),
+        format!(
+            "INSERT INTO processes ({}) VALUES ({})",
+            columns.join(", "),
+            values.join(", ")
+        ),
+    ];
+    let reset = || {
+        sqlite_execute(
+            &registry_path,
+            "DELETE FROM processes WHERE process_id = ?1",
+            process_id,
+        );
+        sqlite_execute(
+            &registry_path,
+            "INSERT OR IGNORE INTO effect_scope_retirements (scope_id, retired_at_ms) VALUES (?1, 0)",
+            &key,
+        );
+    };
+    let registered = || {
+        sqlite_count(
+            &registry_path,
+            "SELECT COUNT(*) FROM processes WHERE process_id = ?1",
+            process_id,
+        )
+    };
+    drop(core);
+
+    // Cut after the commit: registered and unfenced, and the cold host runs
+    // the new incarnation's work.
+    reset();
+    crash_after(&registry_path, &registration, true);
+    assert_eq!(registered(), 1);
+    assert_eq!(sqlite_fence_rows(&registry_path, &key), 0);
+    assert_eq!(sqlite_fence_rows(&journal_path, &key), 0);
+    let cold = (backend.cold_host.as_ref().expect("durable backend"))().await;
+    admission(cold.as_ref(), &scope, "after-committed-cut")
+        .await
+        .expect("a registered, unfenced id is admitted after the cut");
+    cold.await_event_key(
+        &scope,
+        AwaitEventWaitIdentity::tool_completion("after-committed-cut"),
+    )
+    .await
+    .expect("a registered, unfenced id mints after the cut");
+    drop(cold);
+
+    // Cut before the commit: fenced and unregistered, and the cold host admits
+    // nothing under the id.
+    reset();
+    crash_after(&registry_path, &registration, false);
+    assert_eq!(registered(), 0);
+    assert_eq!(sqlite_fence_rows(&registry_path, &key), 1);
+    assert_eq!(sqlite_fence_rows(&journal_path, &key), 0);
+    let cold = (backend.cold_host.as_ref().expect("durable backend"))().await;
+    assert_eq!(
+        admission(cold.as_ref(), &scope, "after-lost-cut").await,
+        Err(lash_core::RuntimeErrorCode::EffectScopeRetired),
+        "a fenced, unregistered id admits nothing after the cut"
+    );
+    let minted = cold
+        .await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion("after-lost-cut"),
+        )
+        .await
+        .expect_err("a fenced, unregistered id mints nothing after the cut");
+    assert_eq!(minted.code.as_str(), "await_event_unknown_or_revoked");
+}
+
+/// Retirement commits the fence into the registry file first; the journal
+/// purge is a second transaction on the journal file. A crash between the
+/// two leaves a fenced scope with stale journal rows: a cold host refuses
+/// admission under it and repairs the rows when the registry binds, and the
+/// reclaim sweep purges them too (FIG-2499 fix round 3, ruling 1).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_fence_committed_before_a_lost_journal_purge_refuses_cold_admission_and_is_purged() {
+    let backend = backend(Kind::Sqlite).await.expect("SQLite backend");
+    let registry_path = backend.sqlite_registry.clone().expect("registry file");
+    let journal_path = backend.sqlite_journal.clone().expect("journal file");
+    let factory = Arc::new(
+        lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
+            backend._dir.path().join("catalog"),
+            registry_path.clone(),
+        ),
+    );
+    let core = core_with_store(
+        Arc::clone(&backend.host),
+        Arc::clone(&backend.registry),
+        Arc::clone(&factory) as Arc<dyn lash::persistence::SessionStoreFactory>,
+    );
+    // The catalog the sweep opens exists once a session has been created.
+    let session = core
+        .session("purge-lost-session")
+        .open()
+        .await
+        .expect("session");
+
+    let journal_rows = |key: &str| {
+        sqlite_count(
+            &journal_path,
+            "SELECT COUNT(*) FROM runtime_effect_replay WHERE scope_id = ?1",
+            key,
+        )
+    };
+    let mut keys = Vec::new();
+    for process_id in ["purge-lost-swept", "purge-lost-bound"] {
+        let scope = ExecutionScope::process(process_id);
+        register_and_complete(backend.registry.as_ref(), process_id).await;
+        admission(backend.host.as_ref(), &scope, "journaled-before-retirement")
+            .await
+            .expect("the process journals");
+        let key = scope_key(&scope);
+        assert_eq!(journal_rows(&key), 1);
+        // The prune committed and the retirement's first transaction — the
+        // fence in the registry file — committed; the journal purge was lost.
+        sqlite_execute(
+            &registry_path,
+            "DELETE FROM processes WHERE process_id = ?1",
+            process_id,
+        );
+        sqlite_execute(
+            &registry_path,
+            "INSERT INTO effect_scope_retirements (scope_id, retired_at_ms) VALUES (?1, 0)",
+            &key,
+        );
+        assert_eq!(journal_rows(&key), 1, "the stale rows survived the cut");
+        keys.push((scope, key));
+    }
+    drop(session);
+    drop(core);
+
+    // The sweep purges the rows under the committed fence.
+    let (_, swept_key) = &keys[0];
+    let report = factory
+        .reclaim_retained_evidence(lash::persistence::RetentionBound {
+            committed_before_epoch_ms: 0,
+        })
+        .await
+        .expect("the sweep commits");
+    assert_eq!(
+        journal_rows(swept_key),
+        0,
+        "the sweep purged the rows under the fenced scope: {report:?}"
+    );
+    assert_eq!(sqlite_fence_rows(&registry_path, swept_key), 1);
+
+    // A cold host refuses the fenced scope and repairs its rows at bind.
+    let (bound_scope, bound_key) = &keys[1];
+    let cold = (backend.cold_host.as_ref().expect("durable backend"))().await;
+    assert_eq!(
+        admission(cold.as_ref(), bound_scope, "after-lost-purge").await,
+        Err(lash_core::RuntimeErrorCode::EffectScopeRetired),
+        "the committed fence refuses admission whatever the journal still holds"
+    );
+    let minted = cold
+        .await_event_key(
+            bound_scope,
+            AwaitEventWaitIdentity::tool_completion("after-lost-purge"),
+        )
+        .await
+        .expect_err("the committed fence refuses the mint");
+    assert_eq!(minted.code.as_str(), "await_event_unknown_or_revoked");
+    assert_eq!(
+        journal_rows(bound_key),
+        0,
+        "binding the registry purged the stale rows"
+    );
+    assert_eq!(sqlite_fence_rows(&registry_path, bound_key), 1);
 }

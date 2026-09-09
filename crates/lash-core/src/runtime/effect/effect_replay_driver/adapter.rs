@@ -38,12 +38,15 @@ pub trait StoreReplayAdapter: Send + Sync {
 /// controllers. Gets [`EffectHost`] for free.
 #[doc(hidden)]
 pub trait StoreReplayHost: StoreReplayAdapter {
-    /// See [`EffectHost::effect_scope_fence_database`]: the file a process
-    /// registry attaches to clear this host's fence rows in its own
-    /// registration transaction, when the fence lives in a file of its own.
+    /// See [`EffectHost::effect_scope_fence_database`]: the journal file a
+    /// session-store factory attaches for the retention sweep, when the
+    /// journal lives in a file of its own.
     fn effect_scope_fence_database(&self) -> Option<std::path::PathBuf> {
         None
     }
+
+    /// See [`EffectHost::bind_process_registry`].
+    fn bind_process_registry(&self, _binding: crate::ProcessRegistryBinding) {}
 }
 
 /// Marks a store's scoped controller and names the scope it executes against.
@@ -226,6 +229,10 @@ impl<T: StoreReplayHost> EffectHost for T {
 
     fn effect_scope_fence_database(&self) -> Option<std::path::PathBuf> {
         StoreReplayHost::effect_scope_fence_database(self)
+    }
+
+    fn bind_process_registry(&self, binding: crate::ProcessRegistryBinding) {
+        StoreReplayHost::bind_process_registry(self, binding);
     }
 }
 

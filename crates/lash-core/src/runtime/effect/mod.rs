@@ -28,9 +28,9 @@ pub use executor::{
     QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
     ResolveOutcome, RuntimeAwaitEventOptions, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectFailureDisposition, RuntimeEffectLocalExecutor,
-    RuntimeSleepOptions, ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink,
-    ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution, TurnControlBinding,
-    TurnControlParticipation,
+    RuntimeSleepOptions, ScopeBoundController, ScopedEffectController, SegmentProgress,
+    ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
+    TurnControlBinding, TurnControlParticipation,
 };
 pub use group::{
     EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserPolicy,

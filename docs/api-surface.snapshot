@@ -1319,6 +1319,7 @@ lash::durability::DurableProcessWorkerConfig::with_turn_phase_probe_slot
 lash::durability::DurableProcessWorkerConfig::with_worker_slot_supplier
 lash::durability::EffectHost
 lash::durability::EffectHost::await_event_resolver
+lash::durability::EffectHost::bind_process_registry
 lash::durability::EffectHost::effect_scope_fence_database
 lash::durability::EffectHost::prepare_tool_intent
 lash::durability::EffectHost::record_tool_intent_outcome
@@ -8555,6 +8556,7 @@ lash::runtime::RuntimeTurnPhaseProbeSlot::set_for_session
 lash::runtime::ScopedEffectController
 lash::runtime::ScopedEffectController::borrowed
 lash::runtime::ScopedEffectController::controller
+lash::runtime::ScopedEffectController::owned
 lash::runtime::ScopedEffectController::scope_id
 lash::runtime::ScopedEffectController::shared
 lash::runtime::ScopedEffectController::turn_id

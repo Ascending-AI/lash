@@ -5,14 +5,30 @@ use crate::*;
 /// Schema name under which the bound effect journal is attached for a sweep.
 const EFFECT_JOURNAL_SCHEMA: &str = "effect_journal";
 
+/// The sweep's outcome, boxed on the failure side: `MaintenanceFailure`
+/// carries the partial report beside the stop, so the `Err` arm is several
+/// times the size of the report alone (`clippy::result_large_err`); the
+/// factory's trait method, whose signature the trait fixes, unboxes it.
+pub(crate) type ReclaimResult = Result<
+    lash_core::store::RetentionReport,
+    Box<lash_core::MaintenanceFailure<lash_core::store::RetentionReport>>,
+>;
+
 pub(crate) async fn reclaim(
     factory: &SqliteSessionStoreFactory,
     bound: lash_core::store::RetentionBound,
-) -> lash_core::MaintenanceResult<lash_core::store::RetentionReport> {
+) -> ReclaimResult {
+    let failed_before_any_work = |error: lash_core::StoreError| {
+        Box::new(lash_core::MaintenanceFailure::failed_before_any_work(error))
+    };
+    // Attach order is lock order under `BEGIN IMMEDIATE`: the catalog, then
+    // the journal, then the registry — the order a journal connection with
+    // the registry attached takes its own locks in, so the two never wait on
+    // each other in a cycle.
     let store = factory
-        .open_catalog_for_maintenance("evidence retention")
+        .open_catalog_for_maintenance_without_registry("evidence retention")
         .await
-        .map_err(lash_core::MaintenanceFailure::failed_before_any_work)?;
+        .map_err(failed_before_any_work)?;
     let effect_journal = factory
         .effect_journal_path
         .lock()
@@ -29,25 +45,45 @@ pub(crate) async fn reclaim(
                 )
             })
             .await
+            .map_err(|error| failed_before_any_work(sqlite_error(error)))?;
+        true
+    } else {
+        false
+    };
+    let registry_attached = if let Some(path) = factory.process_registry_path.as_deref() {
+        lifecycle::attach_process_registry(&store.conn, path, factory.options.connection_policy)
+            .await
             .map_err(|error| {
-                lash_core::MaintenanceFailure::failed_before_any_work(sqlite_error(error))
+                failed_before_any_work(lash_core::StoreError::Backend(format!(
+                    "evidence retention aborted: process registry {} could not be attached: {error}",
+                    path.display()
+                )))
             })?;
         true
     } else {
         false
+    };
+    let fences = if registry_attached {
+        crate::scope_fence::FenceLocations::attached(EFFECT_JOURNAL_SCHEMA)
+    } else {
+        crate::scope_fence::FenceLocations::journal_only_at(EFFECT_JOURNAL_SCHEMA)
     };
     let cutoff = clamp_epoch_ms(bound.committed_before_epoch_ms);
     let now_ms = factory.clock.timestamp_ms();
     store
         .conn
         .write(move |tx| {
-            // Phase 0: deferred scope retirement (ADR 0049 / ADR 0067). A
-            // session-free runtime-operation scope whose operation recorded
-            // its receipt is retired once nothing is live under it, under
-            // the same write fence the receipt-time retirement takes. The
-            // receipts of scopes that are still live are kept past the
-            // horizon below: they are the proof a later sweep needs.
+            // Phase 0: deferred scope retirement (ADR 0049 / ADR 0067). First
+            // the cleanup a process-scope retirement may still owe: rows under
+            // a scope the registry file fences are garbage a lost purge left.
+            // Then a session-free runtime-operation scope the facade minted,
+            // whose operation recorded its receipt, is retired once nothing
+            // is live under it, under the same write fence the receipt-time
+            // retirement takes. The receipts of scopes that are still live
+            // are kept past the horizon below: they are the proof a later
+            // sweep needs.
             let (retired_effect_scope_count, live_scope_receipt_keys) = if journal_attached {
+                effect_replay::purge_rows_under_fenced_scopes(tx, EFFECT_JOURNAL_SCHEMA, fences)?;
                 retire_quiescent_operation_scopes(tx, now_ms)?
             } else {
                 (0, Vec::new())
@@ -105,13 +141,16 @@ pub(crate) async fn reclaim(
             })
         })
         .await
-        .map_err(|error| lash_core::MaintenanceFailure::failed_before_any_work(sqlite_error(error)))
+        .map_err(|error| failed_before_any_work(sqlite_error(error)))
 }
 
 /// Retire every session-free runtime-operation scope in the attached journal
-/// whose operation has recorded its receipt in this catalog and that is
-/// quiescent now. Returns the number retired and the receipt keys of the
-/// scopes that are still live, which the receipt sweep must keep.
+/// that the facade minted (`is_facade_minted_operation_id`), whose operation
+/// has recorded its receipt in this catalog, and that is quiescent now.
+/// Caller-supplied scopes are never the sweep's to retire: a host that names
+/// its own operation id may retry it after a lost response and expects the
+/// receipt to replay (ADR 0067). Returns the number retired and the receipt
+/// keys of the scopes that are still live, which the receipt sweep must keep.
 fn retire_quiescent_operation_scopes(
     tx: &rusqlite::Transaction<'_>,
     now_ms: u64,
@@ -144,10 +183,13 @@ fn retire_quiescent_operation_scopes(
     scopes.dedup();
     let mut retired = 0;
     let mut live_receipt_keys = Vec::new();
-    for scope in scopes
-        .into_iter()
-        .filter(|scope| matches!(scope, lash_core::ExecutionScope::RuntimeOperation { .. }))
-    {
+    for scope in scopes.into_iter().filter(|scope| {
+        matches!(
+            scope,
+            lash_core::ExecutionScope::RuntimeOperation { operation_id }
+                if lash_core::store::is_facade_minted_operation_id(operation_id)
+        )
+    }) {
         let Ok(receipt_key) = lash_core::store::plugin_operation_receipt_storage_key(&scope) else {
             continue;
         };
@@ -191,6 +233,26 @@ impl SqliteSessionStoreFactory {
         &self,
         operation: &str,
     ) -> Result<Store, lash_core::StoreError> {
+        self.open_catalog_for_maintenance_configured(operation, true)
+            .await
+    }
+
+    /// Like [`Self::open_catalog_for_maintenance`] with the configured process
+    /// registry left for the caller to attach after the files it must lock
+    /// ahead of it.
+    pub(crate) async fn open_catalog_for_maintenance_without_registry(
+        &self,
+        operation: &str,
+    ) -> Result<Store, lash_core::StoreError> {
+        self.open_catalog_for_maintenance_configured(operation, false)
+            .await
+    }
+
+    async fn open_catalog_for_maintenance_configured(
+        &self,
+        operation: &str,
+        attach_process_registry: bool,
+    ) -> Result<Store, lash_core::StoreError> {
         let path = self.catalog_path();
         if !path.exists() {
             return Err(lash_core::StoreError::Backend(format!(
@@ -202,7 +264,9 @@ impl SqliteSessionStoreFactory {
             &path,
             self.options,
             Arc::clone(&self.clock),
-            self.process_registry_path.as_deref(),
+            self.process_registry_path
+                .as_deref()
+                .filter(|_| attach_process_registry),
             #[cfg(feature = "testing")]
             self.fault_injector.clone(),
         )

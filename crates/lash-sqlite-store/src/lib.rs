@@ -118,6 +118,7 @@ mod process_registry_change;
 mod process_registry_completion;
 mod queued_work;
 mod schema;
+mod scope_fence;
 mod session_meta;
 #[cfg(any(test, feature = "testing"))]
 mod test_support;
@@ -196,10 +197,10 @@ pub struct SqliteProcessRegistry {
     wake_delivery_config: lash_core::WakeDeliveryConfig,
     /// Effect hosts whose scope fence registration lifts (ADR 0049).
     scope_fence_hosts: lash_core::ProcessScopeFenceHosts,
-    /// The bound host's journal file attached to the registry connection so a
-    /// registration clears the fence row in its own transaction; shared by
-    /// every clock-rebound copy because they share the connection.
-    effect_journal: Arc<process_registry::EffectJournalAttachment>,
+    /// This registry's file: bound effect hosts attach it and keep their
+    /// process-scope fences in it, beside the process rows (ADR 0049).
+    /// `None` for an in-memory registry.
+    path: Option<PathBuf>,
 }
 
 fn sqlite_error(err: rusqlite::Error) -> StoreError {
@@ -816,7 +817,9 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         &self,
         bound: lash_core::store::RetentionBound,
     ) -> lash_core::MaintenanceResult<lash_core::store::RetentionReport> {
-        crate::retention::reclaim(self, bound).await
+        crate::retention::reclaim(self, bound)
+            .await
+            .map_err(|failure| *failure)
     }
 
     async fn create_store(

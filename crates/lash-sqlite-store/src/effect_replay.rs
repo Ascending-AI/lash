@@ -31,7 +31,8 @@ use lash_core::{
 };
 
 use super::*;
-use crate::await_event::{SqliteAwaitEventBackend, scope_is_retired, sqlite_await_events};
+use crate::await_event::{SqliteAwaitEventBackend, sqlite_await_events};
+use crate::scope_fence::{FenceLocations, JOURNAL_SCHEMA, RegistryAttachment};
 
 const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::sqlite();
 
@@ -57,9 +58,12 @@ pub struct SqliteEffectReplayOptions {
 #[derive(Clone)]
 pub struct SqliteEffectHost {
     inner: Arc<SqliteEffectReplay>,
-    /// The journal file, when the host is file-backed: a process registry
-    /// attaches it to clear the scope fence inside its registration write.
+    /// The journal file, when the host is file-backed: a session-store
+    /// factory attaches it for the retention sweep.
     fence_database: Option<PathBuf>,
+    /// The bound process registry's file, attached to the journal connection
+    /// so process-scope fences live beside the process rows (ADR 0049).
+    registry: Arc<RegistryAttachment>,
 }
 
 /// Scoped SQLite-backed runtime effect controller.
@@ -83,6 +87,12 @@ impl effect_replay_driver::StoreReplayAdapter for SqliteEffectHost {
 impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
     fn effect_scope_fence_database(&self) -> Option<PathBuf> {
         self.fence_database.clone()
+    }
+
+    fn bind_process_registry(&self, binding: lash_core::ProcessRegistryBinding) {
+        if let Some(path) = binding.fence_database {
+            self.registry.request(path);
+        }
     }
 }
 
@@ -130,9 +140,18 @@ impl SqliteEffectHost {
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         validate_effect_host_path(path)?;
+        let registry = Arc::new(RegistryAttachment::default());
         Ok(Self {
-            inner: open_effect_replay_driver(path, StoreBacking::File, options, clock).await?,
+            inner: open_effect_replay_driver(
+                path,
+                StoreBacking::File,
+                options,
+                clock,
+                Arc::clone(&registry),
+            )
+            .await?,
             fence_database: Some(path.to_path_buf()),
+            registry,
         })
     }
 
@@ -209,7 +228,14 @@ impl SqliteRuntimeEffectController {
     ) -> tokio_rusqlite::Result<Self> {
         validate_effect_host_path(path)?;
         Ok(Self {
-            inner: open_effect_replay_driver(path, StoreBacking::File, options, clock).await?,
+            inner: open_effect_replay_driver(
+                path,
+                StoreBacking::File,
+                options,
+                clock,
+                Arc::new(RegistryAttachment::default()),
+            )
+            .await?,
             scope,
         })
     }
@@ -280,6 +306,7 @@ async fn open_effect_replay_driver(
     backing: StoreBacking,
     options: SqliteEffectReplayOptions,
     clock: Arc<dyn lash_core::Clock>,
+    registry: Arc<RegistryAttachment>,
 ) -> tokio_rusqlite::Result<Arc<SqliteEffectReplay>> {
     let conn = SqliteConnection::open(path).await?;
     ensure_versioned_schema(&conn, SqliteDatabase::EffectReplay).await?;
@@ -299,6 +326,7 @@ async fn open_effect_replay_driver(
         clock,
         signing_secret,
         CompletionKeys::Issued,
+        registry,
     )))
 }
 
@@ -325,6 +353,7 @@ async fn open_effect_replay_memory_driver(
         clock,
         signing_secret,
         CompletionKeys::Unsupported,
+        Arc::new(RegistryAttachment::default()),
     )))
 }
 
@@ -334,13 +363,20 @@ fn build_effect_replay_driver(
     clock: Arc<dyn lash_core::Clock>,
     signing_secret: Vec<u8>,
     completion_keys: CompletionKeys,
+    registry: Arc<RegistryAttachment>,
 ) -> SqliteEffectReplay {
-    let await_events = sqlite_await_events(conn.clone(), signing_secret, Arc::clone(&clock));
+    let await_events = sqlite_await_events(
+        conn.clone(),
+        Arc::clone(&registry),
+        signing_secret,
+        Arc::clone(&clock),
+    );
     StoreEffectReplayDriver::new(
         SqliteEffectReplayRowStore {
             completion_keys,
             conn,
             clock: Arc::clone(&clock),
+            registry,
         },
         await_events,
         clock,
@@ -360,6 +396,17 @@ pub struct SqliteEffectReplayRowStore {
     /// SQLite's authoritative lease clock, shared with the driver's sleep clock
     /// because the store and its host share one clock domain.
     clock: Arc<dyn lash_core::Clock>,
+    /// The bound process registry whose file holds process-scope fences.
+    registry: Arc<RegistryAttachment>,
+}
+
+impl SqliteEffectReplayRowStore {
+    async fn fence_locations(&self) -> Result<FenceLocations, RuntimeEffectControllerError> {
+        self.registry
+            .ensure_attached(&self.conn)
+            .await
+            .map_err(effect_sqlite_error)
+    }
 }
 
 impl effect_replay_driver::sealed::EffectReplayBackend for SqliteEffectReplayRowStore {}
@@ -383,12 +430,14 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
     ) -> Result<EffectClaimObservation, RuntimeEffectControllerError> {
         let request = request.clone();
         let clock = Arc::clone(&self.clock);
+        let fences = self.fence_locations().await?;
         self.conn
             .write(move |tx| {
                 // The retirement fence is read under the same `BEGIN IMMEDIATE`
-                // lock retirement writes it under, so a claim can never slip
-                // between a scope's tombstone and its row deletions.
-                if scope_is_retired(tx, &request.scope_id)? {
+                // lock retirement writes it under (on every attached file), so
+                // a claim can never slip between a scope's tombstone and its
+                // row deletions.
+                if fences.is_fenced(tx, &request.scope_id)? {
                     return Ok(EffectClaimObservation::ScopeRetired);
                 }
                 let row = select_effect_row(tx, &request.scope_id, &request.replay_key)?;
@@ -553,9 +602,10 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
     ) -> Result<EffectGroupRecord, RuntimeEffectControllerError> {
         let record = record.clone();
         let scope_id = record.scope_id.clone();
+        let fences = self.fence_locations().await?;
         self.conn
             .write(move |tx| {
-                if scope_is_retired(tx, &record.scope_id)? {
+                if fences.is_fenced(tx, &record.scope_id)? {
                     return Ok(None);
                 }
                 // `DO NOTHING` rather than an upsert: reopening a group must not
@@ -746,9 +796,15 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
     /// always reported and what a caller prunes against.
     ///
     /// A scope-exact retirement (N4) additionally deletes the scope's
-    /// await-event promise rows and writes its permanent retirement tombstone
-    /// in the same `BEGIN IMMEDIATE` transaction, so the fence and the deletions
-    /// become visible together.
+    /// await-event promise rows and writes its permanent retirement tombstone.
+    /// A fence kept in this file is written in the same `BEGIN IMMEDIATE`
+    /// transaction as the deletions, so both become visible together. A
+    /// process-scope fence kept in the bound registry's file is the one
+    /// commit point of the retirement: its insert commits first, under the
+    /// quiescence proof read on the same locks, and the journal purge that
+    /// follows is an idempotent cleanup a crash may lose — the fenced scope
+    /// then admits nothing and the next bind or retention sweep purges its
+    /// rows (ADR 0049).
     async fn retire_journal(
         &self,
         retirement: &EffectJournalRetirement,
@@ -759,47 +815,98 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .map(|identity| identity.key().to_string());
         let retirement = retirement.clone();
         let now_ms = self.clock.timestamp_ms();
-        let deleted = self
-            .conn
-            .write(move |tx| match retirement {
-                EffectJournalRetirement::Session { session_id } => {
-                    let deleted = tx.execute(
-                        "DELETE FROM runtime_effect_replay WHERE session_id = ?1",
-                        params![session_id],
-                    )?;
-                    tx.execute(
-                        "DELETE FROM runtime_effect_group WHERE session_id = ?1",
-                        params![session_id],
-                    )?;
-                    Ok(Some(deleted))
-                }
-                EffectJournalRetirement::Process { .. }
-                | EffectJournalRetirement::RuntimeOperation { .. } => {
-                    let scope = retirement
-                        .retired_scope()
-                        .expect("scope-exact retirements name their scope");
-                    let identity = scope
-                        .journal_identity()
-                        .expect("process and runtime-operation scopes always form durable journal identities");
-                    let scope_json = serde_json::to_string(&scope)
-                        .expect("execution scopes serialize infallibly");
-                    // The quiescence proof is read under the same lock the
-                    // fence is written under, so no child can start between
-                    // the proof and the deletions.
-                    if retirement.gate() == Some(EffectRetirementGate::WhenQuiescent)
-                        && !scope_is_quiescent(tx, "main", identity.key(), &scope_json)?
+        let retirement_error = |error: rusqlite::Error| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                error.to_string(),
+            )
+        };
+        let scope = match &retirement {
+            EffectJournalRetirement::Session { session_id } => {
+                let session_id = session_id.clone();
+                return self
+                    .conn
+                    .write(move |tx| {
+                        let deleted = tx.execute(
+                            "DELETE FROM runtime_effect_replay WHERE session_id = ?1",
+                            params![session_id],
+                        )?;
+                        tx.execute(
+                            "DELETE FROM runtime_effect_group WHERE session_id = ?1",
+                            params![session_id],
+                        )?;
+                        Ok(deleted)
+                    })
+                    .await
+                    .map_err(retirement_error);
+            }
+            EffectJournalRetirement::Process { .. }
+            | EffectJournalRetirement::RuntimeOperation { .. } => retirement
+                .retired_scope()
+                .expect("scope-exact retirements name their scope"),
+        };
+        let identity = scope
+            .journal_identity()
+            .expect("process and runtime-operation scopes always form durable journal identities");
+        let scope_id = identity.key().to_string();
+        let scope_json =
+            serde_json::to_string(&scope).expect("execution scopes serialize infallibly");
+        let when_quiescent = retirement.gate() == Some(EffectRetirementGate::WhenQuiescent);
+        let fences = self
+            .registry
+            .ensure_attached(&self.conn)
+            .await
+            .map_err(retirement_error)?;
+        let fence_schema = fences.fence_schema_for(&scope);
+        let two_commits = fences.fence_is_in_registry_file(&scope);
+        // Commit point: the quiescence proof and the fence insert, under the
+        // `BEGIN IMMEDIATE` lock every claim reads the fence under. When the
+        // fence shares the journal file, the purge rides the same commit.
+        let fenced = {
+            let scope_id = scope_id.clone();
+            let scope_json = scope_json.clone();
+            self.conn
+                .write(move |tx| {
+                    if when_quiescent
+                        && !scope_is_quiescent(tx, JOURNAL_SCHEMA, &scope_id, &scope_json)?
                     {
                         return Ok(None);
                     }
-                    Ok(Some(retire_scope_rows(
+                    insert_scope_fence(tx, fence_schema, &scope_id, now_ms)?;
+                    if two_commits {
+                        return Ok(Some(None));
+                    }
+                    Ok(Some(Some(delete_scope_rows(
                         tx,
-                        "main",
-                        identity.key(),
+                        JOURNAL_SCHEMA,
+                        &scope_id,
                         &scope_json,
-                        now_ms,
-                    )?))
-                }
-            })
+                    )?)))
+                })
+                .await
+                .map_err(retirement_error)?
+        };
+        let Some(purged) = fenced else {
+            return Err(effect_replay_driver::scope_not_quiescent(
+                retired_scope_key.as_deref().unwrap_or_default(),
+            ));
+        };
+        if let Some(deleted) = purged {
+            return Ok(deleted);
+        }
+        // Post-commit cleanup: idempotent, and repeated by the next bind or
+        // sweep if this process dies before it lands.
+        self.conn
+            .write(move |tx| delete_scope_rows(tx, JOURNAL_SCHEMA, &scope_id, &scope_json))
+            .await
+            .map_err(retirement_error)
+    }
+
+    async fn reinstate_scope(&self, scope_id: &str) -> Result<(), RuntimeError> {
+        let scope_id = scope_id.to_string();
+        let fences = self
+            .registry
+            .ensure_attached(&self.conn)
             .await
             .map_err(|error| {
                 RuntimeError::new(
@@ -807,25 +914,9 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                     error.to_string(),
                 )
             })?;
-        match deleted {
-            Some(deleted) => Ok(deleted),
-            None => Err(effect_replay_driver::scope_not_quiescent(
-                retired_scope_key.as_deref().unwrap_or_default(),
-            )),
-        }
-    }
-
-    async fn reinstate_scope(&self, scope_id: &str) -> Result<(), RuntimeError> {
-        let scope_id = scope_id.to_string();
         self.conn
-            .write(move |tx| {
-                tx.execute(
-                    "DELETE FROM effect_scope_retirements WHERE scope_id = ?1",
-                    params![scope_id],
-                )
-            })
+            .write(move |tx| fences.lift(tx, &scope_id))
             .await
-            .map(|_| ())
             .map_err(|error| {
                 RuntimeError::new(
                     lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
@@ -874,9 +965,10 @@ pub(crate) fn scope_is_quiescent(
     Ok(!live)
 }
 
-/// Scope-exact retirement (N4) of one non-session scope: the permanent fence
-/// first, then the scope's effect rows, group rows, and promise rows, all in
-/// the caller's transaction. Returns the effect rows deleted.
+/// Scope-exact retirement (N4) of one non-session scope whose fence shares
+/// the journal's file: the permanent fence first, then the scope's effect
+/// rows, group rows, and promise rows, all in the caller's transaction.
+/// Returns the effect rows deleted.
 pub(crate) fn retire_scope_rows(
     tx: &rusqlite::Transaction<'_>,
     schema: &str,
@@ -884,6 +976,17 @@ pub(crate) fn retire_scope_rows(
     scope_json: &str,
     now_ms: u64,
 ) -> rusqlite::Result<usize> {
+    insert_scope_fence(tx, schema, scope_id, now_ms)?;
+    delete_scope_rows(tx, schema, scope_id, scope_json)
+}
+
+/// Write the permanent fence of `scope_id` into `schema`'s fence table.
+pub(crate) fn insert_scope_fence(
+    tx: &rusqlite::Transaction<'_>,
+    schema: &str,
+    scope_id: &str,
+    now_ms: u64,
+) -> rusqlite::Result<()> {
     tx.execute(
         &format!(
             "INSERT INTO {schema}.effect_scope_retirements (scope_id, retired_at_ms)
@@ -892,6 +995,17 @@ pub(crate) fn retire_scope_rows(
         ),
         params![scope_id, now_ms as i64],
     )?;
+    Ok(())
+}
+
+/// Delete the effect rows, group rows, and promise rows of one scope from
+/// `schema`'s journal tables. Returns the effect rows deleted.
+pub(crate) fn delete_scope_rows(
+    tx: &rusqlite::Transaction<'_>,
+    schema: &str,
+    scope_id: &str,
+    scope_json: &str,
+) -> rusqlite::Result<usize> {
     let deleted = tx.execute(
         &format!("DELETE FROM {schema}.runtime_effect_replay WHERE scope_id = ?1"),
         params![scope_id],
@@ -905,6 +1019,56 @@ pub(crate) fn retire_scope_rows(
         params![scope_json],
     )?;
     Ok(deleted)
+}
+
+/// Delete every journal row under a scope that any fence location has
+/// fenced: the cleanup a retirement whose fence committed in the registry
+/// file but whose purge was lost still owes (ADR 0049). Idempotent; returns
+/// the scopes purged.
+pub(crate) fn purge_rows_under_fenced_scopes(
+    tx: &rusqlite::Transaction<'_>,
+    journal_schema: &str,
+    fences: FenceLocations,
+) -> rusqlite::Result<usize> {
+    let mut scopes: Vec<(String, String)> = Vec::new();
+    {
+        let mut keyed = tx.prepare(&format!(
+            "SELECT scope_id FROM {journal_schema}.runtime_effect_replay
+             WHERE session_id IS NULL
+             UNION
+             SELECT scope_id FROM {journal_schema}.runtime_effect_group
+             WHERE session_id IS NULL"
+        ))?;
+        for key in keyed.query_map([], |row| row.get::<_, String>(0))? {
+            let key = key?;
+            if let Some(scope) = lash_core::ExecutionScope::from_journal_key(&key) {
+                let scope_json = serde_json::to_string(&scope).expect("execution scopes serialize");
+                scopes.push((key, scope_json));
+            }
+        }
+        let mut waited = tx.prepare(&format!(
+            "SELECT DISTINCT scope_json FROM {journal_schema}.await_event_waits
+             WHERE session_id IS NULL"
+        ))?;
+        for scope_json in waited.query_map([], |row| row.get::<_, String>(0))? {
+            let scope_json = scope_json?;
+            if let Ok(scope) = serde_json::from_str::<lash_core::ExecutionScope>(&scope_json)
+                && let Ok(identity) = scope.journal_identity()
+            {
+                scopes.push((identity.key().to_string(), scope_json));
+            }
+        }
+    }
+    scopes.sort();
+    scopes.dedup();
+    let mut purged = 0;
+    for (scope_id, scope_json) in scopes {
+        if fences.is_fenced(tx, &scope_id)? {
+            delete_scope_rows(tx, journal_schema, &scope_id, &scope_json)?;
+            purged += 1;
+        }
+    }
+    Ok(purged)
 }
 
 fn select_effect_row(

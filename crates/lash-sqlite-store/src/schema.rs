@@ -625,6 +625,17 @@ CREATE INDEX IF NOT EXISTS idx_processes_status
 CREATE INDEX IF NOT EXISTS idx_processes_live_worklist
     ON processes(process_id) WHERE status IN ('running', 'waiting');
 
+-- Permanent by design: process ids are single-use, so a retired process
+-- scope's fence must outlive every prune and every restart. Kept in this
+-- file, beside the process rows, so a registration deletes the fence and
+-- inserts the row in one single-file commit and a retirement's fence insert
+-- is its one commit point (FIG-2499, ADR 0049). Keyed by the scope's journal
+-- identity, the same key the bound effect journal's rows carry.
+CREATE TABLE IF NOT EXISTS effect_scope_retirements (
+    scope_id        TEXT PRIMARY KEY,
+    retired_at_ms   INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_processes_change_seq
     ON processes(change_seq);
 CREATE INDEX IF NOT EXISTS idx_processes_originator

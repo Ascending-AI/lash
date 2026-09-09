@@ -24,7 +24,7 @@ pub use control::{
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, QueuedLaneAcquisition,
     QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
-    ResolveOutcome, RuntimeEffectController, RuntimeEffectFailureDisposition,
+    ResolveOutcome, RuntimeEffectController, RuntimeEffectFailureDisposition, ScopeBoundController,
     ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
     ToolIntentSubmissionGuard, TurnControlBinding, TurnControlParticipation,
     await_event_scope_not_retirable,

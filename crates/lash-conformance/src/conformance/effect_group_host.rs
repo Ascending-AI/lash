@@ -75,6 +75,7 @@ where
     the_capability_flag_and_the_group_surface_agree(&make, &prefix).await;
     duplicate_replay_keys_are_refused_before_a_host_sees_them(&make, &prefix).await;
     the_first_settlement_wakes_the_caller_while_the_loser_still_runs(&make, &prefix).await;
+    a_scope_with_a_live_group_child_is_not_quiescent(&make, &prefix).await;
     settlement_n_is_stable_across_re_reads(&make, &prefix).await;
     every_child_is_delivered_once_in_rank_order(&make, &prefix).await;
     awaiting_past_the_last_child_is_refused(&make, &prefix).await;
@@ -812,6 +813,59 @@ async fn the_first_settlement_wakes_the_caller_while_the_loser_still_runs<F: Fn(
         "the caller resumed on the winner, so the loser cannot have completed"
     );
     close(&scoped, handle, RUN).await.expect("the group closes");
+}
+
+/// A scope whose open group still has a live child is not quiescent:
+/// `WhenQuiescent` refuses it with `effect_scope_not_quiescent` while the
+/// child runs, leaves the scope unfenced, and retires it once every child
+/// has settled and the group is closed (FIG-2499 fix round 3, ruling 4).
+async fn a_scope_with_a_live_group_child_is_not_quiescent<F: Fn() -> Host>(make: &F, prefix: &str) {
+    let host = make();
+    let scope = scope(prefix, "live-child");
+    let scoped = host.scoped(scope.clone()).expect("a scope binds");
+    let key = group_key(prefix, "live-child");
+    let (slow, child) = gated(0);
+    let mut handle = open(&scoped, &key, 1, GroupWakePolicy::All, RUN, vec![slow]).await;
+    child.wait_until_waiting().await;
+
+    let refused = host
+        .retire_effect_journal(
+            crate::EffectJournalRetirement::for_scope(&scope)
+                .expect("runtime operations are retirable")
+                .when_quiescent(),
+        )
+        .await
+        .expect_err("a live group child is not quiescent");
+    assert_eq!(refused.code.as_str(), "effect_scope_not_quiescent");
+    host.await_event_key(
+        &scope,
+        AwaitEventWaitIdentity::tool_completion("still-open"),
+    )
+    .await
+    .expect("the refused retirement left the scope unfenced");
+
+    child.release();
+    let settlement = next(&scoped, &mut handle)
+        .await
+        .expect("the released child settles");
+    assert_eq!(settlement.position, 0);
+    close(&scoped, handle, RUN).await.expect("the group closes");
+
+    host.retire_effect_journal(
+        crate::EffectJournalRetirement::for_scope(&scope)
+            .expect("runtime operations are retirable")
+            .when_quiescent(),
+    )
+    .await
+    .expect("the scope is quiescent once its children have settled");
+    let fenced = host
+        .await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion("after-retirement"),
+        )
+        .await
+        .expect_err("the retired scope mints nothing");
+    assert_eq!(fenced.code.as_str(), "await_event_unknown_or_revoked");
 }
 
 /// The settlement at rank `n` is a record, not a race: reading it again — as a

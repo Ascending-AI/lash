@@ -16,6 +16,7 @@ use lash_core::{RuntimeError, RuntimeErrorCode};
 use rusqlite::{OptionalExtension, params};
 
 use crate::conn::SqliteConnection;
+use crate::scope_fence::{FenceLocations, RegistryAttachment};
 
 /// The SQLite promise coordinator: one shared state machine over
 /// [`SqliteAwaitEventBackend`].
@@ -32,11 +33,12 @@ const VOCABULARY: AwaitEventVocabulary = AwaitEventVocabulary {
 /// Build the SQLite await-event coordinator over `conn`.
 pub(crate) fn sqlite_await_events(
     conn: SqliteConnection,
+    registry: Arc<RegistryAttachment>,
     signing_secret: Vec<u8>,
     clock: Arc<dyn lash_core::Clock>,
 ) -> SqliteAwaitEvents {
     AwaitEventCoordinator::new(
-        SqliteAwaitEventBackend { conn },
+        SqliteAwaitEventBackend { conn, registry },
         signing_secret.into(),
         clock,
     )
@@ -47,6 +49,17 @@ pub(crate) fn sqlite_await_events(
 #[derive(Clone)]
 pub struct SqliteAwaitEventBackend {
     conn: SqliteConnection,
+    /// The bound process registry whose file holds process-scope fences.
+    registry: Arc<RegistryAttachment>,
+}
+
+impl SqliteAwaitEventBackend {
+    async fn fence_locations(&self) -> Result<FenceLocations, RuntimeError> {
+        self.registry
+            .ensure_attached(&self.conn)
+            .await
+            .map_err(store_error)
+    }
 }
 
 #[async_trait::async_trait]
@@ -65,8 +78,9 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
 
     async fn scope_is_retired(&self, scope_id: &str) -> Result<bool, RuntimeError> {
         let scope_id = scope_id.to_string();
+        let fences = self.fence_locations().await?;
         self.conn
-            .call(move |connection| scope_is_retired(connection, &scope_id))
+            .call(move |connection| fences.is_fenced(connection, &scope_id))
             .await
             .map_err(store_error)
     }
@@ -80,9 +94,10 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         let key_id = key_id.to_string();
         let identity = identity.clone();
         let now = now_ms as i64;
+        let fences = self.fence_locations().await?;
         self.conn
             .write(move |tx| {
-                if identity_is_fenced(tx, &identity)? {
+                if identity_is_fenced(tx, fences, &identity)? {
                     return Ok(false);
                 }
                 match select_wait_row(tx, &key_id)? {
@@ -122,9 +137,10 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         let identity = identity.clone();
         let proposed_json = terminal_json.to_string();
         let now = now_ms as i64;
+        let fences = self.fence_locations().await?;
         self.conn
             .write(move |tx| {
-                if identity_is_fenced(tx, &identity)? {
+                if identity_is_fenced(tx, fences, &identity)? {
                     return Ok(TerminalCas::UnknownOrRevoked);
                 }
                 match select_wait_row(tx, &key_id)? {
@@ -180,10 +196,11 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
     ) -> Result<PersistedPromise, RuntimeError> {
         let key_id = key_id.to_string();
         let identity = identity.clone();
+        let fences = self.fence_locations().await?;
         self.conn
             .call(move |connection| {
                 let tx = connection.transaction()?;
-                let revoked = identity_is_fenced(&tx, &identity)?;
+                let revoked = identity_is_fenced(&tx, fences, &identity)?;
                 let stored = select_wait_row(&tx, &key_id)?;
                 tx.commit()?;
                 if revoked {
@@ -298,6 +315,7 @@ fn select_wait_row(
 /// reading one primary-key row keeps the two fences one predicate.
 fn identity_is_fenced(
     connection: &rusqlite::Connection,
+    fences: FenceLocations,
     identity: &AwaitEventRowIdentity,
 ) -> rusqlite::Result<bool> {
     if let Some(session_id) = identity.session_id.as_deref()
@@ -305,20 +323,7 @@ fn identity_is_fenced(
     {
         return Ok(true);
     }
-    scope_is_retired(connection, &identity.scope_id)
-}
-
-pub(crate) fn scope_is_retired(
-    connection: &rusqlite::Connection,
-    scope_id: &str,
-) -> rusqlite::Result<bool> {
-    connection.query_row(
-        "SELECT EXISTS(
-            SELECT 1 FROM effect_scope_retirements WHERE scope_id = ?1
-         )",
-        params![scope_id],
-        |row| row.get(0),
-    )
+    fences.is_fenced(connection, &identity.scope_id)
 }
 
 fn session_is_revoked(

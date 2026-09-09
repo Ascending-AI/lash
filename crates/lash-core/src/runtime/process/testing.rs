@@ -349,7 +349,8 @@ impl super::registry::ProcessRegistrar for TestLocalProcessRegistry {
     }
 
     fn bind_effect_host(&self, effect_host: &Arc<dyn crate::EffectHost>) {
-        self.scope_fence_hosts.bind(effect_host);
+        self.scope_fence_hosts
+            .bind(effect_host, support::registry_binding(&self.managed));
     }
 
     async fn set_external_ref(

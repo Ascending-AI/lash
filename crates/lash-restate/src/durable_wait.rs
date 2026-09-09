@@ -77,6 +77,12 @@ const DURABLE_WAIT_INDEX_EPOCH_KEY: &str = "wait-index/v2/identity-epoch";
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
 const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";
 const DURABLE_WAIT_INDEX_RESOLUTION_PREFIX: &str = "wait-index/v2/resolution/";
+/// An effect executing under the scope inside a handler, keyed by replay
+/// key: recorded at start, cleared at completion (FIG-2499 quiescence).
+const DURABLE_WAIT_INDEX_EFFECT_PREFIX: &str = "wait-index/v2/effect/";
+/// An effect group opened under the scope, keyed by group key; cleared once
+/// the group's index reports no unsettled child.
+const DURABLE_WAIT_INDEX_GROUP_PREFIX: &str = "wait-index/v2/group/";
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RestateDurableWaitAddress {
     pub workflow_key: String,
@@ -187,6 +193,18 @@ pub struct RestateDurableWaitIndexRequest {
 pub struct RestateDurableWaitSettleRequest {
     pub key: AwaitEventKey,
     pub resolution: Resolution,
+}
+
+/// One executing effect under a scope's index (FIG-2499).
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct RestateDurableWaitEffectRequest {
+    pub replay_key: String,
+}
+
+/// One effect group opened under a scope's index (FIG-2499).
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct RestateDurableWaitGroupRequest {
+    pub group_key: String,
 }
 
 /// One turn-cancel gate entry: the awakeable the index resolves when this
@@ -495,6 +513,20 @@ pub trait LashDurableWaitIndex {
     /// pruned process id the host reuses (ADR 0049). State stays cleared; only
     /// the fence goes.
     async fn reinstate() -> HandlerResult<Json<()>>;
+    /// Record an effect starting under this scope inside a handler, answering
+    /// whether the scope admits it (`false` once revoked). While recorded,
+    /// the scope is not quiescent (FIG-2499).
+    async fn begin_effect(
+        request: Json<RestateDurableWaitEffectRequest>,
+    ) -> HandlerResult<Json<bool>>;
+    /// Clear the record [`begin_effect`](Self::begin_effect) made.
+    async fn end_effect(request: Json<RestateDurableWaitEffectRequest>) -> HandlerResult<Json<()>>;
+    /// Record an effect group opened under this scope, answering whether the
+    /// scope admits it (`false` once revoked). The scope is not quiescent
+    /// while the group's index still reports an unsettled child.
+    async fn record_group(
+        request: Json<RestateDurableWaitGroupRequest>,
+    ) -> HandlerResult<Json<bool>>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -717,7 +749,11 @@ async fn revoke_index(
 ) -> HandlerResult<Json<bool>> {
     let mut metadata = load_durable_wait_index_metadata(ctx).await?;
     let waits = load_indexed_waits(ctx).await?;
-    if only_if_quiescent && (!waits.is_empty() || !metadata.awakeables.is_empty()) {
+    if only_if_quiescent
+        && (!waits.is_empty()
+            || !metadata.awakeables.is_empty()
+            || !scope_effects_and_groups_are_quiescent(ctx).await?)
+    {
         return Ok(Json(false));
     }
     let awakeables = std::mem::take(&mut metadata.awakeables);
@@ -733,6 +769,48 @@ async fn revoke_index(
     }
     resolve_indexed_waits(ctx, waits, false).await?;
     Ok(Json(true))
+}
+
+/// Whether nothing recorded by `begin_effect` or `record_group` is still
+/// live: no executing effect, and every recorded group's index reports no
+/// unsettled child. A group found settled is forgotten here, so a caller
+/// that never closed it does not fence its scope forever.
+async fn scope_effects_and_groups_are_quiescent(
+    ctx: &ObjectContext<'_>,
+) -> Result<bool, TerminalError> {
+    let keys = ctx.get_keys().await?;
+    if keys
+        .iter()
+        .any(|state_key| state_key.starts_with(DURABLE_WAIT_INDEX_EFFECT_PREFIX))
+    {
+        return Ok(false);
+    }
+    let mut live = false;
+    for state_key in keys
+        .iter()
+        .filter(|state_key| state_key.starts_with(DURABLE_WAIT_INDEX_GROUP_PREFIX))
+    {
+        let group_key = &state_key[DURABLE_WAIT_INDEX_GROUP_PREFIX.len()..];
+        let Json(unsettled) = ctx
+            .object_client::<crate::effect_group::EffectGroupIndexClient>(group_key.to_string())
+            .unsettled_children()
+            .call()
+            .await?;
+        if unsettled > 0 {
+            live = true;
+        } else {
+            ctx.clear(state_key);
+        }
+    }
+    Ok(!live)
+}
+
+fn durable_wait_index_effect_key(replay_key: &str) -> String {
+    format!("{DURABLE_WAIT_INDEX_EFFECT_PREFIX}{replay_key}")
+}
+
+fn durable_wait_index_group_key(group_key: &str) -> String {
+    format!("{DURABLE_WAIT_INDEX_GROUP_PREFIX}{group_key}")
 }
 
 pub(crate) fn split_cancellable_waits(
@@ -930,5 +1008,47 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
             ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
         }
         Ok(Json(()))
+    }
+
+    async fn begin_effect(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RestateDurableWaitEffectRequest>,
+    ) -> HandlerResult<Json<bool>> {
+        let metadata = load_durable_wait_index_metadata(&ctx).await?;
+        if metadata.revoked {
+            return Ok(Json(false));
+        }
+        ctx.set(
+            &durable_wait_index_effect_key(&request.replay_key),
+            Json(true),
+        );
+        Ok(Json(true))
+    }
+
+    async fn end_effect(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RestateDurableWaitEffectRequest>,
+    ) -> HandlerResult<Json<()>> {
+        let _metadata = load_durable_wait_index_metadata(&ctx).await?;
+        ctx.clear(&durable_wait_index_effect_key(&request.replay_key));
+        Ok(Json(()))
+    }
+
+    async fn record_group(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RestateDurableWaitGroupRequest>,
+    ) -> HandlerResult<Json<bool>> {
+        let metadata = load_durable_wait_index_metadata(&ctx).await?;
+        if metadata.revoked {
+            return Ok(Json(false));
+        }
+        ctx.set(
+            &durable_wait_index_group_key(&request.group_key),
+            Json(true),
+        );
+        Ok(Json(true))
     }
 }

@@ -6,14 +6,19 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use tokio_util::sync::CancellationToken;
+
 use lash_core::{
     ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy, Resolution, RuntimeEffectCommand,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeErrorCode, RuntimeInvocation,
     RuntimeScope,
 };
+use restate_sdk::context::WorkflowContext;
 use restate_sdk::endpoint::Endpoint;
+use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::http_server::HttpServer;
+use restate_sdk::serde::Json;
 
 use crate::effect_group::{
     EffectGroupChildRequest, admit_wait_request, arm_admission_witness, decode_wait_resolution,
@@ -198,6 +203,7 @@ impl LiveConformanceHarness {
             .await
             .expect("bind Restate effect-group endpoint");
         let endpoint = Endpoint::builder()
+            .bind(ScopeLivenessProbeImpl.serve())
             .bind(services.index)
             .bind(services.payload)
             .bind(services.dispatch)
@@ -256,6 +262,286 @@ impl LiveConformanceHarness {
     pub(super) async fn run_design_witnesses(&self) {
         run_design_witnesses(&self.ingress_url, &self.executors).await;
     }
+
+    /// The handler-side half of the quiescence law (FIG-2499 fix round 3,
+    /// ruling 4): an effect executing inside a Restate handler under a
+    /// runtime-operation scope holds `WhenQuiescent` off until it completes.
+    /// The deployment-level host cannot run a local executor, so the shared
+    /// law early-returns on it; this witness runs the effect where Restate
+    /// runs it.
+    pub(super) async fn run_executing_effect_quiescence_witness(&self) {
+        let ingress = RestateIngressClient::new(self.ingress_url.clone());
+        let host = (self.effect_host_factory())();
+        let scope_id = format!("live-effect-{}", nonce());
+        let scope = ExecutionScope::runtime_operation(scope_id.clone());
+        let gate = executing_effect_gate();
+        let workflow_key = scope_id.clone();
+        let workflow = tokio::spawn(async move {
+            ingress
+                .call_workflow_json::<_, bool>(
+                    "ScopeLivenessProbe",
+                    &workflow_key,
+                    "run",
+                    &scope_id,
+                )
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(30), gate.started.notified())
+            .await
+            .expect("the handler's effect starts executing");
+
+        let refused = host
+            .retire_effect_journal(
+                lash_core::EffectJournalRetirement::for_scope(&scope)
+                    .expect("runtime operations are retirable")
+                    .when_quiescent(),
+            )
+            .await
+            .expect_err("an executing handler effect is not quiescent");
+        assert_eq!(refused.code.as_str(), "effect_scope_not_quiescent");
+        host.await_event_key(
+            &scope,
+            lash_core::AwaitEventWaitIdentity::tool_completion("still-open"),
+        )
+        .await
+        .expect("the refused retirement left the scope unfenced");
+
+        gate.release.notify_one();
+        let completed = tokio::time::timeout(Duration::from_secs(60), workflow)
+            .await
+            .expect("the released handler completes")
+            .expect("the workflow task joins")
+            .expect("the workflow returns");
+        assert!(completed, "the handler ran its effect to completion");
+
+        host.retire_effect_journal(
+            lash_core::EffectJournalRetirement::for_scope(&scope)
+                .expect("runtime operations are retirable")
+                .when_quiescent(),
+        )
+        .await
+        .expect("the scope is quiescent once the handler's effect completed");
+        let fenced = host
+            .await_event_key(
+                &scope,
+                lash_core::AwaitEventWaitIdentity::tool_completion("after-retirement"),
+            )
+            .await
+            .expect_err("the retired scope mints nothing");
+        assert_eq!(fenced.code.as_str(), "await_event_unknown_or_revoked");
+    }
+
+    /// The crash cut between a registry's commit and its post-commit index
+    /// reinstate (FIG-2499 fix round 3, ruling 2): the index is revoked, the
+    /// registration is committed with no host bound, everything is dropped,
+    /// and a cold registry plus host are opened and bound. The first effect
+    /// under the process is admitted with no explicit re-registration: the
+    /// host reads through the revoked index to the registry it is bound to.
+    /// Runs over a SQLite-backed registry always and over a PostgreSQL-backed
+    /// one when `LASH_POSTGRES_DATABASE_URL` names a server. Returns the
+    /// number of registries witnessed.
+    pub(super) async fn run_cold_reopen_witnesses(&self) -> usize {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry_path = dir.path().join("registry.db");
+        let sessions = dir.path().join("sessions");
+        let open_sqlite = || {
+            let registry_path = registry_path.clone();
+            let sessions = sessions.clone();
+            async move {
+                Arc::new(
+                    lash_sqlite_store::SqliteProcessRegistry::open(&registry_path, sessions)
+                        .await
+                        .expect("open the SQLite process registry"),
+                ) as Arc<dyn lash_core::ProcessRegistry>
+            }
+        };
+        cold_reopen_admits_the_registered_process(
+            &self.effect_host_factory(),
+            "sqlite",
+            open_sqlite,
+        )
+        .await;
+        let mut witnessed = 1;
+
+        if let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") {
+            let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+            let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+                .await
+                .expect("connect the isolated database");
+            let open_postgres = || {
+                let storage = storage.clone();
+                async move {
+                    Arc::new(storage.process_registry()) as Arc<dyn lash_core::ProcessRegistry>
+                }
+            };
+            cold_reopen_admits_the_registered_process(
+                &self.effect_host_factory(),
+                "postgres",
+                open_postgres,
+            )
+            .await;
+            witnessed += 1;
+        } else {
+            assert!(
+                std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
+                "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
+            );
+        }
+        witnessed
+    }
+}
+
+fn nonce() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after the epoch")
+        .as_nanos()
+}
+
+struct ExecutingEffectGate {
+    started: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+fn executing_effect_gate() -> &'static ExecutingEffectGate {
+    static GATE: std::sync::OnceLock<ExecutingEffectGate> = std::sync::OnceLock::new();
+    GATE.get_or_init(|| ExecutingEffectGate {
+        started: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    })
+}
+
+/// A workflow that runs one scoped local effect and holds it until the test
+/// releases it: the executing-effect state of a Restate handler, observed
+/// from outside through the durable-wait index.
+#[restate_sdk::workflow]
+pub(super) trait ScopeLivenessProbe {
+    async fn run(input: Json<String>) -> HandlerResult<Json<bool>>;
+}
+
+pub(super) struct ScopeLivenessProbeImpl;
+
+impl ScopeLivenessProbe for ScopeLivenessProbeImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(scope_id): Json<String>,
+    ) -> HandlerResult<Json<bool>> {
+        let controller = crate::RestateRuntimeEffectController::new(ctx);
+        let scoped = controller
+            .scoped_effect_controller(ExecutionScope::runtime_operation(scope_id.clone()))
+            .map_err(TerminalError::from_error)?;
+        let envelope = RuntimeEffectEnvelope::new(
+            RuntimeInvocation::effect(
+                RuntimeScope::new("scope-liveness"),
+                "work",
+                RuntimeEffectKind::LanguageRuntimeValue,
+                format!("{scope_id}:work"),
+            ),
+            RuntimeEffectCommand::LanguageRuntimeValue {
+                operation: "scope-liveness".to_string(),
+            },
+        );
+        scoped
+            .controller()
+            .execute_effect(
+                envelope,
+                RuntimeEffectLocalExecutor::testing(|_| async {
+                    let gate = executing_effect_gate();
+                    gate.started.notify_one();
+                    gate.release.notified().await;
+                    Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
+                        value: serde_json::json!("completed"),
+                    })
+                }),
+            )
+            .await
+            .map_err(TerminalError::from_error)?;
+        Ok(Json(true))
+    }
+}
+
+async fn cold_reopen_admits_the_registered_process<F, Fut>(
+    host_factory: &dyn Fn() -> Arc<dyn lash_core::EffectHost>,
+    label: &str,
+    open_registry: F,
+) where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Arc<dyn lash_core::ProcessRegistry>>,
+{
+    let nonce = nonce();
+    let process_id = format!("cold-reopen-{label}-{nonce}");
+    let scope = ExecutionScope::process(process_id.clone());
+    let registration = || {
+        lash_core::ProcessRegistration::new(
+            process_id.clone(),
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryContract::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+        )
+        .with_identity(lash_core::ProcessIdentity::new("test"))
+    };
+
+    // The index is revoked, and the registration commits with no host bound:
+    // the post-commit reinstate never reaches the engine.
+    let host = host_factory();
+    host.retire_effect_journal(lash_core::EffectJournalRetirement::process(
+        process_id.clone(),
+    ))
+    .await
+    .expect("retire the process scope");
+    let registry = open_registry().await;
+    registry
+        .register_process(registration())
+        .await
+        .expect("register the process");
+    drop(registry);
+    drop(host);
+
+    // Cold reopen: a fresh registry and a fresh host, bound the way
+    // `LashCore::build` binds them, and nothing else.
+    let registry = open_registry().await;
+    let cold = host_factory();
+    registry.bind_effect_host(&cold);
+    let other = ExecutionScope::runtime_operation(format!("cold-reopen-ready-{label}-{nonce}"));
+    let key = cold
+        .await_event_key(
+            &other,
+            lash_core::AwaitEventWaitIdentity::tool_completion("ready"),
+        )
+        .await
+        .expect("mint the effect's promise");
+    cold.resolve_await_event(&key, Resolution::Ok(serde_json::json!("ready")))
+        .await
+        .expect("resolve the effect's promise");
+    let envelope = RuntimeEffectEnvelope::new(
+        RuntimeInvocation::effect(
+            RuntimeScope::new("cold-reopen"),
+            "first",
+            RuntimeEffectKind::AwaitEvent,
+            format!("cold-reopen-first-{label}-{nonce}"),
+        ),
+        RuntimeEffectCommand::AwaitEvent { key },
+    );
+    cold.scoped(scope.clone())
+        .expect("the process scope binds")
+        .controller()
+        .execute_effect(
+            envelope,
+            RuntimeEffectLocalExecutor::await_event(CancellationToken::new(), None),
+        )
+        .await
+        .unwrap_or_else(|error| {
+            panic!("the first effect under the registered process is admitted after a cold reopen over a {label} registry, with no explicit re-registration: {error:?}")
+        });
+    cold.await_event_key(
+        &scope,
+        lash_core::AwaitEventWaitIdentity::tool_completion("after-reopen"),
+    )
+    .await
+    .expect("the registered process mints after the cold reopen");
 }
 
 async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExecutors>) {

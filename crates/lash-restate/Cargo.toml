@@ -49,6 +49,7 @@ lash-protocol-rlm = { workspace = true }
 lash-protocol-standard = { workspace = true, features = ["lashlang"] }
 lash-plugin-process-controls = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
+lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-subagents = { workspace = true }
 lash-tools = { workspace = true }
 tempfile = { workspace = true }
