@@ -262,9 +262,14 @@ impl ExecutionHost for StartHost {
             AbilityOp::StartProcess(start) => {
                 assert_eq!(start.process_name, "worker");
                 assert_eq!(start.args.get("input"), Some(&Value::Number(3.0)));
-                Ok(AbilityResult::Value(Value::String("run-handle".into())))
+                Ok(AbilityResult::Value(lashlang::from_json(
+                    serde_json::json!({"__handle__": "process", "id": "run-handle"}),
+                )))
             }
-            AbilityOp::Await(Value::String(handle)) if handle.as_str() == "run-handle" => {
+            AbilityOp::Await(Value::Record(handle))
+                if handle.get("__handle__") == Some(&Value::String("process".into()))
+                    && handle.get("id") == Some(&Value::String("run-handle".into())) =>
+            {
                 Ok(AbilityResult::Value(Value::Number(6.0)))
             }
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
