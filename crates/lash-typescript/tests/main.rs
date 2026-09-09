@@ -4,6 +4,8 @@ mod advertised_tool_surface;
 mod agent_surface;
 #[path = "cell_boundary_closures.rs"]
 mod cell_boundary_closures;
+#[path = "console_observation.rs"]
+mod console_observation;
 #[path = "constructs.rs"]
 mod constructs;
 #[path = "depth_guard.rs"]

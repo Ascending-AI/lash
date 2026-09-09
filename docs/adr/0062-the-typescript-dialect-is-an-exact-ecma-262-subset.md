@@ -331,9 +331,20 @@ that each entry is a limit taken knowingly.
     `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`. Neither path mutates an element.
     Holes are indistinguishable from explicit `undefined` in the v1 dense
     representation, which is why they are refused rather than approximated.
-13. **`console.log` is host-defined**, not ECMA-262. It prints ECMA `ToString`
-    of each argument joined by a space; Node's inspector formatting is not
-    reproduced, so `console.log({a: 1})` prints `[object Object]`.
+13. **`console.log` is host-defined**, not ECMA-262. *(Superseded on the
+    coercion point by FIG-2767: this ruling originally said the arguments are
+    printed as their ECMA `ToString`, so `console.log({a: 1})` printed
+    `[object Object]`. Rendering the value is the whole purpose of the call —
+    it is the observation the model reads back — and a host-defined method is
+    free to render it.)* It joins its arguments with a space and renders each
+    one for the observation: plain objects and arrays as the compact JSON the
+    host's print projector already produces, so `console.log({a: 1})` prints
+    `{"a":1}`, and every other value as its ECMA `ToString`, which is the
+    informative answer for numbers, booleans, `null`, `undefined`, dates,
+    regexps and errors. The observation is bounded by the same byte and depth
+    limits as any other string this dialect builds. Node's inspector formatting
+    is still not reproduced, and coercion elsewhere is untouched: `"" + {a: 1}`,
+    `` `${{a: 1}}` `` and `String({a: 1})` all remain `[object Object]`.
 14. **Shadowing residual.** A block-scoped binding that shadows a name already
     in scope lowers to a generated slot so the inner binding cannot overwrite
     the outer one. At root that slot is a runtime global, which is the one place

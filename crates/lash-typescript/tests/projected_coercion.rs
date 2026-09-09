@@ -12,8 +12,12 @@
 //! panicked out of the turn, and release builds silently carried
 //! `"[object Object]"` (or `NaN`, or `false`) for a value whose ECMA result is
 //! the projected string, number, or comparison. `console.log(item.kind, item.id)`
-//! over a projected history — which lowers to `"" + a + " " + b` — is how a
-//! workbench turn died (FIG-1446).
+//! over a projected history is how a workbench turn died (FIG-1446); at the
+//! time that call lowered to `"" + a + " " + b`, so it reached the scalar
+//! coercions directly. It no longer does — the arguments now go to the
+//! observation renderer untouched — but the same projected operands still reach
+//! those coercions through `+`, template literals and `String()`, which is what
+//! this suite pins.
 //!
 //! The rule pinned here: a projected binding coerces exactly as the value
 //! behind it does, in both build profiles, whether it reaches the coercion as
@@ -154,7 +158,10 @@ async fn projected_bindings_compare_as_their_underlying_value() {
 #[tokio::test(flavor = "current_thread")]
 async fn console_log_of_projected_bindings_prints_their_values() {
     // The exact shape that killed the FIG-1289 finale turn: a multi-argument
-    // `console.log` over projected values, which lowers to `"" + a + " " + b`.
+    // `console.log` over projected values. The lowering has since changed — the
+    // observation renderer receives the values instead of a concatenation — so
+    // this pins the outcome, that a projected binding still prints the value
+    // behind it, rather than the route it takes.
     let (outcome, printed) = execute(r#"console.log("row", text, count); finish(1);"#)
         .await
         .expect("a projected console.log should execute");

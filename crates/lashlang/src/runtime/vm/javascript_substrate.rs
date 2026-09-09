@@ -1,9 +1,23 @@
 use std::collections::BTreeSet;
 
-use super::super::{ErrorKind, ensure_javascript_string_size};
+use crate::runtime::heap::ensure_value_depth;
+
+use super::super::{
+    ErrorKind, ensure_javascript_string_size, javascript_to_string, to_json_direct,
+};
 use super::javascript::{ecma_record_entries, js_stdlib_error};
 use super::javascript_json::javascript_json_stringify;
 use super::*;
+
+/// The stdlib method name that renders a `console.*` argument list.
+///
+/// The lowerer writes this name into the compiled artifact, so it is program
+/// identity: a cached artifact compiled before a rename would still spell the
+/// old name. The lowerer spells the same literal by hand rather than sharing a
+/// constant, so a one-character drift cannot stay self-consistent — the
+/// substrate stops recognising the call and `lash-internal-typescript`'s
+/// `console_observation` suite fails loudly instead of quietly coercing again.
+pub(super) const CONSOLE_OBSERVATION_TEXT: &str = "__consoleObservationText";
 
 impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn require_typescript_intrinsic(&self, operation: &str) -> Result<(), RuntimeError> {
@@ -609,5 +623,217 @@ fn join_json_container(
     format!(
         "{open}\n{nested}{}\n{current}{close}",
         entries.join(&format!(",\n{nested}"))
+    )
+}
+
+/// Renders a `console.*` argument list as one observation line.
+///
+/// The RLM prompt tells a cell to inspect values with `console.log`, so this
+/// text is the model's only view of what it just computed. ECMAScript's own
+/// string coercion answers `"[object Object]"` for every plain object and
+/// comma-joins arrays into an equally opaque line, which is exactly the shape a
+/// cell reaches for. Objects and arrays therefore render as JSON — the same
+/// body `JSON.stringify` and the host's print projector produce, so the two
+/// inspect paths agree — and every other value keeps JavaScript's coercion,
+/// which is already the useful answer for numbers (`NaN`, `Infinity`,
+/// exponent form), booleans, `null`, `undefined`, dates, regexps and errors.
+///
+/// This is the single seam that owns console observation text: the lowerer
+/// hands over the argument values untouched, and `"" + value`, template
+/// literals and `String(value)` keep ECMAScript's answer everywhere else.
+pub(super) fn javascript_console_observation_text(
+    heap: &Heap,
+    values: &[Value],
+) -> Result<String, RuntimeError> {
+    let mut text = String::new();
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            push_console_text(&mut text, " ")?;
+        }
+        write_console_value(heap, value, &mut BTreeSet::new(), 1, true, &mut text)?;
+    }
+    Ok(text)
+}
+
+/// Appends `text` to the observation, refusing the moment the byte budget is
+/// exceeded.
+///
+/// Every write in this walk goes through here, so the refusal lands while the
+/// string is still bounded rather than after it has been built. That is not a
+/// nicety: the `active` set below closes true cycles but pops on the way out,
+/// so a shared object graph — `a = { l: a, r: a }` repeated — re-expands
+/// exponentially in the output while staying shallow enough that
+/// `ensure_value_depth` never fires. Checking once at the end would let such a
+/// value allocate gigabytes before anything refused it. The error is the same
+/// `MemoryLimitExceeded` a post-hoc `ensure_javascript_string_size` produced,
+/// so callers see no new failure mode; only `attempted` differs, being the
+/// first size over the budget rather than the size the walk would have reached.
+fn push_console_text(out: &mut String, text: &str) -> Result<(), RuntimeError> {
+    ensure_javascript_string_size(out.len() + text.len())?;
+    out.push_str(text);
+    Ok(())
+}
+
+/// Writes one value in observation form.
+///
+/// The shape is the compact JSON the host's print projector produces, so a
+/// TypeScript observation and a Lashlang one describe the same value the same
+/// way. Two rules differ from `JSON.stringify`, both because an inspect step
+/// must never fail the cell it is describing: a value with no JSON body of its
+/// own (a `Map`, a `Date`, a function) keeps its JavaScript string instead of
+/// refusing, and a cycle closes with `[Circular]` instead of throwing.
+///
+/// `depth` is the nesting level of `value` itself, bounded exactly as every
+/// other coercion in this file is: the `active` set beside it only closes
+/// cycles, and a finite but deeply nested container would otherwise recurse
+/// until the thread stack is gone. The bound is the durable boundary's, so a
+/// value this refuses could never have been persisted either. The output size
+/// is bounded independently, inside the walk, by `push_console_text`: depth
+/// alone does not bound a shared graph.
+fn write_console_value(
+    heap: &Heap,
+    value: &Value,
+    active: &mut BTreeSet<HeapId>,
+    depth: usize,
+    top_level: bool,
+    out: &mut String,
+) -> Result<(), RuntimeError> {
+    ensure_value_depth(depth)?;
+    match value {
+        Value::Null => push_console_text(out, "null")?,
+        // Only a bare `console.log(undefined)` can say `undefined`: inside a
+        // container JSON has no spelling for it, and the containers below drop
+        // or null it exactly as `JSON.stringify` does.
+        Value::Undefined => push_console_text(out, if top_level { "undefined" } else { "null" })?,
+        Value::Bool(value) => push_console_text(out, if *value { "true" } else { "false" })?,
+        Value::Number(_) => push_console_text(out, &javascript_to_string(value))?,
+        Value::String(value) => {
+            if top_level {
+                push_console_text(out, value)?;
+            } else {
+                write_json_string(value, out)?;
+            }
+        }
+        Value::Image(_) | Value::Resource(_) => push_console_text(
+            out,
+            &serde_json::to_string(&to_json_direct(value))
+                .map_err(|error| js_stdlib_error(format!("console rendering: {error}")))?,
+        )?,
+        // A projected handle is a host-side view of a value, not an object of
+        // its own: describe what is behind it.
+        Value::Projected(projected) => {
+            write_console_value(
+                heap,
+                &projected.materialize(),
+                active,
+                depth,
+                top_level,
+                out,
+            )?;
+        }
+        Value::List(values) | Value::Tuple(values) => {
+            write_console_sequence(heap, values, active, depth, out)?;
+        }
+        Value::Record(record) => write_console_record(heap, record, active, depth, out)?,
+        Value::Ref(id) => {
+            if !active.insert(*id) {
+                push_console_text(out, "\"[Circular]\"")?;
+                return Ok(());
+            }
+            let result = write_console_heap_object(heap, *id, value, active, depth, top_level, out);
+            active.remove(id);
+            result?;
+        }
+    }
+    Ok(())
+}
+
+fn write_console_heap_object(
+    heap: &Heap,
+    id: HeapId,
+    value: &Value,
+    active: &mut BTreeSet<HeapId>,
+    depth: usize,
+    top_level: bool,
+    out: &mut String,
+) -> Result<(), RuntimeError> {
+    match heap.get(id)? {
+        HeapObject::List(values) | HeapObject::Tuple(values) => {
+            write_console_sequence(heap, values, active, depth, out)
+        }
+        HeapObject::RegExpMatch(result) => {
+            write_console_sequence(heap, &result.items, active, depth, out)
+        }
+        HeapObject::Record(record) => write_console_record(heap, record, active, depth, out),
+        // Everything else — `Map`, `Set`, `Date`, `RegExp`, `Error`, `URL` — has
+        // no JSON body, so its JavaScript string is the most informative text
+        // available; it at least names the type the cell has to convert.
+        // A function has no JavaScript string at this boundary at all.
+        HeapObject::Closure { .. } => {
+            let text = "[Function]";
+            if top_level {
+                push_console_text(out, text)
+            } else {
+                write_json_string(text, out)
+            }
+        }
+        _ => {
+            let text = heap.javascript_to_string(value)?;
+            if top_level {
+                push_console_text(out, &text)
+            } else {
+                write_json_string(&text, out)
+            }
+        }
+    }
+}
+
+fn write_console_sequence(
+    heap: &Heap,
+    values: &[Value],
+    active: &mut BTreeSet<HeapId>,
+    depth: usize,
+    out: &mut String,
+) -> Result<(), RuntimeError> {
+    push_console_text(out, "[")?;
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            push_console_text(out, ",")?;
+        }
+        write_console_value(heap, value, active, depth + 1, false, out)?;
+    }
+    push_console_text(out, "]")?;
+    Ok(())
+}
+
+fn write_console_record(
+    heap: &Heap,
+    record: &Record,
+    active: &mut BTreeSet<HeapId>,
+    depth: usize,
+    out: &mut String,
+) -> Result<(), RuntimeError> {
+    push_console_text(out, "{")?;
+    let mut written = 0usize;
+    for (key, value) in ecma_record_entries(record) {
+        if matches!(value, Value::Undefined) {
+            continue;
+        }
+        if written > 0 {
+            push_console_text(out, ",")?;
+        }
+        write_json_string(key, out)?;
+        push_console_text(out, ":")?;
+        write_console_value(heap, value, active, depth + 1, false, out)?;
+        written += 1;
+    }
+    push_console_text(out, "}")?;
+    Ok(())
+}
+
+fn write_json_string(value: &str, out: &mut String) -> Result<(), RuntimeError> {
+    push_console_text(
+        out,
+        &serde_json::to_string(value).expect("strings are JSON strings"),
     )
 }

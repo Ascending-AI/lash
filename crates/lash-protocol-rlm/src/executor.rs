@@ -5868,6 +5868,53 @@ finish final_ids"#;
         (state, response)
     }
 
+    /// A `console.log` observation has to describe the value the cell inspected.
+    ///
+    /// The prompt tells the model to inspect values with `console.log`, and on
+    /// the pre-FIG-2767 path every one of these cells wrote `[object Object]`
+    /// into the observation, so 17 toolbench attempts learned nothing from the
+    /// step they were told to take. This is the end-to-end witness: the text
+    /// asserted here is what reaches the model.
+    #[test]
+    fn typescript_console_observations_describe_the_value() {
+        block_on(async {
+            for (cell, expected) in [
+                (
+                    "const record = { id: 7, tags: [\"a\", \"b\"] }; console.log(record);",
+                    r#"{"id":7,"tags":["a","b"]}"#,
+                ),
+                (
+                    "console.log(\"record:\", { id: 7 });",
+                    r#"record: {"id":7}"#,
+                ),
+                (
+                    "console.log([{ id: 1 }, { id: 2 }]);",
+                    r#"[{"id":1},{"id":2}]"#,
+                ),
+            ] {
+                let state = RlmExecutionState::for_engine("typescript");
+                let (_, response) = execute_typescript_test_cell(state, cell).await;
+                assert!(
+                    response.error.is_none(),
+                    "cell `{cell}`: {:?}",
+                    response.error
+                );
+                let observations = response
+                    .observations
+                    .iter()
+                    .map(|observation| observation.text.as_str())
+                    .collect::<Vec<_>>();
+                assert_eq!(observations, vec![expected], "cell `{cell}`");
+                assert!(
+                    !observations
+                        .iter()
+                        .any(|text| text.contains("[object Object]")),
+                    "cell `{cell}` still renders an opaque object"
+                );
+            }
+        });
+    }
+
     /// A closure allocated by one cell must not fail validation of the next
     /// cell's program.
     ///

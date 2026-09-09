@@ -293,6 +293,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .push(Value::Bool(values.iter().any(|value| value == needle)));
             return Ok(());
         }
+        if let [Value::String(method), arguments @ ..] = values.as_slice()
+            && method.as_str() == javascript_substrate::CONSOLE_OBSERVATION_TEXT
+        {
+            let text =
+                javascript_substrate::javascript_console_observation_text(&self.heap, arguments)?;
+            self.stack.push(Value::String(text.into()));
+            return Ok(());
+        }
         if let [Value::String(method), value, rest @ ..] = values.as_slice()
             && method.as_str() == "JSON.stringify"
         {
