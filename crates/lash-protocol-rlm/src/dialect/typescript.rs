@@ -400,7 +400,7 @@ impl RlmDialect for TypescriptDialect {
             .surface
             .host_environment(tool_catalog)
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let mut process_abilities = environment.abilities.clone();
+        let mut process_abilities = environment.abilities;
         process_abilities.sleep = false;
         let durable = typescript_process_prompt(&process_abilities);
         let durable = if durable.is_empty() {

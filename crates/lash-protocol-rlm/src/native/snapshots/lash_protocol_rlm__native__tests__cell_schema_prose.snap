@@ -32,7 +32,7 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
     "blocks": [
       {
         "Text": {
-          "text": "\n\n\n=== CURRENT ITERATION: 2 ===\n\n\n=== BOUND VARIABLES ===\n\n- `history`: `list[HistoryItem]`, read-only, 2 entries\n\n\n=== FINALIZATION ===\n\nThis turn uses finish-required termination. Prose-only does not end the turn. Every non-terminal response must contain a paired `<lashlang>...</lashlang>` block that performs the next step; prose before the block is commentary/status only. Never say you will continue, inspect, patch, wait, monitor, validate, or retry unless the same response also contains the block that does it. The terminal response must be a paired `<lashlang>...</lashlang>` block that calls `finish <value>`. The value must match the REQUIRED OUTPUT contract.\n\n=== REQUIRED OUTPUT ===\n\nstr",
+          "text": "\n\n\n=== CURRENT ITERATION: 2 ===\n\n\n=== BOUND VARIABLES ===\n\n- `history`: `list[HistoryItem]`, read-only, 2 entries\n\n\n=== FINALIZATION ===\n\nFinish-required: prose alone never ends this turn. Every response performs its next step in a block, and the last one calls `finish <value>` (`finish null` only when null is the answer). Never announce an action without the block that performs it. The value must match the REQUIRED OUTPUT contract.\n\n=== REQUIRED OUTPUT ===\n\nstr",
           "response_meta": null,
           "cache_breakpoint": false
         }
