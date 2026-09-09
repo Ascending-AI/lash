@@ -1543,11 +1543,6 @@ mod tests {
         let code = "payload = \"\"\"";
         let error = lashlang::parse(code).expect_err("unterminated multiline string");
         let diagnostic = format_rlm_parse_diagnostic(code, &error, crate::plugin::RlmChannel::Cell);
-        let native =
-            format_rlm_parse_diagnostic(code, &error, crate::plugin::RlmChannel::NativeTool);
-        assert!(!native.contains("</lashlang>"));
-        assert_eq!(native, lashlang::format_parse_diagnostic(code, &error));
-
         assert!(diagnostic.contains("standalone `</lashlang>` line"));
         assert!(diagnostic.contains("inside multiline source text"));
     }

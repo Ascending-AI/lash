@@ -222,8 +222,7 @@ impl DialectSession {
         services: LashlangDialectServices,
     ) -> Self {
         debug_assert_eq!(engine_id, dialect.language_id());
-        let mut state = RlmExecutionState::for_engine(engine_id);
-        state.channel = services.channel;
+        let state = RlmExecutionState::for_engine(engine_id);
         Self {
             dialect,
             state,

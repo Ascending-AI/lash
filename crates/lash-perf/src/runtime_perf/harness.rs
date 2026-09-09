@@ -693,10 +693,7 @@ pub(crate) fn build_embed_core(
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                    .build()
-                    .with_lashlang_language_features(
-                        lash_protocol_rlm::RlmLanguageFeatures::default().with_label_annotations(),
-                    ),
+                    .build(),
                 Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
             );
             lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
@@ -881,10 +878,7 @@ pub(crate) async fn build_runtime_with_store(
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                    .build()
-                    .with_lashlang_language_features(
-                        lash_protocol_rlm::RlmLanguageFeatures::default().with_label_annotations(),
-                    ),
+                    .build(),
                 Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
             );
             if let Some(path) = trace_config
@@ -1327,10 +1321,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                    .build()
-                    .with_lashlang_language_features(
-                        lash_protocol_rlm::RlmLanguageFeatures::default().with_label_annotations(),
-                    ),
+                    .build(),
                 artifact_store,
             );
             BenchmarkCore::Rlm(
@@ -1446,10 +1437,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                    .build()
-                    .with_lashlang_language_features(
-                        lash_protocol_rlm::RlmLanguageFeatures::default().with_label_annotations(),
-                    ),
+                    .build(),
                 Arc::new(postgres.lashlang_artifact_store()),
             );
             BenchmarkCore::Rlm(

@@ -412,7 +412,6 @@ pub(super) struct RlmExecutionCheckpoint {
 }
 
 pub struct RlmExecutionState {
-    pub(crate) channel: crate::plugin::RlmChannel,
     engine_id: Arc<str>,
     pub(super) rlm: FlowState,
     pub(super) scratch: ExecutionScratch,
@@ -443,7 +442,6 @@ impl RlmExecutionState {
 
     pub(crate) fn for_engine(engine_id: impl Into<Arc<str>>) -> Self {
         Self {
-            channel: crate::plugin::RlmChannel::Cell,
             engine_id: engine_id.into(),
             rlm: FlowState::new(),
             scratch: ExecutionScratch::new(),

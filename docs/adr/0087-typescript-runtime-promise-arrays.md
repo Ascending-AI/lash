@@ -1,4 +1,4 @@
-# 0086: TypeScript aggregates evaluate runtime arrays
+# 0087: TypeScript aggregates evaluate runtime arrays
 
 Status: Accepted
 
@@ -16,7 +16,7 @@ TypeScript tool calls in expression position create pending tool handles. Evalua
 
 Pending tool requests and the execution nonce are VM roots and continuation state. Each pending request is consumed by await; an abandoned request at cell end produces a typed runtime error. The bytecode format advances to 12 (FIG-2764 took 11 on main for the comprehension batch instruction), continuation format from 8 to 9, VM ABI from v6 to v7, and semantic hash to v5 (FIG-2764 took v4); the execution nonce is part of that same continuation format 9 rather than a further increment.
 
-Lashlang literal aggregates keep their source-order rejection rule and their existing language teaching. This decision does not implement FIG-2764.
+Lashlang literal aggregates keep their source-order rejection rule and their existing language teaching. FIG-2764 direct comprehension batching is owned by ADR 0086; nested composition shares this decision's two-phase settlement.
 
 ## Consequences
 

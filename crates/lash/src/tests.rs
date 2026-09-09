@@ -2297,10 +2297,7 @@ fn rlm_factory() -> lash_protocol_rlm::RlmProtocolPluginFactory {
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-            .build()
-            .with_lashlang_language_features(
-                lash_protocol_rlm::RlmLanguageFeatures::default().with_label_annotations(),
-            ),
+            .build(),
         inmem_artifact_store(),
     )
 }

@@ -66,7 +66,8 @@ fails it. Dynamic process definitions and targets reject with dedicated
 aggregate its pending tool handles and already-settled values through the shared
 batch machine. Unawaited tool calls create handles; abandoning one at cell end
 is a typed runtime error. Non-array values and awaiting a settled value also
-fail loudly. Await process/timer promises separately before aggregating results.
+fail loudly. Mixed aggregates settle tool leaves first, then process promises in
+input order. Tool rejections take precedence over process rejections.
 `Promise.all` rejects with the reason of the leaf that settled first, and
 `Promise.allSettled` keeps its results in input order, both as ECMA specifies.
 The host records the order its leaves settled in as part of the journaled batch
