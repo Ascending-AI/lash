@@ -413,7 +413,7 @@ Standard `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`,
 ### Host API
 
 `console.log/warn/error/info/debug(...values)` and `print(value)` inspect values; `finish(value)` ends the turn.{durable}
-`Promise.all`/`Promise.allSettled` accept inline arrays, inline `xs.map(...)`, and identifiers holding already-settled arrays; calls written directly inside `Promise.all([...])` or `Promise.all(xs.map(...))` run concurrently; later awaits inside the callback run after, one element at a time. Tool calls in an identifier-bound map run when that map is evaluated. All leaves settle before `all` reports the first-settled rejection.
+`Promise.all`/`Promise.allSettled` accept inline arrays, inline `xs.map(...)`, and identifiers holding already-settled arrays; calls written directly inside `Promise.all([...])` or `Promise.all(xs.map(...))` execute concurrently, as does one `await` of a tool call that is the first thing an async callback evaluates. Any other async callback — one that awaits conditionally, inside `try`, after binding a local, inside another call's arguments, or alongside a closure or `console.log` — executes one element at a time. Tool calls in an identifier-bound map execute when that map is evaluated. All leaves settle before `all` reports the first-settled rejection.
 
 A failed tool call rejects with an `Error`: `message` is the host text, `name` is `EffectError` (`RuntimeError` for runtime faults), and `cause` carries `{{ code, details }}`. An `allSettled` rejection uses that same error. Errors in `finish` or tool arguments become `{{ name, message, cause }}`."#
         );
@@ -672,9 +672,18 @@ mod tests {
             "disabled processes stay hidden"
         );
         assert!(section.contains("Promise.allSettled"), "{section}");
-        assert!(section.contains("calls written directly inside `Promise.all([...])` or `Promise.all(xs.map(...))` run concurrently; later awaits inside the callback run after, one element at a time"), "{section}");
         assert!(
-            section.contains("identifier-bound map run when that map is evaluated"),
+            section.contains(
+                "execute concurrently, as does one `await` of a tool call that is the first thing an async callback evaluates"
+            ),
+            "{section}"
+        );
+        assert!(
+            section.contains("executes one element at a time"),
+            "{section}"
+        );
+        assert!(
+            section.contains("identifier-bound map execute when that map is evaluated"),
             "{section}"
         );
         assert!(!section.contains("### v1 guardrails"));

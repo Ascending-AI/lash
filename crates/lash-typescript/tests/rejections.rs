@@ -564,3 +564,60 @@ fn a_multi_use_code_gives_advice_that_matches_the_actual_refusal() {
         );
     }
 }
+
+/// A Promise aggregate reads its argument as an array without ever checking
+/// that it is one, so the acceptance rule is what stands between a scalar and
+/// a silently wrong result, and it has to hold for a name as well as for the
+/// expression it was bound from.
+#[test]
+fn a_promise_aggregate_refuses_a_bound_name_that_does_not_hold_an_array() {
+    for source in [
+        "const n = 3; finish(await Promise.all(n));",
+        "const n = 3; finish(await Promise.allSettled(n));",
+        "const s = 'ab'; finish(await Promise.all(s));",
+        "const o = { a: 1 }; finish(await Promise.all(o));",
+    ] {
+        let error = lash_typescript::validate(source).expect_err(source);
+        assert_eq!(error.code, Code::AwaitUnsupported, "{source}: {error}");
+        assert!(
+            error.to_string().contains("array-valued expression"),
+            "{source}: {error}"
+        );
+    }
+    // The three shapes the dialect does grant still link.
+    for source in [
+        "const xs = [1, 2]; finish(await Promise.all(xs));",
+        "const ps = ['a'].map(id => web.fetch({ url: id })); finish(await Promise.all(ps));",
+        "finish(await Promise.all(['a'].map(id => web.fetch({ url: id }))));",
+    ] {
+        lash_typescript::validate(source).expect(source);
+    }
+}
+
+/// The inline and identifier-bound spellings of the same program must agree:
+/// aggregating process handles is refused either way, so binding the array to
+/// a name cannot be a way past the guard into un-awaited handles.
+#[test]
+fn a_promise_aggregate_refuses_process_handles_bound_to_a_name() {
+    let inline = r#"
+        const worker = defineProcess({ name: "worker", signals: {}, run: async () => 1 });
+        const a = start(worker);
+        const b = start(worker);
+        finish(await Promise.all([a, b]));
+    "#;
+    let bound = r#"
+        const worker = defineProcess({ name: "worker", signals: {}, run: async () => 1 });
+        const a = start(worker);
+        const b = start(worker);
+        const handles = [a, b];
+        finish(await Promise.all(handles));
+    "#;
+    for source in [inline, bound] {
+        let error = lash_typescript::validate(source).expect_err(source);
+        assert_eq!(error.code, Code::AwaitUnsupported, "{source}: {error}");
+        assert!(
+            error.to_string().contains("separate await expressions"),
+            "{source}: {error}"
+        );
+    }
+}

@@ -7,8 +7,8 @@
 //! owns the arity reasoning that decides which callback shapes can run at all.
 
 use lashlang::{
-    AssignTarget, CatchClause, Expr as LashExpr, ExprFolder, FunctionExpr, ListComprehensionClause,
-    TryExpr, fold_expr_children,
+    AssignTarget, BinaryOp, CatchClause, Expr as LashExpr, ExprFolder, FunctionExpr,
+    ListComprehensionClause, TryExpr, fold_expr_children,
 };
 
 use super::{GENERATED_BINDING_PREFIX, Lowerer};
@@ -94,7 +94,7 @@ impl Lowerer {
             return Ok(None);
         };
         let parameter = parameter.to_string();
-        let Some(call) = single_direct_tool_await(&projection.body) else {
+        let Some(call) = hoistable_leading_await(&projection.body) else {
             return Ok(None);
         };
 
@@ -290,7 +290,7 @@ impl Lowerer {
     }
 }
 
-fn promise_map_parts(expression: &Expr) -> Option<(&Expr, &Function)> {
+pub(super) fn promise_map_parts(expression: &Expr) -> Option<(&Expr, &Function)> {
     let Expr::Call { callee, args } = expression else {
         return None;
     };
@@ -383,29 +383,189 @@ fn runtime_list_batch(items: LashExpr, binding: String, call: LashExpr, unwrap: 
     }))
 }
 
-fn single_direct_tool_await(body: &LashExpr) -> Option<LashExpr> {
-    fn collect(expr: &LashExpr, awaits: &mut Vec<Option<LashExpr>>) {
-        match expr {
-            LashExpr::Function(_) => {}
-            LashExpr::Await(inner) => {
-                let call = match inner.as_ref() {
-                    LashExpr::ResultUnwrap(call)
-                        if matches!(call.as_ref(), LashExpr::ReceiverCall { .. }) =>
-                    {
-                        Some(call.as_ref().clone())
-                    }
-                    _ => None,
-                };
-                awaits.push(call);
+/// The one tool await this lowering may hoist out of an async callback, if
+/// the callback has a shape whose semantics the hoist provably preserves.
+///
+/// Hoisting moves a tool call out of the callback into a runtime-sized batch
+/// and re-runs what is left as a pure projection over the settled results.
+/// That is only equivalent to running the callback when the await is
+/// evaluated exactly once, unconditionally, before the callback binds
+/// anything, outside any exception scope, and when what remains is a pure
+/// expression the VM's map driver can run. Every other shape returns `None`
+/// and stays on the sequential async-map driver, which is the documented
+/// fallback: a partial hoist would change which tool calls are issued.
+fn hoistable_leading_await(body: &LashExpr) -> Option<LashExpr> {
+    let LeadingAwait::Found(call) = scan_leading_await(body) else {
+        return None;
+    };
+    let mut hoisted = false;
+    (body_runs_as_projection(body, &mut hoisted) && hoisted).then_some(call)
+}
+
+/// What scanning a sub-expression in evaluation order found.
+enum LeadingAwait {
+    /// Nothing evaluated so far awaits, binds a name, or branches.
+    NotFound,
+    /// The hoistable await, carrying the tool call to batch.
+    Found(LashExpr),
+    /// The callback cannot be hoisted: the await is conditional, guarded,
+    /// preceded by a binding, or reached through a node whose evaluation
+    /// order this analysis does not model.
+    Unsupported,
+}
+
+/// Locates the leading await, refusing anything it cannot prove runs first.
+///
+/// Only nodes whose children are evaluated unconditionally and in order are
+/// descended into; `children()` yields them in exactly that order. Anything
+/// else — a branch, a loop, an exception scope, a call, a closure — is
+/// `Unsupported` rather than searched, so a hoisted await can never come from
+/// a position that might not have been evaluated.
+fn scan_leading_await(expr: &LashExpr) -> LeadingAwait {
+    match expr {
+        LashExpr::LabelAnnotated { expr, .. } => scan_leading_await(expr),
+        LashExpr::Await(inner) => match inner.as_ref() {
+            LashExpr::ResultUnwrap(call)
+                if matches!(call.as_ref(), LashExpr::ReceiverCall { .. }) =>
+            {
+                LeadingAwait::Found(call.as_ref().clone())
             }
-            _ => expr.children().for_each(|child| collect(child, awaits)),
+            _ => LeadingAwait::Unsupported,
+        },
+        // Leaves: pure, and they bind nothing.
+        LashExpr::Null
+        | LashExpr::Undefined
+        | LashExpr::Bool(_)
+        | LashExpr::Number(_)
+        | LashExpr::String(_)
+        | LashExpr::Variable(_)
+        | LashExpr::ResourceRef(_)
+        | LashExpr::TypeLiteral(_) => LeadingAwait::NotFound,
+        // A binding whose value does not contain the await completes before
+        // it, and the hoisted call runs outside the callback where that name
+        // does not exist.
+        LashExpr::Assign { target, expr } if target.is_simple() => match scan_leading_await(expr) {
+            LeadingAwait::Found(call) => LeadingAwait::Found(call),
+            LeadingAwait::NotFound | LeadingAwait::Unsupported => LeadingAwait::Unsupported,
+        },
+        // `&&`/`||` may not evaluate their right operand.
+        LashExpr::Binary {
+            op: BinaryOp::And | BinaryOp::Or,
+            ..
+        } => LeadingAwait::Unsupported,
+        LashExpr::Block(_)
+        | LashExpr::Tuple(_)
+        | LashExpr::List(_)
+        | LashExpr::Record(_)
+        | LashExpr::Return(_)
+        | LashExpr::ResultUnwrap(_)
+        | LashExpr::Field { .. }
+        | LashExpr::Index { .. }
+        | LashExpr::Unary { .. }
+        | LashExpr::Binary { .. }
+        | LashExpr::JavaScriptUnary { .. }
+        | LashExpr::JavaScriptBinary { .. } => {
+            for child in expr.children() {
+                match scan_leading_await(child) {
+                    LeadingAwait::NotFound => {}
+                    found @ LeadingAwait::Found(_) => return found,
+                    LeadingAwait::Unsupported => return LeadingAwait::Unsupported,
+                }
+            }
+            LeadingAwait::NotFound
         }
+        _ => LeadingAwait::Unsupported,
     }
-    let mut awaits = Vec::new();
-    collect(body, &mut awaits);
-    match awaits.as_slice() {
-        [Some(call)] => Some(call.clone()),
-        _ => None,
+}
+
+/// Whether the whole callback body, minus the one hoisted await, is something
+/// the VM's pure map driver can run after the batch settles.
+///
+/// `hoisted` records that the batched await was seen; a second await, a
+/// closure, a call, or any effect disqualifies the callback. This is what
+/// keeps a projection that captures the loop variable or logs inside the
+/// callback on the sequential driver instead of failing to link or tripping
+/// the builtin-callback effect guard.
+fn body_runs_as_projection(expr: &LashExpr, hoisted: &mut bool) -> bool {
+    if !*hoisted
+        && let LashExpr::Await(inner) = expr
+        && let LashExpr::ResultUnwrap(call) = inner.as_ref()
+        && matches!(call.as_ref(), LashExpr::ReceiverCall { .. })
+    {
+        *hoisted = true;
+        // The batched call is evaluated outside the callback, so its own
+        // arguments must be pure: a dependent await in there has to run per
+        // element, in order.
+        return call.children().all(is_pure_argument);
+    }
+    projection_node_is_pure(expr)
+        && expr
+            .children()
+            .all(|child| body_runs_as_projection(child, hoisted))
+}
+
+fn is_pure_argument(expr: &LashExpr) -> bool {
+    projection_node_is_pure(expr) && expr.children().all(is_pure_argument)
+}
+
+/// Whether this node alone performs no effect, suspends nothing, and creates
+/// no closure. Spelled exhaustively so a new expression kind has to be
+/// classified rather than silently inheriting permission to be hoisted.
+fn projection_node_is_pure(expr: &LashExpr) -> bool {
+    match expr {
+        LashExpr::Block(_)
+        | LashExpr::LabelAnnotated { .. }
+        | LashExpr::Null
+        | LashExpr::Undefined
+        | LashExpr::Bool(_)
+        | LashExpr::Number(_)
+        | LashExpr::String(_)
+        | LashExpr::Variable(_)
+        | LashExpr::Tuple(_)
+        | LashExpr::List(_)
+        | LashExpr::ListComprehension { .. }
+        | LashExpr::Record(_)
+        | LashExpr::Assign { .. }
+        | LashExpr::If { .. }
+        | LashExpr::For { .. }
+        | LashExpr::While { .. }
+        | LashExpr::Break
+        | LashExpr::Continue
+        | LashExpr::ResourceRef(_)
+        | LashExpr::ResultUnwrap(_)
+        | LashExpr::BuiltinCall { .. }
+        | LashExpr::Map { .. }
+        | LashExpr::Throw(_)
+        | LashExpr::Return(_)
+        | LashExpr::Field { .. }
+        | LashExpr::Index { .. }
+        | LashExpr::Unary { .. }
+        | LashExpr::Binary { .. }
+        | LashExpr::JavaScriptUnary { .. }
+        | LashExpr::JavaScriptBinary { .. }
+        | LashExpr::JavaScriptLogical { .. }
+        | LashExpr::TypeLiteral(_) => true,
+        // Effects, suspension points, exception scopes, and anything that
+        // makes or enters a function body this analysis cannot see into.
+        LashExpr::Await(_)
+        | LashExpr::ReceiverCall { .. }
+        | LashExpr::StartProcess(_)
+        | LashExpr::ProcessRef { .. }
+        | LashExpr::HostDescriptorConstructor { .. }
+        | LashExpr::SleepFor(_)
+        | LashExpr::SleepUntil(_)
+        | LashExpr::WaitSignal { .. }
+        | LashExpr::SignalRun { .. }
+        | LashExpr::Cancel(_)
+        | LashExpr::Print(_)
+        | LashExpr::Yield(_)
+        | LashExpr::Wake(_)
+        | LashExpr::Finish(_)
+        | LashExpr::Fail(_)
+        | LashExpr::Function(_)
+        | LashExpr::Call { .. }
+        | LashExpr::FunctionCall { .. }
+        | LashExpr::Try(_) => false,
     }
 }
 

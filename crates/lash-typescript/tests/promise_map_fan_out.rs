@@ -325,3 +325,192 @@ fn a_second_dependent_await_keeps_the_async_map_sequential() {
     assert_eq!(host.calls.load(Ordering::SeqCst), 4);
     assert_eq!(host.batches.load(Ordering::SeqCst), 0);
 }
+
+/// Records what the host was actually asked to do, so a witness can assert on
+/// call counts and argument order rather than only on returned values: two of
+/// the shapes below return plausible values while issuing the wrong calls.
+#[derive(Default)]
+struct OrderRecordingHost {
+    batches: AtomicUsize,
+    batch_sizes: Mutex<Vec<usize>>,
+    urls: Mutex<Vec<f64>>,
+    prints: Mutex<Vec<String>>,
+    fail_every_call: bool,
+}
+
+impl OrderRecordingHost {
+    fn failing() -> Self {
+        Self {
+            fail_every_call: true,
+            ..Self::default()
+        }
+    }
+
+    fn url_of(operation: &lashlang::ResourceOperation) -> Result<f64, ExecutionHostError> {
+        let [Value::Record(fields)] = operation.args.as_slice() else {
+            return Err(ExecutionHostError::new("expected one record argument"));
+        };
+        fields
+            .iter()
+            .find(|(key, _)| *key == "url")
+            .and_then(|(_, value)| match value {
+                Value::Number(number) => Some(*number),
+                _ => None,
+            })
+            .ok_or_else(|| ExecutionHostError::new("expected a numeric url argument"))
+    }
+
+    fn record(&self, operation: &lashlang::ResourceOperation) -> Result<f64, ExecutionHostError> {
+        let url = Self::url_of(operation)?;
+        self.urls.lock().expect("urls lock").push(url);
+        Ok(url + 10.0)
+    }
+
+    fn recorded_urls(&self) -> Vec<f64> {
+        self.urls.lock().expect("urls lock").clone()
+    }
+}
+
+impl ExecutionHost for OrderRecordingHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::ResourceOperation(operation) => {
+                let value = self.record(&operation)?;
+                if self.fail_every_call {
+                    return Err(ExecutionHostError::new(format!("failure-{}", value - 10.0)));
+                }
+                Ok(AbilityResult::Value(Value::Number(value)))
+            }
+            AbilityOp::ResourceOperationBatch(batch) => {
+                self.batches.fetch_add(1, Ordering::SeqCst);
+                self.batch_sizes
+                    .lock()
+                    .expect("batch sizes lock")
+                    .push(batch.operations.len());
+                let mut results = Vec::new();
+                for operation in &batch.operations {
+                    let value = self.record(operation)?;
+                    results.push(if self.fail_every_call {
+                        ResourceOperationResult::Error(ExecutionHostError::new(format!(
+                            "failure-{}",
+                            value - 10.0
+                        )))
+                    } else {
+                        ResourceOperationResult::Value(Value::Number(value))
+                    });
+                }
+                let settlement = (0..results.len()).collect();
+                Ok(AbilityResult::ResourceOperationBatch(
+                    ResourceOperationBatchResult::settled_in_order(results, settlement),
+                ))
+            }
+            AbilityOp::Print(value) => {
+                self.prints
+                    .lock()
+                    .expect("prints lock")
+                    .push(format!("{value:?}"));
+                Ok(AbilityResult::Unit)
+            }
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            other => Err(ExecutionHostError::new(format!(
+                "unexpected ability {other:?}"
+            ))),
+        }
+    }
+}
+
+fn numbers(values: &[f64]) -> ExecutionOutcome {
+    ExecutionOutcome::Finished(Value::List(
+        values
+            .iter()
+            .copied()
+            .map(Value::Number)
+            .collect::<Vec<_>>()
+            .into(),
+    ))
+}
+
+#[test]
+fn a_conditional_await_stays_sequential_and_issues_one_call() {
+    let host = OrderRecordingHost::default();
+    let outcome = execute(
+        "finish(await Promise.all([0, 1].map(async id => id === 0 ? 99 : await web.fetch({ url: id }))));",
+        &host,
+    )
+    .expect("a conditionally awaited callback should run on the sequential driver");
+
+    assert_eq!(outcome, numbers(&[99.0, 11.0]));
+    assert_eq!(host.recorded_urls(), vec![1.0]);
+    assert_eq!(host.batches.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_caught_await_returns_the_caught_value_instead_of_failing_the_aggregate() {
+    let host = OrderRecordingHost::failing();
+    let outcome = execute(
+        "finish(await Promise.all([0].map(async id => { try { return await web.fetch({ url: id }); } catch (e) { return 99; } })));",
+        &host,
+    )
+    .expect("a caught leaf failure must not escape the aggregate");
+
+    assert_eq!(outcome, numbers(&[99.0]));
+    assert_eq!(host.recorded_urls(), vec![0.0]);
+    assert_eq!(host.batches.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_local_binding_before_the_await_stays_sequential() {
+    let host = OrderRecordingHost::default();
+    let outcome = execute(
+        "finish(await Promise.all([0, 1].map(async id => { const url = id; return await web.fetch({ url }); })));",
+        &host,
+    )
+    .expect("a callback binding a local before awaiting should link and run");
+
+    assert_eq!(outcome, numbers(&[10.0, 11.0]));
+    assert_eq!(host.recorded_urls(), vec![0.0, 1.0]);
+    assert_eq!(host.batches.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_nested_dependent_await_in_tool_arguments_stays_sequential() {
+    let host = OrderRecordingHost::default();
+    let outcome = execute(
+        "finish(await Promise.all([0, 1].map(async id => await web.fetch({ url: await web.fetch({ url: id }) }))));",
+        &host,
+    )
+    .expect("a dependent await inside tool arguments should run on the sequential driver");
+
+    assert_eq!(outcome, numbers(&[20.0, 21.0]));
+    assert_eq!(host.recorded_urls(), vec![0.0, 10.0, 1.0, 11.0]);
+    assert_eq!(host.batches.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_projection_closing_over_the_callback_parameter_stays_sequential() {
+    let host = OrderRecordingHost::default();
+    let outcome = execute(
+        "finish(await Promise.all([0, 1].map(async id => { const r = await web.fetch({ url: id }); return (() => id)(); })));",
+        &host,
+    )
+    .expect("a projection closure over the callback parameter should link and run");
+
+    assert_eq!(outcome, numbers(&[0.0, 1.0]));
+    assert_eq!(host.recorded_urls(), vec![0.0, 1.0]);
+    assert_eq!(host.batches.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_callback_effect_after_the_await_stays_sequential() {
+    let host = OrderRecordingHost::default();
+    let outcome = execute(
+        "finish(await Promise.all([0, 1].map(async id => { const r = await web.fetch({ url: id }); console.log(id); return r; })));",
+        &host,
+    )
+    .expect("a callback that logs should link and run");
+
+    assert_eq!(outcome, numbers(&[10.0, 11.0]));
+    assert_eq!(host.recorded_urls(), vec![0.0, 1.0]);
+    assert_eq!(host.batches.load(Ordering::SeqCst), 0);
+    assert_eq!(host.prints.lock().expect("prints lock").len(), 2);
+}

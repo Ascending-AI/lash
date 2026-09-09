@@ -46,17 +46,17 @@ impl Lowerer {
                         None,
                     ));
                 };
-                if matches!(
-                    value,
-                    Expr::Undefined
-                        | Expr::Null
-                        | Expr::Bool(_)
-                        | Expr::Number(_)
-                        | Expr::String(_)
-                        | Expr::RegExp { .. }
-                        | Expr::Object(_)
-                        | Expr::Function(_)
-                ) {
+                // An allow-list, not a deny-list: nothing checks at runtime
+                // that the aggregate's argument is an array, so a shape this
+                // pass cannot see an array in has to be refused here. These
+                // are exactly the three the dialect grants.
+                let array_valued = matches!(value, Expr::Array(_))
+                    || is_map_call(value)
+                    || matches!(value, Expr::Ident(name)
+                    if self.binding(name).is_ok_and(|binding| {
+                        matches!(binding.role, BindingRole::ArrayValue(_))
+                    }));
+                if !array_valued {
                     return Err(Diagnostic::with_repair(
                         DiagnosticCode::AwaitUnsupported,
                         format!("Promise.{method} requires an array-valued expression"),
@@ -183,18 +183,26 @@ impl Lowerer {
         ))
     }
 
+    /// Whether the aggregate's argument may carry a process handle.
+    ///
+    /// The inline and identifier-bound spellings of the same program have to
+    /// agree, so a name whose binding recorded process handles is refused
+    /// exactly like the array literal it was bound from.
     fn aggregate_contains_process_handle(&self, value: &Expr) -> bool {
-        let Expr::Array(items) = value else {
-            return false;
-        };
-        items.iter().any(|item| match item {
-            ArrayElement::Value(value) | ArrayElement::Spread(value) => {
-                self.expr_may_be_process_handle(value)
-            }
-        })
+        match value {
+            Expr::Array(items) => items.iter().any(|item| match item {
+                ArrayElement::Value(value) | ArrayElement::Spread(value) => {
+                    self.expr_may_be_process_handle(value)
+                }
+            }),
+            Expr::Ident(name) => self.binding(name).is_ok_and(|binding| {
+                binding.role == BindingRole::ArrayValue(ArrayContents::ProcessHandles)
+            }),
+            _ => false,
+        }
     }
 
-    fn expr_may_be_process_handle(&self, expr: &Expr) -> bool {
+    pub(super) fn expr_may_be_process_handle(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Ident(name) => self
                 .binding(name)
@@ -214,6 +222,17 @@ impl Lowerer {
             _ => false,
         }
     }
+}
+
+/// An inline `xs.map(callback)` with a function literal, which the aggregate
+/// accepts whether or not the callback is async.
+fn is_map_call(value: &Expr) -> bool {
+    matches!(
+        value,
+        Expr::Call { callee, args }
+            if matches!(callee.as_ref(), Expr::Member { property: MemberProperty::Field(map), .. } if map == "map")
+                && matches!(args.as_slice(), [CallArg::Value(Expr::Function(_))])
+    )
 }
 
 fn is_async_map(value: &Expr) -> bool {

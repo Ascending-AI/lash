@@ -59,6 +59,21 @@ pub(super) enum BindingRole {
     ProcessDefinition(String),
     /// A collection whose iteration protocol is its own, not an array's.
     ExoticIterable(IterableKind),
+    /// A `const` initialized from an array literal or a mapped tool call, so
+    /// a Promise aggregate may read it by name. What the array holds decides
+    /// whether the aggregate accepts it, which is why the contents are part
+    /// of the role rather than re-derived at the aggregate.
+    ArrayValue(ArrayContents),
+}
+
+/// What an array-valued binding holds, as far as a Promise aggregate cares.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum ArrayContents {
+    /// Values that are already settled by the time the aggregate reads them.
+    SettledValues,
+    /// At least one element is a process handle, which a Promise aggregate
+    /// refuses inline and must refuse by name too.
+    ProcessHandles,
 }
 
 #[derive(Clone, Debug)]
