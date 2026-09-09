@@ -821,7 +821,7 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// Version-29 registries are rejected rather than migrated.
 /// Version 31 removes the unread process waiting projection and its index.
 /// Version-30 registries are rejected rather than migrated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 31;
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 32;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
