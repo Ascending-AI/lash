@@ -1,7 +1,7 @@
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::world::{MailMessage, World};
+use crate::world::{Catalog, MailMessage, World};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "expected")]
@@ -101,42 +101,49 @@ pub(crate) fn task_pack() -> Vec<Task> {
 pub(crate) fn easy_pack() -> Vec<Task> {
     vec![
         read_task(
+            Catalog::Easy,
             "weather-temperature",
             "Call weather.lookup for Berlin and finish with only its temperature_c value.",
             FinishMatcher::Numeric(12.0),
             1,
         ),
         read_task(
+            Catalog::Easy,
             "weather-condition",
             "Call weather.lookup for Berlin, then finish with only its condition.",
             FinishMatcher::Normalized("rain".to_string()),
             1,
         ),
         read_task(
+            Catalog::Easy,
             "weather-compare",
             "Call weather.lookup once for Berlin and once for Lisbon, then finish with only the warmer city's name, preserving its spelling.",
             FinishMatcher::Exact(json!("Lisbon")),
             2,
         ),
         read_task(
+            Catalog::Easy,
             "string-owner",
             "Call notes.render for N-7 and extract the value after owner= up to the next comma, excluding the comma. Finish with only that value, nothing else, preserving its spelling.",
             FinishMatcher::Exact(json!("Imani")),
             1,
         ),
         read_task(
+            Catalog::Easy,
             "string-token",
             "Call notes.render for N-7 and extract the value after token= up to the closing parenthesis, excluding the parenthesis. Finish with only that value, nothing else, preserving its spelling.",
             FinishMatcher::Exact(json!("ALPHA-17")),
             1,
         ),
         read_task(
+            Catalog::Easy,
             "kv-read",
             "Call kv.get for project, then finish with its value.",
             FinishMatcher::Exact(json!("aurora")),
             1,
         ),
         write_task(
+            Catalog::Easy,
             "kv-write",
             "Use code to call kv.put with key status and value ready, then finish with saved.",
             FinishMatcher::Exact(json!("saved")),
@@ -146,6 +153,7 @@ pub(crate) fn easy_pack() -> Vec<Task> {
             },
         ),
         write_task(
+            Catalog::Easy,
             "kv-write-read",
             "Use code to store violet under theme with kv.put and verify it with kv.get. Finish with the verified value.",
             FinishMatcher::Exact(json!("violet")),
@@ -155,18 +163,21 @@ pub(crate) fn easy_pack() -> Vec<Task> {
             },
         ),
         read_task(
+            Catalog::Easy,
             "mail-count",
             "Use code to call mail.list and count the messages. Finish with only the count.",
             FinishMatcher::Numeric(2.0),
             1,
         ),
         read_task(
+            Catalog::Easy,
             "mail-sender",
             "Call mail.list and find the message whose subject is Build. Finish with only its sender field, preserving its spelling.",
             FinishMatcher::Exact(json!("Ada")),
             1,
         ),
         write_task(
+            Catalog::Easy,
             "mail-send",
             "Call mail.send once with recipient \"ops@example.test\", subject \"Deploy\", and body \"Ship build 104\" (exactly the text inside the quotes). Finish with only the returned id field.",
             FinishMatcher::Exact(json!("m3")),
@@ -174,6 +185,7 @@ pub(crate) fn easy_pack() -> Vec<Task> {
             append_deploy_mail,
         ),
         write_task(
+            Catalog::Easy,
             "mail-send-read",
             "Call mail.send once with recipient \"ops@example.test\", subject \"Deploy\", and body \"Ship build 104\" (exactly the text inside the quotes), then call mail.list once to verify it is present. Finish with only the new message's id field.",
             FinishMatcher::Exact(json!("m3")),
@@ -181,6 +193,7 @@ pub(crate) fn easy_pack() -> Vec<Task> {
             append_deploy_mail,
         ),
         write_task(
+            Catalog::Easy,
             "weather-to-kv",
             "Use code to call weather.lookup for Lisbon and store its condition under last_weather with kv.put. Finish with the condition.",
             FinishMatcher::Exact(json!("sunny")),
@@ -192,12 +205,14 @@ pub(crate) fn easy_pack() -> Vec<Task> {
             },
         ),
         read_task(
+            Catalog::Easy,
             "missing-field",
             "Use code to call contacts.get for C-17 and check whether the record contains a phone field. Finish with its phone value if present, or FIELD_UNAVAILABLE if absent.",
             FinishMatcher::Exact(json!("FIELD_UNAVAILABLE")),
             1,
         ),
         write_task(
+            Catalog::Easy,
             "targeted-update",
             "Call kv.put once to set project to nebula, then finish with nebula. Leave everything else unchanged.",
             FinishMatcher::Exact(json!("nebula")),
@@ -207,6 +222,7 @@ pub(crate) fn easy_pack() -> Vec<Task> {
             },
         ),
         read_task(
+            Catalog::Easy,
             "string-to-kv-chain",
             "Call notes.render for N-9, extract the key after key= through the end of the text, and retrieve that key with kv.get. Finish with only the retrieved value field, preserving its spelling.",
             FinishMatcher::Exact(json!("L7")),
@@ -216,15 +232,17 @@ pub(crate) fn easy_pack() -> Vec<Task> {
 }
 
 fn read_task(
+    catalog: Catalog,
     id: &'static str,
     prompt: &'static str,
     finish: FinishMatcher,
     tool_calls: usize,
 ) -> Task {
-    write_task(id, prompt, finish, tool_calls, |_| {})
+    write_task(catalog, id, prompt, finish, tool_calls, |_| {})
 }
 
 fn write_task(
+    catalog: Catalog,
     id: &'static str,
     prompt: &'static str,
     finish: FinishMatcher,
@@ -232,13 +250,7 @@ fn write_task(
     mutate_expected: impl FnOnce(&mut World),
 ) -> Task {
     let mut seed = World::seeded();
-    seed.catalog = if id.starts_with("hard-retail-") {
-        crate::world::Catalog::Retail
-    } else if id.starts_with("hard-ops-") {
-        crate::world::Catalog::Ops
-    } else {
-        crate::world::Catalog::Easy
-    };
+    seed.catalog = catalog;
     let mut expected_world = seed.clone();
     mutate_expected(&mut expected_world);
     Task {
@@ -289,6 +301,114 @@ fn append_deploy_mail(world: &mut World) {
         subject: "Deploy".to_string(),
         body: "Ship build 104".to_string(),
     });
+}
+
+pub(crate) fn hard_pack() -> Vec<Task> {
+    vec![
+        write_task(
+            Catalog::Retail,
+            "hard-retail-refund",
+            "Refund all of Mira's delivered orders within the 30-day return window. Finish with only the total refunded cents verified in those orders, nothing else.",
+            FinishMatcher::Numeric(4000.0),
+            9,
+            |w| {
+                w.retail.orders[0].refunded_cents = 2200;
+                w.retail.orders[2].refunded_cents = 1800;
+            },
+        ),
+        write_task(
+            Catalog::Retail,
+            "hard-retail-exchange",
+            "For order R7, attempt the requested replacement P2; if it is out of stock, use the cheapest other product in the original category with enough stock for the entire order. Finish with only the verified replacement sku field value, nothing else.",
+            FinishMatcher::Exact(json!("P5")),
+            6,
+            |w| {
+                w.retail.orders[6].sku = "P5".into();
+                w.retail.products[4].stock = 0;
+            },
+        ),
+        write_task(
+            Catalog::Retail,
+            "hard-retail-reschedule",
+            "Move the pending delivery scheduled soonest for Sana to day 22 only if she has no pending payment; shipped orders must stay unchanged. Finish with only the verified delivery_day field value of the moved order, or PAYMENT_PENDING if payment blocks it, nothing else.",
+            FinishMatcher::Numeric(22.0),
+            7,
+            |w| {
+                w.retail.orders[6].delivery_day = 22;
+            },
+        ),
+        read_task(
+            Catalog::Retail,
+            "hard-retail-reprice",
+            "How many cents more would Mira pay at current product prices for the quantities in her delivered orders still within the 30-day return window, compared with what she actually paid for those orders? Finish with only the difference in cents, nothing else.",
+            FinishMatcher::Numeric(500.0),
+            7,
+        ),
+        read_task(
+            Catalog::Retail,
+            "hard-retail-lamps",
+            "Which of Mira's delivered orders contain products in category lamp? Finish with only the list of matching order IDs, nothing else, without changing anything.",
+            FinishMatcher::UnorderedSet(vec![json!("R1"), json!("R2")]),
+            8,
+        ),
+        read_task(
+            Catalog::Retail,
+            "hard-retail-best-return",
+            "Which of Mira's delivered orders still within the 30-day return window has the greatest paid amount per unit? Break ties by the earlier order ID and finish with only that order ID, nothing else.",
+            FinishMatcher::Exact(json!("R1")),
+            5,
+        ),
+        write_task(
+            Catalog::Ops,
+            "hard-ops-deploy-recovery",
+            "Attempt Beacon's newest release with passed checks; if capacity prevents it, deploy the newest passed release that fits. Finish with only the verified deployed_release field value, nothing else.",
+            FinishMatcher::Exact(json!("V2")),
+            8,
+            |w| {
+                w.ops.services[0].deployed_release = "V2".into();
+            },
+        ),
+        write_task(
+            Catalog::Ops,
+            "hard-ops-resolve-chain",
+            "Resolve incident I2 and its open prerequisites with their required fixes deployed on Beacon. Finish with only I2's verified status field value, nothing else.",
+            FinishMatcher::Exact(json!("resolved")),
+            9,
+            |w| {
+                w.ops.services[0].deployed_release = "V2".into();
+                w.ops.tickets[0].status = "resolved".into();
+                w.ops.tickets[1].status = "resolved".into();
+            },
+        ),
+        read_task(
+            Catalog::Ops,
+            "hard-ops-impact",
+            "What is the sum of affected users on Beacon's open incidents of severity 1 or 2? Exclude resolved incidents and finish with only the total, nothing else.",
+            FinishMatcher::Numeric(200.0),
+            5,
+        ),
+        read_task(
+            Catalog::Ops,
+            "hard-ops-oncall",
+            "For the highest-severity open incident across Beacon and Harbor, finish with only the owning team's available primary email, or its backup email when the primary is unavailable. Break severity ties by the larger affected-user count and include nothing besides that email.",
+            FinishMatcher::Exact(json!("nia@example.test")),
+            10,
+        ),
+        read_task(
+            Catalog::Ops,
+            "hard-ops-ready",
+            "Which of Beacon's open incidents have no open prerequisites and a fix release whose checks passed and capacity fits Beacon? Finish with only the list of matching incident IDs, nothing else, without deploying or resolving anything.",
+            FinishMatcher::UnorderedSet(vec![json!("I1")]),
+            6,
+        ),
+        read_task(
+            Catalog::Ops,
+            "hard-ops-blocked-impact",
+            "Among incident I2 and all of Harbor's incidents, how many affected users belong to open incidents whose required fix release has failed checks? Finish with only the total, nothing else.",
+            FinishMatcher::Numeric(290.0),
+            7,
+        ),
+    ]
 }
 
 #[cfg(test)]
@@ -452,102 +572,6 @@ mod tests {
             assert!(!crate::grading::grade(&task, &task.expected_world, &evidence, 0.10).passed);
         }
     }
-}
-
-pub(crate) fn hard_pack() -> Vec<Task> {
-    vec![
-        write_task(
-            "hard-retail-refund",
-            "Refund all of Mira's delivered orders within the 30-day return window. Finish with only the total refunded cents verified in those orders, nothing else.",
-            FinishMatcher::Numeric(4000.0),
-            9,
-            |w| {
-                w.retail.orders[0].refunded_cents = 2200;
-                w.retail.orders[2].refunded_cents = 1800;
-            },
-        ),
-        write_task(
-            "hard-retail-exchange",
-            "For order R7, attempt the requested replacement P2; if it is out of stock, use the cheapest other product in the original category with enough stock for the entire order. Finish with only the verified replacement sku field value, nothing else.",
-            FinishMatcher::Exact(json!("P5")),
-            6,
-            |w| {
-                w.retail.orders[6].sku = "P5".into();
-                w.retail.products[4].stock = 0;
-            },
-        ),
-        write_task(
-            "hard-retail-reschedule",
-            "Move Sana's earliest pending delivery to day 22 only if she has no pending payment; shipped orders must stay unchanged. Finish with only the verified delivery_day field value of the moved order, or PAYMENT_PENDING if payment blocks it, nothing else.",
-            FinishMatcher::Numeric(22.0),
-            7,
-            |w| {
-                w.retail.orders[6].delivery_day = 22;
-            },
-        ),
-        read_task(
-            "hard-retail-reprice",
-            "How many cents more would Mira pay at current product prices for the quantities in her delivered orders still within the 30-day return window, compared with what she actually paid for those orders? Finish with only the difference in cents, nothing else.",
-            FinishMatcher::Numeric(500.0),
-            7,
-        ),
-        read_task(
-            "hard-retail-lamps",
-            "Which of Mira's delivered orders contain products in category lamp? Finish with only the list of matching order IDs, nothing else, without changing anything.",
-            FinishMatcher::UnorderedSet(vec![json!("R1"), json!("R2")]),
-            8,
-        ),
-        read_task(
-            "hard-retail-best-return",
-            "Which of Mira's delivered orders still within the 30-day return window has the greatest paid amount per unit? Break ties by the earlier order ID and finish with only that order ID, nothing else.",
-            FinishMatcher::Exact(json!("R1")),
-            5,
-        ),
-        write_task(
-            "hard-ops-deploy-recovery",
-            "Attempt Beacon's newest release with passed checks; if capacity prevents it, deploy the newest passed release that fits. Finish with only the verified deployed_release field value, nothing else.",
-            FinishMatcher::Exact(json!("V2")),
-            8,
-            |w| {
-                w.ops.services[0].deployed_release = "V2".into();
-            },
-        ),
-        write_task(
-            "hard-ops-resolve-chain",
-            "Resolve incident I2 and its open prerequisites with their required fixes deployed on Beacon. Finish with only I2's verified status field value, nothing else.",
-            FinishMatcher::Exact(json!("resolved")),
-            9,
-            |w| {
-                w.ops.services[0].deployed_release = "V2".into();
-                w.ops.tickets[0].status = "resolved".into();
-                w.ops.tickets[1].status = "resolved".into();
-            },
-        ),
-        read_task(
-            "hard-ops-impact",
-            "What is the sum of affected users on Beacon's open incidents of severity 1 or 2? Exclude resolved incidents and finish with only the total, nothing else.",
-            FinishMatcher::Numeric(200.0),
-            5,
-        ),
-        read_task(
-            "hard-ops-oncall",
-            "For the highest-severity open incident across Beacon and Harbor, finish with only the owning team's available primary email, or its backup email when the primary is unavailable. Break severity ties by the larger affected-user count and include nothing besides that email.",
-            FinishMatcher::Exact(json!("nia@example.test")),
-            10,
-        ),
-        read_task(
-            "hard-ops-ready",
-            "Which of Beacon's open incidents have no open prerequisites and a fix release whose checks passed and capacity fits Beacon? Finish with only the list of matching incident IDs, nothing else, without deploying or resolving anything.",
-            FinishMatcher::UnorderedSet(vec![json!("I1")]),
-            6,
-        ),
-        read_task(
-            "hard-ops-blocked-impact",
-            "Among incident I2 and all of Harbor's incidents, how many affected users belong to open incidents whose required fix release has failed checks? Finish with only the total, nothing else.",
-            FinishMatcher::Numeric(290.0),
-            7,
-        ),
-    ]
 }
 
 #[cfg(test)]

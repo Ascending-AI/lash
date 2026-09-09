@@ -641,6 +641,14 @@ impl Operations {
 fn refusal(code: &str) -> Value {
     json!({"error":{"code":code}})
 }
+// JSON Schema integers include numbers such as 22.0. Keep conversion bounded
+// to the signed representation used by the world, without truncation/saturation.
+fn integer(value: &Value) -> Option<i64> {
+    value.as_i64().or_else(|| {
+        let n = value.as_f64()?;
+        (n.fract() == 0.0 && n >= i64::MIN as f64 && n < -(i64::MIN as f64)).then_some(n as i64)
+    })
+}
 pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<Value, String> {
     // Enforce the same strict inputs in the direct oracle path as in the host.
     let definitions = hard_definitions();
@@ -656,7 +664,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
             .iter()
             .any(|(key, field)| match field["type"].as_str() {
                 Some("string") => !object.get(key).is_some_and(Value::is_string),
-                Some("integer") => !object.get(key).is_some_and(|v| v.as_i64().is_some()),
+                Some("integer") => !object.get(key).is_some_and(|v| integer(v).is_some()),
                 _ => true,
             })
     {
@@ -785,7 +793,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
             let id = required_string(args, "order_id")?;
             let day = args
                 .get("day")
-                .and_then(Value::as_i64)
+                .and_then(integer)
                 .filter(|d| *d > 0)
                 .ok_or("day must be a positive integer")?;
             let order = world

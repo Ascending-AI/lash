@@ -6,10 +6,13 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone, Default)]
 pub(crate) struct Capture {
     pub(crate) http_bodies: Arc<Mutex<std::collections::BTreeMap<usize, Vec<u8>>>>,
+    pub(crate) http_finished: Arc<Mutex<std::collections::BTreeSet<usize>>>,
     pub(crate) entries: Arc<Mutex<Vec<Value>>>,
     secret: Arc<Mutex<String>>,
     span: Arc<Mutex<Option<tracing::Span>>>,
     dump_prefix: Arc<Mutex<Option<std::path::PathBuf>>>,
+    #[cfg(test)]
+    pub(crate) dump_writes: Arc<Mutex<Vec<(usize, String)>>>,
     pub(crate) dump_errors: Arc<Mutex<Vec<String>>>,
 }
 impl std::fmt::Debug for Capture {
@@ -113,7 +116,7 @@ impl Provider for LoggedProvider {
         let request_id = request.scope.request_id.clone();
         let attempt_index = self.capture.rows().len() + 1;
         tracing::debug!(target: "toolbench", parent: &self.capture.span(), attempt_index, request_id, request = %redact(serde_json::to_value(&request).expect("request serializes"), &self.secret), "provider request");
-        self.capture.entries.lock().unwrap_or_else(|e| e.into_inner()).push(json!({"request_id":request_id, "request_ms":null, "cost":null, "response":null, "error":null}));
+        self.capture.entries.lock().unwrap_or_else(|e| e.into_inner()).push(json!({"request_id":request_id, "partial":true, "request_ms":null, "cost":null, "response":null, "error":null}));
         let started = std::time::Instant::now();
         let result = self.inner.complete(request).await;
         let (error, response) = match &result {
@@ -123,7 +126,7 @@ impl Provider for LoggedProvider {
                 error.partial_response.as_deref(),
             ),
         };
-        let mut row = json!({"request_id":request_id, "request_ms":started.elapsed().as_millis(), "error":error,
+        let mut row = json!({"partial":false,"request_id":request_id, "request_ms":started.elapsed().as_millis(), "error":error,
             "cost":reported_cost(response, result.as_ref().err()),
             "response":response.map(|r| redact(serde_json::to_value(r).expect("response serializes"), &self.secret))});
         let mut entries = self
@@ -345,6 +348,13 @@ impl Capture {
                     serde_json::to_vec_pretty(&self.redact(body.clone()))?,
                 )
             })();
+            #[cfg(test)]
+            if result.is_ok() {
+                self.dump_writes
+                    .lock()
+                    .unwrap()
+                    .push((attempt, direction.into()));
+            }
             if let Err(error) = result {
                 self.dump_errors
                     .lock()
@@ -390,8 +400,7 @@ impl lash::tracing::TraceSink for Capture {
                     .unwrap()
                     .push(body.clone());
                 tracing::debug!(target: "toolbench", parent: &self.span(), attempt, response = %body, "wire response chunk");
-                // Write through every chunk so interrupted calls retain their evidence.
-                self.dump(attempt, "response", row);
+                // The provider completion or recorder teardown writes this row once.
             }
             _ => {}
         }

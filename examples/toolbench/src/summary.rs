@@ -111,7 +111,7 @@ pub(crate) fn markdown(summaries: &[Summary]) -> String {
             rows[0].reasoning_effort.name()
         )
         .unwrap();
-        out.push_str("| Cohort | Pass | Rounds | Prompt total | of which cached (read) | Cache write | Completion | Reasoning | Cost USD | Wall total/median s | Prompt/task | Completion/task | Reasoning/task | Cost/task USD | Rounds/task | First prompt mean | Retries |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+        out.push_str("| Cohort | Pass | Attempts | Prompt total | of which cached (read) | Cache write | Completion | Reasoning | Cost USD | Wall total/median s | Prompt/task | Completion/task | Reasoning/task | Cost/task USD | Attempts/task | First prompt mean | Retries |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
         for r in &rows {
             writeln!(out,"| {}/{} | {}/{} | {} | {} | {} | {} | {} | {} | {} | {:.3}/{:.3} | {} | {} | {} | {} | {:.2} | {} | {} |",r.channel,r.dialect,r.passed,r.rows,r.rounds,number(r.usage.prompt_tokens_total),number(r.usage.cache_read),number(r.usage.cache_write),number(r.usage.completion_tokens),number(r.usage.reasoning_tokens),decimal(r.usage.cost,6),r.wall_total_s,r.wall_median_s,decimal(r.prompt_per_task,1),decimal(r.completion_per_task,1),decimal(r.reasoning_per_task,1),decimal(r.cost_per_task,6),r.rounds_per_task,decimal(r.system_prompt_tokens_first_call_mean,1),r.retries).unwrap();
         }
@@ -120,12 +120,12 @@ pub(crate) fn markdown(summaries: &[Summary]) -> String {
             if let Some(base) = rows.iter().find(|b| b.channel == "standard")
                 && r.channel != "standard"
             {
-                writeln!(out,"- {}/{} vs standard: Δ prompt/task {}, Δ completion/task {}, Δ reasoning/task {}, Δ cost/task {}, Δ rounds/task {}.",r.channel,r.dialect,delta(r.prompt_per_task,base.prompt_per_task),delta(r.completion_per_task,base.completion_per_task),delta(r.reasoning_per_task,base.reasoning_per_task),delta(r.cost_per_task,base.cost_per_task),delta(Some(r.rounds_per_task),Some(base.rounds_per_task))).unwrap();
+                writeln!(out,"- {}/{} vs standard: Δ prompt/task {}, Δ completion/task {}, Δ reasoning/task {}, Δ cost/task {}, Δ attempts/task {}.",r.channel,r.dialect,delta(r.prompt_per_task,base.prompt_per_task),delta(r.completion_per_task,base.completion_per_task),delta(r.reasoning_per_task,base.reasoning_per_task),delta(r.cost_per_task,base.cost_per_task),delta(Some(r.rounds_per_task),Some(base.rounds_per_task))).unwrap();
             }
         }
         out.push('\n');
     }
-    out.push_str("Prompt total includes uncached, cache read and cache write. Reasoning is INCLUDED in completion. Rounds count actual provider attempts (including retries); protocol rounds are separately recorded on attempts. First prompt includes protocol, task and tool definitions, not just the system prompt. Missing metering makes sums n/a. Failed tasks are included; preflight is reported separately. Wall totals sum task durations, not elapsed run time.\n");
+    out.push_str("Prompt total includes uncached, cache read and cache write. Reasoning is INCLUDED in completion. Attempts count actual provider attempts (including retries); protocol rounds are separately recorded on attempts. First prompt includes protocol, task and tool definitions, not just the system prompt. Missing metering makes sums n/a. Failed tasks are included; preflight is reported separately. Wall totals sum task durations, not elapsed run time. All cohorts route through the local recorder hop; its latency and capture I/O are inside measured wall time.\n");
     out
 }
 #[cfg(test)]
@@ -195,7 +195,13 @@ mod tests {
         assert_eq!((summary.wall_total_s, summary.wall_median_s), (4.0, 2.0));
         assert_eq!(summary.prompt_per_task, Some(350.0));
         assert_eq!(summary.system_prompt_tokens_first_call_mean, Some(150.0));
-        assert!(markdown(&[summary]).contains("| Prompt total |"));
+        let report = markdown(&[summary]);
+        assert!(report.contains("| Prompt total |"));
+        assert!(report.contains("| Attempts |"));
+        assert!(report.contains("| Attempts/task |"));
+        assert!(report.contains("| Retries |"));
+        assert!(report.contains("local recorder hop"));
+        assert!(!report.contains("Rounds"));
         rows[1].usage.prompt_tokens_total = None;
         rows[1].usage.cost = None;
         rows[1].cost_unknown = true;

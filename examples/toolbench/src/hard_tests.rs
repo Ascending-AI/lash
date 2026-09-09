@@ -404,3 +404,27 @@ fn repeated_refund_and_exchange_do_not_duplicate_mutations() {
         assert_eq!(world, after);
     }
 }
+
+#[test]
+fn integer_arguments_accept_zero_fraction_without_truncation() {
+    let mut world = World::seeded();
+    hard_call(
+        &mut world,
+        "retail_reschedule",
+        &json!({"order_id":"R7","day":22.0}),
+    )
+    .unwrap();
+    assert_eq!(world.retail.orders[6].delivery_day, 22);
+    let before = world.clone();
+    for day in [json!(22.5), json!("22"), json!(9223372036854775808_u64)] {
+        assert!(
+            hard_call(
+                &mut world,
+                "retail_reschedule",
+                &json!({"order_id":"R7","day":day})
+            )
+            .is_err()
+        );
+        assert_eq!(world, before);
+    }
+}
