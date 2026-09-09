@@ -625,6 +625,10 @@ impl Lowerer {
                             ));
                         };
                         self.lower_process_definition(process_name, init)?
+                    } else if let Some(init) = declaration.init.as_ref()
+                        && let Some(mapped) = self.lower_eager_tool_map(init)?
+                    {
+                        mapped
                     } else {
                         declaration
                             .init
@@ -896,9 +900,31 @@ impl Lowerer {
         function: &Function,
         internal_name: Option<String>,
     ) -> Result<LashExpr, Diagnostic> {
+        self.lower_function_with_effect_permission(function, internal_name, false)
+    }
+
+    /// Lowers the one synchronous callback shape whose returned tool call is
+    /// executed eagerly by an array map. Ordinary nested functions still need
+    /// their own authored `await`; the permission is scoped to this callback.
+    pub(super) fn lower_eager_tool_map_function(
+        &mut self,
+        function: &Function,
+    ) -> Result<LashExpr, Diagnostic> {
+        self.lower_function_with_effect_permission(function, None, true)
+    }
+
+    fn lower_function_with_effect_permission(
+        &mut self,
+        function: &Function,
+        internal_name: Option<String>,
+        eager_tool_call: bool,
+    ) -> Result<LashExpr, Diagnostic> {
         let outer_position = std::mem::take(&mut self.position);
         let outer_switch_breaks = std::mem::take(&mut self.switch_breaks);
         let outer_continue_epilogues = std::mem::take(&mut self.continue_epilogues);
+        if eager_tool_call {
+            self.position.await_depth = 1;
+        }
         let result = self.lower_function_body(function, internal_name);
         self.position = outer_position;
         self.switch_breaks = outer_switch_breaks;

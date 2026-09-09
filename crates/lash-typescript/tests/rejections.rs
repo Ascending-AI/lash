@@ -531,8 +531,8 @@ fn a_multi_use_code_gives_advice_that_matches_the_actual_refusal() {
         ),
         (
             "finish(await Promise.all('nope'));",
+            "array-valued expression",
             "build the array first",
-            "top level",
         ),
         // Arity, not availability.
         (

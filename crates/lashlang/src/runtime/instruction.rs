@@ -176,13 +176,16 @@ pub(crate) struct CompiledResourceOperationBatchLeaf {
 /// `await [op(x)? for x in xs]`. Every leaf shares the comprehension element's
 /// operation, arity and `?`, so only the leaf count is decided at run time: the
 /// comprehension leaves one `(receiver, args...)` tuple per accepted element in
-/// a list on the stack, and this batch starts all of them together.
+/// a list on the stack, and this batch starts all of them together. TypeScript
+/// also records whether `Promise.all` selects a rejection by settlement order;
+/// Lashlang comprehensions retain source order.
 #[derive(Clone)]
 pub(crate) struct CompiledResourceOperationListBatch {
     pub(crate) operation: usize,
     pub(crate) argc: usize,
     pub(crate) unwrap: bool,
     pub(crate) aggregate_unwrap: bool,
+    pub(crate) first_settled_rejection: bool,
     pub(crate) site: Option<LashlangExecutionSite>,
     pub(crate) source_span: Option<Span>,
 }

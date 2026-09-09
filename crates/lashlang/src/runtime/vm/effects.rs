@@ -360,7 +360,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
             Vec::new()
         } else {
             let settled = self
-                .perform_resource_operation_batch(operations, &active_nodes, false)
+                .perform_resource_operation_batch(
+                    operations,
+                    &active_nodes,
+                    batch.first_settled_rejection,
+                )
                 .await?;
             self.settle_resource_operation_leaves(
                 std::iter::repeat_n((batch.unwrap, batch.source_span), calls.len()),

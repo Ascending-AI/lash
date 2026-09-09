@@ -264,6 +264,22 @@ pub(super) fn settle_aggregate_leaves(expr: LashExpr) -> LashExpr {
     }
 }
 
+pub(super) fn all_settled_resolved_values(items: LashExpr) -> LashExpr {
+    let value = "__typescript_settled_value";
+    LashExpr::Map {
+        items: Box::new(items),
+        function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
+            name: None,
+            params: vec![value.into()],
+            captures: Vec::new(),
+            body: Box::new(LashExpr::Return(Box::new(LashExpr::Record(vec![
+                ("status".into(), LashExpr::String("fulfilled".into())),
+                ("value".into(), LashExpr::Variable(value.into())),
+            ])))),
+        }))),
+    }
+}
+
 pub(super) fn has_aggregate_effect_leaf(expr: &LashExpr) -> bool {
     matches!(expr, LashExpr::ReceiverCall { .. }) || expr.children().any(has_aggregate_effect_leaf)
 }

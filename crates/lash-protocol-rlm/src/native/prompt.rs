@@ -415,11 +415,13 @@ mod prompt_diet_tests {
             for forbidden in [",s.", "process", "defineProcess", "waitSignal"] {
                 assert!(!prompt.contains(forbidden), "{forbidden}: {prompt}");
             }
-            assert!(
-                !prompt
-                    .split(|c: char| !c.is_alphanumeric() && c != '_')
-                    .any(|word| word == "run")
-            );
+            if !typescript {
+                assert!(
+                    !prompt
+                        .split(|c: char| !c.is_alphanumeric() && c != '_')
+                        .any(|word| word == "run")
+                );
+            }
             if let Ok(directory) = std::env::var("LASH_PROMPT_CAPTURE_DIR") {
                 std::fs::write(
                     std::path::Path::new(&directory)

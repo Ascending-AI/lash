@@ -821,17 +821,18 @@ struct SequentialAsyncMapHost {
 impl ExecutionHost for SequentialAsyncMapHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
-            AbilityOp::ResourceOperation(_) => {
-                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                    Ok(AbilityResult::Value(Value::String("ok".into())))
-                } else {
-                    Err(ExecutionHostError::new("boom"))
-                }
+            AbilityOp::ResourceOperationBatch(batch) => {
+                self.calls
+                    .fetch_add(batch.operations.len(), Ordering::SeqCst);
+                Ok(AbilityResult::ResourceOperationBatch(
+                    ResourceOperationBatchResult::settled_in_input_order(vec![
+                        ResourceOperationResult::Value(Value::String("ok".into())),
+                        ResourceOperationResult::Error(ExecutionHostError::new("boom")),
+                    ]),
+                ))
             }
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
-            _ => Err(ExecutionHostError::new(
-                "unexpected sequential async-map ability",
-            )),
+            _ => Err(ExecutionHostError::new("expected one async-map batch")),
         }
     }
 }
@@ -852,7 +853,7 @@ fn promise_all_settled_async_map_catches_each_effect_failure_and_continues() {
         &mut State::new(),
         &host,
     ))
-    .expect("an individual callback rejection must not abort the async map");
+    .expect("one rejected batch leaf must not abort allSettled projection");
     assert_eq!(host.calls.load(Ordering::SeqCst), 2);
     let ExecutionOutcome::Finished(Value::List(items)) = outcome else {
         panic!("allSettled async map returns a list, got {outcome:?}");

@@ -24,6 +24,8 @@ mod no_abort_guarantee;
 mod projected_coercion;
 #[path = "projected_paths.rs"]
 mod projected_paths;
+#[path = "promise_map_fan_out.rs"]
+mod promise_map_fan_out;
 #[path = "regex_runtime.rs"]
 mod regex_runtime;
 #[path = "rejections.rs"]

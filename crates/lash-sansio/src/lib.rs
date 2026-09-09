@@ -21,7 +21,7 @@ pub mod turn_driver;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Identity version mixed into every Lashlang and TypeScript module-artifact hash.
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v4";
+pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v5";
 
 pub use attachment::{
     AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef, AttachmentTypeMetadata,

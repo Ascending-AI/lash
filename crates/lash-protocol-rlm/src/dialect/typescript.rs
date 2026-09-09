@@ -413,7 +413,7 @@ Standard `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`,
 ### Host API
 
 `console.log/warn/error/info/debug(...values)` and `print(value)` inspect values; `finish(value)` ends the turn.{durable}
-`Promise.all`/`Promise.allSettled` accept tool promises and resolved values; all leaves settle before `all` reports the first-settled rejection.
+`Promise.all`/`Promise.allSettled` accept inline arrays, inline `xs.map(...)`, and identifiers holding already-settled arrays; calls written directly inside `Promise.all([...])` or `Promise.all(xs.map(...))` run concurrently; later awaits inside the callback run after, one element at a time. Tool calls in an identifier-bound map run when that map is evaluated. All leaves settle before `all` reports the first-settled rejection.
 
 A failed tool call rejects with an `Error`: `message` is the host text, `name` is `EffectError` (`RuntimeError` for runtime faults), and `cause` carries `{{ code, details }}`. An `allSettled` rejection uses that same error. Errors in `finish` or tool arguments become `{{ name, message, cause }}`."#
         );
@@ -672,6 +672,11 @@ mod tests {
             "disabled processes stay hidden"
         );
         assert!(section.contains("Promise.allSettled"), "{section}");
+        assert!(section.contains("calls written directly inside `Promise.all([...])` or `Promise.all(xs.map(...))` run concurrently; later awaits inside the callback run after, one element at a time"), "{section}");
+        assert!(
+            section.contains("identifier-bound map run when that map is evaluated"),
+            "{section}"
+        );
         assert!(!section.contains("### v1 guardrails"));
         assert!(!section.contains("### Deterministic standard library"));
         assert!(section.contains("`Date` (UTC)"));

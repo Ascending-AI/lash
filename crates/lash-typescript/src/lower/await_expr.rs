@@ -46,17 +46,21 @@ impl Lowerer {
                         None,
                     ));
                 };
-                let async_map = matches!(
+                if matches!(
                     value,
-                    Expr::Call { callee, args }
-                        if matches!(callee.as_ref(), Expr::Member { property: MemberProperty::Field(map), .. } if map == "map")
-                            && matches!(args.as_slice(), [CallArg::Value(Expr::Function(function))] if function.is_async)
-                );
-                if !matches!(value, Expr::Array(_)) && !async_map {
+                    Expr::Undefined
+                        | Expr::Null
+                        | Expr::Bool(_)
+                        | Expr::Number(_)
+                        | Expr::String(_)
+                        | Expr::RegExp { .. }
+                        | Expr::Object(_)
+                        | Expr::Function(_)
+                ) {
                     return Err(Diagnostic::with_repair(
                         DiagnosticCode::AwaitUnsupported,
-                        format!("Promise.{method} currently requires an array iterable"),
-                        "build the array first, then pass it — or use `items.map(async (item) => ...)` directly",
+                        format!("Promise.{method} requires an array-valued expression"),
+                        "pass an array literal, an inline `.map(...)`, or an identifier that holds an array",
                         None,
                     ));
                 }
@@ -64,6 +68,12 @@ impl Lowerer {
             }
             _ => None,
         };
+        if let Some((mode, value)) = promise_kind
+            && let Some(mapped) =
+                self.with_await(|lowerer| lowerer.lower_promise_map(value, mode == "allSettled"))?
+        {
+            return Ok(mapped);
+        }
         let aggregate_process_handle = promise_kind
             .as_ref()
             .is_some_and(|(_, value)| self.aggregate_contains_process_handle(value));
@@ -97,7 +107,10 @@ impl Lowerer {
                 None,
             ));
         }
-        if mode.is_some() && has_nested_aggregate_effect(&lowered) {
+        if mode.is_some()
+            && has_aggregate_effect_leaf(&lowered)
+            && has_nested_aggregate_effect(&lowered)
+        {
             return Err(Diagnostic::with_repair(
                 DiagnosticCode::AwaitUnsupported,
                 "Promise.all/allSettled tool promises must be top-level array elements",
@@ -130,6 +143,9 @@ impl Lowerer {
         }
         if mode == Some("allSettled") {
             let has_effect = has_aggregate_effect_leaf(&lowered);
+            if !has_effect {
+                return Ok(all_settled_resolved_values(lowered));
+            }
             let settled = settle_aggregate_leaves(lowered);
             let values = if has_effect {
                 LashExpr::Await(Box::new(settled))

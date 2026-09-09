@@ -236,6 +236,8 @@ impl Compiler {
                     argc: leaf.args.len(),
                     unwrap: leaf.unwrap,
                     aggregate_unwrap,
+                    first_settled_rejection: self.dialect == CompilationDialect::Typescript
+                        && leaf.unwrap,
                     site,
                     source_span,
                 });

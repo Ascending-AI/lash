@@ -38,6 +38,14 @@ failures in the toolbench (FIG-2764).
    model the value is already resolved, instead of returning a wrapped
    `{ ok: false }`. Real handle failures inside an aggregate still settle as
    per-item error records.
+3. **TypeScript inline maps reuse the runtime-sized batch.** A direct tool call
+   returned by `Promise.all(xs.map(...))` or `Promise.allSettled(xs.map(...))`
+   is collected like the comprehension element. For an async callback with one
+   leading direct tool await, the batch settles first and the remaining pure
+   projection runs per input element afterward. TypeScript `all` selects the
+   first rejection by host-recorded settlement order; Lashlang comprehensions
+   retain their source-order selection. Callbacks with another await keep the
+   sequential async-map driver.
 
 The lowering adds a bytecode instruction and changes how identical source
 compiles, so `BYTECODE_FORMAT_VERSION` and `LASHLANG_SEMANTIC_HASH_VERSION`

@@ -18,7 +18,7 @@ Standard `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`,
 
 `console.log/warn/error/info/debug(...values)` and `print(value)` inspect values; `finish(value)` ends the turn.
 declare function sleep(ms: number): Promise<void>; // cell
-`Promise.all`/`Promise.allSettled` accept tool promises and resolved values; all leaves settle before `all` reports the first-settled rejection.
+`Promise.all`/`Promise.allSettled` accept inline arrays, inline `xs.map(...)`, and identifiers holding already-settled arrays; calls written directly inside `Promise.all([...])` or `Promise.all(xs.map(...))` run concurrently; later awaits inside the callback run after, one element at a time. Tool calls in an identifier-bound map run when that map is evaluated. All leaves settle before `all` reports the first-settled rejection.
 
 A failed tool call rejects with an `Error`: `message` is the host text, `name` is `EffectError` (`RuntimeError` for runtime faults), and `cause` carries `{ code, details }`. An `allSettled` rejection uses that same error. Errors in `finish` or tool arguments become `{ name, message, cause }`.
 Continue with one `execute_code` call, or finish with prose and no code call. A call to `finish(value)` returns a computed final value.This turn uses finish-required termination. Prose-only does not end the turn. Every non-terminal response must contain an `execute_code` call that performs the next step; prose before the code call is commentary/status only. Never say you will continue, inspect, patch, wait, monitor, validate, or retry unless the same response also contains the code call that does it. The terminal response must be an `execute_code` call that calls `finish(value)`. Use `finish(null)` only when null is intentional.
