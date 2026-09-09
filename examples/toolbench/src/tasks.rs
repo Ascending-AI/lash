@@ -493,7 +493,7 @@ pub(crate) fn hard_pack() -> Vec<Task> {
         ),
         read_task(
             "hard-retail-lamps",
-            "Which of Mira's delivered orders contain products in category lamp? Finish with only their order IDs, nothing else, without changing anything.",
+            "Which of Mira's delivered orders contain products in category lamp? Finish with only the list of matching order IDs, nothing else, without changing anything.",
             FinishMatcher::UnorderedSet(vec![json!("R1"), json!("R2")]),
             8,
         ),
@@ -537,7 +537,7 @@ pub(crate) fn hard_pack() -> Vec<Task> {
         ),
         read_task(
             "hard-ops-ready",
-            "Which of Beacon's open incidents have no open prerequisites and a fix release whose checks passed and capacity fits Beacon? Finish with only the incident IDs, nothing else, without deploying or resolving anything.",
+            "Which of Beacon's open incidents have no open prerequisites and a fix release whose checks passed and capacity fits Beacon? Finish with only the list of matching incident IDs, nothing else, without deploying or resolving anything.",
             FinishMatcher::UnorderedSet(vec![json!("I1")]),
             6,
         ),
