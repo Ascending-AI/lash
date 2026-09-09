@@ -61,6 +61,7 @@ impl RlmRuntimeState {
         deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     ) -> Result<Self, SessionError> {
         let services = crate::dialect::LashlangDialectServices {
+            channel: crate::plugin::RlmChannel::Cell,
             projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
             artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
             deferred_tool_resolver,

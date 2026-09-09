@@ -11,6 +11,7 @@ pub(crate) const LANGUAGE_ID: &str = "lashlang";
 
 #[derive(Clone)]
 pub(crate) struct LashlangDialectServices {
+    pub(crate) channel: crate::plugin::RlmChannel,
     pub(crate) projection_resolver: Arc<dyn ProjectionResolver>,
     pub(crate) artifact_store: Arc<dyn LashlangArtifactStore>,
     pub(crate) deferred_tool_resolver: Option<SharedDeferredToolResolver>,

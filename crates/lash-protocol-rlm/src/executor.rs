@@ -341,7 +341,7 @@ async fn execute_code_inner(
                 .map_err(|error| match error {
                     lashlang::LinkedProgramCacheError::Parse(error) => (
                         lashlang_parse_feedback_kind(&error),
-                        format_rlm_parse_diagnostic(code, &error),
+                        format_rlm_parse_diagnostic(code, &error, state.channel),
                     ),
                     lashlang::LinkedProgramCacheError::Link(error) => (
                         lashlang_link_feedback_kind(&error),
@@ -788,7 +788,14 @@ fn lashlang_link_feedback_kind(error: &lashlang::LinkError) -> lash_core::CellFa
     }
 }
 
-fn format_rlm_parse_diagnostic(code: &str, error: &lashlang::ParseError) -> String {
+fn format_rlm_parse_diagnostic(
+    code: &str,
+    error: &lashlang::ParseError,
+    channel: crate::plugin::RlmChannel,
+) -> String {
+    if channel == crate::plugin::RlmChannel::NativeTool {
+        return lashlang::format_parse_diagnostic(code, error);
+    }
     format!(
         "{}\n\nA standalone `</lashlang>` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line.",
         lashlang::format_parse_diagnostic(code, error)
@@ -1521,7 +1528,11 @@ mod tests {
     fn parse_diagnostic_warns_about_multiline_cell_delimiters() {
         let code = "payload = \"\"\"";
         let error = lashlang::parse(code).expect_err("unterminated multiline string");
-        let diagnostic = format_rlm_parse_diagnostic(code, &error);
+        let diagnostic = format_rlm_parse_diagnostic(code, &error, crate::plugin::RlmChannel::Cell);
+        let native =
+            format_rlm_parse_diagnostic(code, &error, crate::plugin::RlmChannel::NativeTool);
+        assert!(!native.contains("</lashlang>"));
+        assert_eq!(native, lashlang::format_parse_diagnostic(code, &error));
 
         assert!(diagnostic.contains("standalone `</lashlang>` line"));
         assert!(diagnostic.contains("inside multiline source text"));

@@ -195,9 +195,11 @@ impl DialectSession {
         services: LashlangDialectServices,
     ) -> Self {
         debug_assert_eq!(engine_id, dialect.language_id());
+        let mut state = RlmExecutionState::for_engine(engine_id);
+        state.channel = services.channel;
         Self {
             dialect,
-            state: RlmExecutionState::for_engine(engine_id),
+            state,
             surface,
             services,
             bound_variable_render_cache: Arc::new(std::sync::Mutex::new(
@@ -650,6 +652,7 @@ mod tests {
         let dialect: Arc<dyn RlmDialect> = Arc::new(TypescriptDialect::new(
             lash_lashlang_runtime::LashlangSurface::default(),
             LashlangDialectServices {
+                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: ::lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
@@ -709,6 +712,7 @@ mod tests {
 #[cfg(test)]
 pub(crate) fn test_dialect_services() -> LashlangDialectServices {
     LashlangDialectServices {
+        channel: crate::plugin::RlmChannel::Cell,
         projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
         artifact_store: ::lashlang::global_in_memory_lashlang_artifact_store(),
         deferred_tool_resolver: None,

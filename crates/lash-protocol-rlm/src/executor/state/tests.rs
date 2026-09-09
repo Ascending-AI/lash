@@ -1145,6 +1145,7 @@ fn lashlang_dialect_pins_snapshot_engine_id() {
     let dialect = LashlangDialect::new(
         lash_lashlang_runtime::LashlangSurface::default(),
         LashlangDialectServices {
+            channel: crate::plugin::RlmChannel::Cell,
             projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
             artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
             deferred_tool_resolver: None,

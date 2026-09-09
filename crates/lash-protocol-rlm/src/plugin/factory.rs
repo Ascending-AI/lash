@@ -315,6 +315,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
         .with_plugin_extensions(&ctx.extensions)
         .map_err(|err| PluginError::Registration(err.to_string()))?;
         let services = LashlangDialectServices {
+            channel: config.channel,
             projection_resolver: Arc::clone(&self.projection_resolver),
             artifact_store: Arc::clone(&self.artifact_store),
             deferred_tool_resolver: self.deferred_tool_resolver.clone(),
@@ -442,13 +443,21 @@ mod label_config_tests {
     fn host_owns_label_annotations_in_the_plugin_prompt() {
         assert!(!super::super::RlmLanguageFeatures::default().label_annotations);
         for enabled in [false, true] {
-            let mut config = RlmProtocolPluginConfig::default();
+            let mut config = RlmProtocolPluginConfig::builder()
+                .instruction_limit(super::super::InstructionBound::Unbounded)
+                .wall_clock(super::super::WallClockBound::Unbounded)
+                .memory_limit(super::super::MemoryBound::Unbounded)
+                .build();
             config.lashlang_language_features.label_annotations = enabled;
             let config = rlm_protocol_config(config, false);
             let dialect = LashlangDialect::prompt_only(rlm_lashlang_surface(&config, false));
-            let prompt = dialect.render_execution_section(Default::default(), &Default::default()).unwrap();
+            let prompt = dialect
+                .render_execution_section(Default::default(), &Default::default())
+                .unwrap();
             assert_eq!(prompt.contains("@label"), enabled);
-            if enabled { assert!(prompt.contains("String literals only; never standalone or stacked.")); }
+            if enabled {
+                assert!(prompt.contains("String literals only; never standalone or stacked."));
+            }
         }
     }
 }

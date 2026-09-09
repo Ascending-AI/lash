@@ -25,6 +25,7 @@ impl TypescriptDialect {
         Self {
             surface,
             services: LashlangDialectServices {
+                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: std::sync::Arc::new(
                     crate::projection::ProjectionRegistry::new(),
                 ),
@@ -516,6 +517,7 @@ mod tests {
         let dialect = TypescriptDialect::new(
             LashlangSurface::default(),
             LashlangDialectServices {
+                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
@@ -573,6 +575,7 @@ mod tests {
                 resources,
             },
             LashlangDialectServices {
+                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
@@ -633,6 +636,7 @@ mod tests {
         let dialect = TypescriptDialect::new(
             LashlangSurface::default(),
             LashlangDialectServices {
+                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
@@ -682,6 +686,7 @@ mod tests {
                 ..LashlangSurface::default()
             },
             LashlangDialectServices {
+                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
@@ -720,6 +725,7 @@ mod tests {
                 ..LashlangSurface::default()
             },
             LashlangDialectServices {
+                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
@@ -780,6 +786,7 @@ mod tests {
         let dialect = TypescriptDialect::new(
             LashlangSurface::default(),
             LashlangDialectServices {
+                channel: crate::plugin::RlmChannel::Cell,
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
@@ -915,6 +922,7 @@ mod tests {
                 let dialect = TypescriptDialect::new(
                     LashlangSurface::default(),
                     LashlangDialectServices {
+                        channel: crate::plugin::RlmChannel::Cell,
                         projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                         artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                         deferred_tool_resolver: None,
