@@ -313,16 +313,18 @@ impl LashRuntime {
     /// Adopt `state` as the resident state and restore the protocol session to
     /// it.
     ///
-    /// The restore view carries `state`'s execution root when the resident
-    /// bodies hold one; otherwise it carries `execution_before_append`, the
-    /// live executor's capture from before the append, so the protocol session
-    /// rebuilds the committed execution instead of keeping what the failed
-    /// append applied (FIG-2521). A capture restored this way is staged into
-    /// the resident checkpoint components exactly as an explicit
-    /// [`Self::restore_execution_state`] stages its snapshot: the executor now
-    /// treats the capture's leaves as its persisted baseline, and the next
-    /// commit can only reference them as unchanged if the resident set carries
-    /// them.
+    /// `state` is the resident state from before the append, so adopting it
+    /// reinstates the checkpoint components and their persisted-leaf
+    /// bookkeeping exactly as the append found them. Whether the last commit
+    /// released its execution bodies (store-backed) or kept them resident
+    /// (storeless), the restore view carries `execution_before_append`, the
+    /// live executor's capture from before the append, and the protocol
+    /// session rebuilds the committed execution instead of keeping what the
+    /// failed append applied (FIG-2521). The
+    /// capture is then staged over the reinstated set through
+    /// [`RuntimeSessionState::stage_restored_execution_state`]: leaves the set
+    /// already holds keep their durable refs, so the next commit sends only
+    /// genuinely changed components.
     async fn restore_protocol_session_from_state(
         &mut self,
         state: RuntimeSessionState,
@@ -330,13 +332,13 @@ impl LashRuntime {
     ) -> Result<(), SessionError> {
         self.state = state;
         let state_for_restore = self.state.clone();
-        let mut staged_capture = None;
+        let mut restored_capture = None;
         if let Some(session) = self.session.as_mut() {
             let protocol_session = Arc::clone(session.plugins().protocol_session());
             let session_id = state_for_restore.session_id.clone();
             let mut view = crate::plugin::ProtocolSessionRestoreView::new(&state_for_restore);
-            if let (Ok(None), Some(snapshot)) = (&view.execution_state, execution_before_append) {
-                staged_capture = Some(snapshot.clone());
+            if let Some(snapshot) = execution_before_append {
+                restored_capture = Some(snapshot.clone());
                 view.execution_state = Ok(Some(snapshot));
             }
             protocol_session
@@ -346,11 +348,9 @@ impl LashRuntime {
                 )
                 .await?;
         }
-        if let Some(snapshot) = staged_capture {
+        if let Some(snapshot) = restored_capture {
             self.state
-                .set_execution_state_components(
-                    crate::plugin::ExecutionStateSnapshot::from_hydrated(snapshot),
-                )
+                .stage_restored_execution_state(snapshot)
                 .map_err(|source| SessionError::Store {
                     context: "failed to stage the rolled-back execution-state components"
                         .to_string(),

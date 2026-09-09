@@ -11,6 +11,11 @@
 //! execution result, or the next durable checkpoint. Each path is witnessed on
 //! the memory, SQLite and PostgreSQL backends with the shipped RLM plugin, not
 //! a test protocol.
+//!
+//! Two bounds on that rebuild are witnessed alongside: a storeless session
+//! keeps its accepted execution across a post-commit observer failure, and a
+//! rolled-back append leaves the next commit exactly as large as it would have
+//! been without the append.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -21,7 +26,7 @@ use lash_core::facade_support::{
     SingleProviderResolver, TurnFinish, TurnOutcome,
 };
 use lash_core::plugin::{
-    PluginFactory, PromptHookContext, RecordedSessionConfig, SessionStateService,
+    PluginFactory, PromptHookContext, RecordedSessionConfig, RuntimeServices, SessionStateService,
 };
 use lash_core::store::{RuntimeCommitReceipt, RuntimePersistenceDecorator};
 use lash_core::{
@@ -52,11 +57,17 @@ enum CommitFault {
 struct FaultStore {
     inner: Arc<dyn RuntimePersistence>,
     fault: Mutex<CommitFault>,
+    /// Every commit handed to the store, faulted or not, in order.
+    commits: Mutex<Vec<RuntimeCommit>>,
 }
 
 impl FaultStore {
     fn arm(&self, fault: CommitFault) {
         *self.fault.lock_recover() = fault;
+    }
+
+    fn take_commits(&self) -> Vec<RuntimeCommit> {
+        std::mem::take(&mut *self.commits.lock_recover())
     }
 }
 
@@ -71,6 +82,7 @@ impl RuntimePersistenceDecorator for FaultStore {
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
         let fault = std::mem::take(&mut *self.fault.lock_recover());
+        self.commits.lock_recover().push(commit.clone());
         match fault {
             CommitFault::None => self.inner.commit_runtime_state(commit).await,
             CommitFault::FailNext => Err(StoreError::Backend(
@@ -347,9 +359,20 @@ impl Backend {
                 return None;
             }
         };
-        let storage = lash_postgres_store::PostgresStorage::connect(&database_url)
-            .await
-            .expect("connect PostgreSQL");
+        // Concurrent first connections contend for the migration lock; a
+        // contended connect is retried unchanged, bounded.
+        let mut attempt = 0u32;
+        let storage = loop {
+            match lash_postgres_store::PostgresStorage::connect(&database_url).await {
+                Ok(storage) => break storage,
+                Err(StoreError::Contended) if attempt < 5 => {
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(250 * u64::from(attempt)))
+                        .await;
+                }
+                Err(error) => panic!("connect PostgreSQL: {error:?}"),
+            }
+        };
         Some(Self {
             label: "postgres",
             factory: Arc::new(storage.session_store_factory()),
@@ -380,6 +403,7 @@ impl Backend {
         let store = Arc::new(FaultStore {
             inner: base.clone(),
             fault: Mutex::new(CommitFault::None),
+            commits: Mutex::new(Vec::new()),
         });
         let initial = RuntimeSessionState {
             session_id: session_id.clone(),
@@ -649,7 +673,8 @@ async fn faulted_append_rollback(backend: Backend) {
             .execution_state_hydration()
             .expect("hydration")
             .is_none(),
-        "{}: the rollback must run without a resident execution body (discarded post-commit)",
+        "{}: the durable head carries no execution root before the append (the seed events \
+         are the authority), so the rollback rebuilds from the pre-append capture alone",
         backend.label
     );
 
@@ -912,5 +937,596 @@ async fn rlm_follow_on_failure_discards_the_uncommitted_execution_on_postgres() 
             backend,
         ))
         .await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bounds on the same-frame rebuild (FIG-2521 fix round 2).
+// ---------------------------------------------------------------------------
+
+async fn turn(runtime: &mut LashRuntime, id: &str) -> lash_core::facade_support::AssembledTurn {
+    runtime
+        .run_turn_assembled(
+            TurnInput::text(id),
+            tokio_util::sync::CancellationToken::new(),
+            turn_scope(runtime, id),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("turn `{id}`: {error:?}"))
+}
+
+fn assert_final_value(
+    label: &str,
+    result: &lash_core::facade_support::AssembledTurn,
+    value: serde_json::Value,
+) {
+    assert_eq!(
+        result.outcome,
+        TurnOutcome::Finished(TurnFinish::FinalValue { value }),
+        "{label}: {:?}",
+        result.errors
+    );
+    assert!(result.errors.is_empty(), "{label}: {:?}", result.errors);
+}
+
+fn establish_response() -> String {
+    lashlang_block("accumulated = \"COMMITTED\"\nfinish accumulated")
+}
+
+fn read_response() -> String {
+    lashlang_block("finish accumulated")
+}
+
+/// A seeded session whose first turn committed the global `accumulated`, with
+/// the durable head carrying that execution on the session's only frame.
+async fn committed_session(
+    backend: &Backend,
+    scenario: &str,
+    responses: Vec<String>,
+) -> SeededSession {
+    let script = Arc::new(Script {
+        responses,
+        ..Script::default()
+    });
+    let mut seeded = Box::pin(backend.seeded_session(scenario, script)).await;
+    let frame = seeded
+        .runtime
+        .export_persistence_state()
+        .current_frame_node_id;
+    let result = turn(&mut seeded.runtime, "establish").await;
+    assert_final_value(backend.label, &result, serde_json::json!("COMMITTED"));
+    let durable = durable_execution_state(&seeded.store)
+        .await
+        .expect("the established commit carries an execution root");
+    assert_eq!(
+        snapshot_globals(&durable, "accumulated").1.as_deref(),
+        Some("Some(String(\"COMMITTED\"))"),
+        "{}",
+        backend.label
+    );
+    assert_eq!(
+        seeded
+            .runtime
+            .export_persistence_state()
+            .current_frame_node_id,
+        frame,
+        "{}: establishing the global must not switch frames",
+        backend.label
+    );
+    seeded.store.take_commits();
+    seeded
+}
+
+/// A session with no history store at all: the runtime is the only holder of
+/// its execution.
+async fn storeless_runtime(
+    responses: Vec<String>,
+    extra_plugins: Vec<Arc<dyn PluginFactory>>,
+) -> LashRuntime {
+    let script = Arc::new(Script {
+        responses,
+        ..Script::default()
+    });
+    // The provider arms faults on a store; a storeless session has none, so it
+    // gets a detached one that nothing commits to.
+    let detached = Arc::new(FaultStore {
+        inner: InMemorySessionStoreFactory::new()
+            .create_store(&SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
+                session_id: "fig2521-detached".to_string(),
+                relation: SessionRelation::Root,
+                policy: policy(),
+            })
+            .await
+            .expect("detached store"),
+        fault: Mutex::new(CommitFault::None),
+        commits: Mutex::new(Vec::new()),
+    });
+    let state = RuntimeSessionState {
+        session_id: format!("fig2521-storeless-{}", uuid::Uuid::new_v4().simple()),
+        protocol_turn_options: ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
+            dialect: Some(lash_rlm_types::RlmDialect::Lashlang),
+            ..Default::default()
+        })
+        .expect("rlm options"),
+        ..RuntimeSessionState::new(policy())
+    };
+    let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(
+        RlmProtocolPluginFactory::new(
+            RlmProtocolPluginConfig::builder()
+                .instruction_limit(InstructionBound::instructions(1_000_000))
+                .wall_clock(WallClockBound::secs(30))
+                .memory_limit(MemoryBound::mebibytes(64))
+                .build(),
+            Arc::new(crate::persistence::InMemoryLashlangArtifactStore::new()),
+        )
+        .with_process_lifecycle(false),
+    )];
+    factories.extend(extra_plugins);
+    let plugins = PluginHost::new(factories)
+        .build_session(&state.session_id)
+        .expect("build plugins");
+    let mut config = RuntimeHostConfig::in_memory(
+        CommitBudget::bounded(8 * 1024 * 1024, 1024),
+        QueuedWorkBatchingConfig::new(1),
+    );
+    config.providers.provider_resolver =
+        Arc::new(SingleProviderResolver::new(provider(script, detached)));
+    let mut runtime = LashRuntime::from_embedded_state(
+        policy(),
+        EmbeddedRuntimeHost::new(config),
+        RuntimeServices::new(plugins),
+        state,
+        lash_core::testing::runtime_lease_owner(),
+    )
+    .await
+    .expect("storeless runtime");
+    runtime
+        .configure_protocol_on_materialize(&lash_core::PluginOptions::empty(), true)
+        .expect("materialize protocol");
+    runtime
+        .append_session_nodes(AppendSessionNodesRequest {
+            operation_id: "fig2521-storeless-seed".to_string(),
+            requires_ancestor_node_id: None,
+            nodes: seed_nodes("original"),
+        })
+        .await
+        .expect("append seed");
+    runtime
+}
+
+/// A plugin whose first `TurnPersisted` delivery fails: the turn's commit is
+/// accepted, the observer failure invalidates the resident state, and the next
+/// turn reloads it.
+struct FailFirstTurnPersisted;
+
+impl PluginFactory for FailFirstTurnPersisted {
+    fn id(&self) -> &'static str {
+        "fig2521-fail-first-turn-persisted"
+    }
+
+    fn build(
+        &self,
+        _: &lash_core::facade_support::PluginSessionContext,
+    ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, lash_core::PluginError> {
+        Ok(Arc::new(FailFirstTurnPersisted))
+    }
+}
+
+impl lash_core::facade_support::SessionPlugin for FailFirstTurnPersisted {
+    fn id(&self) -> &'static str {
+        "fig2521-fail-first-turn-persisted"
+    }
+
+    fn register(
+        &self,
+        reg: &mut lash_core::facade_support::PluginRegistrar,
+    ) -> Result<(), lash_core::PluginError> {
+        let deliveries = Arc::new(AtomicUsize::new(0));
+        reg.session().on_event(Arc::new(move |event| {
+            let deliveries = Arc::clone(&deliveries);
+            Box::pin(async move {
+                if matches!(
+                    event,
+                    lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(_)
+                ) && deliveries.fetch_add(1, Ordering::SeqCst) == 0
+                {
+                    return Err(lash_core::PluginError::Session(
+                        "injected post-commit delivery failure (FIG-2521)".into(),
+                    ));
+                }
+                Ok(())
+            })
+        }));
+        Ok(())
+    }
+}
+
+/// (e) Storeless: a turn commits a global, its `TurnPersisted` delivery fails,
+/// and the next ordinary turn reloads the invalidated resident state on the
+/// same frame. No store can rehydrate that commit, so the accepted execution
+/// must stay resident and the reload must rebuild from it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_storeless_reload_after_turn_persisted_failure_keeps_the_accepted_global() {
+    let mut runtime = storeless_runtime(
+        vec![
+            establish_response(),
+            read_response(),
+            "global missing".to_string(),
+        ],
+        vec![Arc::new(FailFirstTurnPersisted)],
+    )
+    .await;
+
+    let first = turn(&mut runtime, "commit-then-fail-delivery").await;
+    assert_eq!(
+        first.outcome,
+        TurnOutcome::Finished(TurnFinish::FinalValue {
+            value: serde_json::json!("COMMITTED")
+        })
+    );
+    assert!(
+        format!("{:?}", first.errors).contains("injected post-commit delivery failure"),
+        "the observer failure must be reported on the accepted turn: {:?}",
+        first.errors
+    );
+    let resident = runtime
+        .export_persistence_state()
+        .execution_state_hydration()
+        .expect("the accepted execution is retained, not refused")
+        .expect("the accepted execution is retained, not absent");
+    assert_eq!(
+        snapshot_globals(&resident, "accumulated").1.as_deref(),
+        Some("Some(String(\"COMMITTED\"))")
+    );
+
+    let next = turn(&mut runtime, "natural-reload").await;
+    assert_final_value("storeless", &next, serde_json::json!("COMMITTED"));
+}
+
+/// (f) Storeless: an append fenced on an absent ancestor is refused before it
+/// touches anything; the accepted execution and the next turn are unchanged.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_storeless_stale_ancestor_append_keeps_the_accepted_execution() {
+    let mut runtime =
+        storeless_runtime(vec![establish_response(), read_response()], Vec::new()).await;
+    assert_final_value(
+        "storeless",
+        &turn(&mut runtime, "establish").await,
+        serde_json::json!("COMMITTED"),
+    );
+    let before = runtime
+        .snapshot_execution_state()
+        .await
+        .expect("snapshot")
+        .expect("execution state");
+    let graph = format!("{:?}", runtime.export_persistence_state().session_graph);
+    let outcome = runtime
+        .append_session_nodes(AppendSessionNodesRequest {
+            operation_id: "fig2521-stale".to_string(),
+            requires_ancestor_node_id: Some("absent".to_string()),
+            nodes: seed_nodes("discarded"),
+        })
+        .await
+        .expect("a stale ancestor is an outcome, not an error");
+    assert!(
+        matches!(
+            outcome,
+            lash_core::AppendSessionNodesOutcome::StaleBranch { .. }
+        ),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        runtime
+            .snapshot_execution_state()
+            .await
+            .expect("snapshot")
+            .expect("execution state"),
+        before
+    );
+    assert_eq!(
+        format!("{:?}", runtime.export_persistence_state().session_graph),
+        graph
+    );
+    assert_final_value(
+        "storeless",
+        &turn(&mut runtime, "after-stale").await,
+        serde_json::json!("COMMITTED"),
+    );
+}
+
+/// The execution-state entries of a commit's checkpoint.
+fn execution_entries(
+    commit: &RuntimeCommit,
+) -> std::collections::BTreeMap<String, lash_core::HydratedCheckpointComponent> {
+    commit
+        .checkpoint
+        .components
+        .iter()
+        .filter(|(key, _)| key.starts_with("execution_state"))
+        .map(|(key, component)| (key.clone(), component.clone()))
+        .collect()
+}
+
+/// The smallest byte budget `commit` fits.
+fn exact_byte_budget(commit: &RuntimeCommit) -> usize {
+    let mut probe = commit.clone();
+    let (mut low, mut high) = (1usize, 8 * 1024 * 1024);
+    while low < high {
+        let mid = low + (high - low) / 2;
+        probe.commit_budget = CommitBudget::bounded(mid, 1024);
+        if probe.validate_budget().is_ok() {
+            high = mid;
+        } else {
+            low = mid + 1;
+        }
+    }
+    low
+}
+
+/// The next commit after a committed global, with or without a rolled-back
+/// append in between: its execution entries, changed-entry count, manifest
+/// refs and byte budget.
+struct NextCommit {
+    entries: std::collections::BTreeMap<String, lash_core::HydratedCheckpointComponent>,
+    changed: usize,
+    refs: std::collections::BTreeMap<String, lash_core::CheckpointComponentDescriptor>,
+    commit: RuntimeCommit,
+}
+
+async fn next_commit_after(backend: &Backend, rolled_back_append: bool) -> NextCommit {
+    let SeededSession {
+        mut runtime, store, ..
+    } = committed_session(
+        backend,
+        if rolled_back_append {
+            "parity-rollback"
+        } else {
+            "parity-control"
+        },
+        vec![establish_response(), read_response()],
+    )
+    .await;
+    let before = runtime
+        .snapshot_execution_state()
+        .await
+        .expect("snapshot")
+        .expect("execution state");
+    if rolled_back_append {
+        // The committed root's resident bodies were released post-commit: the
+        // resident state refuses to hydrate them rather than reading as no
+        // execution, so the rollback must rebuild from the pre-append capture.
+        let resident_hydration = runtime
+            .export_persistence_state()
+            .execution_state_hydration();
+        assert!(
+            matches!(
+                resident_hydration,
+                Err(StoreError::ExecutionStateBodiesReleased)
+            ),
+            "{}: {resident_hydration:?}",
+            backend.label
+        );
+        store.arm(CommitFault::FailNext);
+        let mut discarded = RlmSeed::default();
+        discarded
+            .globals
+            .insert("discarded".to_string(), serde_json::json!([1, 2, 3, 4]));
+        runtime
+            .append_session_nodes(AppendSessionNodesRequest {
+                operation_id: "fig2521-parity-discarded".to_string(),
+                requires_ancestor_node_id: None,
+                nodes: rlm_seed_initial_nodes(discarded),
+            })
+            .await
+            .expect_err("the faulted append must fail");
+        assert_eq!(
+            runtime
+                .snapshot_execution_state()
+                .await
+                .expect("snapshot")
+                .expect("execution state"),
+            before,
+            "{}: rollback must restore the committed execution",
+            backend.label
+        );
+    }
+    store.take_commits();
+    let result = turn(&mut runtime, "next-commit").await;
+    assert_final_value(backend.label, &result, serde_json::json!("COMMITTED"));
+    let commit = store.take_commits().pop().expect("the next turn commits");
+    let durable = durable_execution_state(&store)
+        .await
+        .expect("the next commit carries an execution root");
+    assert_eq!(
+        snapshot_globals(&durable, "accumulated"),
+        snapshot_globals(&before, "accumulated"),
+        "{}",
+        backend.label
+    );
+    assert_eq!(
+        durable.components, before.components,
+        "{}: the next commit's leaves equal the committed leaves",
+        backend.label
+    );
+    let entries = execution_entries(&commit);
+    assert!(
+        !entries.is_empty(),
+        "{}: the witness must count real execution components",
+        backend.label
+    );
+    let changed = entries
+        .values()
+        .filter(|component| {
+            matches!(
+                component,
+                lash_core::HydratedCheckpointComponent::Changed { .. }
+            )
+        })
+        .count();
+    let refs = commit
+        .checkpoint
+        .manifest()
+        .expect("manifest")
+        .components
+        .into_iter()
+        .filter(|(key, _)| key.starts_with("execution_state"))
+        .collect();
+    NextCommit {
+        entries,
+        changed,
+        refs,
+        commit,
+    }
+}
+
+/// (g) A rolled-back append must not dirty the execution leaves the durable
+/// head already holds: the next commit sends exactly the components the
+/// no-append control sends, references the same leaf addresses, and fits the
+/// control's exact byte budget.
+async fn commit_after_rolled_back_append_matches_the_control(backend: Backend) {
+    let control = Box::pin(next_commit_after(&backend, false)).await;
+    let rolled_back = Box::pin(next_commit_after(&backend, true)).await;
+    let leaves = |next: &NextCommit| {
+        next.refs
+            .iter()
+            .filter(|(key, _)| key.as_str() != "execution_state")
+            .map(|(key, descriptor)| (key.clone(), descriptor.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    assert_eq!(
+        leaves(&control),
+        leaves(&rolled_back),
+        "{}: the next commit must reference the same leaf addresses",
+        backend.label
+    );
+    assert_eq!(
+        control.entries.keys().collect::<Vec<_>>(),
+        rolled_back.entries.keys().collect::<Vec<_>>(),
+        "{}",
+        backend.label
+    );
+    assert_eq!(
+        control.changed, rolled_back.changed,
+        "{}: a rolled-back append spuriously marks existing execution leaves changed: \
+         control {:?} vs rolled back {:?}",
+        backend.label, control.entries, rolled_back.entries
+    );
+    // Byte parity against the real budget validator: swap the control's
+    // execution leaves for the rolled-back commit's and it must still fit the
+    // control's exact budget.
+    let budget = exact_byte_budget(&control.commit);
+    let mut staged = control.commit.clone();
+    staged.commit_budget = CommitBudget::bounded(budget, 1024);
+    for (key, component) in &rolled_back.entries {
+        if key != "execution_state" {
+            staged
+                .checkpoint
+                .components
+                .insert(key.clone(), component.clone());
+        }
+    }
+    staged.validate_budget().unwrap_or_else(|error| {
+        panic!(
+            "{}: the commit after a rolled-back append must fit the control's {budget}-byte \
+             budget: {error}",
+            backend.label
+        )
+    });
+}
+
+/// (h) A message-only append between turns leaves the committed execution and
+/// the durable head untouched, and the next turn reads the committed global.
+async fn message_append_keeps_the_committed_execution(backend: Backend) {
+    let SeededSession {
+        mut runtime, store, ..
+    } = committed_session(
+        &backend,
+        "continuity",
+        vec![establish_response(), read_response()],
+    )
+    .await;
+    let before = runtime
+        .snapshot_execution_state()
+        .await
+        .expect("snapshot")
+        .expect("execution state");
+    runtime
+        .append_session_nodes(AppendSessionNodesRequest {
+            operation_id: "fig2521-message".to_string(),
+            requires_ancestor_node_id: None,
+            nodes: vec![SessionAppendNode::message(
+                lash_core::PluginMessage::text(lash_core::MessageRole::User, "message only")
+                    .with_id("fig2521-message"),
+            )],
+        })
+        .await
+        .expect("message append");
+    assert_eq!(
+        runtime
+            .snapshot_execution_state()
+            .await
+            .expect("snapshot")
+            .expect("execution state"),
+        before,
+        "{}",
+        backend.label
+    );
+    assert_eq!(
+        durable_execution_state(&store).await.as_ref(),
+        Some(&before),
+        "{}",
+        backend.label
+    );
+    assert_final_value(
+        backend.label,
+        &turn(&mut runtime, "after-message").await,
+        serde_json::json!("COMMITTED"),
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_commit_after_rolled_back_append_matches_the_control_on_memory() {
+    Box::pin(commit_after_rolled_back_append_matches_the_control(
+        Backend::memory(),
+    ))
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_commit_after_rolled_back_append_matches_the_control_on_sqlite() {
+    Box::pin(commit_after_rolled_back_append_matches_the_control(
+        Backend::sqlite(),
+    ))
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_commit_after_rolled_back_append_matches_the_control_on_postgres() {
+    if let Some(backend) = Backend::postgres().await {
+        Box::pin(commit_after_rolled_back_append_matches_the_control(backend)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_message_append_keeps_the_committed_execution_on_memory() {
+    Box::pin(message_append_keeps_the_committed_execution(
+        Backend::memory(),
+    ))
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_message_append_keeps_the_committed_execution_on_sqlite() {
+    Box::pin(message_append_keeps_the_committed_execution(
+        Backend::sqlite(),
+    ))
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rlm_message_append_keeps_the_committed_execution_on_postgres() {
+    if let Some(backend) = Backend::postgres().await {
+        Box::pin(message_append_keeps_the_committed_execution(backend)).await;
     }
 }

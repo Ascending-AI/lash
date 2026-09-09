@@ -307,12 +307,12 @@ fn committing_execution_state_leaves_releases_their_resident_bodies() {
             .is_some(),
         "the committed leaf keeps its durable ref so the next commit can reuse it"
     );
-    assert_eq!(
-        state
-            .execution_state_hydration()
-            .expect("descriptor-backed discarded residency is not corrupt"),
-        None,
-        "live post-commit state leaves execution restore to the protocol's resident state"
+    assert!(
+        matches!(
+            state.execution_state_hydration(),
+            Err(crate::StoreError::ExecutionStateBodiesReleased)
+        ),
+        "a released root backed by a store refuses hydration instead of reading as no execution (FIG-2521)"
     );
 
     // The next turn changes the same logical value: its new leaf body is
@@ -324,11 +324,188 @@ fn committing_execution_state_leaves_releases_their_resident_bodies() {
     state
         .set_execution_state_components(next)
         .expect("stage the next changed leaf");
-    state.checkpoint_components.discard_known_bodies(true);
+    state
+        .checkpoint_components
+        .discard_known_bodies(true, AcceptedExecutionRetention::DurableHead);
     assert_eq!(
         resident_leaf_body_bytes(&state),
         next_leaf_body.len(),
         "an uncommitted leaf body must survive a body discard"
+    );
+}
+
+fn two_leaf_execution(root: &[u8], leaf_key: &str, leaf_body: &[u8]) -> RuntimeSessionState {
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut snapshot = crate::plugin::ExecutionStateSnapshot::from_root(Some(root.to_vec()));
+    snapshot.changed_component(leaf_key.to_string(), leaf_body.to_vec());
+    state
+        .set_execution_state_components(snapshot)
+        .expect("stage the execution state");
+    state
+}
+
+/// A storeless commit keeps the accepted execution bodies resident: the
+/// same-frame restore that follows rebuilds from them, the next commit
+/// replaces them, and a frame clear drops them (FIG-2521).
+#[test]
+fn storeless_body_release_keeps_the_accepted_execution_for_restore() {
+    let leaf_key = "execution_state/blake3/aa";
+    let mut state = two_leaf_execution(b"root-1", leaf_key, b"leaf-1");
+    state.set_tool_state_snapshot(Some(crate::ToolState::default()));
+    state.discard_runtime_snapshots_retaining_accepted_execution();
+    assert!(
+        state.tool_state_snapshot().is_none(),
+        "tool and plugin snapshots are released like every other committed body"
+    );
+    let accepted = state
+        .execution_state_hydration()
+        .expect("the accepted execution hydrates")
+        .expect("the accepted execution stays resident");
+    assert_eq!(accepted.root, b"root-1");
+    assert_eq!(accepted.components.get(leaf_key), Some(&b"leaf-1".to_vec()));
+
+    // A restore releases again; the accepted execution stays.
+    state.discard_runtime_snapshots_retaining_accepted_execution();
+    assert_eq!(
+        state.execution_state_hydration().expect("still resident"),
+        Some(accepted)
+    );
+
+    // The next commit supersedes it.
+    let mut next = crate::plugin::ExecutionStateSnapshot::from_root(Some(b"root-2".to_vec()));
+    next.changed_component("execution_state/blake3/bb".to_string(), b"leaf-2".to_vec());
+    state
+        .set_execution_state_components(next)
+        .expect("stage the next commit");
+    state.discard_runtime_snapshots_retaining_accepted_execution();
+    let superseded = state
+        .execution_state_hydration()
+        .expect("resident")
+        .expect("the next commit's execution is resident");
+    assert_eq!(superseded.root, b"root-2");
+    assert!(!superseded.components.contains_key(leaf_key));
+
+    // A frame switch clears the execution: nothing is kept and nothing is
+    // refused, because the session no longer holds a root at all.
+    state.set_execution_state_snapshot(None);
+    state.discard_runtime_snapshots_retaining_accepted_execution();
+    assert_eq!(
+        state
+            .execution_state_hydration()
+            .expect("no root is not corrupt"),
+        None
+    );
+}
+
+/// A store-backed release keeps nothing in process: hydrating the released
+/// root is a typed refusal, never "no execution", while a session that never
+/// held a root still hydrates to `None` (FIG-2521).
+#[test]
+fn released_execution_bodies_without_a_retained_snapshot_refuse_hydration() {
+    let mut state = two_leaf_execution(b"root", "execution_state/blake3/aa", b"leaf");
+    let result = commit_result_for(&state);
+    state.apply_persisted_commit_result(result);
+    assert!(
+        matches!(
+            state.execution_state_hydration(),
+            Err(crate::StoreError::ExecutionStateBodiesReleased)
+        ),
+        "the released root must refuse hydration"
+    );
+    state.discard_runtime_snapshots();
+    assert!(
+        matches!(
+            state.execution_state_hydration(),
+            Err(crate::StoreError::ExecutionStateBodiesReleased)
+        ),
+        "a later store-backed release must not launder the refusal into no execution"
+    );
+
+    let mut rootless =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    rootless.discard_runtime_snapshots();
+    assert_eq!(
+        rootless
+            .execution_state_hydration()
+            .expect("a session that never held execution is not refused"),
+        None
+    );
+}
+
+/// Staging a restored capture over the resident set keeps every leaf the set
+/// already holds — durably or as a pending body — as unchanged bookkeeping,
+/// and stages only the leaves it never held; the root is always restaged
+/// (FIG-2521).
+#[test]
+fn restoring_a_capture_keeps_held_leaves_unchanged_and_stages_missing_ones() {
+    const DURABLE: &str = "execution_state/blake3/durable";
+    const PENDING: &str = "execution_state/blake3/pending";
+    const MISSING: &str = "execution_state/blake3/missing";
+    let mut state = two_leaf_execution(b"root-1", DURABLE, b"durable body");
+    let result = commit_result_for(&state);
+    state.apply_persisted_commit_result(result);
+    let mut pending = crate::plugin::ExecutionStateSnapshot::from_root(Some(b"root-2".to_vec()));
+    pending.unchanged_component(DURABLE.to_string());
+    pending.changed_component(PENDING.to_string(), b"pending body".to_vec());
+    state
+        .set_execution_state_components(pending)
+        .expect("stage an uncommitted leaf beside the durable one");
+
+    let restored = crate::plugin::HydratedExecutionState {
+        root: b"root-3".to_vec(),
+        components: [
+            (DURABLE.to_string(), b"durable body".to_vec()),
+            (PENDING.to_string(), b"pending body".to_vec()),
+            (MISSING.to_string(), b"missing body".to_vec()),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    state
+        .stage_restored_execution_state(restored)
+        .expect("stage the restored capture");
+
+    let checkpoint = state
+        .checkpoint_components
+        .build_checkpoint(crate::PersistedTurnState::default())
+        .expect("build the next commit's checkpoint");
+    let component = |key: &str| checkpoint.components.get(key).expect(key);
+    assert!(
+        matches!(
+            component(DURABLE),
+            crate::HydratedCheckpointComponent::Unchanged { .. }
+        ),
+        "a durable leaf keeps its ref: {:?}",
+        component(DURABLE)
+    );
+    assert!(
+        matches!(
+            component(PENDING),
+            crate::HydratedCheckpointComponent::Changed { body, .. } if body == b"pending body"
+        ),
+        "a pending leaf keeps its body for its first commit: {:?}",
+        component(PENDING)
+    );
+    assert!(
+        matches!(
+            component(MISSING),
+            crate::HydratedCheckpointComponent::Changed { body, .. } if body == b"missing body"
+        ),
+        "a leaf the set never held is staged with its body: {:?}",
+        component(MISSING)
+    );
+    assert!(
+        matches!(
+            component(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT),
+            crate::HydratedCheckpointComponent::Changed { body, .. } if body == b"root-3"
+        ),
+        "the restored root is always restaged"
+    );
+    assert_eq!(
+        state.execution_state_snapshot(),
+        Some(b"root-3".as_slice()),
+        "the staged root is resident until the next commit releases it"
     );
 }
 
