@@ -259,6 +259,11 @@ pub struct Vm<'a, H> {
     pub(crate) reference_semantics: bool,
     assigned_globals: std::collections::BTreeSet<String>,
     pending_tools: Vec<Option<Value>>,
+    /// Identity of this execution, stamped into every pending-tool handle it
+    /// mints and required back at await, so a handle kept from an earlier
+    /// execution (or written by hand) cannot alias this execution's requests.
+    /// Restored with the continuation: a resumed process is the same execution.
+    execution_nonce: u64,
     #[cfg(test)]
     test_suspension: TestSuspension,
 }

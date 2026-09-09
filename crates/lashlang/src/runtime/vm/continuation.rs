@@ -27,6 +27,26 @@ use super::exceptions::PendingErrorOrigin;
 /// wiring a store.
 pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 9;
 
+/// The execution identity pending-tool handles carry.
+///
+/// Distinctness is what matters, not secrecy: a handle from one cell must
+/// never match the nonce of the next cell on the same session, and a
+/// hand-written `{__handle__: "tool", id: 0}` must not match anything. The
+/// nonce is a mixed function of the session heap's allocation counter at
+/// execution start — a value that only grows across a session's cells — rather
+/// than a random draw, so two runs of the same program from the same state
+/// produce byte-identical continuations (the cross-process determinism probes
+/// compare them). A durable park carries the nonce inside the continuation, so
+/// a resumed execution still recognises the handles it minted.
+pub(super) fn mint_execution_nonce(seed: u64) -> u64 {
+    // SplitMix64 finaliser: a bijection over the seed, so distinct seeds never
+    // share a nonce and the spelled value does not read as a counter.
+    let mut nonce = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    nonce = (nonce ^ (nonce >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    nonce = (nonce ^ (nonce >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    nonce ^ (nonce >> 31)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum VmRunOutcome {
     EffectCompleted,
@@ -77,6 +97,9 @@ pub struct VmContinuation {
         deserialize_with = "continuation_serde::deserialize_slots"
     )]
     pub pending_tools: Vec<Option<Value>>,
+    /// The suspended execution's identity; every pending-tool handle it minted
+    /// carries it, and the resumed VM keeps accepting exactly those handles.
+    pub execution_nonce: u64,
     #[serde(
         serialize_with = "continuation_serde::serialize_optional_value",
         deserialize_with = "continuation_serde::deserialize_optional_value"
@@ -873,6 +896,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         };
         heap.set_limit(limit);
         heap.set_collect_every_allocation(self.host.collect_heap_every_allocation());
+        self.execution_nonce = mint_execution_nonce(heap.allocations());
         self.heap = heap;
     }
 
@@ -906,6 +930,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             extras_heapified: false,
             reference_semantics: false,
             pending_tools: Vec::new(),
+            execution_nonce: mint_execution_nonce(0),
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -943,6 +968,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             extras_heapified: false,
             reference_semantics: false,
             pending_tools: Vec::new(),
+            execution_nonce: mint_execution_nonce(0),
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -1083,6 +1109,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 .transpose()
                 .map_err(|_| ContinuationError::FunctionIndexOverflow)?,
             pending_tools: self.pending_tools.clone(),
+            execution_nonce: self.execution_nonce,
             operand_stack: self.stack.clone(),
             last_value: self.last_value.clone(),
             slots: self.slots.values.clone(),
@@ -1338,6 +1365,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             // `State` and never recycle into an `ExecutionScratch`, so there are
             // no earlier marks to carry across the handover blob.
             pending_tools: continuation.pending_tools,
+            execution_nonce: continuation.execution_nonce,
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -1357,6 +1385,7 @@ mod tests {
             instruction_pointer: 0,
             active_function: None,
             pending_tools: Vec::new(),
+            execution_nonce: 0,
             operand_stack: Vec::new(),
             last_value: None,
             slots: Vec::new(),

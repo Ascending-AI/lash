@@ -147,6 +147,21 @@ impl Lowerer {
         result
     }
 
+    /// Lower `lower` as if it stood at the top level of the cell, whatever
+    /// awaits enclose it. A `Promise.all`/`allSettled` operand is the one
+    /// position that needs this: its tool calls must become pending handles
+    /// even when the aggregate is itself an argument of an awaited call.
+    pub(super) fn at_top_level_await_depth<T>(
+        &mut self,
+        lower: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        let outer_depth = self.position.await_depth;
+        self.position.await_depth = 0;
+        let result = lower(self);
+        self.position.await_depth = outer_depth;
+        result
+    }
+
     pub(super) fn with_iterable_sink<T>(
         &mut self,
         lower: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,

@@ -9,9 +9,14 @@ use super::super::host::{
 };
 use super::super::{
     CompiledAggregateAwaitShape, ExecutionHost, RuntimeError, Value, error_value,
-    is_process_handle, record_with_capacity, success, unwrap_tool_result,
+    is_process_handle, is_runtime_process_handle, record_with_capacity, success,
+    unwrap_tool_result,
 };
 use super::control::VmOutcome;
+use super::pending_tools::{
+    AwaitedValue, FOREIGN_HANDLE, ProcessLeafSettlement, SETTLED_HANDLE,
+    ensure_no_tool_handle_arguments, plain_value_awaited,
+};
 use super::{ActiveLashlangExecutionNode, Vm};
 
 #[derive(Clone, Copy)]
@@ -66,6 +71,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         match effect {
             VmEffect::ResourceCall { operation, argc } => {
                 let (receiver, args) = self.drain_receiver_call(argc)?;
+                ensure_no_tool_handle_arguments(&args)?;
                 let result = match self
                     .host
                     .perform(AbilityOp::ResourceOperation(ResourceOperation {
@@ -89,6 +95,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             VmEffect::ResourceCallUnwrap { operation, argc } => {
                 let (receiver, args) = self.drain_receiver_call(argc)?;
+                ensure_no_tool_handle_arguments(&args)?;
                 let value = self
                     .host
                     .perform(AbilityOp::ResourceOperation(ResourceOperation {
@@ -107,18 +114,38 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             VmEffect::AwaitPending => {
                 let value = self.pop_stack()?;
-                if super::pending_tools::pending_tool_id(&value).is_none() {
-                    return Err(RuntimeError::PendingTool {
-                        problem: "await requires a pending handle; this value is already settled"
-                            .into(),
-                    });
+                match self.classify_awaited(&value) {
+                    AwaitedValue::LocalToolHandle(id) => {
+                        if self.pending_tools.get(id).is_none_or(Option::is_none) {
+                            return Err(RuntimeError::PendingTool {
+                                problem: SETTLED_HANDLE.into(),
+                            });
+                        }
+                        self.stack.push(Value::List(vec![value].into()));
+                        self.await_pending_array(false).await?;
+                        let Value::List(values) = self.pop_stack()? else {
+                            unreachable!()
+                        };
+                        self.stack.push(values[0].clone());
+                    }
+                    AwaitedValue::ForeignToolHandle => {
+                        return Err(RuntimeError::PendingTool {
+                            problem: FOREIGN_HANDLE.into(),
+                        });
+                    }
+                    // A process handle that reached the tool-await path (a
+                    // runtime value the lowerer could not type) awaits the
+                    // process the way the typed form does.
+                    AwaitedValue::ProcessHandle => {
+                        let value = self.await_value_unwrap(value).await?;
+                        self.stack.push(value);
+                    }
+                    AwaitedValue::Plain => {
+                        return Err(RuntimeError::PendingTool {
+                            problem: plain_value_awaited(&value),
+                        });
+                    }
                 }
-                self.stack.push(Value::List(vec![value].into()));
-                self.await_pending_array(false).await?;
-                let Value::List(values) = self.pop_stack()? else {
-                    unreachable!()
-                };
-                self.stack.push(values[0].clone());
             }
             VmEffect::ResourceOperationBatch(batch) => {
                 self.resolve_resource_operation_batch(batch).await?;
@@ -301,14 +328,59 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let batch = self.chunk.resource_operation_batches[batch].clone();
         let start = self.stack_drain_start(batch.stack_value_count)?;
         let values = self.stack.drain(start..).collect::<Vec<_>>();
-        self.resolve_batch_spec(&batch, values).await
+        self.resolve_batch_spec(&batch, values, ProcessLeafSettlement::Result)
+            .await
     }
 
     pub(super) async fn resolve_batch_spec(
         &mut self,
         batch: &super::super::CompiledResourceOperationBatch,
-        values: Vec<Value>,
+        mut values: Vec<Value>,
+        process_leaves: ProcessLeafSettlement,
     ) -> Result<(), RuntimeError> {
+        let leaf_values = if batch.leaves.is_empty() {
+            Vec::new()
+        } else {
+            self.settle_tool_leaves(batch, &values).await?
+        };
+
+        // Phase two: process handles written into the aggregate settle after
+        // the tool batch, in written order, through the same durable
+        // process-await seam a direct `await` uses. Reaching this point means
+        // no tool leaf rejected, so the first failing process is the
+        // rejection an unwrapping aggregate reports (ADR 0086).
+        let mut process_positions = Vec::new();
+        collect_value_positions(&batch.shape, &mut process_positions);
+        for index in process_positions {
+            let Some(value) = values.get(index) else {
+                return Err(RuntimeError::AggregateAwaitValueOutOfRange);
+            };
+            if !is_runtime_process_handle(value) {
+                continue;
+            }
+            let handle = value.clone();
+            values[index] = match process_leaves {
+                ProcessLeafSettlement::Unwrap => self.await_value_unwrap(handle).await?,
+                ProcessLeafSettlement::Result => self.await_value(handle).await,
+            };
+        }
+
+        let mut value = build_aggregate_await_shape(&batch.shape, &values, &leaf_values, self)?;
+        if batch.aggregate_unwrap {
+            value = unwrap_tool_result(value)?;
+        }
+        self.stack.push(value);
+        Ok(())
+    }
+
+    /// Phase one of an aggregate await: every tool leaf as one host batch.
+    /// Returns each leaf's value in leaf order, or the rejection the batch
+    /// reports (first settled for `Promise.all`, first written otherwise).
+    async fn settle_tool_leaves(
+        &mut self,
+        batch: &super::super::CompiledResourceOperationBatch,
+        values: &[Value],
+    ) -> Result<Vec<Value>, RuntimeError> {
         let mut operations = Vec::with_capacity(batch.leaves.len());
         let mut active_nodes = Vec::with_capacity(batch.leaves.len());
         for leaf in batch.leaves.iter() {
@@ -452,13 +524,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.pending_error_span = span;
             return Err(RuntimeError::UnwrappedModuleOperationFailed { source });
         }
-
-        let mut value = build_aggregate_await_shape(&batch.shape, &values, &leaf_values, self)?;
-        if batch.aggregate_unwrap {
-            value = unwrap_tool_result(value)?;
-        }
-        self.stack.push(value);
-        Ok(())
+        Ok(leaf_values)
     }
 
     fn await_value(
@@ -541,6 +607,21 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .map_err(|error| RuntimeError::UnwrappedToolResultFailed {
                     message: error.to_string(),
                 }),
+        }
+    }
+}
+
+/// Every stack-value position an aggregate shape reads, in written order.
+fn collect_value_positions(shape: &CompiledAggregateAwaitShape, positions: &mut Vec<usize>) {
+    match shape {
+        CompiledAggregateAwaitShape::BatchLeaf(_) => {}
+        CompiledAggregateAwaitShape::Value(index) => positions.push(*index),
+        CompiledAggregateAwaitShape::Tuple(values)
+        | CompiledAggregateAwaitShape::List(values)
+        | CompiledAggregateAwaitShape::Record { values, .. } => {
+            for value in values.iter() {
+                collect_value_positions(value, positions);
+            }
         }
     }
 }

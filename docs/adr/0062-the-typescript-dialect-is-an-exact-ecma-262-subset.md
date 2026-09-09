@@ -92,7 +92,7 @@ captured object reference are supported.
 
 **Cells are scripts.** A foreground cell is ordinary top-level TypeScript, and
 may use top-level `await` for tools, process handles, `sleep`, `Promise.all`
-and `Promise.allSettled`. Tool calls must be awaited directly or consumed as pending handles before the execution ends ([ADR 0086](0086-typescript-runtime-promise-arrays.md)), and use explicit
+and `Promise.allSettled`. Tool calls must be awaited directly or consumed as pending handles before the execution ends ([ADR 0086](0086-typescript-runtime-promise-arrays.md)); the pending-tool runtime error (`TS_PENDING_TOOL`) is `Catchable`, so a `try/catch` in the cell observes it. Tool calls use explicit
 `typescript.tool` module paths; their rendered signatures return `Promise<T>`,
 and unknown module paths enter the executor's deferred tool-resolution path.
 

@@ -51,14 +51,6 @@ impl Lowerer {
             _ => None,
         };
         if let Some((mode, value)) = promise_kind {
-            if self.aggregate_contains_process_handle(value) {
-                return Err(Diagnostic::with_repair(
-                    DiagnosticCode::AwaitUnsupported,
-                    "Promise.all/allSettled process promises require separate await expressions",
-                    "await the process promise on its own line, before the aggregate",
-                    None,
-                ));
-            }
             if is_async_map(value) {
                 return self.with_await(|lowerer| {
                     if mode == "allSettled" {
@@ -68,7 +60,15 @@ impl Lowerer {
                     }
                 });
             }
-            let array = self.lower_expr(value)?;
+            // The operand is lowered as top-level code whatever surrounds the
+            // aggregate. Tool calls become pending handles only at await depth
+            // zero (`calls.rs`), and an aggregate written inside another
+            // awaited call's arguments inherited that call's depth: its leaves
+            // lowered as plain calls whose `{ok:false,error}` envelopes the
+            // aggregate then reported as fulfilled values, so `try/catch`
+            // never fired. Process handles in the array are values here; the
+            // runtime awaits them after the tool batch settles (ADR 0086).
+            let array = self.at_top_level_await_depth(|lowerer| lowerer.lower_expr(value))?;
             let aggregate = LashExpr::BuiltinCall {
                 name: "__typescript_await_array".into(),
                 args: vec![array, LashExpr::Bool(mode == "allSettled")],
@@ -114,37 +114,6 @@ impl Lowerer {
             name: "__typescript_await_pending".into(),
             args: vec![lowered],
         })
-    }
-    fn aggregate_contains_process_handle(&self, value: &Expr) -> bool {
-        let Expr::Array(items) = value else {
-            return false;
-        };
-        items.iter().any(|item| match item {
-            ArrayElement::Value(value) | ArrayElement::Spread(value) => {
-                self.expr_may_be_process_handle(value)
-            }
-        })
-    }
-
-    fn expr_may_be_process_handle(&self, expr: &Expr) -> bool {
-        match expr {
-            Expr::Ident(name) => self
-                .binding(name)
-                .is_ok_and(|binding| binding.role == BindingRole::ProcessHandle),
-            Expr::Assign { value, .. } => self.expr_may_be_process_handle(value),
-            Expr::Logical { left, right, .. } => {
-                self.expr_may_be_process_handle(left) || self.expr_may_be_process_handle(right)
-            }
-            Expr::Conditional {
-                consequent,
-                alternate,
-                ..
-            } => {
-                self.expr_may_be_process_handle(consequent)
-                    || self.expr_may_be_process_handle(alternate)
-            }
-            _ => false,
-        }
     }
 }
 
