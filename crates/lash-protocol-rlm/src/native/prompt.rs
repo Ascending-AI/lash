@@ -20,10 +20,7 @@ pub(super) fn execution_section(
         text.replace_range(start..end, "### Tool transport\n\nCall `execute_code` once with a JSON object containing only the string `code`. Put the complete program in `code`. Host operations and `finish` run inside that program.\n");
     }
     text = text
-        .replace(
-            "from inside a paired `<lashlang>` block",
-            "from inside the `execute_code` program",
-        )
+        .replace("a paired `<lashlang>` block", "the `execute_code` program")
         .replace("across `<lashlang>` blocks", "across programs");
     if let Some(start) = text.find("### Example cell")
         && let Some(close) = text[start..].find(dialect.cell_tags().close)
@@ -164,7 +161,6 @@ mod drift_tests {
         }
         for needle in [
             "### Response shape",
-            "from inside a paired `<lashlang>` block",
             "across `<lashlang>` blocks",
             "paired `<lashlang>...</lashlang>` block",
             "paired `<typescript>...</typescript>` block",
@@ -189,5 +185,198 @@ mod drift_tests {
         );
         assert!(intermediate.contains("inside a `execute_code` call"));
         assert!(intermediate.contains("a `execute_code`"));
+    }
+}
+
+#[cfg(test)]
+mod prompt_diet_tests {
+    use super::*;
+    use lash_lashlang_runtime::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
+
+    fn catalog() -> lash_core::ToolCatalog {
+        lash_core::ToolCatalog::from_tool_definitions((0..7).map(|index| {
+            lash_core::ToolDefinition::raw(format!("tool:probe{index}"), format!("probe{index}"),
+                "Return a STRING containing record-looking text, not a structured record.",
+                serde_json::json!({"type":"object","properties":{"id":{"type":"string","description":"Record identifier"}},"required":["id"]}),
+                serde_json::json!({"type":"string"}))
+                .with_tool_binding(ToolBinding::new(["probe"], format!("op{index}")))
+        }).collect())
+    }
+
+    fn dialect(typescript: bool, enabled: bool) -> Box<dyn RlmDialect> {
+        let surface = LashlangSurface {
+            abilities: if enabled {
+                lashlang::LashlangAbilities::all()
+            } else {
+                lashlang::LashlangAbilities::default()
+            },
+            ..LashlangSurface::default()
+        };
+        if typescript {
+            Box::new(crate::dialect::typescript::TypescriptDialect::prompt_only(
+                surface,
+            ))
+        } else {
+            Box::new(crate::dialect::lashlang::LashlangDialect::prompt_only(
+                surface,
+            ))
+        }
+    }
+
+    fn system(dialect: &dyn RlmDialect, native: bool, enabled: bool) -> String {
+        let catalog = catalog();
+        let features = crate::protocol::RlmPromptFeatures {
+            images: enabled,
+            type_literals: enabled,
+            decomposition: enabled,
+        };
+        let mut execution = if native {
+            execution_section(dialect, features, &catalog)
+        } else {
+            dialect
+                .render_execution_section(features, &catalog)
+                .unwrap()
+        };
+        if dialect.language_id() != "typescript" {
+            execution.push_str(&format!(
+                "\n\n### Tools\n\nAwait these documented operations:\n\n{}",
+                crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect, enabled)
+            ));
+        }
+        lash_core::PromptTemplate::default().render(&lash_sansio::PromptContext {
+            execution_prompt: execution.into(),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn prompt_diet_sizes_and_capability_gates() {
+        for typescript in [true, false] {
+            for native in [false, true] {
+                let off = system(dialect(typescript, false).as_ref(), native, false);
+                let on = system(dialect(typescript, true).as_ref(), native, true);
+                let size = off.chars().count();
+                println!(
+                    "prompt diet typescript={typescript} native={native}: off={size} on={}",
+                    on.chars().count()
+                );
+                assert!(
+                    size <= if typescript { 6000 } else { 7000 },
+                    "{size}: {off}"
+                );
+                assert!(on.len() > off.len());
+                for forbidden in [
+                    "defineProcess",
+                    "waitSignal",
+                    "registerTrigger",
+                    "Background processes",
+                    "wait_signal",
+                    "signal_run",
+                    "### Type literals",
+                    "@label",
+                    "Image",
+                    "continuation tool",
+                ] {
+                    assert!(!off.contains(forbidden), "disabled {forbidden}: {off}");
+                }
+                assert_eq!(off.matches("### Tools\n").count(), 1);
+                assert_eq!(off.matches("Return a STRING").count(), 7);
+                assert!(!off.contains("### Host Surface"));
+            }
+        }
+        let durable = crate::dialect::typescript::typescript_process_prompt(
+            &lashlang::LashlangAbilities::all(),
+        );
+        assert!(durable.chars().count() <= 900, "{}", durable.len());
+    }
+
+    #[test]
+    fn mode_independent_header_and_guidance_are_identical() {
+        let standard = lash_core::PromptTemplate::default().render(&lash_sansio::PromptContext {
+            execution_prompt: "Use direct tool calls.".into(),
+            ..Default::default()
+        });
+        for typescript in [false, true] {
+            for native in [false, true] {
+                let prompt = system(dialect(typescript, false).as_ref(), native, false);
+                assert_eq!(prompt.lines().next(), standard.lines().next());
+                assert_eq!(
+                    prompt.split_once("## Guidance").unwrap().1,
+                    standard.split_once("## Guidance").unwrap().1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn durable_primitives_gate_independently() {
+        for mask in 0..16 {
+            let abilities = lashlang::LashlangAbilities {
+                processes: mask & 1 != 0,
+                sleep: mask & 2 != 0,
+                process_signals: mask & 4 != 0,
+                triggers: mask & 8 != 0,
+            };
+            let text = crate::dialect::typescript::typescript_process_prompt(&abilities);
+            for (needle, expected) in [
+                ("defineProcess", abilities.processes),
+                ("sleep(", abilities.sleep),
+                (
+                    "waitSignal",
+                    abilities.processes && abilities.process_signals,
+                ),
+                ("registerTrigger", abilities.processes && abilities.triggers),
+                ("signals?", abilities.processes && abilities.process_signals),
+            ] {
+                assert_eq!(
+                    text.contains(needle),
+                    expected,
+                    "mask={mask}, {needle}: {text}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn continuation_docs_are_short_and_gated() {
+        for dialect in [dialect(false, false), dialect(true, false)] {
+            let tool =
+                crate::control_tools::continue_as_tool_definition_for(dialect.prompt_vocabulary());
+            assert!(tool.manifest().description.chars().count() <= 350);
+            let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
+            assert!(
+                crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect.as_ref(), false)
+                    .is_empty()
+            );
+            assert!(
+                crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect.as_ref(), true)
+                    .contains("Terminal action")
+            );
+        }
+    }
+
+    #[test]
+    fn removed_guardrails_still_have_repair_hints() {
+        let host = lashlang::LashlangHostEnvironment::new(
+            lashlang::LashlangHostCatalog::default(),
+            lashlang::LashlangAbilities::all(),
+        );
+        for (source, repair) in [
+            ("class A {}", "Use functions and plain objects"),
+            (
+                "function* g() { yield 1; }",
+                "build the whole list and return it",
+            ),
+            (
+                "await Promise.race([1, 2]);",
+                "Promise.all/Promise.allSettled",
+            ),
+        ] {
+            let error = lash_typescript::link(source, &host)
+                .expect_err("unsupported construct")
+                .to_string();
+            let hint = error.split_once("hint:").expect("repair hint").1;
+            assert!(hint.contains(repair), "{source}: {error}");
+        }
     }
 }

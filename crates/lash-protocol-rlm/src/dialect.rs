@@ -73,7 +73,7 @@ pub(crate) struct CellTags {
 /// Shared cell transport teaching; native transport replaces this whole section.
 pub(crate) fn cell_response_shape(tags: CellTags, vocabulary: DialectPromptVocabulary) -> String {
     format!(
-        "### Response shape\n\nExecutable code must be inside paired `{open}` and `{close}` tags. The start and close tag lines must be standalone after trimming. Markdown code fences are documentation and never execute here. A standalone `{close}` line terminates the cell even inside a multiline string, so construct such string content without that standalone delimiter line. When action is needed, place the {language} block after any visible prose or omit prose. Prose before the block is commentary only. `{finish}` at the top level of the foreground cell ends the turn with a computed value. Any turn-ending rules for prose-only responses versus `finish` are listed in the current **FINALIZATION** section.\n",
+        "### Response shape\n\nExecutable code must be inside paired `{open}` and `{close}` tags. Tag lines must be standalone after trimming; `{close}` terminates the cell even inside a multiline string. Markdown fences never execute. Put the {language} block after optional commentary. Top-level `{finish}` ends the turn with a value; **FINALIZATION** defines prose-only versus finish rules.\n",
         open = tags.open,
         close = tags.close,
         language = vocabulary.language_name,

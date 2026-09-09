@@ -28,6 +28,7 @@ pub(super) struct RlmHistoryRenderInput<'a> {
 #[derive(Clone, Copy)]
 pub(super) struct CurrentIterationMessageInput<'a> {
     pub(super) history_len: usize,
+    pub(super) history_has_structure: bool,
     pub(super) protocol_iteration: usize,
     pub(super) turn_causes: &'a [lash_core::TurnCause],
     pub(super) finalization: &'a str,
@@ -49,13 +50,17 @@ pub(super) fn build_rlm_history_messages_from_turn(
 ) -> Vec<LlmMessage> {
     let mut messages = render_history_messages(&input);
     let saw_history = !messages.is_empty();
-    let history_len = rlm_history_projection(
+    let history = rlm_history_projection(
         &lash_core::facade_support::ChronologicalProjection::from_turn_view(
             input.events,
             input.turn_messages,
         ),
-    )
-    .len();
+    );
+    let history_len = history.len();
+    let history_has_structure = history.history().iter().any(|item| match item {
+        lash_rlm_types::RlmHistoryItem::LashlangStep { .. } => true,
+        lash_rlm_types::RlmHistoryItem::Message { attachments, .. } => !attachments.is_empty(),
+    });
     if !saw_history {
         messages.push(LlmMessage::new(
             LlmRole::User,
@@ -71,6 +76,7 @@ pub(super) fn build_rlm_history_messages_from_turn(
         &mut messages,
         CurrentIterationMessageInput {
             history_len,
+            history_has_structure,
             protocol_iteration: input.protocol_iteration,
             turn_causes: input.turn_causes,
             finalization: input.finalization,
@@ -335,11 +341,9 @@ fn append_current_iteration_message(
         current_prompt.push_str(&turn_events);
     }
     current_prompt.push_str("\n\n\n=== BOUND VARIABLES ===\n\n");
-    current_prompt.push_str(input.bound_variables);
-    current_prompt.push_str("\n\nRuntime notes:\n");
     let _ = write!(
         current_prompt,
-        "- `history` currently has {} {}",
+        "- `history`: `list[HistoryItem]`, read-only, {} {}",
         input.history_len,
         if input.history_len == 1 {
             "entry"
@@ -347,6 +351,14 @@ fn append_current_iteration_message(
             "entries"
         }
     );
+    if input.history_has_structure {
+        current_prompt.push_str("\n\nSchema:\n");
+        current_prompt.push_str(&crate::rlm_support::history_item_type_definition().join("\n"));
+    }
+    if !input.bound_variables.is_empty() {
+        current_prompt.push_str("\n\n");
+        current_prompt.push_str(input.bound_variables);
+    }
     current_prompt.push_str("\n\n\n=== FINALIZATION ===\n\n");
     current_prompt.push_str(input.finalization);
     if let Some(block) = input.required_output {

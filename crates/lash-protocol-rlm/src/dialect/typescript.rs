@@ -256,6 +256,37 @@ impl TypescriptDialect {
     }
 }
 
+pub(crate) fn typescript_process_prompt(abilities: &lashlang::LashlangAbilities) -> String {
+    let mut lines = Vec::new();
+    if abilities.processes {
+        lines.push(r#"interface Process { readonly name: string }
+declare function defineProcess(c: {name: string; run: Function; signals?: Record<string, null>}): Process;
+declare function start(p: Process, args?: Record<string, unknown>): Promise<unknown> & {id: string};
+declare function wake(value: unknown): void; // progress
+Use top-level const, literal name, async run; start keys match run parameter names. In run, return succeeds after finally; throw fails."#);
+        if abilities.process_signals {
+            lines.push(
+                r#"declare function waitSignal(name: string): Promise<unknown>;
+declare function wake(handle: {id: string}, signal: string, payload: unknown): void;
+Use signals: {go: null}; waitSignal is run-only."#,
+            );
+        }
+        if abilities.triggers {
+            lines.push(r#"declare function registerTrigger(c: {source: unknown; target: Process; inputs: Record<string, unknown>; name?: string}): Promise<unknown>;
+Literal target; inputs match run parameters."#);
+        }
+    }
+    if abilities.sleep {
+        lines.push("declare function sleep(ms: number): Promise<void>; // cell or run");
+    }
+    let prompt = lines.join("\n");
+    if abilities.process_signals {
+        prompt
+    } else {
+        prompt.replace("; signals?: Record<string, null>", "")
+    }
+}
+
 impl RlmDialect for TypescriptDialect {
     fn language_id(&self) -> &'static str {
         LANGUAGE_ID
@@ -342,73 +373,42 @@ impl RlmDialect for TypescriptDialect {
 
     fn render_execution_section(
         &self,
-        _features: crate::protocol::RlmPromptFeatures,
+        features: crate::protocol::RlmPromptFeatures,
         tool_catalog: &lash_core::ToolCatalog,
     ) -> Result<String, SessionError> {
-        let tools = tool_catalog
-            .tools
-            .iter()
-            .filter_map(|tool| {
-                let binding =
-                    lash_lashlang_runtime::required_tool_typescript_executable(&tool.manifest)
-                        .ok()?;
-                let contract = tool_catalog.resolve_contract(&tool.manifest.name)?;
-                Some(lash_typescript::render_tool_signature(
-                    &binding.call_path(),
-                    contract.input_schema.canonical(),
-                    Some(contract.output_schema.canonical()),
-                ))
-            })
-            .collect::<Vec<_>>()
-            .join("\n    ");
+        let tools =
+            crate::tool_catalog::rlm_prompt_tool_docs(tool_catalog, self, features.decomposition);
         let tools = if tools.is_empty() {
-            "\n\nNo host tools are available in this turn.".to_string()
+            String::new()
         } else {
             format!(
-                "\n\n### Tools\n\nEvery call requires `await` and returns the declared `Promise<T>`:\n\n    {tools}"
+                "\n\n### Tools\n\nEvery call requires `await` and returns the declared `Promise<T>`:\n\n{tools}"
             )
         };
         let host_surface = self.render_host_surface_section(tool_catalog)?;
         let response_shape = super::cell_response_shape(self.cell_tags(), self.prompt_vocabulary());
-        let host_api = r#"Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
+        let environment = self
+            .surface
+            .host_environment(tool_catalog)
+            .map_err(|error| SessionError::Protocol(error.to_string()))?;
+        let durable = typescript_process_prompt(&environment.abilities);
+        let host_api = format!(
+            r#"Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
+
+Standard `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp`, `URL` are supported.
 
 ### Host API
 
-    interface ProcessDefinition<Input, Output> { readonly name: string }
-    interface ProcessHandle<Output> extends PromiseLike<Output> { readonly id: string }
-    declare const console: {
-      log(...values: unknown[]): void;
-      warn(...values: unknown[]): void;
-      error(...values: unknown[]): void;
-      info(...values: unknown[]): void;
-      debug(...values: unknown[]): void;
-    };
-    declare function print(value: unknown): void;
-    declare function finish(value: unknown): never;
-    declare function sleep(milliseconds: number): Promise<void>;
-    declare function waitSignal(name: string): Promise<unknown>; // inside a defineProcess run body only
-    declare function defineProcess<Input, Output>(config: { name: string; signals: Record<string, null>; run: (input: Input) => Promise<Output> }): ProcessDefinition<Input, Output>;
-    declare function start<Input, Output>(process: ProcessDefinition<Input, Output>, args?: Record<string, unknown>): ProcessHandle<Output>;
-    declare function wake(progress: unknown): void;
-    declare function wake(handle: ProcessHandle<unknown>, signal: string, payload: unknown): void;
-    declare function registerTrigger(config: { source: unknown; target: ProcessDefinition<unknown, unknown>; inputs: Record<string, unknown>; name?: string }): Promise<unknown>;
+`console.log/warn/error/info/debug(...values)` and `print(value)` inspect values; `finish(value)` ends the turn.
+{durable}
+`Promise.all`/`Promise.allSettled` accept tool promises and resolved values; all leaves settle before `all` reports the first-settled rejection.
 
-Declare durable work only as a top-level `const p = defineProcess({ name: "literal", signals: { signal: null }, run: async (...) => { ... } })`. The keys of `start`'s second argument are the `run` function's own parameter names, not a fixed `input` field — `run: async (request: unknown)` is started as `start(p, { request: value })`, and any other key rejects; `registerTrigger`'s `inputs` keys work the same way. `await start(...)` waits for its result; an un-awaited handle can be signalled. In `run`, `wake(value)` emits progress, `await waitSignal("literal")` and `await sleep(ms)` suspend durably, `return` succeeds after enclosing `finally` blocks, and an uncaught `throw` fails. `waitSignal` is the only primitive above that is scoped to a process body: outside one it is refused as "`waitSignal` can only be used inside a process body", while `await sleep(ms)` is also valid in a cell. `await registerTrigger(...)` requires a literal process target. `Promise.all`/`Promise.allSettled` accept top-level tool promises and resolved values; `Promise.all` reports the first-settled rejection (v1 waits for every leaf before reporting).
-
-A failed tool call rejects with a real `Error`: `error instanceof Error` holds, `error.message` is the host's own text, `error.name` is `EffectError` (`RuntimeError` for a runtime fault), and `error.cause` carries `{ code, details }`. A rejected `allSettled` leaf's `reason` is that same value. An `Error` returned to the host — from `finish`, or inside a tool argument — is flattened to `{ name, message, cause }`.
-
-### v1 guardrails
-
-Use ordinary modern TypeScript control flow and expression syntax: destructuring (including defaults/rest), optional chaining, spread, compound/update operators, `switch`, `do...while`, `for...in`, `for...of`, parameter defaults/rest, `var`, runtime enums, and const enums are supported. Async functions and arrows are supported wherever every awaited value is a tool call, `sleep`, or a process handle; fan out with `await Promise.all(items.map(async (item) => ...))` or its `Promise.allSettled` form, which runs the callbacks sequentially and durably. Error-family constructors, `new Map`/`Set`/`Date`/`RegExp`, and `new URL(input, base?)` / `new URLSearchParams(init?)` are supported; `instanceof` accepts exactly those built-ins plus `Array` and `Object`. A `URL`'s `searchParams` is one live object, so mutating it updates `href`. RegExp literals and `new RegExp(pattern?, flags?)` accept `gimsuy`; use `exec`/`test` or string `match`/`search`/`replace`/`replaceAll`/`split`, and consume `matchAll` directly with `for...of`, spread, or `Array.from`. Date math is UTC-only; use `getUTC*` and `toISOString()`. Bare conversions and number parsers are available; other iterators must be consumed directly by `for...of`, spread, `Array.from`, `new Map|Set`, or `Object.fromEntries`. `globalThis.name` and top-level bindings address the durable session state.
-
-Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), namespaces (`TS_NAMESPACE_UNSUPPORTED`), decorators (`TS_DECORATOR_UNSUPPORTED`), `for await` (`TS_FOR_OF_UNSUPPORTED`), labels (`TS_LABEL_UNSUPPORTED`), arbitrary `new` (`TS_NEW_UNSUPPORTED`), and arbitrary `instanceof` (`TS_INSTANCEOF_UNSUPPORTED`) reject with a replacement in the diagnostic. A rejection names what it refused on its first line, points at the offending line and column, and — whenever the dialect has an accepted alternative — names it on a following `hint:` line. When a `hint:` line is present it is the rewrite; when it is absent the diagnostic itself is the whole answer. RegExp flags `d`/`v` reject as `TS_REGEX_INDICES_FLAG_UNSUPPORTED`/`TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED`; remove `d` and use `match.index` plus capture lengths, or replace `v` with `u` and ordinary Unicode classes. A retained `matchAll` iterator rejects as `TS_REGEX_ITERATOR_POSITION`; spread it immediately. Assigning to a captured `let` rejects as `TS_MUTABLE_CAPTURE_UNSUPPORTED`; mutate a captured object's field instead. `for...of` snapshots its input, so a body that aliases or mutates that input rejects as `TS_FOR_OF_UNSUPPORTED`. Promise chaining and `Promise.resolve`/`reject` reject: use direct `await` and `try/catch`. `Promise.race`/`any` reject pending FIG-1416; use `Promise.all`, `Promise.allSettled`, or durable `sleep`. Unsupported methods reject as `TS_METHOD_UNSUPPORTED`. `localeCompare` and locale formatting reject; use `(a < b ? -1 : a > b ? 1 : 0)` and `toFixed(digits)`. `Date.now()` and argless `new Date()` use the same journaled clock effect; non-ISO parsing, local-time Date methods, and implicit Date string coercion reject with UTC/ISO repairs. `Math.random()` is journaled.
-
-### Deterministic standard library"#;
-        let stdlib = lash_typescript::render_stdlib_contract();
+A failed tool call rejects with an `Error`: `message` is the host text, `name` is `EffectError` (`RuntimeError` for runtime faults), and `cause` carries `{{ code, details }}`. An `allSettled` rejection uses that same error. Errors in `finish` or tool arguments become `{{ name, message, cause }}`."#
+        );
         let example =
             "### Example cell\n\n<typescript>\nconst total = 1 + 2;\nfinish(total);\n</typescript>";
         Ok(format!(
-            "## TypeScript execution\n\n{response_shape}\n{example}\n\n{host_api}\n\n{stdlib}{tools}{host_surface}"
+            "TypeScript execution.\n\n{response_shape}\n{example}\n\n{host_api}\n\n{tools}{host_surface}"
         ))
     }
 
@@ -646,24 +646,24 @@ mod tests {
             ),
             "{section}"
         );
-        assert!(section.contains("defineProcess"), "{section}");
+        assert!(
+            !section.contains("defineProcess"),
+            "disabled processes stay hidden"
+        );
         assert!(section.contains("Promise.allSettled"), "{section}");
-        assert!(
-            section.contains("TS_MUTABLE_CAPTURE_UNSUPPORTED"),
-            "{section}"
-        );
-        assert!(section.contains("TS_FOR_OF_UNSUPPORTED"), "{section}");
-        assert!(
-            section.contains(&lash_typescript::render_stdlib_contract()),
-            "the prompt stdlib inventory must come from the lowering signature table"
-        );
+        assert!(!section.contains("### v1 guardrails"));
+        assert!(!section.contains("### Deterministic standard library"));
+        assert!(section.contains("`Date` (UTC)"));
         insta::assert_snapshot!("typescript_execution_section", section);
     }
 
     #[test]
     fn process_handle_interface_advertises_id_member() {
         let dialect = TypescriptDialect::new(
-            LashlangSurface::default(),
+            LashlangSurface {
+                abilities: lashlang::LashlangAbilities::all(),
+                ..LashlangSurface::default()
+            },
             LashlangDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
@@ -679,7 +679,7 @@ mod tests {
             )
             .expect("render execution section");
         assert!(
-            prompt.contains("interface ProcessHandle<Output> extends PromiseLike<Output> { readonly id: string }"),
+            prompt.contains("id: string"),
             "the ProcessHandle interface must advertise its `id` member: {prompt}"
         );
     }
@@ -698,7 +698,10 @@ mod tests {
     #[test]
     fn the_prompt_teaches_the_real_process_argument_convention() {
         let dialect = TypescriptDialect::new(
-            LashlangSurface::default(),
+            LashlangSurface {
+                abilities: lashlang::LashlangAbilities::all(),
+                ..LashlangSurface::default()
+            },
             LashlangDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
@@ -789,8 +792,8 @@ mod tests {
             rest = &rest[end..];
         }
         assert!(
-            named.len() >= 7,
-            "the walker found only {named:?}; the prompt names more than that"
+            named.is_empty(),
+            "FIG-2750 removes diagnostic inventory: {named:?}"
         );
 
         let phantom = named
@@ -879,29 +882,8 @@ mod tests {
             "model-facing TypeScript diagnostics leak Lashlang identifiers: {leaks:#?}"
         );
 
-        // The prompt now states the scope rule the reject enforces, and states
-        // that its neighbour is *not* scoped that way. Both halves are pinned
-        // here, because a scope annotation that is wrong in the permissive
-        // direction is worse than none.
-        //
-        // FIG-1398: assert the rendered prompt contains the exact refusal message
-        // the linker emits rather than checking a hardcoded literal against `refusal`.
-        // A prompt-sentence reword or diagnostic change turns this test red
-        // immediately without relying on an insta snapshot.
-        let refusal = lash_typescript::link("await waitSignal(\"go\");", &host)
-            .expect_err("waitSignal outside a process body must reject");
-        let prompt =
-            TypescriptDialect::prompt_only(lash_lashlang_runtime::LashlangSurface::default())
-                .render_execution_section(
-                    crate::protocol::RlmPromptFeatures::default(),
-                    &lash_core::ToolCatalog::default(),
-                )
-                .expect("typescript execution section");
-        let expected_quote = format!("\"{}\"", refusal.message);
-        assert!(
-            prompt.contains(&expected_quote),
-            "the rendered prompt must quote the linker refusal verbatim: expected {expected_quote} in prompt"
-        );
+        let prompt = typescript_process_prompt(&lashlang::LashlangAbilities::all());
+        assert!(prompt.contains("waitSignal is run-only"));
         lash_typescript::link("await sleep(1); finish(1);", &host)
             .expect("the prompt says sleep is also valid in a cell");
     }

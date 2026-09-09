@@ -258,10 +258,6 @@ pub(crate) fn render_bound_variables(
             "These variables are already bound in {}. Access them directly in `{}` {}s; do not recreate them manually.",
             vocabulary.language_name, vocabulary.cell_open_tag, vocabulary.cell_noun
         ),
-        format!(
-            "Small values are shown in full; larger ones show only a truncated preview (record keys, or the head and tail of a list/string) — but the variable still holds its COMPLETE value. A short preview never means state was lost; `{}` the variable (or the part you need) to see the rest.",
-            vocabulary.print_call
-        ),
         // A wrong field name is the one mistake this runtime does not report.
         // Reading a key that was never there yields `undefined`, which flows
         // into arithmetic as `NaN` and into totals as nothing at all: the cell
@@ -320,11 +316,6 @@ pub(crate) fn render_bound_variables(
 
     lines.push(String::new());
     lines.push("Available variables:".to_string());
-    lines.push(render_read_only_line(
-        "history",
-        "list[HistoryItem]",
-        "list",
-    ));
     for row in &rows {
         let line = render_row_line(row, &registry, vocabulary);
         cache.entries.insert(
@@ -340,9 +331,18 @@ pub(crate) fn render_bound_variables(
         lines.push(line);
     }
 
-    lines.push(String::new());
-    lines.push("Schema:".to_string());
-    lines.extend(history_item_type_definition());
+    if rows.is_empty() {
+        return Arc::from("");
+    }
+    if rows
+        .iter()
+        .any(|row| row.inline.is_none() && row.preview.is_some())
+    {
+        lines.insert(1, format!("Previews are truncated; variables retain complete values. Use `{}` on the part you need.", vocabulary.print_call));
+    }
+    if !registry.definitions.is_empty() {
+        lines.push("\nSchema:".to_string());
+    }
     if !registry.definitions.is_empty() {
         lines.push(String::new());
     }
@@ -408,7 +408,7 @@ fn flow_value_descriptor_type(value: &FlowValue) -> &'static str {
     }
 }
 
-fn history_item_type_definition() -> Vec<String> {
+pub(crate) fn history_item_type_definition() -> Vec<String> {
     vec![
         "type HistoryItem =".to_string(),
         "  | { kind: \"message\", id: str, role: enum[\"user\", \"system\", \"assistant\", \"event\"], content: str, attachments?: list[HistoryAttachment] }".to_string(),
@@ -982,24 +982,11 @@ mod bound_variable_tests {
     }
 
     #[test]
-    fn history_is_listed_without_volatile_length() {
+    fn history_is_rendered_by_the_history_driver_only() {
         let mut cache = BoundVariableRenderCache::default();
         let s = render_with_cache(&mut cache, json!({ "task": "ship" }));
-
-        assert!(
-            s.contains("- `history`: `list[HistoryItem]`, read-only"),
-            "{s}"
-        );
-        assert!(s.contains("type HistoryItem ="), "{s}");
-        assert!(s.contains("kind: \"message\""), "{s}");
-        assert!(s.contains("kind: \"lashlang_step\""), "{s}");
-        assert!(
-            !s.contains("- `history`: `list[HistoryItem]`, read-only, 7 entries"),
-            "{s}"
-        );
-
-        assert!(!s.contains("Runtime notes:"), "{s}");
-        assert!(!s.contains("currently has"), "{s}");
+        assert!(!s.contains("HistoryItem"));
+        assert!(!s.contains("truncated"));
     }
 
     /// The one mistake this runtime does not report is a wrong field name: the

@@ -22,9 +22,16 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     let tool_names_fingerprint = tool_catalog.tool_names_fingerprint();
     let mut prompt_contributions = Vec::new();
 
-    let tool_docs = crate::tool_catalog::rlm_prompt_tool_docs(tool_catalog, dialect.as_ref());
-    if !tool_docs.trim().is_empty() {
-        prompt_contributions.push(PromptContribution::execution("Tools", tool_docs));
+    let tool_docs = crate::tool_catalog::rlm_prompt_tool_docs(
+        tool_catalog,
+        dialect.as_ref(),
+        config.prompt_features.decomposition,
+    );
+    if dialect.language_id() != "typescript" && !tool_docs.trim().is_empty() {
+        prompt_contributions.push(PromptContribution::execution(
+            "Tools",
+            format!("Await these documented operations:\n\n{tool_docs}"),
+        ));
     }
     prompt_contributions.extend(input.extra_prompt_contributions);
     let turn_limit_dialect = Arc::clone(&dialect);

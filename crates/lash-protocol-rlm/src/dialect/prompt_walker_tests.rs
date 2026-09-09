@@ -227,7 +227,7 @@ fn assembled_prompt_fragments_with_projection(
 
     fragments.push((
         "tool docs",
-        crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect),
+        crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect, true),
     ));
 
     // The deferred-tool advertisement, which is prose a *lower* crate composes
@@ -414,36 +414,10 @@ fn no_assembled_prompt_fragment_carries_the_other_dialects_words() {
     );
 }
 
-/// The leaks this round measured but did not close, named rather than hidden.
-///
-/// Both are the *type* syntax of the host's declarations, not prose, and both
-/// come from renderers that live outside this crate's dialect seam: tool docs
-/// are rendered by `lash_core`'s contract renderer
-/// (`compact_contract_with_signature_name(...).render_markdown()`), and the
-/// bound-variable block builds its own shape language (`list[...]`,
-/// `HistoryItem`) from a schema registry. Teaching either to speak a second
-/// dialect is a typed-rendering change across crates, not a copy edit, so it is
-/// recorded here instead of being half-done.
-///
-/// This list is asserted *exactly*: a third leak fails the walker, and closing
-/// one of these fails it too until its row is deleted. That is the point — a
-/// residual that cannot be forgotten is different in kind from one that is
-/// merely known.
-const KNOWN_TYPE_SYNTAX_RESIDUALS: &[&str] = &[
-    "typescript prompt fragment `bound variables` contains `: int,`",
-    "typescript prompt fragment `bound variables` contains `: str,`",
-    "typescript prompt fragment `bound variables` contains `?: any |`",
-    "typescript prompt fragment `bound variables` contains `list[`",
-    "typescript prompt fragment `tool docs` contains `-> str`",
-    // A collection-of-records result — `processes.list` is the shipped one —
-    // renders its return shape as `list[record{id: str, …}]`. Same renderer,
-    // same residual as `-> str`: the label comes from `lash_core`'s contract
-    // renderer, and the walker only saw scalars until the fixture catalog grew
-    // a listing member. Measured here rather than left invisible; closing it is
-    // the same cross-crate typed-rendering change as the rows above.
-    "typescript prompt fragment `tool docs` contains `: str,`",
-    "typescript prompt fragment `tool docs` contains `list[`",
-];
+// FIG-2750 closes the fixture's tool-signature and always-rendered history
+// residuals. Structured history and large projected shapes still use the shared
+// schema vocabulary; this simple-global fixture must have no dialect leaks.
+const KNOWN_TYPE_SYNTAX_RESIDUALS: &[&str] = &[];
 
 /// The walker only measures if its marker list can fire. Both vocabularies are
 /// asserted to be genuinely different so a future refactor cannot make the
@@ -537,74 +511,34 @@ fn the_two_vocabularies_are_actually_different() {
 /// The check is deliberately coarse: one family, a few tokens, at least one of
 /// which must appear. It cannot verify the prose is *good*; it can only make
 /// silent omission impossible. The list is explicit and maintained — widening
-/// the accepted surface means adding a row here, which is the point.
-const TYPESCRIPT_PROMPT_CONSTRUCT_FAMILIES: &[(&str, &[&str])] = &[
-    ("async functions", &["Async functions", "async function"]),
-    ("async fan-out", &[".map(async"]),
-    (
-        "promise aggregation",
-        &["Promise.all", "Promise.allSettled"],
-    ),
-    ("URL construction", &["new URL("]),
-    ("URLSearchParams construction", &["new URLSearchParams("]),
-    ("instanceof targets", &["instanceof"]),
-    ("Error family", &["Error-family", "Error family"]),
-    ("Map and Set", &["Map/Set", "new Map"]),
-    ("Date", &["Date"]),
-    ("RegExp literals and construction", &["new RegExp("]),
-    ("regexp string methods", &["matchAll"]),
-    ("destructuring", &["destructuring"]),
-    ("optional chaining", &["optional chaining"]),
-    ("spread", &["spread"]),
-    ("enums", &["enums"]),
-    ("for...of", &["for...of"]),
-    ("for...in", &["for...in"]),
-    ("switch", &["`switch`", "switch"]),
-    ("durable processes", &["defineProcess"]),
-    ("durable sleep", &["sleep("]),
-    ("signals", &["waitSignal"]),
-    ("triggers", &["registerTrigger"]),
-    ("session state", &["globalThis."]),
-    ("console", &["console.log"]),
-    ("finish", &["finish("]),
-    ("journaled clock", &["Date.now()"]),
-    ("journaled randomness", &["Math.random"]),
-    (
-        "standard library statics",
-        &["Object.entries", "JSON.parse"],
-    ),
-    (
-        "standard library instance methods",
-        &["instance.map", "instance.reduce"],
-    ),
-];
-
+/// FIG-2750 supersedes exhaustive syntax teaching with a compact library list.
+// FIG-2750: ordinary TypeScript syntax is learned from diagnostics; only the
+// supported library families and host execution rules belong in the prompt.
 #[test]
-fn every_accepted_construct_family_is_named_in_the_assembled_prompt() {
-    let dialect = crate::dialect::typescript_test_dialect();
-    let prompt = assembled_prompt_fragments(&dialect)
+fn typescript_teaches_library_families_without_exhaustive_inventory() {
+    let prompt = assembled_prompt_fragments(&crate::dialect::typescript_test_dialect())
         .into_iter()
-        .map(|(_, fragment)| fragment)
+        .map(|(_, text)| text)
         .collect::<Vec<_>>()
         .join("\n");
-
-    let missing = TYPESCRIPT_PROMPT_CONSTRUCT_FAMILIES
-        .iter()
-        .filter(|(_, tokens)| !tokens.iter().any(|token| prompt.contains(token)))
-        .map(|(family, tokens)| format!("{family} (none of {tokens:?})"))
-        .collect::<Vec<_>>();
-    assert!(
-        missing.is_empty(),
-        "the assembled TypeScript prompt never mentions: {missing:?}"
-    );
-
-    // The list is the check. Shrinking it silently would retire the guarantee,
-    // so its size is pinned alongside it.
-    assert_eq!(
-        TYPESCRIPT_PROMPT_CONSTRUCT_FAMILIES.len(),
-        29,
-        "adding or removing a construct family is a deliberate change"
-    );
+    for name in [
+        "Math",
+        "Date",
+        "String",
+        "Array",
+        "Object",
+        "JSON",
+        "Map",
+        "Set",
+        "RegExp",
+        "URL",
+        "Promise.all",
+        "finish(",
+    ] {
+        assert!(prompt.contains(name), "{name}");
+    }
+    assert!(!prompt.contains("### v1 guardrails"));
+    assert!(!prompt.contains("### Deterministic standard library"));
 }
 
 #[test]
@@ -647,7 +581,7 @@ fn composed_typescript_prompt_has_no_markdown_fences() {
             assert!(fragment.contains("type cron_Tick ="));
             assert!(fragment.contains("cron.Schedule(input:"));
             assert!(
-                fragment.find("## TypeScript execution").unwrap()
+                fragment.find("TypeScript execution.").unwrap()
                     < fragment.find("### Response shape").unwrap()
             );
         }
