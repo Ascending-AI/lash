@@ -2392,6 +2392,8 @@ use harness::{
 mod agent_scenarios;
 #[cfg(feature = "rlm")]
 mod aggregate_await_comprehension;
+#[cfg(feature = "rlm")]
+mod discovery_execution;
 mod plugin_stack;
 #[cfg(feature = "rlm")]
 mod processes_endstate;

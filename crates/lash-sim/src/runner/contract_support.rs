@@ -555,7 +555,7 @@ fn contract_durable_input_definition() -> lash_core::ToolDefinition {
 pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineConfig {
     let protocol_driver: Arc<
         dyn lash_core::sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol>,
-    > = Arc::new(lash_protocol_standard::StandardDriver);
+    > = Arc::new(lash_protocol_standard::StandardDriver::default());
     lash_core::TurnMachineConfig {
         protocol_driver,
         projector: Arc::new(lash_core::sansio::ChatContextProjector),

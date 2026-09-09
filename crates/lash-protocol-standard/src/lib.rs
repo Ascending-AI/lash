@@ -152,7 +152,9 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
         let tool_names_fingerprint = input.tool_catalog.tool_names_fingerprint();
         TurnDriverPreamble {
             config: TurnDriverConfig::chat(
-                Arc::new(StandardDriver),
+                Arc::new(StandardDriver {
+                    discovery: self.config.discovery.is_some(),
+                }),
                 true,
                 Arc::new(turn_limit_exhausted_message),
             ),
@@ -378,7 +380,10 @@ fn parse_batch_specs(args: &Value) -> Result<Vec<BatchCallSpec>, ToolOutcome> {
 /// `DriverAction::StartTools`, and splices reasoning parts into the
 /// assistant message so provider replay metadata preserves
 /// chain-of-thought ordering.
-pub struct StandardDriver;
+#[derive(Default)]
+pub struct StandardDriver {
+    discovery: bool,
+}
 
 #[derive(Clone, Debug)]
 struct StandardToolCall {
@@ -528,7 +533,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_>,
-        _waiting: WaitingLlmState<lash_core::HostTurnProtocol>,
+        waiting: WaitingLlmState<lash_core::HostTurnProtocol>,
         llm_response: LlmResponse,
         text_streamed: bool,
     ) -> Vec<DriverAction> {
@@ -608,6 +613,60 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             )]));
         }
 
+        let (calls, refused): (Vec<_>, Vec<_>) = calls.into_iter().partition(|call| {
+            !self.discovery
+                || waiting
+                    .request
+                    .tools
+                    .iter()
+                    .any(|tool| tool.name == call.tool_name)
+        });
+        if !refused.is_empty() {
+            let completed = refused.into_iter().map(|call| {
+                let output = lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
+                    lash_core::ToolFailureClass::Unavailable,
+                    "unknown_tool",
+                    format!("Tool `{}` was not listed in this request; use a listed discovery operation or batch.", call.tool_name),
+                ));
+                let model_return = lash_core::facade_support::ModelToolReturn {
+                    attachment_notices: Vec::new(),
+                    call_id: call.call_id.clone(),
+                    tool_name: call.tool_name.clone(),
+                    parts: vec![lash_core::facade_support::ModelToolReturnPart::Text {
+                        text: serde_json::to_string(&output).expect("typed refusal serializes"),
+                    }],
+                };
+                CompletedToolCall {
+                    call_id: call.call_id,
+                    tool_name: call.tool_name,
+                    args: call.args,
+                    output,
+                    model_return,
+                    duration_ms: 0,
+                    intent_outcomes: Vec::new(),
+                    replay: call.replay,
+                }
+            }).collect::<Vec<_>>();
+            if calls.is_empty() {
+                actions.extend(self.handle_tool_results(ctx, completed));
+                return actions;
+            }
+            let mut parts = Vec::new();
+            for outcome in completed {
+                append_model_return_parts(&mut parts, outcome.model_return);
+            }
+            let message_id =
+                standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), "refused_tools");
+            reassign_part_ids(&message_id, &mut parts);
+            actions.push(DriverAction::AppendEvents(vec![conversation_event(
+                Message {
+                    id: message_id,
+                    role: MessageRole::User,
+                    parts: shared_parts(parts),
+                    origin: None,
+                },
+            )]));
+        }
         actions.push(DriverAction::StartTools { calls });
         actions
     }
@@ -1484,59 +1543,4 @@ mod tests {
 }
 
 #[cfg(test)]
-mod discovery_tests {
-    use super::*;
-    #[test]
-    fn standard_discovery_filters_provider_specs_and_requires_an_inline_member() {
-        let tool = |name: &str, inline| {
-            let mut tool = lash_core::ToolDefinition::raw(
-                name,
-                name,
-                name,
-                serde_json::json!({"type":"object"}),
-                serde_json::json!({"type":"string"}),
-            );
-            tool.manifest.inline = inline;
-            tool
-        };
-        let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![
-            tool("tools.search", true),
-            tool("hidden", false),
-        ]);
-        let manifests = catalog
-            .tools
-            .iter()
-            .map(|entry| entry.manifest.clone())
-            .collect::<Vec<_>>();
-        for discovery in [
-            None,
-            Some(lash_core::ToolDiscovery {
-                operation: "tools.search".into(),
-            }),
-        ] {
-            validate_discovery(&manifests, discovery.as_ref()).unwrap();
-            let expected = if discovery.is_some() { 1 } else { 2 };
-            let driver = StandardProtocolDriver {
-                config: StandardProtocolConfig { discovery },
-            };
-            let preamble = driver.build_preamble(ProtocolBuildInput {
-                tool_catalog: Arc::new(catalog.clone()),
-                plugin_extensions: Default::default(),
-                trigger_events: Default::default(),
-                extra_prompt_contributions: Vec::new(),
-            });
-            assert_eq!(preamble.tool_specs.len(), expected);
-        }
-        for operation in ["hidden", "absent"] {
-            assert!(matches!(
-                validate_discovery(
-                    &manifests,
-                    Some(&lash_core::ToolDiscovery {
-                        operation: operation.into()
-                    })
-                ),
-                Err(PluginError::InvalidToolDiscovery { .. })
-            ));
-        }
-    }
-}
+mod discovery_tests;

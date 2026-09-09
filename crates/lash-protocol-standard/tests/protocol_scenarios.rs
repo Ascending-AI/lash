@@ -516,7 +516,7 @@ impl StandardProtocolRun {
 
 fn standard_config() -> TurnMachineConfig {
     let protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> =
-        Arc::new(StandardDriver);
+        Arc::new(StandardDriver::default());
     TurnMachineConfig {
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
