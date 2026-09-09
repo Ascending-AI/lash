@@ -786,11 +786,11 @@ async fn scope_effects_and_groups_are_quiescent(
         return Ok(false);
     }
     let mut live = false;
-    for state_key in keys
-        .iter()
-        .filter(|state_key| state_key.starts_with(DURABLE_WAIT_INDEX_GROUP_PREFIX))
-    {
-        let group_key = &state_key[DURABLE_WAIT_INDEX_GROUP_PREFIX.len()..];
+    for (state_key, group_key) in keys.iter().filter_map(|state_key| {
+        state_key
+            .strip_prefix(DURABLE_WAIT_INDEX_GROUP_PREFIX)
+            .map(|group_key| (state_key, group_key))
+    }) {
         let Json(unsettled) = ctx
             .object_client::<crate::effect_group::EffectGroupIndexClient>(group_key.to_string())
             .unsettled_children()
