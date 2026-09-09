@@ -481,7 +481,10 @@ impl TurnBoundary {
             outcome,
             clock.as_ref(),
             agent_frame_switch_materializes,
-        );
+        )
+        .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
+            error: Box::new(error),
+        })?;
         // Appends recorded after finalization (finalize-turn hooks) land here,
         // after everything the turn materialized.
         graph_appends.fold_into_final_state(state);

@@ -15,8 +15,13 @@ use super::state::{
 };
 
 impl LashRuntime {
-    /// Replace the host-owned state envelope.
-    pub fn set_persisted_state(&mut self, state: RuntimeSessionState) -> Result<(), SessionError> {
+    /// Replace the host-owned state envelope without durable publication.
+    /// Reachable only through the test surface (`apply_persistence_state`).
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn set_persisted_state(
+        &mut self,
+        state: RuntimeSessionState,
+    ) -> Result<(), SessionError> {
         if let Some(session) = self.session.as_ref() {
             if let Some(snapshot) = state.plugin_state() {
                 session

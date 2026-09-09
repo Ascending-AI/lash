@@ -79,6 +79,10 @@ pub enum RuntimeErrorCode {
     ProtocolBeforeLlmCall,
     TurnStreamJoin,
     EmptyAgentFrameRun,
+    /// A persisted historical frame cannot become resident through this API:
+    /// switching it would replace resident configuration without a commanded
+    /// config patch, and no such patch supports historical-frame switching.
+    HistoricalAgentFrameSwitchUnsupported,
     DurableEffectLiveProtocolExtension,
     DurableEffectLivePluginInput,
     AwaitEventCancelUnsupported,
@@ -322,6 +326,9 @@ pub(super) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> 
             RuntimeErrorCode::ExecutionStateCaptureFailed,
             format!("failed to snapshot dirty execution state: {message}"),
         ),
+        // The refusal was typed when the commit aborted; hand it back unchanged
+        // so the caller classifies the turn by that code, not by the wrapper.
+        crate::store::StoreError::TurnOutcomeMaterializationRefused { error } => *error,
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
     }
 }
@@ -444,6 +451,25 @@ mod store_commit_error_tests {
     }
 
     #[test]
+    fn refused_turn_outcome_materialization_hands_back_the_typed_runtime_error() {
+        let refusal = super::RuntimeError::new(
+            RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported,
+            "frame `frame-a` is a persisted historical frame",
+        );
+        let mapped =
+            runtime_error_from_store_commit(StoreError::TurnOutcomeMaterializationRefused {
+                error: Box::new(refusal.clone()),
+            });
+        assert_eq!(
+            mapped.code,
+            RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
+        );
+        assert_eq!(mapped.message, refusal.message);
+        assert!(mapped.code.is_terminal());
+        assert!(!mapped.code.is_retryable());
+    }
+
+    #[test]
     fn public_append_and_park_preserve_deterministic_store_errors() {
         for error in [
             StoreError::CheckpointComponentEncodingVersionMismatch {
@@ -505,6 +531,9 @@ impl RuntimeErrorCode {
             Self::ProtocolBeforeLlmCall => "protocol_before_llm_call",
             Self::TurnStreamJoin => "turn_stream_join",
             Self::EmptyAgentFrameRun => "empty_agent_frame_run",
+            Self::HistoricalAgentFrameSwitchUnsupported => {
+                "historical_agent_frame_switch_unsupported"
+            }
             Self::DurableEffectLiveProtocolExtension => "durable_effect_live_protocol_extension",
             Self::DurableEffectLivePluginInput => "durable_effect_live_plugin_input",
             Self::AwaitEventCancelUnsupported => "await_event_cancel_unsupported",
@@ -746,6 +775,7 @@ impl RuntimeErrorCode {
                 | Self::InvalidAwaitEventSessionId
                 | Self::InvalidAwaitEventWaitIdentity
                 | Self::InvalidTurnCancelRequest
+                | Self::HistoricalAgentFrameSwitchUnsupported
                 | Self::LlmProvider
                 | Self::Plugin
                 | Self::PostgresEffectReplayCorruptRow
@@ -875,6 +905,9 @@ impl RuntimeErrorCode {
             "protocol_before_llm_call" => Self::ProtocolBeforeLlmCall,
             "turn_stream_join" => Self::TurnStreamJoin,
             "empty_agent_frame_run" => Self::EmptyAgentFrameRun,
+            "historical_agent_frame_switch_unsupported" => {
+                Self::HistoricalAgentFrameSwitchUnsupported
+            }
             "durable_effect_live_protocol_extension" => Self::DurableEffectLiveProtocolExtension,
             "durable_effect_live_plugin_input" => Self::DurableEffectLivePluginInput,
             "await_event_cancel_unsupported" => Self::AwaitEventCancelUnsupported,
@@ -1283,6 +1316,7 @@ mod tests {
             | RuntimeErrorCode::InvalidAwaitEventSessionId
             | RuntimeErrorCode::InvalidAwaitEventWaitIdentity
             | RuntimeErrorCode::InvalidTurnCancelRequest
+            | RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
             | RuntimeErrorCode::LlmProvider
             | RuntimeErrorCode::Plugin
             | RuntimeErrorCode::PostgresEffectReplayCorruptRow
@@ -1427,6 +1461,7 @@ mod tests {
             RuntimeErrorCode::ProtocolBeforeLlmCall,
             RuntimeErrorCode::TurnStreamJoin,
             RuntimeErrorCode::EmptyAgentFrameRun,
+            RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported,
             RuntimeErrorCode::DurableEffectLiveProtocolExtension,
             RuntimeErrorCode::DurableEffectLivePluginInput,
             RuntimeErrorCode::AwaitEventCancelUnsupported,

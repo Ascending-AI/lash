@@ -604,7 +604,8 @@ mod tests {
                 AgentFrameReason::compaction(),
             ),
             &clock,
-        );
+        )
+        .expect("open a new compaction frame");
         assert!(opened.opened);
         state.append_active_conversation_messages_with_clock(
             &[text_message("seed", "frame seed")],

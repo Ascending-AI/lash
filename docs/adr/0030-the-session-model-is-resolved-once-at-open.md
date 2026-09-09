@@ -47,3 +47,25 @@ single live configuration copy. The config-update door updates the runtime and
 existing frames retain the model they opened with. This supersedes the
 requirements above to reconcile or update a current frame assignment together
 with policy. It does not restore a turn-level overlay.
+
+## Bypass surfaces
+
+FIG-1875 made session configuration a durable fact that changes only through a
+commanded config patch settled at the command-queue drain; resident policy never
+runs ahead of the durable head. Two pre-existing paths replaced resident
+configuration with no guard write, and FIG-2520 disposes of both:
+
+- `SessionStateAdmin::set_persisted` (facade) and
+  `LashRuntime::apply_persistence_state` (core) replace resident state without
+  durable publication. Both exist only under the `testing` feature. They are
+  test and recovery tooling, never a product path, and are never blessed with a
+  guard write: a product host that needs a different configuration issues a
+  config patch.
+- Opening an Agent Frame whose key names a persisted, non-current frame
+  previously made that frame current and copied its recorded assignment policy
+  and protocol turn options over resident state. The runtime now refuses with
+  `RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported`, and a protocol
+  outcome naming such a frame aborts the turn commit before any durable write.
+  Historical frames stay durable history; switching one back into service would
+  require a commanded config patch that nothing supports today. Reopening the
+  current frame remains an idempotent no-op.

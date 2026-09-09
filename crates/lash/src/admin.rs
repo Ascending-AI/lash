@@ -232,9 +232,10 @@ impl SessionAdmin {
         .await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn set_persisted_state(&self, state: RuntimeSessionState) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime.set_persisted_state(state).map_err(Into::into)
+            runtime.apply_persistence_state(state).map_err(Into::into)
         })
         .await
     }
@@ -1291,7 +1292,9 @@ impl SessionStateAdmin {
         self.control.append_plugin_body(plugin_type, body).await
     }
 
-    /// Replaces the persisted runtime session state.
+    /// Replaces resident state WITHOUT durable publication; test and recovery
+    /// tooling only, never a product path.
+    #[cfg(any(test, feature = "testing"))]
     pub async fn set_persisted(&self, state: RuntimeSessionState) -> Result<()> {
         self.control.set_persisted_state(state).await
     }

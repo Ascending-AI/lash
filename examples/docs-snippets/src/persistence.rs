@@ -408,6 +408,19 @@ fn newer_session_state_requires_runtime_upgrade(
     }
 }
 
+/// `TurnOutcomeMaterializationRefused` is raised only by the runtime's turn
+/// commit and never by a backend.
+fn inspect_turn_outcome_materialization_refusal(
+    error: &lash::persistence::StoreError,
+) -> Option<(&str, bool)> {
+    match error {
+        lash::persistence::StoreError::TurnOutcomeMaterializationRefused { error } => {
+            Some((error.code.as_str(), error.is_terminal()))
+        }
+        _ => None,
+    }
+}
+
 fn initial_session_state_generation() -> (u32, u32) {
     (
         lash::persistence::CURRENT_SESSION_STATE_VERSION,

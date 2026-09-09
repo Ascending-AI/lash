@@ -1175,7 +1175,8 @@ impl LashRuntime {
     }
 
     // Prompt handback after an operation observes lease loss or an unambiguous
-    // local pre-commit capture abort. Abandon clears
+    // local pre-commit abort (a capture failure or a refused outcome
+    // materialization, both before any durable write). Abandon clears
     // claim ownership, which both frees the rows for a peer and invalidates this
     // owner's pending completion. That is safe here because the turn is already
     // failing on the observed lease loss (ADR 0029).
@@ -1188,6 +1189,7 @@ impl LashRuntime {
             err.code,
             RuntimeErrorCode::SessionExecutionLeaseLost
                 | RuntimeErrorCode::ExecutionStateCaptureFailed
+                | RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
         ) || claims.is_empty()
         {
             return;
@@ -1227,6 +1229,7 @@ impl LashRuntime {
             err.code,
             RuntimeErrorCode::SessionExecutionLeaseLost
                 | RuntimeErrorCode::ExecutionStateCaptureFailed
+                | RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
         ) || claims.is_empty()
         {
             return;

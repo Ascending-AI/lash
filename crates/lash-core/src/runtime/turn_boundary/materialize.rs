@@ -120,14 +120,14 @@ pub(super) fn materialize_agent_frame_switch(
     outcome: &TurnOutcome,
     clock: &dyn crate::Clock,
     materializes: bool,
-) {
+) -> Result<(), crate::RuntimeError> {
     let TurnOutcome::AgentFrameSwitch {
         frame_key,
         initial_nodes,
         ..
     } = outcome
     else {
-        return;
+        return Ok(());
     };
     // The pre-snapshot decision and this post-snapshot state must never diverge;
     // fail in debug/tests instead of silently clearing the wrong frame's state.
@@ -140,8 +140,11 @@ pub(super) fn materialize_agent_frame_switch(
         )
     );
     if !materializes {
-        return;
+        return Ok(());
     }
+    // A protocol outcome naming a persisted historical frame is the same
+    // resident-config replacement the open API refuses; the commit aborts
+    // before any durable write rather than switching without a config patch.
     super::super::open_agent_frame_in_state_with_clock(
         state,
         crate::OpenAgentFrameRequest::new(
@@ -150,7 +153,8 @@ pub(super) fn materialize_agent_frame_switch(
         )
         .with_initial_nodes(initial_nodes.clone()),
         clock,
-    );
+    )
+    .map(|_| ())
 }
 
 #[cfg(test)]
