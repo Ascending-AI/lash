@@ -17,6 +17,7 @@ mod attachment_tests;
 #[cfg(feature = "testing")]
 pub(crate) mod conformance;
 mod driver_stream_tests;
+mod empty_completion_tests;
 mod error_classification_tests;
 mod generation_tests;
 mod openrouter_execution_evidence_tests;

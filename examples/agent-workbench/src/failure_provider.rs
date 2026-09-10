@@ -28,6 +28,8 @@ pub(crate) enum DevProviderScenario {
     CodeFailure,
     RetryResetPartial,
     ReplayRouteChange,
+    #[cfg(feature = "provider-wire-fixtures")]
+    ValidEmptyCompletion,
 }
 
 impl DevProviderScenario {
@@ -50,11 +52,21 @@ impl DevProviderScenario {
             "code-failure" => Self::CodeFailure,
             "retry-reset-partial" => Self::RetryResetPartial,
             "replay-route-change" => Self::ReplayRouteChange,
+            "valid-empty-completion" => {
+                #[cfg(feature = "provider-wire-fixtures")]
+                {
+                    Self::ValidEmptyCompletion
+                }
+                #[cfg(not(feature = "provider-wire-fixtures"))]
+                bail!(
+                    "{DEV_PROVIDER_SCENARIO_ENV}=valid-empty-completion requires the agent-workbench provider-wire-fixtures feature"
+                )
+            }
             other => bail!(
                 "invalid {DEV_PROVIDER_SCENARIO_ENV} `{other}`; expected one of: \
                  auth-failure-once, rate-limit-once, partial-output-failure, failed-process, \
                  exec-blocked, tool-value, rendered-surface, code-failure, retry-reset-partial, \
-                 replay-route-change"
+                 replay-route-change, valid-empty-completion"
             ),
         };
         Ok(Some(scenario))
@@ -72,12 +84,16 @@ impl DevProviderScenario {
             Self::CodeFailure => "code-failure",
             Self::RetryResetPartial => "retry-reset-partial",
             Self::ReplayRouteChange => "replay-route-change",
+            #[cfg(feature = "provider-wire-fixtures")]
+            Self::ValidEmptyCompletion => "valid-empty-completion",
         }
     }
 
     pub(crate) fn initial_model(self) -> &'static str {
         match self {
             Self::ReplayRouteChange => "dev/replay-route-a",
+            #[cfg(feature = "provider-wire-fixtures")]
+            Self::ValidEmptyCompletion => "openai/gpt-5.4",
             _ => "dev/failure-paths",
         }
     }
@@ -91,6 +107,11 @@ impl DevProviderScenario {
     /// scenario hangs rather than failing. Nine of the twenty-one TypeScript
     /// judged rows boot this provider.
     pub(crate) fn provider(self, dialect: lash::rlm::RlmDialect) -> ProviderHandle {
+        #[cfg(feature = "provider-wire-fixtures")]
+        if self == Self::ValidEmptyCompletion {
+            return crate::valid_empty_completion::provider()
+                .expect("the checked-in valid-empty Provider Wire Script must parse");
+        }
         let retry_delay_ms = if self == Self::RetryResetPartial {
             2_000
         } else {
@@ -198,6 +219,10 @@ finish("started deterministic failing process");"#,
                 dialect,
                 &format!("\"FIG-1374 replay-route response {call}\""),
             ),
+            #[cfg(feature = "provider-wire-fixtures")]
+            (Self::ValidEmptyCompletion, _) => {
+                unreachable!("valid-empty-completion is served by the OpenAI-compatible adapter")
+            }
         })
     }
 
@@ -385,6 +410,10 @@ impl Provider for DevFailureProvider {
             }
             DevProviderScenario::ReplayRouteChange => {
                 Ok(replay_route_response(&request, self.dialect))
+            }
+            #[cfg(feature = "provider-wire-fixtures")]
+            DevProviderScenario::ValidEmptyCompletion => {
+                unreachable!("valid-empty-completion uses the OpenAI-compatible adapter")
             }
         }
     }

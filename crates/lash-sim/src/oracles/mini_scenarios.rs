@@ -711,15 +711,10 @@ pub fn scenario_contract_generated_facts_for_semantic(
             standard_protocol_execution_fact(events, "standard.initial_request_projection")?,
             initial_provider_projection_fact(events)?,
         ]),
-        "standard.empty_provider_response_error" => Ok(vec![
-            standard_protocol_execution_fact(events, "standard.empty_provider_response_error")?,
-            provider_mutation_semantic_fact(
-                events,
-                "dropped_terminal_event",
-                "standard_empty_response_terminal_error",
-                "empty/unterminated provider output is classified as a terminal provider error by every migrated parser",
-            )?,
-        ]),
+        "standard.empty_response_finishes" => Ok(vec![standard_protocol_execution_fact(
+            events,
+            "standard.empty_response_finishes",
+        )?]),
         "standard.provider_error_without_checkpoint" => Ok(vec![
             standard_protocol_execution_fact(events, "standard.provider_error_without_checkpoint")?,
             provider_mutation_semantic_fact(

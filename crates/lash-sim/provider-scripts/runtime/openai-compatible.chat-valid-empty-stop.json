@@ -1,0 +1,44 @@
+{
+  "schema": "lash.provider-wire-script.v1",
+  "name": "openai-compatible.chat-valid-empty-stop",
+  "provider_kind": "openai-compatible",
+  "endpoint": {
+    "method": "POST",
+    "path": "/chat/completions"
+  },
+  "request_match": {
+    "body": {
+      "model": { "equals": "openai/gpt-5.4" },
+      "stream": { "equals": true },
+      "messages": { "contains_role": "user" }
+    },
+    "headers": {
+      "authorization": { "present": true },
+      "content-type": { "contains": "application/json" }
+    }
+  },
+  "timeline": [
+    {
+      "at": 10,
+      "event": "response_start",
+      "status": 200,
+      "headers": [
+        { "name": "content-type", "value": "text/event-stream; charset=utf-8" },
+        { "name": "x-request-id", "value": "req-valid-empty-stop" }
+      ]
+    },
+    {
+      "at": 20,
+      "event": "sse",
+      "data": "{\"id\":\"chat-valid-empty-stop\",\"model\":\"openai/gpt-5.4\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":0,\"total_tokens\":7}}"
+    },
+    { "at": 21, "event": "sse", "data": "[DONE]" },
+    { "at": 22, "event": "end" }
+  ],
+  "expected_provider": {
+    "terminal_reason": "stop",
+    "text": "",
+    "input_tokens": 7,
+    "output_tokens": 0
+  }
+}

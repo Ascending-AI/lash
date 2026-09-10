@@ -675,6 +675,7 @@ impl OpenAiCompatibleProvider {
                 merge_usage(&mut state.usage, &usage_from_usage_value(usage));
             }
             if let Some(finish_reason) = choice.finish_reason {
+                state.normal_stop_seen |= finish_reason == "stop";
                 state.terminal_reason =
                     terminal_reason_from_chat_finish_reason(finish_reason, state.terminal_reason);
             }
@@ -801,6 +802,10 @@ pub(crate) struct ChatStreamState {
     emitted_tool_call_indices: std::collections::HashSet<usize>,
     pub(crate) final_response_raw: Option<String>,
     pub(crate) terminal_reason: LlmTerminalReason,
+    /// True only when the Chat wire carries the normal successful terminal
+    /// status. Native provider evidence is retained separately and cannot
+    /// stand in for a missing `finish_reason`.
+    pub(crate) normal_stop_seen: bool,
     pub(crate) execution_evidence: Option<ExecutionEvidence>,
 }
 
@@ -809,6 +814,13 @@ impl ChatStreamState {
         &mut self,
         value: &Value,
     ) -> Result<(), LlmTransportError> {
+        self.normal_stop_seen |= value
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("finish_reason"))
+            .and_then(Value::as_str)
+            == Some("stop");
         let provider_finish_reason = value
             .get("choices")
             .and_then(Value::as_array)

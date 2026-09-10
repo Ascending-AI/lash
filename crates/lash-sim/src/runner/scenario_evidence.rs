@@ -511,9 +511,8 @@ fn operational_cases_for_semantic(semantic_oracle: &str) -> &'static [&'static s
         "runtime.advisory_lease_head_cas" | "runtime.stale_lease_ttl" => {
             &["lease-fencing", "worker-failover", "stale-completion"]
         }
-        "standard.empty_provider_response_error" | "standard.provider_error_without_checkpoint" => {
-            &["provider-failure", "retry-exhaustion"]
-        }
+        "standard.provider_error_without_checkpoint" => &["provider-failure", "retry-exhaustion"],
+        "standard.empty_response_finishes" => &["successful-empty-completion"],
         "standard.streamed_text_finalizes_once" => &["duplicate-free-stream-finalization"],
         "standard.native_tool_loop_reenters_model"
         | "standard.tool_failure_feedback_reenters_model"
@@ -583,8 +582,8 @@ fn scenario_transition_kind(contract: &ScenarioContractSpec) -> &'static str {
         "runtime.observation_replay_preserves_input" => {
             "runtime.observer-reconnect-preserves-input-transition"
         }
-        "standard.empty_provider_response_error" => {
-            "standard.empty-provider-response-terminal-error-transition"
+        "standard.empty_response_finishes" => {
+            "standard.empty-response-normal-completion-transition"
         }
         "standard.provider_error_without_checkpoint" => {
             "standard.provider-error-no-checkpoint-transition"

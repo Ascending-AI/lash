@@ -916,6 +916,9 @@ pub struct ResponsesStreamState {
     /// Set only by a terminal Responses event, never merely by an event that
     /// happens to carry a `response` snapshot.
     pub terminal_event_seen: bool,
+    /// True only when a terminal Responses payload carries the normal
+    /// successful `completed` status.
+    pub completed_status_seen: bool,
     pub current_text_part: Option<usize>,
     /// Maps a server output slot to the index of its `Text` part. Responses
     /// streams are ordered by `output_index`; ids may be absent or change
