@@ -541,6 +541,35 @@ mod tests {
     #[test]
     #[cfg(feature = "rlm")]
     fn a_frozen_sha256_module_artifact_is_an_identity_refusal() {
+        let mut raw: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../lashlang/tests/fixtures/module-artifact-old.json"
+        ))
+        .expect("frozen fixture should be JSON");
+        raw.as_object_mut()
+            .expect("artifact should be an object")
+            .remove("trigger_key_manifest");
+        let extractions = extract(&item(
+            DurableSurface::ModuleArtifact,
+            DurablePayload::Json(
+                serde_json::to_string(&raw).expect("legacy artifact should encode"),
+            ),
+        ));
+        let detail = extractions
+            .iter()
+            .find_map(|extraction| match extraction {
+                Extraction::IdentityMismatch {
+                    format: DurableFormat::ModuleArtifact,
+                    detail,
+                } => Some(detail.as_str()),
+                _ => None,
+            })
+            .expect("the SHA-256 artifact should be refused by its identity fence");
+        assert!(detail.contains("lashlang:v2:blake3:"), "{detail}");
+    }
+
+    #[test]
+    #[cfg(feature = "rlm")]
+    fn a_frozen_trigger_manifest_artifact_is_a_shape_refusal() {
         let extractions = extract(&item(
             DurableSurface::ModuleArtifact,
             DurablePayload::Json(
@@ -557,8 +586,9 @@ mod tests {
                 } => Some(detail.as_str()),
                 _ => None,
             })
-            .expect("the SHA-256 artifact should be refused by its identity fence");
-        assert!(detail.contains("lashlang:v2:blake3:"), "{detail}");
+            .expect("the trigger-manifest artifact should be refused by its shape fence");
+        assert!(detail.contains("trigger_key_manifest"), "{detail}");
+        assert!(detail.contains("recompile and republish"), "{detail}");
     }
 
     #[test]
