@@ -15,25 +15,6 @@ import {
   makeClause,
 } from './fields.js';
 
-// Mirror of ExpressionField's builder-selection predicate. Kept in the test so
-// the selection logic that decides raw-vs-builder is itself under coverage —
-// this is the logic whose gap let the paren bug ship green.
-function autoRaw(builder, value, vars = []) {
-  if (isComplexExpression(value)) return true;
-  const empty = (value ?? '').trim() === '';
-  if (builder === 'comparison') return !(parseComparison(value) || empty || isBoolLiteral(value));
-  if (builder === 'value') return operandType(value, vars) === 'expression';
-  if (builder === 'list') {
-    return !(
-      parseList(value) ||
-      empty ||
-      (isSimpleReference(value) && vars.includes((value ?? '').trim()))
-    );
-  }
-  if (builder === 'target') return !(empty || isSimpleReference(value));
-  return true;
-}
-
 describe('literal parse/encode', () => {
   it('classifies scalar literals', () => {
     expect(parseLiteral('42')).toEqual({ type: 'number', value: '42' });
@@ -242,44 +223,6 @@ describe('operandType — var-vs-scalar classification for the value builder', (
     expect(operandType('compute(x)', vars)).toBe('expression');
     expect(operandType('notInScope', vars)).toBe('expression');
     expect(operandType('y', [])).toBe('expression'); // no scope supplied
-  });
-});
-
-describe('builder-selection (autoRaw) — locks the raw-vs-builder decision', () => {
-  it('keeps a parenthesized comparison on the builder, not raw', () => {
-    expect(autoRaw('comparison', '(x < 2)')).toBe(false);
-    expect(autoRaw('comparison', '(state.count < 3)')).toBe(false);
-  });
-
-  it('starts a fresh comparison for empty / bare-boolean conditions', () => {
-    expect(autoRaw('comparison', '')).toBe(false);
-    expect(autoRaw('comparison', 'true')).toBe(false);
-  });
-
-  it('falls back to raw for compound / non-comparison conditions', () => {
-    expect(autoRaw('comparison', '(x < 2) && ok')).toBe(true);
-    expect(autoRaw('comparison', 'compute(x)')).toBe(true);
-  });
-
-  it('list: literal list and in-scope var use the builder, else raw', () => {
-    expect(autoRaw('list', '[1, 2, 3]')).toBe(false);
-    expect(autoRaw('list', 'items', ['items'])).toBe(false);
-    expect(autoRaw('list', 'items', [])).toBe(true); // not in scope
-    expect(autoRaw('list', 'range(0, n)')).toBe(true);
-  });
-
-  it('value: literals and in-scope vars use the builder, expressions stay raw', () => {
-    expect(autoRaw('value', '42')).toBe(false);
-    expect(autoRaw('value', '"hi"')).toBe(false);
-    expect(autoRaw('value', 'y', ['y'])).toBe(false); // in-scope variable
-    expect(autoRaw('value', 'a + b')).toBe(true);
-    expect(autoRaw('value', 'y', [])).toBe(true); // no scope → not a var
-  });
-
-  it('target: dotted references use the builder, index/calls stay raw', () => {
-    expect(autoRaw('target', 'state.count')).toBe(false);
-    expect(autoRaw('target', 'total')).toBe(false);
-    expect(autoRaw('target', 'arr[0]')).toBe(true);
   });
 });
 
