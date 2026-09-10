@@ -566,6 +566,27 @@ impl LifecycleActor {
                         let mut probe = Box::pin(entry.probe_peer(&peer));
                         loop {
                             tokio::select! {
+                                biased;
+                                reason = &mut waiting => {
+                                    let cause = format!("MCP server `{server_name}` service quit: {reason:?}");
+                                    drop(probe);
+                                    drop(entry);
+                                    self.record_error(cause);
+                                    self.unpublish(generation);
+                                    let shutdown = self.cancel_and_reap(
+                                        &server_name,
+                                        &request_tasks,
+                                        cancellation.take().expect("service cancellation token"),
+                                        &mut waiting,
+                                        stdio_child.take(),
+                                    ).await;
+                                    self.maybe_panic_on_service_quit();
+                                    return if shutdown {
+                                        ConnectionExit::Shutdown
+                                    } else {
+                                        ConnectionExit::Disconnected
+                                    };
+                                }
                                 result = &mut probe => break result.err().map(|error| error.to_string()),
                                 command = self.commands.recv() => match command {
                                     Some(LifecycleCommand::Shutdown) | None => {
@@ -652,6 +673,15 @@ impl LifecycleActor {
                                     Some(LifecycleCommand::InstallToolCatalog { .. })
                                     | Some(LifecycleCommand::CallSucceeded { .. })
                                     | Some(LifecycleCommand::Disconnect { .. }) => {}
+                                },
+                                () = &mut healthy, if !healthy_observed => {
+                                    healthy_observed = true;
+                                    if self.current_generation() == Some(generation) {
+                                        self.reconnect_backoff = self.entry.upgrade().map_or(
+                                            self.reconnect_backoff,
+                                            |entry| entry.config.reconnect_initial_backoff(),
+                                        );
+                                    }
                                 }
                             }
                         }
