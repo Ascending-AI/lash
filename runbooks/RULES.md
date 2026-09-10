@@ -27,7 +27,6 @@ judged. **Manual judged** is the semantic browser or static-page runbook layer.
 | --- | --- | --- | --- |
 | `agent-service` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/4` runs `Test workspace shard`. | `Functional E2E (agent-service)` runs `agent-service-restate-e2e`, including the Restate ingress, process-workflow, and effect-group HTTP live tests; it is not a browser journey. | [`agent-service-branching`](agent-service-branching/runbook.md), [`agent-service-effect-groups`](agent-service-effect-groups/runbook.md), and [`tictactoe-full-game`](tictactoe-full-game/runbook.md). The deterministic, operator-only [`agent-service-effect-group-retirement`](agent-service-effect-group-retirement/runbook.md) rehearsal is inventoried separately and is never a judged browser row. |
 | `agent-workbench` | `Test docs + build cache` runs `Check workspace (all targets)` and `Package feature checks` runs the package-scoped workbench check; `Test shard ${{ matrix.shard }}/4` runs `Test workspace shard`. | `Functional E2E (agent-workbench)` runs `agent-workbench-restate-e2e` with Restate and Postgres live tests; it is not a browser journey. | [`workbench-process-lifecycle`](workbench-process-lifecycle/runbook.md), [`workbench-session-resume`](workbench-session-resume/runbook.md), and [`workbench-deferred-tools`](workbench-deferred-tools/runbook.md), plus the other `workbench-*` runbooks. |
-| `docs-snippets` | `Test docs + build cache` runs `Check workspace (all targets)`, which compiles the snippet target; `Repository gates` runs the docs lints and the full-profile facade contract job checks the generated API gates. | None. `Publish docs` publishes the checked-in static docs; it does not judge a hosted quickstart journey. | [`docs-quickstart`](docs-quickstart/runbook.md). |
 | `slack-clone` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/4` runs the workspace tests, including the Slack package tests. | `Functional E2E (slack-clone-full-host)` is token-free and deterministic. The separate `Slack-clone live-model acceptance` workflow is dispatch-only and uses exact nonce/tool/UI oracles around real OpenRouter turns. | [`slack-clone-bot`](slack-clone-bot/runbook.md), whose Phase 3M carries MCP client depth and runtime integration attach/detach. |
 | `rlm-smoke` | The workspace check compiles `rlm-smoke-host`; its focused tests prove path, symlink, and command jail refusals. | `just rlm-smoke-e2e` runs `file-edit-bugfix`, `missing-helper-file`, and `config-contract-edit` against exact shell oracles after live OpenRouter turns, once per dialect. It is a local/manual paid gate, not per-PR CI. | None. These are scripted deterministic-oracle rows, never judged browser rows. |
 | `workflow-graph-roundtrip` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/4` runs workspace tests; `Lint` runs `Check workflow graph model`. | Partial: `Functional E2E (workflow-graph-roundtrip)` runs `workflow-graph-integration-verify` (frontend production build, backend tests, and model check); it does not judge the browser journey. | [`workflow-editor-authoring`](workflow-editor-authoring/runbook.md). |
@@ -85,8 +84,8 @@ Independent scenario/dialect rows may execute concurrently from the start, subje
 repository's two-heavy-job limit and each runbook's port/container isolation rules.
 Judging is a separate sharded phase over completed evidence bundles, so a judge never owns
 or mutates the app it scores. `python3 scripts/judged_runbook_matrix.py --shard I/N` emits a
-stable JSON work shard. The matrix currently expands to **65 rows**: 30 RLM scenarios in two
-dialects, four no-RLM-session rows, and one TypeScript-only composite. The arithmetic is
+stable JSON work shard. The matrix currently expands to **64 rows**: 30 RLM scenarios in two
+dialects, three no-RLM-session rows, and one TypeScript-only composite. The arithmetic is
 asserted by `scripts/test_judged_runbook_matrix.py`, so a reclassification cannot leave this
 number stale without turning CI red.
 
@@ -148,10 +147,9 @@ state produce the observed result. When those surfaces disagree, the run is void
 ## The browser surface (example apps)
 
 Scenarios drive an **example web app** (`examples/agent-service`,
-`examples/agent-workbench`, `examples/slack-clone`, and
-`examples/workflow-graph-roundtrip`) or the checked-in docs surface used by
-`docs-quickstart`. There is no scripted driver for these judged surfaces — browser
-automation is the driver, and the docs runbook serves the static page directly. Use
+`examples/agent-workbench`, `examples/slack-clone`, or
+`examples/workflow-graph-roundtrip`). There is no scripted driver for these judged
+surfaces — browser automation is the driver. Use
 whatever your harness provides: a browser MCP/plugin, Playwright, or similar. If nothing
 is pre-wired, the known-good zero-install path is a PEP 723 Playwright script run with
 `uv`:

@@ -15,11 +15,10 @@ EXAMPLES = REPO / "examples"
 ALWAYS_FORBIDDEN = re.compile(r"\b(?:lash_core|lash_sansio|lash_internal)::")
 LASHLANG = re.compile(r"\blashlang::")
 
-# These files are the source-level RLM contexts in the two mixed-purpose
-# examples. Agent Workbench uses them to describe and execute the RLM dialect;
-# docs-snippets uses them for the RLM/Lashlang embedding pages. Keeping the
-# exemption at file granularity means a new `lashlang::` import elsewhere in
-# either package fails closed instead of inheriting a package-wide exemption.
+# These files are the source-level RLM contexts in Agent Workbench, which uses
+# them to describe and execute the RLM dialect. Keeping the exemption at file
+# granularity means a new `lashlang::` import elsewhere in the package fails
+# closed instead of inheriting a package-wide exemption.
 RLM_LASHLANG_SOURCES = frozenset(
     Path(path)
     for path in (
@@ -30,12 +29,6 @@ RLM_LASHLANG_SOURCES = frozenset(
         "agent-workbench/src/main_sections/tests/typescript_dialect.rs",
         "agent-workbench/src/restate.rs",
         "agent-workbench/src/restate/tests/cron_tests.rs",
-        "docs-snippets/src/embedding_advanced.rs",
-        "docs-snippets/src/embedding_lashlang_functions.rs",
-        "docs-snippets/src/embedding_prompts.rs",
-        "docs-snippets/src/embedding_typescript.rs",
-        "docs-snippets/src/example_agent_workbench.rs",
-        "docs-snippets/src/fig1556_preflight.rs",
     )
 )
 

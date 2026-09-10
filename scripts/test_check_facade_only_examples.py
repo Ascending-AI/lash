@@ -64,36 +64,36 @@ class FacadeOnlyExamplesTests(unittest.TestCase):
 
     def test_rlm_dependency_does_not_exempt_an_unrelated_source_file(self) -> None:
         self.fixture.package(
-            "docs-snippets",
+            "agent-workbench",
             'lash = { version = "0.1", features = ["rlm"] }\n'
             'lashlang = "0.1"\n',
         )
         self.fixture.write(
-            "docs-snippets/src/quickstart.rs", "use lashlang::Program;\n"
+            "agent-workbench/src/quickstart.rs", "use lashlang::Program;\n"
         )
 
         self.assertEqual(
-            [(Path("examples/docs-snippets/src/quickstart.rs"), 1, "lashlang::")],
+            [(Path("examples/agent-workbench/src/quickstart.rs"), 1, "lashlang::")],
             self.violations(),
         )
 
     def test_named_rlm_source_is_exempt_only_when_rlm_is_enabled(self) -> None:
         self.fixture.package(
-            "docs-snippets",
+            "agent-workbench",
             'lash = { version = "0.1", features = ["rlm"] }\n'
             'lashlang = "0.1"\n',
         )
         self.fixture.write(
-            "docs-snippets/src/embedding_advanced.rs",
+            "agent-workbench/src/restate.rs",
             "use lashlang::Program;\n",
         )
         self.assertEqual([], self.violations())
 
-        self.fixture.package("docs-snippets", 'lashlang = "0.1"\n')
+        self.fixture.package("agent-workbench", 'lashlang = "0.1"\n')
         self.assertEqual(
             [
                 (
-                    Path("examples/docs-snippets/src/embedding_advanced.rs"),
+                    Path("examples/agent-workbench/src/restate.rs"),
                     1,
                     "lashlang::",
                 )
@@ -103,21 +103,21 @@ class FacadeOnlyExamplesTests(unittest.TestCase):
 
     def test_dev_dependency_rlm_does_not_exempt_named_source(self) -> None:
         self.fixture.write(
-            "docs-snippets/Cargo.toml",
-            '[package]\nname = "docs-snippets"\nversion = "0.0.0"\n\n'
+            "agent-workbench/Cargo.toml",
+            '[package]\nname = "agent-workbench"\nversion = "0.0.0"\n\n'
             "[dev-dependencies]\n"
             'lash = { version = "0.1", features = ["rlm"] }\n'
             'lashlang = "0.1"\n',
         )
         self.fixture.write(
-            "docs-snippets/src/embedding_advanced.rs",
+            "agent-workbench/src/restate.rs",
             "use lashlang::Program;\n",
         )
 
         self.assertEqual(
             [
                 (
-                    Path("examples/docs-snippets/src/embedding_advanced.rs"),
+                    Path("examples/agent-workbench/src/restate.rs"),
                     1,
                     "lashlang::",
                 )
