@@ -230,9 +230,6 @@ impl ResponsesStreamState {
                 .is_some_and(lash_core::llm::types::provider_usage_has_quantities)
             || self.usage != LlmUsage::default()
             || self.parts.iter().any(part_has_output_evidence)
-            || self
-                .tool_calls
-                .values()
-                .any(|tool_call| !tool_call.input_json.is_empty())
+            || self.pending_tool_call_has_output_evidence()
     }
 }
