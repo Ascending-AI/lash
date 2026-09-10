@@ -871,11 +871,12 @@ mod pattern_impl {
         }
     }
 
-    // SAFETY: every returned range is ordered, lies on UTF-8 character
-    // boundaries in `haystack`, and advances or terminates the partition.
+    // The nightly `Searcher` trait requires an unsafe impl. This preserves the
+    // inherited implementation; its zero-width partition behavior is not
+    // repaired by this lint-policy change.
     #[expect(
         unsafe_code,
-        reason = "the searcher yields valid UTF-8 boundaries in monotonic order"
+        reason = "retain the existing nightly Searcher implementation at its required unsafe trait boundary"
     )]
     unsafe impl<'r, 't> Searcher<'t> for RegexSearcher<'r, 't> {
         fn haystack(&self) -> &'t str {
@@ -939,11 +940,12 @@ mod pattern_impl {
         }
     }
 
-    // SAFETY: reverse steps use ranges produced for the same haystack and move
-    // monotonically toward its start without overlapping later steps.
+    // The nightly `ReverseSearcher` trait requires an unsafe impl. This
+    // preserves the inherited implementation; its zero-width partition
+    // behavior is not repaired by this lint-policy change.
     #[expect(
         unsafe_code,
-        reason = "the reverse searcher yields valid non-overlapping haystack ranges"
+        reason = "retain the existing nightly ReverseSearcher implementation at its required unsafe trait boundary"
     )]
     unsafe impl<'r, 't> ReverseSearcher<'t> for RegexSearcher<'r, 't> {
         fn next_back(&mut self) -> SearchStep {
