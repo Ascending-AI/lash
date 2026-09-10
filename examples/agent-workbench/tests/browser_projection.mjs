@@ -149,19 +149,6 @@ test("committed-cancelled Stop renders its request evidence", async () => {
   assert.equal(busyRefreshes, 1);
 });
 
-test("resident replacement refetches without settling provisional rows", () => {
-  const recovery = markedSource(
-    "WORKBENCH_REMOTE_STREAM_RECOVERY",
-    "WORKBENCH_REMOTE_STREAM_RECOVERY",
-  );
-  const residentBranch = recovery.match(
-    /if \(item\.type === "resident_replacement"\) \{([\s\S]*?)\n\s*\}/,
-  )?.[1];
-  assert.ok(residentBranch, "resident replacement branch is missing");
-  assert.match(residentBranch, /recoverResidentReplacement\(\)/);
-  assert.doesNotMatch(residentBranch, /finishTransientRows\(/);
-});
-
 test("resident replacement async refetch preserves an actual provisional tool row", async () => {
   function element(tagName) {
     const selectors = new Map();
