@@ -745,3 +745,110 @@ async fn reopen_seed_alternating_seeds_advance_without_panicking() {
         assert_eq!(runtime.state.head_revision, head.head_revision);
     }
 }
+
+/// FIG-2782: the checkpoint-adopt path owns its own rehydration of the
+/// outstanding usage-attempt registry, and nothing else covers it.
+///
+/// Session construction rebuilds the registry from the durable ledger it opened
+/// on, so every reopen witness stays green even with the adopt-path rebuild
+/// deleted. This drives the other order: a live handle whose registry is empty
+/// adopts a head that already carries holes, while a resident correction that
+/// has not settled into any durable row is layered on top. The rebuilt set must
+/// be the durable holes minus the ones the resident correction already fills,
+/// which is only true if the adopt path rebuilds it at all.
+#[tokio::test]
+async fn checkpoint_adopt_rehydrates_outstanding_usage_attempts_from_the_adopted_head() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+    let model = runtime.state.effective_policy().model.id.clone();
+
+    // Durable holes committed outside this handle: two billed attempts whose
+    // usage never arrived, carried by one accumulating `(source, model)` row.
+    let durable_holes = crate::TokenLedgerEntry {
+        source: "turn".to_string(),
+        model: model.clone(),
+        usage: crate::TokenUsage::default(),
+        usage_disposition: crate::LedgerUsageDisposition::unreported([
+            crate::UnreportedLedgerAttempt {
+                call_id: "fig2782-call-alpha".to_string(),
+                attempt_ordinal: 1,
+                generation_id: Some("gen-alpha".to_string()),
+            },
+            crate::UnreportedLedgerAttempt {
+                call_id: "fig2782-call-beta".to_string(),
+                attempt_ordinal: 1,
+                generation_id: Some("gen-beta".to_string()),
+            },
+        ]),
+    };
+    let operation = crate::store::OperationId::new(
+        crate::ExecutionScope::runtime_operation("fig2782-external-usage-writer"),
+        "commit",
+    );
+    store.usage_deltas.lock_recover().extend(
+        crate::store::RuntimeUsageDelta::for_operation(&operation, &[durable_holes])
+            .expect("durable usage delta identities"),
+    );
+
+    // A resident correction for one of those holes: recorded on the shared
+    // ledger by a reconciliation that has not ridden a commit boundary yet, so
+    // it exists only in memory while its hole is still durable.
+    runtime.shared_token_ledger.lock_recover().push(
+        crate::runtime::session_manager::PendingTokenLedgerEntry::unstaged(
+            crate::TokenLedgerEntry {
+                source: "turn".to_string(),
+                model: model.clone(),
+                usage: crate::TokenUsage {
+                    input_tokens: 334,
+                    ..crate::TokenUsage::default()
+                },
+                usage_disposition: crate::LedgerUsageDisposition::Reconciled {
+                    call_id: "fig2782-call-beta".to_string(),
+                    attempt_ordinal: 1,
+                },
+            },
+        ),
+    );
+
+    assert!(
+        runtime.unreported_usage_attempts().is_empty(),
+        "the live handle must start with nothing registered, or the adopt is not what fills it"
+    );
+
+    let mut advanced = store
+        .load_session_head_meta()
+        .await
+        .expect("read durable head")
+        .expect("session head exists");
+    advanced.head_revision += 1;
+    store.save_session_head_meta(advanced.clone()).await;
+    let head_before_adopt = runtime.state.head_revision;
+
+    runtime
+        .refresh_session_graph_from_store()
+        .await
+        .expect("adopt the advanced durable head");
+
+    assert!(
+        runtime.state.head_revision > head_before_adopt,
+        "the adopt must actually advance the head, or the adopt path never ran"
+    );
+    assert_eq!(runtime.state.head_revision, advanced.head_revision);
+    assert_eq!(
+        runtime.unreported_usage_attempts(),
+        [crate::UnreportedUsageAttempt {
+            call_id: "fig2782-call-alpha".to_string(),
+            attempt_ordinal: 1,
+            source: "turn".to_string(),
+            model: model.clone(),
+            generation_id: Some("gen-alpha".to_string()),
+        }],
+        "the adopted head must rebuild the outstanding set: every durable hole, \
+         minus the one the resident correction already fills"
+    );
+    assert_eq!(
+        runtime.shared_token_ledger.lock_recover().len(),
+        1,
+        "rebuilding from the resident correction must not consume it"
+    );
+}
