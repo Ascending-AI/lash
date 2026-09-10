@@ -971,10 +971,16 @@ fn turn_scenarios_require_the_typed_commit_phase_metrics() {
         RuntimePerfScenario::RlmObliqueStackMix,
         RuntimePerfScenario::RlmStreamedPairedLashlang,
         RuntimePerfScenario::RlmProcessHandles,
+        RuntimePerfScenario::RlmGlobals,
         RuntimePerfScenario::Standard,
     ] {
         let phases = required_phases(scenario);
-        for expected in ["prepared_turn", "committed_turn", "post_commit_delivery"] {
+        for expected in [
+            "prepared_turn",
+            "commit_admission.product_attempt",
+            "committed_turn",
+            "post_commit_delivery",
+        ] {
             assert!(
                 phases.contains(&expected),
                 "{} is missing required phase {expected}",
