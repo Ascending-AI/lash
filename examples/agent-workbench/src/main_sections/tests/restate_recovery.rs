@@ -1934,8 +1934,10 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     );
 
     let address = lash::TurnAddress::new(&session_id, &turn_id);
-    let database_url = (backend == "postgres")
-        .then(|| std::env::var("AGENT_WORKBENCH_DATABASE_URL").expect("Postgres recovery URL"));
+    let database_url = (backend == "postgres").then(|| {
+        std::env::var("AGENT_WORKBENCH_E2E_DATABASE_URL")
+            .expect("Postgres recovery E2E database URL")
+    });
     let stores = WorkbenchStores::open(&data_dir, database_url.as_deref())
         .await
         .expect("reopen recovery session catalog");
