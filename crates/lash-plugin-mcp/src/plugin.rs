@@ -457,8 +457,32 @@ mod tests {
             assert_eq!(binding.operation.as_deref(), Some("search_docs"));
             assert_eq!(binding.aliases, vec!["search-docs".to_string()]);
         }
-        #[cfg(not(feature = "lashlang"))]
-        assert!(defs[0].manifest.bindings.is_empty());
+        // Whether the binding lands in the manifest is governed by
+        // `lash-tool-support/lashlang`, not by this crate's own feature: our
+        // `lashlang` implies it, but `lash-llm-tools`, `lash-tools`,
+        // `lash-plugin-process-controls` and `lash-protocol-standard` each
+        // enable it independently, so a workspace build can carry the binding
+        // while this crate is built without the feature. An empty map is
+        // therefore a legitimate configuration, not a failure. What this crate
+        // owes is that when a binding IS recorded it is the right one, so
+        // assert the content rather than the presence or absence.
+        if let Some(recorded) = defs[0].manifest.bindings.get("lashlang.tool") {
+            assert_eq!(
+                recorded.get("module_path"),
+                Some(&serde_json::json!(["docs"])),
+                "{recorded:?}"
+            );
+            assert_eq!(
+                recorded.get("operation"),
+                Some(&serde_json::json!("search_docs")),
+                "{recorded:?}"
+            );
+            assert_eq!(
+                recorded.get("aliases"),
+                Some(&serde_json::json!(["search-docs"])),
+                "{recorded:?}"
+            );
+        }
         assert_eq!(
             defs[0]
                 .contract

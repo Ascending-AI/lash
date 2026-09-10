@@ -76,7 +76,6 @@ signage type.
 - **a11y is best-effort**, not a hard WCAG target — but `--ash-text` and
   `--chalk-dim` are tuned to clear AA against `--form` and shouldn't be
   dropped below their current lightness without re-checking contrast.
-- **Anti-pattern guardrails** are non-negotiable. See
-  [`docs/STYLEGUIDE.md`](./docs/STYLEGUIDE.md) for the full list — no
-  glassmorphism on cards, no side-stripe borders, no gradient text, no new
-  fonts, no auto-redirect stubs, no comma-stuffed list-as-sentence prose.
+- **Anti-pattern guardrails** are non-negotiable: no glassmorphism on cards,
+  no side-stripe borders, no gradient text, no new fonts, no auto-redirect
+  stubs, no comma-stuffed list-as-sentence prose.

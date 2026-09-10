@@ -41,7 +41,7 @@ pub(crate) struct AppStateData {
 impl AppStateData {
     // Every parameter is a distinct required collaborator; the repo's
     // convention for constructors of this shape is the allow, not a config
-    // struct (see `docs-snippets::persistence`, `workflow-graph-roundtrip`).
+    // struct (see `workflow-graph-roundtrip`).
     #[allow(clippy::too_many_arguments)]
     #[cfg(feature = "restate")]
     pub(crate) fn from_shared_db(

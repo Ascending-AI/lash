@@ -170,10 +170,9 @@ hook arguments (`ToolCatalogContext`, `ToolResultProjectionContext`, and
 it onto `lash::plugins`; exposing those values a plugin is handed does not
 expose the runtime-only services or session-authority assembly path.
 
-The rule is enforced, not asserted:
-`facade_only_plugin_authoring::example_plugins_need_no_lash_core_import` in
-`examples/docs-snippets` fails when any in-tree example plugin module names
-`lash_core` in code. A plugin type that cannot be reached from `lash` is
+The rule is enforced, not asserted: `scripts/check_facade_only_examples.py`
+fails when any `.rs` file under `examples/` names `lash_core`, `lash_sansio`,
+or `lash_internal` in code. A plugin type that cannot be reached from `lash` is
 therefore a facade gap the next such module discovers, not a carve-out.
 
 ### Read-only handles

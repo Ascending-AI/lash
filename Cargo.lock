@@ -1088,36 +1088,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "docs-snippets"
-version = "0.0.0-dev"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "futures-util",
- "lash-internal-http-transport",
- "lash-internal-lashlang",
- "lash-internal-plugin-mcp",
- "lash-internal-postgres-store",
- "lash-internal-protocol-standard",
- "lash-internal-provider-openai",
- "lash-internal-remote-protocol",
- "lash-internal-restate",
- "lash-internal-s3-store",
- "lash-internal-sqlite-store",
- "lash-internal-subagents",
- "lash-internal-typescript",
- "lash-runtime",
- "rmp-serde",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "dotenvy"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

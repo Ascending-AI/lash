@@ -626,6 +626,14 @@ jobs:
       - name: Test lash-remote-protocol core conversions
         run: cargo test -p lash-internal-remote-protocol --features core-conversions --locked
 
+      # lash-plugin-mcp's `lashlang` arm has no workspace enabler: it was on
+      # only because examples/docs-snippets happened to request it, and that
+      # crate is gone (FIG-2817). The workspace run now exercises the arm
+      # without the feature, so run the crate on its own to keep the arm with
+      # it covered rather than leaving the MCP tool-binding path untested.
+      - name: Test lash-plugin-mcp lashlang bindings
+        run: cargo test -p lash-internal-plugin-mcp --features lashlang --locked
+
       # Provider test support is deliberately outside each crate's default
       # feature set. Keep the shared normalization contract explicit so a
       # production-safe default cannot silently reduce conformance coverage.

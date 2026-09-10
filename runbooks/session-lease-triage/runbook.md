@@ -97,16 +97,14 @@ the case that used to go unreported.
 **Setup.** `00-trace-event-tests.log` and `01-facade-read-tests.log` are the unit gates the
 companion runs before it stages anything.
 
-**Action.** Confirm both suites passed, and that `05-docs-lint.log` reports the docs lint
-green (the documented procedure's Rust block is compiled from `examples/docs-snippets` and
-must still match it).
+**Action.** Confirm both suites passed.
 
 **Expected observable evidence.** The lease-event suite covers the recovery transitions,
 including the negative case (a renewal that failed while the row still names this owner is
 not reported as a takeover). The facade suite covers absent, unheld, current, and lapsed
 readings plus the no-disturbance property.
 
-**Fail if:** either suite is absent or failing, the docs lint is not green, or the run's
+**Fail if:** either suite is absent or failing, or the run's
 `backends` line names a backend no phase reported on.
 
 ## Phase 1 — Provider hang: the lane is healthy
@@ -258,7 +256,7 @@ confirm no container or host port was left behind (the companion owns none).
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
-| Contract coverage | lease-event suite and facade-read suite green; docs lint green | | `00-trace-event-tests.log`, `01-facade-read-tests.log`, `05-docs-lint.log` |
+| Contract coverage | lease-event suite and facade-read suite green | | `00-trace-event-tests.log`, `01-facade-read-tests.log` |
 | Provider hang | `current` reading naming the parked worker, positive headroom, zero lease-trouble events | | `02-provider-hang.jsonl` |
 | Lease release on commit | the committed turn's lane reads `unheld` | | `02-provider-hang.jsonl` |
 | Winner-emitted takeover | one `taken_over` from the winner naming the abandoned holder and generation | | `03-lease-takeover.jsonl` |

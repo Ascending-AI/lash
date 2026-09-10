@@ -97,7 +97,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             + len(config["no_rlm_session_only"])
         )
         self.assertEqual(len(MATRIX.rows(config)), expected)
-        self.assertEqual(expected, 65)
+        self.assertEqual(expected, 64)
 
     def test_every_scenario_declares_a_valid_tier_and_its_tier_model(self) -> None:
         # The tier word is what a reader trusts; the slug is what the bill is
@@ -118,11 +118,11 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         # assertion that only reads the shipped file cannot pass vacuously.
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
-        config["no_rlm_session_only"]["docs-quickstart"]["model"] = config[
+        config["no_rlm_session_only"]["request-abandon"]["model"] = config[
             "tiers"
         ]["frontier"][0]
         self.assertNotEqual(MATRIX.tier_violations(config), [])
-        config["no_rlm_session_only"]["docs-quickstart"]["tier"] = "platinum"
+        config["no_rlm_session_only"]["request-abandon"]["tier"] = "platinum"
         self.assertNotEqual(MATRIX.tier_violations(config), [])
 
     def test_no_deterministic_scenario_names_a_paid_model(self) -> None:

@@ -2,8 +2,7 @@
 
 These pairs show the same flagship host flow in both permanent RLM dialects.
 They are source examples, not language tutorials: the host API and lifecycle
-are the point. `docs-snippets` parses every file so examples cannot drift from
-the accepted surfaces.
+are the point.
 
 - `turn.lash` / `turn.ts`: inspect two host results and finish a compact value.
 - `durable-process.lash` / `durable-process.ts`: define a durable process that
