@@ -12,10 +12,9 @@ use lash_core::{
     facade_support::TraceRecord, facade_support::TraceRuntimeSubject, facade_support::TraceSink,
 };
 use lash_lashlang_runtime::{
-    LASHLANG_ENGINE_KIND, LashlangProcessInput, TraceLanguageChildExecution,
-    TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload,
-    lashlang_process_event_types, lashlang_process_signal_event_types, lashlang_type_expr_schema,
-    lashlang_value_to_json, prepare_lashlang_process_start, protocol_tool_output_to_lashlang_value,
+    LASHLANG_ENGINE_KIND, TraceLanguageChildExecution, TraceLanguageExecution,
+    TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, lashlang_value_to_json,
+    prepare_lashlang_process_start, protocol_tool_output_to_lashlang_value,
     resolve_lashlang_module_operation, sleep_duration_ms,
 };
 use lashlang::{
@@ -327,9 +326,14 @@ impl HostBridge<'_> {
         if let Some(trigger_operation) =
             lashlang::TriggerHostOperation::from_host_operation(&host_operation)
         {
-            let result = self
-                .trigger_operation(trigger_operation, payload, call_id)
-                .await;
+            let result = lash_lashlang_runtime::execute_trigger_operation(
+                &self.ctx,
+                self.artifact_store.as_ref(),
+                trigger_operation,
+                payload,
+                call_id,
+            )
+            .await;
             let outcome = if result.is_ok() {
                 lash_core::ExecutedCallOutcome::Ok
             } else {
@@ -471,9 +475,14 @@ impl HostBridge<'_> {
                     call_site.as_ref(),
                     Some(source_index),
                 );
-                let result = self
-                    .trigger_operation(trigger_operation, payload, call_id)
-                    .await;
+                let result = lash_lashlang_runtime::execute_trigger_operation(
+                    &self.ctx,
+                    self.artifact_store.as_ref(),
+                    trigger_operation,
+                    payload,
+                    call_id,
+                )
+                .await;
                 let outcome = if result.is_ok() {
                     lash_core::ExecutedCallOutcome::Ok
                 } else {
@@ -560,313 +569,6 @@ impl HostBridge<'_> {
                 .collect(),
             settlement_order,
         )
-    }
-
-    async fn trigger_operation(
-        &self,
-        operation: lashlang::TriggerHostOperation,
-        payload: Value,
-        effect_id: String,
-    ) -> Result<FlowValue, ExecutionHostError> {
-        match operation {
-            lashlang::TriggerHostOperation::Register => {
-                self.register_trigger(payload, effect_id).await
-            }
-            lashlang::TriggerHostOperation::List => self.list_triggers(payload, effect_id).await,
-            lashlang::TriggerHostOperation::Update => {
-                self.update_trigger(payload, effect_id, false).await
-            }
-            lashlang::TriggerHostOperation::Enable => {
-                self.set_trigger_enabled(payload, effect_id, true).await
-            }
-            lashlang::TriggerHostOperation::Disable => {
-                self.set_trigger_enabled(payload, effect_id, false).await
-            }
-            lashlang::TriggerHostOperation::Delete => self.delete_trigger(payload, effect_id).await,
-            lashlang::TriggerHostOperation::Revive => {
-                self.update_trigger(payload, effect_id, true).await
-            }
-            lashlang::TriggerHostOperation::Prune => self.prune_triggers(payload, effect_id).await,
-        }
-    }
-
-    async fn register_trigger(
-        &self,
-        payload: Value,
-        effect_id: String,
-    ) -> Result<FlowValue, ExecutionHostError> {
-        let request = lashlang::TriggerRegistrationRequest::decode(&payload)
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-        let draft = self.prepare_trigger_draft(&request).await?;
-        let command = lash_core::TriggerCommand::Register {
-            owner_scope: self.trigger_owner_scope()?,
-            actor: self.ctx.trigger_actor(),
-            draft,
-        };
-        self.execute_trigger_command(effect_id, command).await
-    }
-
-    async fn prepare_trigger_draft(
-        &self,
-        request: &lashlang::TriggerRegistrationRequest,
-    ) -> Result<lash_core::TriggerSubscriptionDraft, ExecutionHostError> {
-        let artifact = self
-            .artifact_store
-            .get_module_artifact(&request.target.module_ref)
-            .await
-            .map_err(|err| {
-                ExecutionHostError::new(format!("failed to load lashlang module artifact: {err}"))
-            })?
-            .ok_or_else(|| {
-                ExecutionHostError::new(format!(
-                    "missing lashlang module artifact `{}` for trigger target `{}`",
-                    request.target.module_ref, request.target.process_name
-                ))
-            })?;
-        let compatibility =
-            lashlang::check_trigger_compatibility(lashlang::TriggerCompatibilityRequest {
-                artifact: artifact.as_ref(),
-                definition: &request.target,
-                source_type: &request.source.source_type,
-                inputs: &request.inputs,
-            })
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-        let subscription_key =
-            materialized_trigger_subscription_key(request.subscription_key.as_deref())?;
-        let source_key = lash_core::facade_support::default_trigger_source_key(
-            &request.source.source_type,
-            &request.source.value,
-        );
-        let target = trigger_target_process_input(&request.target).map_err(|err| {
-            ExecutionHostError::new(format!("failed to encode trigger target: {err}"))
-        })?;
-        let target_identity = lashlang_process_identity_for_definition(&request.target);
-        let process = artifact
-            .canonical_ir
-            .process(&request.target.process_name)
-            .ok_or_else(|| {
-                ExecutionHostError::new(format!(
-                    "trigger target artifact `{}` is missing process `{}`",
-                    request.target.module_ref, request.target.process_name
-                ))
-            })?;
-        let event_types = lashlang_process_event_types()
-            .into_iter()
-            .chain(lashlang_process_signal_event_types(process))
-            .collect::<Vec<_>>();
-        let env_ref = self
-            .ctx
-            .captured_process_execution_env_ref()
-            .await
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-        let draft = lash_core::TriggerSubscriptionDraft {
-            subscription_key,
-            env_ref,
-            wake_target: self.ctx.trigger_registration_wake_target(),
-            name: request.name.clone(),
-            source_type: request.source.source_type.clone(),
-            source_key,
-            source: request.source.to_json(),
-            payload_schema: lash_core::LashSchema::new(lashlang_type_expr_schema(
-                &compatibility.resolved_event_type,
-            )),
-            target,
-            target_identity,
-            event_types,
-            input_template: core_trigger_input_template(&request.inputs),
-            target_label: Some(request.target.process_name.clone()),
-        };
-        draft
-            .validate()
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-        Ok(draft)
-    }
-
-    async fn list_triggers(
-        &self,
-        payload: Value,
-        effect_id: String,
-    ) -> Result<FlowValue, ExecutionHostError> {
-        let request = lashlang::TriggerListRequest::decode(&payload)
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-        let owner_scope = self.trigger_owner_scope()?;
-        let mut filter =
-            lash_core::TriggerSubscriptionFilter::for_registrant_scope(owner_scope.namespace());
-        filter.name = request.name;
-        filter.source_type = request.source_type;
-        filter.enabled = request.enabled;
-        filter.target = request
-            .target
-            .as_ref()
-            .map(lashlang_process_definition_for_identity);
-        self.execute_trigger_command(
-            effect_id,
-            lash_core::TriggerCommand::List {
-                owner_scope,
-                filter,
-            },
-        )
-        .await
-    }
-
-    async fn update_trigger(
-        &self,
-        payload: Value,
-        effect_id: String,
-        revive: bool,
-    ) -> Result<FlowValue, ExecutionHostError> {
-        let request = lashlang::TriggerRegistrationRequest::decode(&payload)
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-        let subscription_key = request
-            .subscription_key
-            .clone()
-            .ok_or_else(|| ExecutionHostError::new("trigger update requires `subscription_key`"))?;
-        let expected_revision = trigger_expected_revision(&payload)?;
-        let draft = self.prepare_trigger_draft(&request).await?;
-        let owner_scope = self.trigger_owner_scope()?;
-        let actor = self.ctx.trigger_actor();
-        let command = if revive {
-            lash_core::TriggerCommand::Revive {
-                owner_scope,
-                actor,
-                subscription_key,
-                draft,
-                expected_revision,
-            }
-        } else {
-            lash_core::TriggerCommand::Update {
-                owner_scope,
-                actor,
-                subscription_key,
-                draft,
-                expected_revision,
-            }
-        };
-        self.execute_trigger_command(effect_id, command).await
-    }
-
-    async fn set_trigger_enabled(
-        &self,
-        payload: Value,
-        effect_id: String,
-        enabled: bool,
-    ) -> Result<FlowValue, ExecutionHostError> {
-        let (subscription_key, expected_revision) = trigger_key_and_revision(&payload)?;
-        let owner_scope = self.trigger_owner_scope()?;
-        let actor = self.ctx.trigger_actor();
-        let command = if enabled {
-            lash_core::TriggerCommand::Enable {
-                owner_scope,
-                actor,
-                subscription_key,
-                expected_revision,
-            }
-        } else {
-            lash_core::TriggerCommand::Disable {
-                owner_scope,
-                actor,
-                subscription_key,
-                expected_revision,
-            }
-        };
-        self.execute_trigger_command(effect_id, command).await
-    }
-
-    async fn delete_trigger(
-        &self,
-        payload: Value,
-        effect_id: String,
-    ) -> Result<FlowValue, ExecutionHostError> {
-        let (subscription_key, expected_revision) = trigger_key_and_revision(&payload)?;
-        let command = lash_core::TriggerCommand::Delete {
-            owner_scope: self.trigger_owner_scope()?,
-            actor: self.ctx.trigger_actor(),
-            subscription_key,
-            expected_revision,
-        };
-        self.execute_trigger_command(effect_id, command).await
-    }
-
-    async fn prune_triggers(
-        &self,
-        payload: Value,
-        effect_id: String,
-    ) -> Result<FlowValue, ExecutionHostError> {
-        let request = lashlang::TriggerPruneRequest::decode(&payload)
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-        let command = lash_core::TriggerCommand::Prune {
-            owner_scope: self.trigger_owner_scope()?,
-            actor: self.ctx.trigger_actor(),
-            subscription_keys: request.subscription_keys,
-        };
-        self.execute_trigger_command(effect_id, command).await
-    }
-
-    fn trigger_owner_scope(&self) -> Result<lash_core::TriggerOwnerScope, ExecutionHostError> {
-        self.ctx
-            .trigger_owner_scope()
-            .map_err(|err| ExecutionHostError::new(err.to_string()))
-    }
-
-    async fn execute_trigger_command(
-        &self,
-        effect_id: String,
-        command: lash_core::TriggerCommand,
-    ) -> Result<FlowValue, ExecutionHostError> {
-        let outcome = self
-            .ctx
-            .execute_trigger_effect(effect_id, command)
-            .await
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-        let value = match outcome {
-            lash_core::TriggerCommandOutcome::Mutation { receipt } => {
-                let mut value = serde_json::to_value(&receipt).map_err(|err| {
-                    ExecutionHostError::new(format!("failed to encode trigger receipt: {err}"))
-                })?;
-                let object = value.as_object_mut().ok_or_else(|| {
-                    ExecutionHostError::new("trigger mutation receipt must encode as a record")
-                })?;
-                object.insert("type".to_string(), serde_json::json!("trigger_handle"));
-                object.insert(
-                    "id".to_string(),
-                    serde_json::json!(receipt.subscription_key),
-                );
-                value
-            }
-            lash_core::TriggerCommandOutcome::List { records } => serde_json::to_value(
-                records
-                    .iter()
-                    .map(lash_core::facade_support::TriggerRegistration::from)
-                    .collect::<Vec<_>>(),
-            )
-            .map_err(|err| {
-                ExecutionHostError::new(format!("failed to encode trigger records: {err}"))
-            })?,
-            lash_core::TriggerCommandOutcome::Prune { receipts } => {
-                let values = receipts
-                    .iter()
-                    .map(|receipt| {
-                        let mut value = serde_json::to_value(receipt).map_err(|err| {
-                            ExecutionHostError::new(format!(
-                                "failed to encode trigger prune receipt: {err}"
-                            ))
-                        })?;
-                        let object = value.as_object_mut().ok_or_else(|| {
-                            ExecutionHostError::new("trigger prune receipt must encode as a record")
-                        })?;
-                        object.insert("type".to_string(), serde_json::json!("trigger_handle"));
-                        object.insert(
-                            "id".to_string(),
-                            serde_json::json!(receipt.subscription_key),
-                        );
-                        Ok(value)
-                    })
-                    .collect::<Result<Vec<_>, ExecutionHostError>>()?;
-                serde_json::Value::Array(values)
-            }
-        };
-        Ok(lashlang::from_json(value))
     }
 
     async fn start_process(&self, start: ProcessStart) -> Result<FlowValue, ExecutionHostError> {
@@ -1144,88 +846,6 @@ fn lashlang_parent_start_seed(ctx: &RuntimeExecutionContext<'_>) -> String {
     format!("runtime-scope:{}", ctx.execution_scope_id())
 }
 
-fn lashlang_process_input_for_definition(
-    definition: &lashlang::ProcessDefinitionIdentity,
-) -> LashlangProcessInput {
-    LashlangProcessInput {
-        module_ref: definition.module_ref.clone(),
-        process_ref: definition.process_ref.clone(),
-        host_requirements_ref: definition.host_requirements_ref.clone(),
-        process_name: definition.process_name.clone(),
-        args: serde_json::Map::new(),
-    }
-}
-
-fn lashlang_process_definition_for_identity(
-    definition: &lashlang::ProcessDefinitionIdentity,
-) -> serde_json::Value {
-    lashlang_process_input_for_definition(definition).definition()
-}
-
-fn lashlang_process_identity_for_definition(
-    definition: &lashlang::ProcessDefinitionIdentity,
-) -> lash_core::ProcessIdentity {
-    lash_core::ProcessIdentity::new(LASHLANG_ENGINE_KIND)
-        .with_label(Some(definition.process_name.clone()))
-        .with_definition(Some(lashlang_process_definition_for_identity(definition)))
-}
-
-fn trigger_key_and_revision(payload: &Value) -> Result<(String, u64), ExecutionHostError> {
-    let subscription_key = payload
-        .get("subscription_key")
-        .and_then(Value::as_str)
-        .filter(|key| !key.is_empty())
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| ExecutionHostError::new("trigger operation requires `subscription_key`"))?;
-    Ok((subscription_key, trigger_expected_revision(payload)?))
-}
-
-fn trigger_expected_revision(payload: &Value) -> Result<u64, ExecutionHostError> {
-    payload
-        .get("expected_revision")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            ExecutionHostError::new(
-                "trigger operation requires a non-negative integer `expected_revision`",
-            )
-        })
-}
-
-fn materialized_trigger_subscription_key(
-    subscription_key: Option<&str>,
-) -> Result<String, ExecutionHostError> {
-    subscription_key.map(ToOwned::to_owned).ok_or_else(|| {
-        ExecutionHostError::new(
-            "linked lashlang trigger registrations must carry a materialized `subscription_key`",
-        )
-    })
-}
-
-fn trigger_target_process_input(
-    definition: &lashlang::ProcessDefinitionIdentity,
-) -> Result<lash_core::ProcessInput, serde_json::Error> {
-    lashlang_process_input_for_definition(definition).into_process_input()
-}
-
-fn core_trigger_input_template(
-    input: &lashlang::TriggerInputTemplate,
-) -> BTreeMap<String, lash_core::TriggerInputBinding> {
-    input
-        .entries()
-        .map(|(name, binding)| {
-            let binding = match binding {
-                lashlang::TriggerInputBinding::Event => lash_core::TriggerInputBinding::Event,
-                lashlang::TriggerInputBinding::Fixed { value } => {
-                    lash_core::TriggerInputBinding::Fixed {
-                        value: value.clone(),
-                    }
-                }
-            };
-            (name.to_string(), binding)
-        })
-        .collect()
-}
-
 fn flow_values_to_json<'a>(values: &'a [FlowValue]) -> ProjectedFuture<'a, Vec<Value>> {
     Box::pin(async move {
         let mut out = Vec::with_capacity(values.len());
@@ -1328,20 +948,4 @@ fn collect_printed_images_inner<'a>(
         }
         Ok(())
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn trigger_registration_rejects_an_unmaterialized_subscription_key() {
-        let error =
-            materialized_trigger_subscription_key(None).expect_err("missing key must be rejected");
-
-        assert_eq!(
-            error.to_string(),
-            "linked lashlang trigger registrations must carry a materialized `subscription_key`"
-        );
-    }
 }
