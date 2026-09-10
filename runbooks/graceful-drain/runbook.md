@@ -5,12 +5,13 @@
 > process assertions with manual database writes, and do not treat a green script as the
 > judgment itself.
 
-**Purpose.** Prove the published graceful-drain procedure is the behavior lash actually
-has. The host stops admission, lets an already-admitted effect finish, parks the session,
-closes the provider and flushes tracing, and invokes
-`DurableProcessWorker::drain_owner_bound_work` only after process run leases are released.
-The judgment compares every drain claim in `docs/operations.html` with the persistent
-PostgreSQL deployment the companion observed.
+**Purpose.** Prove that this scenario's graceful-drain procedure composes Lash's host-owned
+shutdown levers without losing admitted work or inventing process outcomes. This fixture's
+host policy stops admission, lets an already-admitted effect finish, parks the session,
+releases process run leases before calling
+`DurableProcessWorker::drain_owner_bound_work`, then closes the provider and flushes tracing.
+That total order belongs to this fixture; Lash requires the capability dependencies and
+leaves the rest of the ordering, grace budget, and cancel-versus-await choice to each host.
 
 **Deterministic companion.** Run with a fresh artifact directory:
 
@@ -34,8 +35,8 @@ provider.
 terminal cell: it is not judged for language quality, but it must be a cell the session can
 *execute*, because a foreign cell never commits and the turn then never reaches a terminal
 state — the row hangs rather than failing. The judged layer is everything above it: the
-drain procedure, the persisted dispositions, and the docs comparison, none of which differ
-by dialect. So the two dialect rows of this scenario differ in exactly one observable, the
+drain procedure, the persisted dispositions, and the observed-behavior judgment, none of
+which differ by dialect. So the two dialect rows of this scenario differ in exactly one observable, the
 language of the committed cell, and agree on every drain claim. Confirm the served dialect
 from the row's own evidence (the committed cell's tag), never from the environment
 variable you set.
@@ -62,24 +63,21 @@ does not fabricate a terminal or call a registry completion method.
 4. **Opposite dispositions remain opposite.** A started `Rerunnable` row remains
    non-terminal. The foreign-owner, never-started `OwnerBound`, and `ExternallyOwned` rows
    are also untouched.
-5. **Docs claims are assertions.** A documented claim with no companion evidence is a
-   finding. Any observed contradiction is a real-defect stop; do not weaken this runbook.
+5. **Every claim needs observed evidence.** A required outcome with no companion evidence is
+   a finding. Any observed contradiction is a real-defect stop; do not weaken this runbook.
 6. **A commit-budget rejection is terminal.** The host must supply explicit byte and node
    policy. If turn settlement or `park()` reports the typed byte/node rejection, do not
    retry the identical operation: raise the configured limit or make the commit smaller.
    The 1 MiB / 512-node pair used by first-party hosts is a recommended starting point,
    not Lash-owned authority.
 
-## Working material
+## Evidence to inspect
 
 - Companion artifacts from the command above. `03-observed.jsonl` is backend truth.
-- Docs surface: serve checked-in `docs/` on an unused loopback port and open
-  `/operations.html#graceful-drain`.
-- Source truth: `crates/lash-core/src/runtime/process_worker/mod.rs` and
-  `crates/lash/src/process_admin.rs`; the budget error contract is covered by
-  `crates/lash/src/tests/core_session_builder/session_lifecycle.rs`.
-- Save rendered section text, the named screenshot, and the completed scorecard in the
-  artifact directory. Do not edit docs or sources during judgment.
+- The procedure and expected operator decisions are in this runbook. The companion artifacts
+  are the independent behavior evidence; do not score the prose by reading the prose again.
+- Save the completed scorecard in the artifact directory. Do not edit the runbook, companion,
+  or artifacts during judgment.
 
 ## Phase 0 — Contract and deployment gates
 
@@ -113,7 +111,7 @@ still accepting, and five non-terminal process rows:
 terminal before drain, or the seeded ownership/disposition facts do not distinguish all
 five verdicts.
 
-## Phase 2 — Execute the documented drain order
+## Phase 2 — Execute this fixture's drain order
 
 The companion performs the host-owned sequence: close admission; reject a newly offered
 turn; release and await the already-admitted effect; park its session; confirm no active
@@ -138,7 +136,7 @@ terminal-writing path.
 
 ## Phase 3 — Judge disposition and ownership outcomes
 
-Compare the final `processes` array to the documented verdicts.
+Compare the final `processes` array to the required verdicts.
 
 | Process row | Required final fact |
 |---|---|
@@ -153,31 +151,35 @@ Also require the held observer resolved as `Abandoned{OwnerDrain}` with the same
 **Judgment — FAIL if:** any extra row terminalized, the mine row stayed live, the evidence
 writer or owner differs, or the observed terminal disagrees with the registry record.
 
-## Phase 4 — Score the docs against the observed run
+## Phase 4 — Judge the host procedure from observed behavior
 
-Serve `docs/` on loopback and open `/operations.html#graceful-drain`. Poll until
-**Graceful Drain** and **Background Process Recovery** render. Save the Graceful Drain
-section text as `04-docs-claims.txt` and capture `04-graceful-drain.png` with the nine-step
-procedure and worker-specific paragraph visible.
+Reconstruct the sequence from `03-observed.jsonl`; do not accept the companion's pass line
+as the judgment. Check each claim against fields emitted at different checkpoints, and check
+the final process array against both its seeded state and the drain report.
 
-| Documented claim | Evidence |
+| Required operator conclusion | Independent behavior evidence |
 |---|---|
-| Admission and grace-budget policy belong to the host | `graceful_drain_observed` ingress fields |
-| An admitted turn may finish before shutdown | completed turn and controller journal fields |
-| Parking flushes and releases an idle session | `parked_session_id` after turn completion |
-| Provider close and trace flush are explicit ordered levers | `provider_closed`, `trace_flushed` |
-| Worker drain is separate from facade/session drain | explicit `drain_report_abandoned` and empty `drain_report_deferred` after park |
-| This worker's started OwnerBound rows become `Abandoned{OwnerDrain}` | final mine row and observer terminal |
-| Rerunnable work receives no terminal | final rerunnable row |
-| Other-owner, unstarted OwnerBound, and ExternallyOwned rows remain untouched | final process array |
+| Admission closed while one admitted effect still existed | seed has one active replay key; final ingress rejects a new turn |
+| Already-admitted work settled before the journal emptied | the same replay key moves from active to completed and returns `drained` |
+| The correct session parked after its effect committed | seeded session id equals the parked id after the completed-key transition |
+| Owner drain selected no ineligible or still-held row | drain report has the one eligible id, no deferred id, and the final array leaves every opposite case live |
+| Owner drain abandoned exactly its eligible row | seeded five-row ownership/disposition split matches the final array and single report id |
+| Provider close and trace flush both completed | final checkpoint carries the terminal result and both completion flags |
+| The observed order is fixture policy, not a universal Lash total order | evidence proves this run's order only; no scorecard claim generalizes it to other hosts |
 
-A page step the companion did not perform, or a companion-observed required step absent
-from the page, is a docs/behavior contract violation. Stop and report it as a finding.
+Missing fields, inconsistent identities, or a conclusion that requires facts outside the
+artifact bundle are failures. Preserve the bundle and report the unsupported claim.
+
+The bundle exposes final shutdown facts, not timestamps for every teardown call. It therefore
+does not independently prove the fixture source's release-before-owner-drain or
+settlement-before-close ordering. Record that limitation; do not promote final true flags
+into ordering evidence. The scenario still proves the observable consequence of the required
+lease prerequisite: exactly the eligible owned row was abandoned and no row was deferred.
 
 ## Phase 5 — Teardown and score
 
-Require `panic gate: clean`, `graceful-drain e2e passed: scenarios=1`, a closed docs port,
-and no `lash-fig897-graceful-drain-postgres` container.
+Require `panic gate: clean`, `graceful-drain e2e passed: scenarios=1`, and no
+`lash-fig897-graceful-drain-postgres` container.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
@@ -188,14 +190,14 @@ and no `lash-fig897-graceful-drain-postgres` container.
 | Session/provider/trace shutdown | session parked, provider closed, trace flushed | | `03-observed.jsonl` |
 | Owner-bound drain | exact mine id is `Abandoned{OwnerDrain}` and observer agrees | | `03-observed.jsonl` |
 | Untouched work | rerunnable, foreign, unstarted, and external rows remain non-terminal | | `03-observed.jsonl` |
-| Docs agreement | every scored claim matched observed evidence | | `04-docs-claims.txt`, `04-graceful-drain.png` |
-| Teardown | panic gate clean; owned container and docs port gone | | `graceful-drain-e2e.log`, container inventory |
+| Procedure judgment | every Phase 4 conclusion matched independent observed evidence | | `03-observed.jsonl`, completed scorecard |
+| Teardown | panic gate clean; owned container gone | | `graceful-drain-e2e.log`, container inventory |
 
-**Aggregate:** would a host following only the published procedure stop admission, settle
+**Aggregate:** would a host following only this self-contained procedure stop admission, settle
 its admitted effects, and write exactly the process terminals it owns without stranding or
 misclassifying any other work?
 
 ---
 
-_Stop triggers and the Abort/RCA protocol are in [../RULES.md](../RULES.md). A docs versus
-behavior divergence is a product finding: preserve artifacts and stop._
+_Stop triggers and the Abort/RCA protocol are in [../RULES.md](../RULES.md). An expected
+behavior versus observed-artifact divergence is a product finding: preserve artifacts and stop._

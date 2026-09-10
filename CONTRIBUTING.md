@@ -196,5 +196,5 @@ the next version, tags the exact commit, builds assets, and publishes with
 the auto-generated commit list; release notes are written manually on the
 GitHub release afterward.
 
-Never create release tags or publish crates and artifacts by hand. See
-`docs/PUBLISHING.md` for the complete release contract.
+Never create release tags or publish crates and artifacts by hand. The workflow file is
+the executable release contract; this section states the contributor-facing process.

@@ -132,7 +132,8 @@ ply screenshot — expected, keep both names for the scorecard).
 
 ## Phase 5 — Teardown and score
 
-Stop the app (Ctrl-C / SIGTERM — it drains per docs/operations.html). Then fill:
+Stop the app with Ctrl-C or SIGTERM. The example stops accepting connections, lets
+in-flight requests finish, then closes its provider and flushes its trace sink. Then fill:
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

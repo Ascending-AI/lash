@@ -121,7 +121,7 @@ When those durable-semantics lines change, follow the named transcript-justifica
 ## Team and session norms
 
 - Read `CONTEXT.md` and area-relevant ADRs before exploring (see [domain.md](domain.md)).
-- Trunk-based: `main` is the only long-lived branch, branch from fresh `origin/main`, short-lived branches, merge by PR. Never push product changes straight to `main`, and never tag or publish a release by hand; see `CONTRIBUTING.md` and `docs/PUBLISHING.md`.
+- Trunk-based: `main` is the only long-lived branch, branch from fresh `origin/main`, short-lived branches, merge by PR. Never push product changes straight to `main`, and never tag or publish a release by hand; `CONTRIBUTING.md` carries the release process.
 - PRs are not a request surface; work items live in Linear, and GitHub is for code review only.
 - **Nothing load-bearing in private agent memory.** Session memory is a personal cache. Anything a teammate (or their agent) would need must land on Linear or in the repo.
 - **Outward text gets a human go-ahead.** Agents draft freely, but PR comments, review replies, and comments on tickets that teammates will read are posted only with the driving human's per-item approval.

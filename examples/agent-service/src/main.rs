@@ -498,9 +498,9 @@ async fn async_main() -> anyhow_like::Result<()> {
             get(list_chat_branch_points).post(pin_chat_branch_point),
         )
         .route("/api/chats/{chat_id}/forks", axum::routing::post(fork_chat))
-        // Operator triage read for a chat whose turn looks stuck. Diagnostics
-        // only: see docs/operations.html#stuck-turn. Operator-facing, and it
-        // names the replica and boot running the session, so any deployment
+        // Operator triage read for a chat whose turn looks stuck. This is a
+        // read-only diagnostic that never authorizes fencing or cancellation.
+        // It names the replica and boot running the session, so any deployment
         // beyond this localhost demo must authenticate and authorize the caller
         // before this route is reachable.
         .route(
@@ -530,9 +530,9 @@ async fn async_main() -> anyhow_like::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .map_err(|err| err.to_string())?;
-    // Step 1 of the drain (see docs/operations.html): stop admitting. Axum's
-    // graceful shutdown stops accepting connections and lets in-flight requests
-    // finish once a signal arrives.
+    // This example's first drain step is to stop admitting. Axum's graceful
+    // shutdown stops accepting connections and lets in-flight requests finish
+    // once a signal arrives.
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
@@ -575,7 +575,8 @@ async fn shutdown_signal() {
 /// queued-work claims to hand back. A host that caches live sessions would, at
 /// this point, `cancel_running_turns()`, then `park()` (or `close()`) each one,
 /// and `abandon_queued_work_claim` / `revoke_durable_waits` for any driver it
-/// stopped mid-claim. See docs/operations.html for the full lever list.
+/// stopped mid-claim. The host also closes provider transports and flushes its
+/// trace sink, as this example does below.
 async fn drain(state: &AppStateData, provider: &ProviderHandle) {
     // Release provider transports (the Codex provider sends WebSocket Close
     // frames; the default provider close is a no-op).

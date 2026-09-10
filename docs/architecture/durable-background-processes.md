@@ -596,9 +596,11 @@ is thin observer-scoped sugar returning `ObservedProcess`, and the old
 is renamed `LashSession::refresh_background_graph`. `ProcessDrainReport` lives in
 `lash::durability`; the Restate tier skips `ExternallyOwned` submission at ingress,
 reconciles abandon requests, and completes a re-invoked started `OwnerBound`
-row as `Abandoned{Sweep}` instead of re-running it. The operations runbook renders the full
-recovery verdict table and the drain / crash / stuck-detection paths:
-`docs/operations.html`.
+row as `Abandoned{Sweep}` instead of re-running it. The executable operator scenarios are
+self-contained in [`graceful-drain`](../../runbooks/graceful-drain/runbook.md),
+[`request-abandon`](../../runbooks/request-abandon/runbook.md), and
+[`process-operations`](../../runbooks/process-operations/runbook.md); each carries its own
+drain, crash, or stuck-detection decisions and judges them against companion artifacts.
 
 ## Non-goals
 

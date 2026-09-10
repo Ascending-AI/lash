@@ -48,6 +48,6 @@ Blast radius, anything deliberately out of scope, follow-ups filed as tickets.
 ## Mechanics (defined elsewhere)
 
 - **Commits.** No AI-assistant attribution or co-author trailers; see the root agent rules.
-- **Branching and releases.** Short-lived branches off fresh `origin/main`, merged by PR; releases are dispatched manually by a maintainer from a green `main` (`CONTRIBUTING.md`, `docs/PUBLISHING.md`). Never tag or publish by hand.
+- **Branching and releases.** Short-lived branches off fresh `origin/main`, merged by PR; releases are dispatched manually by a maintainer from a green `main` as described in `CONTRIBUTING.md`. Never tag or publish by hand.
 - **Stacked PRs.** For dependent chains, use the native stack flow (global agent rules).
 - **Generated and gated artifacts.** Run the cheap static checks and focused regressions relevant to the diff. `just push-gate` and confidence lanes are opt-in diagnostics for unusual risk, release work, or an explicit request—not routine push prerequisites. Regenerate any generated artifact your diff moves: `docs/api-surface.snapshot` is written by `python3 scripts/api_surface.py generate`, and the version constants guarding serialized surfaces are declared in `scripts/versioned-surfaces.toml`.
