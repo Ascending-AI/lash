@@ -979,13 +979,14 @@ finish "done through route"
         ))
         .await
         .expect("send message");
-        let turn_id = response
-            .headers()
-            .get("x-lash-turn-id")
-            .expect("turn id response header")
-            .to_str()
-            .expect("turn id header text")
-            .to_string();
+        let turn_id = TurnId::from(
+            response
+                .headers()
+                .get("x-lash-turn-id")
+                .expect("turn id response header")
+                .to_str()
+                .expect("turn id header text"),
+        );
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("response body");
