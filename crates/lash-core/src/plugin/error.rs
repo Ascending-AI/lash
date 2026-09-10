@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 #[derive(Debug, thiserror::Error, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", content = "message", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -50,14 +52,14 @@ pub enum PluginError {
     /// A turn-scoped plugin write presented a lapsed or superseded borrowed
     /// session-execution guard.
     #[error("session execution lease for `{session_id}` was lost before plugin commit")]
-    SessionExecutionLeaseLost { session_id: String },
+    SessionExecutionLeaseLost { session_id: SessionId },
     /// A session append operation id was reused for different semantic request content.
     #[error(
         "append operation `{operation_key}` for session `{session_id}` was reused with different request content"
     )]
     AppendOperationIdentityConflict {
         /// Session whose append operation identity conflicted.
-        session_id: String,
+        session_id: SessionId,
         /// Canonical durable operation key that was reused incorrectly.
         operation_key: String,
     },
@@ -68,7 +70,7 @@ pub enum PluginError {
     )]
     AppendReceiptRequestedNodeCountCorrupt {
         /// Session whose append receipt is corrupt.
-        session_id: String,
+        session_id: SessionId,
         /// Canonical durable operation key of the corrupt receipt.
         operation_key: String,
         /// Count stored with the first attempt, when present.
@@ -99,17 +101,17 @@ pub enum PluginError {
     #[error("{clock} returned a pre-Unix-epoch millisecond value: {epoch_ms}")]
     ClockBeforeUnixEpoch { clock: String, epoch_ms: i64 },
     #[error("process handle `{process_id}` is not live or visible in this session")]
-    ProcessNotVisible { process_id: String },
+    ProcessNotVisible { process_id: ProcessId },
     /// An operation referenced a process id that the registry never knew.
     #[error("unknown process `{process_id}`")]
-    ProcessUnknown { process_id: String },
+    ProcessUnknown { process_id: ProcessId },
     /// A durable reference names a different lifetime than the currently
     /// retained process with the same host-facing id.
     #[error(
         "process `{process_id}` incarnation {requested_incarnation} was superseded by incarnation {current_incarnation}"
     )]
     ProcessIncarnationSuperseded {
-        process_id: String,
+        process_id: ProcessId,
         requested_incarnation: crate::ProcessIncarnation,
         current_incarnation: crate::ProcessIncarnation,
     },
@@ -127,17 +129,17 @@ pub enum PluginError {
     RuntimeEffectController(#[from] crate::RuntimeEffectControllerError),
     #[error("process `{process_id}` execution was already started by {by:?}")]
     ProcessAlreadyStarted {
-        process_id: String,
+        process_id: ProcessId,
         by: Box<crate::LeaseOwnerIdentity>,
     },
     #[error("process `{process_id}` exhausted its execution attempts ({attempts}/{max_attempts})")]
     ProcessAttemptsExhausted {
-        process_id: String,
+        process_id: ProcessId,
         attempts: u32,
         max_attempts: u32,
     },
     #[error("process lease for `{process_id}` is missing or expired (superseded)")]
-    ProcessLeaseSuperseded { process_id: String },
+    ProcessLeaseSuperseded { process_id: ProcessId },
     #[error("monotonic counter `{counter}` cannot advance past {current}")]
     MonotonicCounterOverflow { counter: String, current: u64 },
     #[error(
@@ -157,10 +159,10 @@ pub enum PluginError {
     #[error(
         "process `{process_id}` recorded a caller departure before any outcome; awaiting it would never resolve"
     )]
-    ProcessCallerDeparted { process_id: String },
+    ProcessCallerDeparted { process_id: ProcessId },
     #[error("process `{process_id}` is already terminal in state `{status:?}`")]
     ProcessAlreadyTerminal {
-        process_id: String,
+        process_id: ProcessId,
         status: crate::ProcessStatus,
     },
     #[error(

@@ -1,4 +1,5 @@
 use super::*;
+use crate::SessionId;
 
 #[tokio::test]
 async fn authority_hidden_tool_executes_on_pinned_registry_but_is_absent_from_catalog() {
@@ -14,13 +15,16 @@ async fn authority_hidden_tool_executes_on_pinned_registry_but_is_absent_from_ca
     ))])
     .build_session("root")
     .expect("plugin session");
-    let session = crate::Session::new(crate::RuntimeServices::new(plugins), "root")
-        .await
-        .expect("runtime session");
+    let session = crate::Session::new(
+        crate::RuntimeServices::new(plugins),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("runtime session");
     let mut tool_access = crate::SessionToolAccess::default();
     tool_access.hidden_tools.insert("hidden".to_string());
     let pinned = session
-        .pin_tool_surface("root", &tool_access, None)
+        .pin_tool_surface(&SessionId::from("root"), &tool_access, None)
         .expect("authority-hidden pinned surface");
 
     assert!(

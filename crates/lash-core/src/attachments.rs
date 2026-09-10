@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 mod file_store;
@@ -1046,7 +1048,7 @@ pub fn content_id(bytes: &[u8]) -> AttachmentId {
 pub struct SessionAttachmentStore {
     backend: Arc<dyn AttachmentStore>,
     manifest: Arc<dyn AttachmentManifest>,
-    session_id: String,
+    session_id: SessionId,
     max_attachment_bytes: Option<u64>,
     owner: Mutex<Option<AttachmentOwner>>,
     clock: Arc<dyn crate::Clock>,
@@ -1075,7 +1077,7 @@ impl SessionAttachmentStore {
     pub fn new(
         backend: Arc<dyn AttachmentStore>,
         manifest: Arc<dyn AttachmentManifest>,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
     ) -> Self {
         Self::new_with_clock(backend, manifest, session_id, Arc::new(crate::SystemClock))
     }
@@ -1083,7 +1085,7 @@ impl SessionAttachmentStore {
     pub fn new_with_clock(
         backend: Arc<dyn AttachmentStore>,
         manifest: Arc<dyn AttachmentManifest>,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
         Self {
@@ -1169,9 +1171,12 @@ impl SessionAttachmentStore {
     /// Bind puts for the lifetime of a recovered ToolCall or Engine process.
     pub fn bind_process_scoped(
         self: &Arc<Self>,
-        process_id: impl Into<String>,
+        process_id: impl Into<ProcessId>,
     ) -> AttachmentOwnerBinding {
-        self.bind_owner_scoped(crate::AttachmentOwnerKind::Process, process_id.into())
+        self.bind_owner_scoped(
+            crate::AttachmentOwnerKind::Process,
+            process_id.into().to_string(),
+        )
     }
 
     fn bind_owner_scoped(
@@ -1321,7 +1326,7 @@ impl AttachmentManifest for NoopAttachmentManifest {
 
     fn commit_refs(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _attachment_ids: &[AttachmentId],
     ) -> Result<(), StoreError> {
         Ok(())
@@ -1334,7 +1339,11 @@ impl AttachmentManifest for NoopAttachmentManifest {
         Ok(Vec::new())
     }
 
-    fn forget(&self, _session_id: &str, _attachment_id: &AttachmentId) -> Result<(), StoreError> {
+    fn forget(
+        &self,
+        _session_id: &SessionId,
+        _attachment_id: &AttachmentId,
+    ) -> Result<(), StoreError> {
         Ok(())
     }
 
@@ -1371,7 +1380,7 @@ impl AttachmentManifest for PersistenceManifestAdapter {
 
     fn commit_refs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_ids: &[AttachmentId],
     ) -> Result<(), crate::StoreError> {
         AttachmentManifest::commit_refs(&*self.0, session_id, attachment_ids)
@@ -1386,7 +1395,7 @@ impl AttachmentManifest for PersistenceManifestAdapter {
 
     fn forget(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_id: &AttachmentId,
     ) -> Result<(), crate::StoreError> {
         AttachmentManifest::forget(&*self.0, session_id, attachment_id)

@@ -1,8 +1,9 @@
+use crate::SessionId;
 use crate::plugin::{DirectCompletion, PluginError};
 
 #[derive(Clone)]
 pub struct ToolDirectCompletionClient<'run> {
-    pub(super) session_id: String,
+    pub(super) session_id: SessionId,
     pub(super) tool_call_id: Option<String>,
     pub(super) direct_completions: crate::DirectCompletionClient<'run>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,

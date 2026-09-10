@@ -1,4 +1,5 @@
 use super::{InMemoryQueuedWorkClaimKind, InMemorySessionStore};
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
@@ -38,7 +39,10 @@ impl InMemorySessionStore {
         }
         if let Some(wake_source) = batch.process_wake_source.as_ref()
             && let Some(allocation_floor) = wake_redelivery_fences
-                .get(&(batch.session_id.clone(), wake_source.process_id.clone()))
+                .get(&(
+                    batch.session_id.clone().to_string(),
+                    wake_source.process_id.clone().to_string(),
+                ))
                 .copied()
             && wake_source.sequence <= allocation_floor
         {
@@ -120,7 +124,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
 
     async fn claim_leading_ready_session_command(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
     ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
@@ -135,7 +139,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
 
     async fn claim_ready_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
@@ -151,7 +155,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
 
     async fn claim_checkpoint_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         turn_id: &crate::TurnId,
@@ -226,7 +230,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
 
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
@@ -437,7 +441,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         }
         Ok(crate::SelectedQueuedWorkClaimOutcome::new(
             Some(crate::QueuedWorkClaim {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 claim_id,
                 owner: owner.clone(),
                 lease_token,
@@ -480,7 +484,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
 
     async fn cancel_queued_work_batch(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, crate::store::StoreError> {
         let now = self.clock.timestamp_ms();
@@ -501,7 +505,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
 
     async fn queued_work_batch_completed(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<bool, crate::StoreError> {
         let marker = crate::store_backend_support::session_command_batch_completion_key(
@@ -510,12 +514,12 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         Ok(self
             .runtime_turn_commits
             .lock_recover()
-            .contains_key(&(session_id.to_string(), marker)))
+            .contains_key(&(session_id.clone(), marker)))
     }
 
     async fn list_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::QueuedWorkBatch>, crate::store::StoreError> {
         #[cfg(any(test, feature = "testing"))]
         self.refuse_injected_counter_defect("queued_work_claim_fencing_token")?;
@@ -539,7 +543,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
 
     async fn pending_session_work_ordering(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<crate::store::PendingSessionWorkOrdering, crate::store::StoreError> {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
@@ -587,7 +591,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
 
     async fn list_pending_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::QueuedWorkBatch>, crate::store::StoreError> {
         #[cfg(any(test, feature = "testing"))]
         self.list_pending_queued_work_count

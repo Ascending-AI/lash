@@ -1,3 +1,4 @@
+use crate::ProcessId;
 use serde::{Deserialize, Serialize};
 
 use super::{ProcessLease, ProcessRecord};
@@ -37,7 +38,7 @@ impl ProcessStarted {
 pub enum ProcessExecutionWriteAuthority {
     Lease(ProcessLease),
     Invocation {
-        process_id: String,
+        process_id: ProcessId,
         execution_id: String,
         attempt: Option<u32>,
         resume_from: Option<ProcessStarted>,
@@ -48,7 +49,7 @@ impl ProcessExecutionWriteAuthority {
     /// Constructs owner-bound resume authority for durable-substrate implementors, pinning the
     /// exact retained execution that may hand over.
     pub fn invocation_resume(
-        process_id: impl Into<String>,
+        process_id: impl Into<ProcessId>,
         execution_id: impl Into<String>,
         resume_from: ProcessStarted,
     ) -> Self {
@@ -68,7 +69,7 @@ impl ProcessExecutionWriteAuthority {
 
     /// Constructs a `ProcessExecutionWriteAuthority` using invocation semantics for store and
     /// durable-substrate implementors while persisting and coordinating durable process execution.
-    pub fn invocation(process_id: impl Into<String>, execution_id: impl Into<String>) -> Self {
+    pub fn invocation(process_id: impl Into<ProcessId>, execution_id: impl Into<String>) -> Self {
         Self::Invocation {
             process_id: process_id.into(),
             execution_id: execution_id.into(),
@@ -133,7 +134,7 @@ impl ProcessExecutionWriteAuthority {
 
     pub(crate) fn validate_resume_predecessor(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         retained: Option<&ProcessStarted>,
     ) -> Result<(), crate::PluginError> {
         let Self::Invocation {
@@ -153,13 +154,13 @@ impl ProcessExecutionWriteAuthority {
             "durable handover predecessor does not match retained execution",
         );
         Err(crate::PluginError::ProcessLeaseSuperseded {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
         })
     }
 
     fn trace_invocation_denial(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         proposed_start: Option<&ProcessStarted>,
         retained: Option<&ProcessStarted>,
         reason: &'static str,
@@ -178,8 +179,8 @@ impl ProcessExecutionWriteAuthority {
             execution_id,
         );
         tracing::warn!(
-            process_id,
-            presented_process_id = authority_process_id,
+            process_id = %process_id,
+            presented_process_id = %authority_process_id,
             presented_owner_id = presented_owner.owner_id,
             presented_invocation_id = execution_id,
             presented_attempt = ?attempt,
@@ -204,7 +205,7 @@ impl ProcessExecutionWriteAuthority {
     /// execution identity match the presented authority.
     pub fn validate_invocation_for_start(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         started: &ProcessStarted,
         retained: Option<&ProcessStarted>,
     ) -> Result<(), crate::PluginError> {
@@ -227,7 +228,7 @@ impl ProcessExecutionWriteAuthority {
                 "presented start identity does not match authority",
             );
             return Err(crate::PluginError::ProcessLeaseSuperseded {
-                process_id: process_id.to_string(),
+                process_id: ProcessId::from(process_id.to_string()),
             });
         }
         Ok(())
@@ -237,7 +238,7 @@ impl ProcessExecutionWriteAuthority {
     /// execution identity match the record's retained current execution.
     pub fn validate_invocation_for_write(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         record: &ProcessRecord,
     ) -> Result<(), crate::PluginError> {
         let Self::Invocation {
@@ -260,7 +261,7 @@ impl ProcessExecutionWriteAuthority {
                 "presented write identity does not match retained execution",
             );
             return Err(crate::PluginError::ProcessLeaseSuperseded {
-                process_id: process_id.to_string(),
+                process_id: ProcessId::from(process_id.to_string()),
             });
         }
         Ok(())

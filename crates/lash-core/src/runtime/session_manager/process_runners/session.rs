@@ -15,8 +15,11 @@ impl RuntimeSessionServices {
         let requested_child_session_id = create_request.session_id.clone();
         if cancellation.is_cancelled() {
             if let Some(child_session_id) = create_request.session_id.as_deref() {
-                self.reclaim_prestart_cancelled_child_session(&registration.id, child_session_id)
-                    .await?;
+                self.reclaim_prestart_cancelled_child_session(
+                    &registration.id,
+                    &SessionId::from(child_session_id),
+                )
+                .await?;
             }
             return Ok(cancelled_session_turn_output());
         }
@@ -34,7 +37,7 @@ impl RuntimeSessionServices {
             Ok(child) => child,
             Err(err) => {
                 if cancellation.is_cancelled() {
-                    if let Some(child_session_id) = requested_child_session_id.as_deref() {
+                    if let Some(child_session_id) = requested_child_session_id.as_ref() {
                         self.reclaim_prestart_cancelled_child_session(
                             &registration.id,
                             child_session_id,
@@ -198,8 +201,8 @@ impl RuntimeSessionServices {
 
     async fn reclaim_cancelled_child_session(
         &self,
-        process_id: &str,
-        child_session_id: &str,
+        process_id: &ProcessId,
+        child_session_id: &SessionId,
     ) -> Result<(), crate::ProcessInfraError> {
         if let Some(factory) = self.current.host.session_store_factory.as_ref()
             && let Some(store) = factory
@@ -232,8 +235,8 @@ impl RuntimeSessionServices {
 
     async fn reclaim_prestart_cancelled_child_session(
         &self,
-        process_id: &str,
-        child_session_id: &str,
+        process_id: &ProcessId,
+        child_session_id: &SessionId,
     ) -> Result<(), crate::ProcessInfraError> {
         let Some(factory) = self.current.host.session_store_factory.as_ref() else {
             return Ok(());
@@ -257,8 +260,8 @@ impl RuntimeSessionServices {
 
     async fn require_process_owned_child_session(
         &self,
-        process_id: &str,
-        child_session_id: &str,
+        process_id: &ProcessId,
+        child_session_id: &SessionId,
         store: &dyn crate::store::RuntimePersistence,
     ) -> Result<(), crate::ProcessInfraError> {
         let meta = store
@@ -295,8 +298,8 @@ impl RuntimeSessionServices {
 
     async fn close_or_reclaim_cancelled_session_turn(
         &self,
-        process_id: &str,
-        child_session_id: &str,
+        process_id: &ProcessId,
+        child_session_id: &SessionId,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Result<bool, crate::ProcessInfraError> {
         if cancellation.is_cancelled() {
@@ -364,7 +367,7 @@ fn process_turn_summary(
 
 fn output_from_process_turn(
     registration: &crate::ProcessRegistration,
-    child_session_id: &str,
+    child_session_id: &SessionId,
     turn: crate::AssembledTurn,
     state: crate::ProcessStatus,
 ) -> crate::ToolCallOutput {
@@ -429,8 +432,8 @@ mod tests {
     }
 
     async fn cancelled_mid_turn_subagent_reclaims_durable_child_rows(case: &str) {
-        let child_session_id = format!("cancelled-{case}-subagent-child");
-        let process_id = format!("process:subagent:cancelled-{case}");
+        let child_session_id = SessionId::from(format!("cancelled-{case}-subagent-child"));
+        let process_id = ProcessId::from(format!("process:subagent:cancelled-{case}"));
         let factory = crate::InMemorySessionStoreFactory::new();
         let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
             crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -459,7 +462,7 @@ mod tests {
         let services = runtime
             .runtime_session_services()
             .expect("runtime session services");
-        let foreign_session_id = format!("unrelated-{case}-session");
+        let foreign_session_id = SessionId::from(format!("unrelated-{case}-session"));
         factory
             .create_store(&crate::SessionStoreCreateRequest {
                 session_id: foreign_session_id.clone(),
@@ -469,7 +472,7 @@ mod tests {
             })
             .await
             .expect("materialize unrelated durable session");
-        let foreign_process_id = format!("process:subagent:foreign-{case}");
+        let foreign_process_id = ProcessId::from(format!("process:subagent:foreign-{case}"));
         let foreign_create_request = crate::SessionCreateRequest::child_session(
             runtime.session_id(),
             crate::SessionStartPoint::Empty,
@@ -726,7 +729,7 @@ mod tests {
                     registration,
                     request,
                     crate::TurnInput::text("park"),
-                    named_turn_scope("permit-child", &TurnId::from("permit-process")),
+                    named_turn_scope(&SessionId::from("permit-child"), &TurnId::from("permit-process")),
                     cancellation.clone(),
                 ));
                 tokio::select! {

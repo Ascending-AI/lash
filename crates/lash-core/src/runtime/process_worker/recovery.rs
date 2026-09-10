@@ -1,3 +1,4 @@
+use crate::ProcessId;
 use crate::{
     PluginError, ProcessAwaitOutput, ProcessLease, ProcessLeaseCompletion, ProcessRecord,
     ProcessStatus,
@@ -26,7 +27,7 @@ pub struct ProcessAdmissionReport {
     pub intake: ProcessAdmissionIntake,
     /// Process ids this call admitted to the worker's execution scheduler, in
     /// intake order.
-    pub admitted: Vec<String>,
+    pub admitted: Vec<ProcessId>,
     /// Rows this call inspected but did not admit, in inspection order. Each
     /// entry preserves the typed reason, so ordinary contention stays distinct
     /// from disappearance and from a backend failure.
@@ -86,7 +87,7 @@ impl ProcessAdmissionReport {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessAdmissionDeferred {
     /// Durable process id deferred by this admission pass.
-    pub process_id: String,
+    pub process_id: ProcessId,
     /// Typed reason the row was not admitted by this call.
     pub disposition: ProcessRecoveryAttemptOutcome,
 }
@@ -106,7 +107,7 @@ pub enum ProcessWorkerFault {
     /// left non-terminal for a later pass instead of being driven terminal.
     RecoveryBackendError {
         /// Durable process id the failing operation targeted.
-        process_id: String,
+        process_id: ProcessId,
         /// Registry operation that failed.
         operation: ProcessRecoveryOperation,
         /// Display form of the registry error for host diagnostics.
@@ -117,7 +118,7 @@ pub enum ProcessWorkerFault {
     /// by a later pass rather than terminal.
     RecoveryRunFailed {
         /// Durable process id whose execution could not be rebuilt.
-        process_id: String,
+        process_id: ProcessId,
         /// Display form of the execution failure for host diagnostics.
         error: String,
     },
@@ -148,7 +149,7 @@ pub struct ProcessDrainReport {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessDrainDeferred {
     /// Durable process id deferred by this drain pass.
-    pub process_id: String,
+    pub process_id: ProcessId,
     /// Typed reason the row did not produce confirmed terminal evidence.
     pub disposition: ProcessRecoveryAttemptOutcome,
 }
@@ -317,7 +318,7 @@ impl DurableProcessWorker {
     /// live-owner contention.
     pub(super) async fn claim_for_recovery(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         owner: &crate::LeaseOwnerIdentity,
         lease_ttl_ms: u64,
     ) -> RecoveryClaimDisposition {
@@ -339,7 +340,10 @@ impl DurableProcessWorker {
         }
     }
 
-    pub(super) async fn read_for_recovery(&self, process_id: &str) -> RecoveryReadDisposition {
+    pub(super) async fn read_for_recovery(
+        &self,
+        process_id: &ProcessId,
+    ) -> RecoveryReadDisposition {
         match self.config.process_registry().get_process(process_id).await {
             Ok(Some(record)) => RecoveryReadDisposition::Found(Box::new(record)),
             Ok(None) => RecoveryReadDisposition::Absent,
@@ -356,7 +360,7 @@ impl DurableProcessWorker {
     pub(super) async fn complete_and_release(
         &self,
         lease: &ProcessLease,
-        process_id: &str,
+        process_id: &ProcessId,
         output: ProcessAwaitOutput,
     ) -> RecoveryCompletionDisposition {
         self.complete_and_release_with_parent_end(lease, process_id, output, Vec::new())
@@ -366,7 +370,7 @@ impl DurableProcessWorker {
     pub(super) async fn complete_and_release_with_parent_end(
         &self,
         lease: &ProcessLease,
-        process_id: &str,
+        process_id: &ProcessId,
         output: ProcessAwaitOutput,
         actions: Vec<crate::ToolIntentParentEndAction>,
     ) -> RecoveryCompletionDisposition {
@@ -540,7 +544,7 @@ impl DurableProcessWorker {
     /// non-terminal with nothing else to say so.
     pub(super) async fn observe_recovery_outcome(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         outcome: ProcessRecoveryOutcome,
     ) {
         match outcome {
@@ -558,7 +562,7 @@ impl DurableProcessWorker {
                 error,
             }) => {
                 self.emit_worker_fault(ProcessWorkerFault::RecoveryBackendError {
-                    process_id: process_id.to_string(),
+                    process_id: ProcessId::from(process_id.to_string()),
                     operation,
                     error,
                 })
@@ -566,7 +570,7 @@ impl DurableProcessWorker {
             }
             ProcessRecoveryOutcome::RunFailed(error) => {
                 self.emit_worker_fault(ProcessWorkerFault::RecoveryRunFailed {
-                    process_id: process_id.to_string(),
+                    process_id: ProcessId::from(process_id.to_string()),
                     error: error.to_string(),
                 })
                 .await;
@@ -576,7 +580,7 @@ impl DurableProcessWorker {
 
     pub(super) fn recovery_lease_lost(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         operation: ProcessRecoveryOperation,
         error: &PluginError,
     ) {
@@ -585,7 +589,7 @@ impl DurableProcessWorker {
             target: "lash_core::process_recovery",
             event = "process_recovery.lease_lost",
             decision_basis = "lease_superseded",
-            process_id,
+            process_id = %process_id,
             operation = operation.label(),
             outcome = "deferred_to_new_owner",
             error = error.as_str(),
@@ -595,7 +599,7 @@ impl DurableProcessWorker {
 
     pub(super) fn recovery_backend_error(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         operation: ProcessRecoveryOperation,
         error: PluginError,
     ) -> RecoveryBackendError {
@@ -604,7 +608,7 @@ impl DurableProcessWorker {
             target: "lash_core::process_recovery",
             event = "process_recovery.backend_error",
             decision_basis = "backend_error",
-            process_id,
+            process_id = %process_id,
             operation = operation.label(),
             outcome = "deferred",
             error = error_message.as_str(),

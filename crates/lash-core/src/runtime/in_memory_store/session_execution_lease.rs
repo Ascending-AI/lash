@@ -4,6 +4,7 @@
 //! the semantics live with the trait contract in `crate::store`.
 
 use super::InMemorySessionStore;
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
 #[derive(Clone)]
@@ -119,7 +120,7 @@ impl InMemorySessionExecutionLease {
 impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
     async fn try_claim_session_execution_lease_with_token(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &crate::LeaseOwnerIdentity,
         executor_id: &str,
         claim_nonce: &crate::LeaseClaimNonce,
@@ -130,7 +131,9 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(session_id)?;
         let mut leases = self.session_execution_leases.lock_recover();
-        let current = leases.entry(session_id.to_string()).or_default();
+        let current = leases
+            .entry(SessionId::from(session_id.to_string()))
+            .or_default();
         if current.is_live(now) {
             if current.is_held_by(owner, executor_id) {
                 if let super::Lease::Held {
@@ -351,7 +354,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
 
     async fn get_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<crate::SessionExecutionLeaseObservation, crate::store::StoreError> {
         #[cfg(any(test, feature = "testing"))]
         self.refuse_injected_counter_defect("session_lease_fencing_token")?;

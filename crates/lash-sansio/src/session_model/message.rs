@@ -1,3 +1,4 @@
+use crate::ProcessId;
 use crate::TurnId;
 use crate::llm::types::{
     AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, ProviderReasoningReplay,
@@ -123,7 +124,7 @@ pub enum MessageOrigin {
         transient: bool,
     },
     Process {
-        process_id: String,
+        process_id: ProcessId,
         event_type: String,
         sequence: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]

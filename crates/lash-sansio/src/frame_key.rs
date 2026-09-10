@@ -1,5 +1,6 @@
 //! Deterministic key material for opening an agent frame.
 
+use crate::SessionId;
 use crate::core_support::Blake3DomainHasher;
 
 const FRAME_KEY_PREFIX: &str = "frame-key/v2/";
@@ -41,7 +42,7 @@ impl FrameKey {
     ///
     /// A redrive preserves all three inputs, while two distinct calls in the
     /// same frame have distinct `tool_call_id` values.
-    pub fn from_call_site(session_id: &str, frame_lineage: &str, tool_call_id: &str) -> Self {
+    pub fn from_call_site(session_id: &SessionId, frame_lineage: &str, tool_call_id: &str) -> Self {
         Self::derive(0, [session_id, frame_lineage, tool_call_id])
     }
 
@@ -58,7 +59,7 @@ impl FrameKey {
     /// The three inputs are length-delimited independently so callers cannot
     /// assemble or ambiguously concatenate durable key bytes themselves.
     pub fn from_compaction_material(
-        session_id: &str,
+        session_id: &SessionId,
         boundary_id: &str,
         previous_frame_node_id: &str,
     ) -> Self {
@@ -127,10 +128,10 @@ mod tests {
 
     #[test]
     fn call_site_derivation_is_stable_and_call_specific() {
-        let first = FrameKey::from_call_site("session", "frame", "call-1");
+        let first = FrameKey::from_call_site(&SessionId::from("session"), "frame", "call-1");
         assert_eq!(
             first,
-            FrameKey::from_call_site("session", "frame", "call-1")
+            FrameKey::from_call_site(&SessionId::from("session"), "frame", "call-1")
         );
         assert_eq!(
             first.as_str(),
@@ -138,7 +139,7 @@ mod tests {
         );
         assert_ne!(
             first,
-            FrameKey::from_call_site("session", "frame", "call-2")
+            FrameKey::from_call_site(&SessionId::from("session"), "frame", "call-2")
         );
     }
 
@@ -146,7 +147,10 @@ mod tests {
     fn caller_material_uses_the_same_derived_representation_in_its_own_domain() {
         let caller = FrameKey::from_caller_material("frame").expect("non-empty caller material");
         assert!(FrameKey::is_derived(caller.as_str()));
-        assert_ne!(caller, FrameKey::from_call_site("", "", "frame"));
+        assert_ne!(
+            caller,
+            FrameKey::from_call_site(&SessionId::from(""), "", "frame")
+        );
     }
 
     #[test]
@@ -183,11 +187,12 @@ mod tests {
 
     #[test]
     fn compaction_material_is_stable_and_boundary_specific() {
-        let first = FrameKey::from_compaction_material("session", "turn", "frame-before");
+        let first =
+            FrameKey::from_compaction_material(&SessionId::from("session"), "turn", "frame-before");
 
         assert_eq!(
             first,
-            FrameKey::from_compaction_material("session", "turn", "frame-before")
+            FrameKey::from_compaction_material(&SessionId::from("session"), "turn", "frame-before")
         );
         assert_eq!(
             first.as_str(),
@@ -195,7 +200,7 @@ mod tests {
         );
         assert_ne!(
             first,
-            FrameKey::from_compaction_material("session", "turn", "frame-after")
+            FrameKey::from_compaction_material(&SessionId::from("session"), "turn", "frame-after")
         );
         assert!(FrameKey::is_derived(first.as_str()));
     }

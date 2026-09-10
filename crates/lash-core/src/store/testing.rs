@@ -1,4 +1,5 @@
 use super::{RuntimeCommit, RuntimeTurnCommitStamp, StoreError};
+use crate::SessionId;
 
 /// Test-only probes and fault-injection seams on a runtime store handle.
 ///
@@ -28,7 +29,7 @@ pub trait StoreTestSupport: Send + Sync {
     /// store surface (the in-memory runtime store is such a backend).
     async fn seed_session_trigger_manifest_ref_for_testing(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<bool, StoreError>;
 
     /// Return session-owned artifact-ref identities through this retained store
@@ -36,7 +37,7 @@ pub trait StoreTestSupport: Send + Sync {
     /// and body representations are deliberately excluded.
     async fn raw_session_owned_artifact_refs_for_testing(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<(String, String)>, StoreError>;
 }
 

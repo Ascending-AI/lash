@@ -1,5 +1,6 @@
 //! Shared effect driver for SQLite/PostgreSQL cold-process recovery helpers.
 
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::io::Write as _;
 
@@ -10,7 +11,7 @@ pub const RECOVERY_RENEW: std::time::Duration = std::time::Duration::from_millis
 pub async fn run_effect_action<C>(
     controller: &C,
     action: &str,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     nonce: &str,
     marker: &std::path::Path,
@@ -61,7 +62,7 @@ where
 }
 
 fn effect_envelope(
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     nonce: &str,
 ) -> lash_core::RuntimeEffectEnvelope {

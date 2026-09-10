@@ -31,7 +31,7 @@ fn legacy_turn_commit_hash(commit: &RuntimeCommit) -> String {
 
 fn intent_fixture() -> RuntimeCommit {
     let mut state = crate::RuntimeSessionState {
-        session_id: "golden-session".to_string(),
+        session_id: SessionId::from("golden-session"),
         turn_index: 7,
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
@@ -159,7 +159,7 @@ fn claim_settlement_refuses_duplicate_completion_count() {
 fn first_persisted_state_commit_derives_and_installs_node_ids() {
     let placeholder = "draft-node/v2:first".to_string();
     let mut state = crate::RuntimeSessionState {
-        session_id: "first-commit".to_string(),
+        session_id: SessionId::from("first-commit"),
         session_graph: crate::SessionGraph::from_nodes(
             vec![crate::SessionNodeRecord {
                 node_id: placeholder.clone(),
@@ -225,7 +225,7 @@ fn with_operation_returns_the_append_id_mapping() {
 fn legacy_hash_reproduces_random_committed_message_id_conflict() {
     let mut first = intent_fixture();
     first.completed_turn_input_claims = vec![crate::TurnInputCompletion {
-        session_id: "golden-session".to_string(),
+        session_id: SessionId::from("golden-session"),
         claim: Some(crate::TurnInputSettlementClaim {
             claim_id: "claim-a".to_string(),
             lease_token: "lease-a".to_string(),
@@ -307,7 +307,7 @@ fn session_head_payload_bytes_match_the_legacy_meta_format() {
     struct LegacySessionHeadMeta {
         schema_version: u32,
         #[serde(default = "super::default_root_session_id")]
-        session_id: String,
+        session_id: SessionId,
         #[serde(skip)]
         head_revision: u64,
         config: crate::PersistedSessionConfig,
@@ -321,7 +321,7 @@ fn session_head_payload_bytes_match_the_legacy_meta_format() {
 
     let legacy = LegacySessionHeadMeta {
         schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
-        session_id: "column-owned-head".to_string(),
+        session_id: SessionId::from("column-owned-head"),
         head_revision: 41,
         config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
         current_frame_node_id: None,
@@ -331,7 +331,7 @@ fn session_head_payload_bytes_match_the_legacy_meta_format() {
     let assembled = SessionHeadMeta::assemble(
         SessionHeadPayload {
             schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
-            session_id: "column-owned-head".to_string(),
+            session_id: SessionId::from("column-owned-head"),
             config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
             current_frame_node_id: None,
         },
@@ -351,7 +351,7 @@ fn session_head_payload_bytes_match_the_legacy_meta_format() {
 #[test]
 fn operation_conflict_diagnostic_explains_identity_reuse() {
     let message = StoreError::RuntimeTurnCommitConflict {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         operation_key: "operation-key".to_string(),
     }
     .to_string();
@@ -365,7 +365,8 @@ fn operation_conflict_diagnostic_explains_identity_reuse() {
 fn node_id_golden_vector() {
     let operation = OperationId::turn("golden-session", "turn-42", "final");
     assert_eq!(
-        derive_history_node_id("golden-session", &operation, 3).expect("golden node"),
+        derive_history_node_id(&SessionId::from("golden-session"), &operation, 3)
+            .expect("golden node"),
         "n_f49e2d5bb98b94bf5530b52f34bf226d1742ed60a999302b542abf50a8d030c6"
     );
 }
@@ -373,7 +374,7 @@ fn node_id_golden_vector() {
 #[test]
 fn frame_node_id_golden_vector() {
     assert_eq!(
-        crate::frame_node_id("golden-session", "frame-42").as_str(),
+        crate::frame_node_id(&SessionId::from("golden-session"), "frame-42").as_str(),
         "frame-node/v3/591a075378ab921fd73a0a4d1825ab1ebf32830427f41c332a3ae6807305c128"
     );
 }
@@ -483,22 +484,22 @@ fn intent_projection_excludes_host_commit_budget() {
 fn derived_node_ids_are_session_operation_and_ordinal_scoped() {
     let first = OperationId::turn("session-a", "turn", "final");
     let other = OperationId::turn("session-a", "other-turn", "final");
-    let id = derive_history_node_id("session-a", &first, 0).expect("derive");
+    let id = derive_history_node_id(&SessionId::from("session-a"), &first, 0).expect("derive");
     assert_eq!(
         id,
-        derive_history_node_id("session-a", &first, 0).expect("rederive")
+        derive_history_node_id(&SessionId::from("session-a"), &first, 0).expect("rederive")
     );
     assert_ne!(
         id,
-        derive_history_node_id("session-b", &first, 0).expect("other session")
+        derive_history_node_id(&SessionId::from("session-b"), &first, 0).expect("other session")
     );
     assert_ne!(
         id,
-        derive_history_node_id("session-a", &other, 0).expect("other operation")
+        derive_history_node_id(&SessionId::from("session-a"), &other, 0).expect("other operation")
     );
     assert_ne!(
         id,
-        derive_history_node_id("session-a", &first, 1).expect("other ordinal")
+        derive_history_node_id(&SessionId::from("session-a"), &first, 1).expect("other ordinal")
     );
 }
 
@@ -566,7 +567,7 @@ fn node_derivation_remaps_in_batch_parent_edges() {
         leaf_node_id: Some("draft-b".to_string()),
     };
     graph
-        .derive_node_ids("session", &operation)
+        .derive_node_ids(&SessionId::from("session"), &operation)
         .expect("derive node ids");
     let GraphAppend { nodes, .. } = graph;
     assert_eq!(
@@ -580,7 +581,8 @@ fn frame_node_identity_is_stable_across_operation_realization() {
     let operation = OperationId::turn("session", "turn", "final");
     let frame_key =
         crate::FrameKey::from_caller_material("initial-frame").expect("non-empty frame material");
-    let frame_node_id = crate::session_graph::frame_node_id("session", frame_key.as_str());
+    let frame_node_id =
+        crate::session_graph::frame_node_id(&SessionId::from("session"), frame_key.as_str());
     let mut graph = GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
             node_id: frame_node_id.to_string(),
@@ -599,7 +601,7 @@ fn frame_node_identity_is_stable_across_operation_realization() {
     };
 
     graph
-        .derive_node_ids("session", &operation)
+        .derive_node_ids(&SessionId::from("session"), &operation)
         .expect("realize frame node");
 
     let GraphAppend {

@@ -325,6 +325,7 @@ mod terminal_wait_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ProcessId;
     use crate::TestProcessRegistryWriteExt as _;
     use crate::{ProcessEventLog as _, ProcessRegistrar as _};
 
@@ -355,12 +356,16 @@ mod tests {
             .expect("register process");
         registry
             .set_process_wait(
-                process_id,
+                &ProcessId::from(process_id),
                 crate::WaitState {
                     kind: crate::WaitKind::Signal {
                         name: signal_name.to_string(),
                         event_type: event_type.clone(),
-                        key: crate::runtime::process_signal_wait_key(process_id, signal_name, 7),
+                        key: crate::runtime::process_signal_wait_key(
+                            &ProcessId::from(process_id),
+                            signal_name,
+                            7,
+                        ),
                         ordinal: 7,
                     },
                     since_ms: 1,
@@ -409,7 +414,7 @@ mod tests {
         ));
         assert_eq!(
             registry
-                .count_events_through(process_id, &event_type, u64::MAX)
+                .count_events_through(&ProcessId::from(process_id), &event_type, u64::MAX)
                 .await
                 .expect("count appended signal events"),
             1,

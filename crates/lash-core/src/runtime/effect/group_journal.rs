@@ -62,6 +62,7 @@
 
 use super::effect_replay_driver::EffectRowState;
 use super::group::{GroupWakePolicy, LoserPolicy, RuntimeEffectGroup};
+use crate::SessionId;
 
 /// The durable group record a substrate writes before any of its children
 /// claim.
@@ -80,7 +81,7 @@ pub struct EffectGroupRecord {
     /// Durable journal identity of the scope that opened the group.
     pub scope_id: String,
     /// Owning session, when the scope has one. `NULL` rows are session-free.
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     /// The group's wake rule, persisted with no default: a group record written
     /// without one is refused rather than replayed under a guessed rule.
     pub wake: GroupWakePolicy,
@@ -122,7 +123,7 @@ impl EffectGroupRecord {
     pub fn from_group(
         group: &RuntimeEffectGroup,
         scope_id: impl Into<String>,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
         created_at_ms: u64,
     ) -> Self {
         Self {
@@ -337,7 +338,7 @@ mod tests {
         let record = EffectGroupRecord::from_group(
             &group,
             "scope-journal-key",
-            Some("session".to_string()),
+            Some(SessionId::from("session")),
             1_700_000_000_000,
         );
         assert_eq!(record.group_key, group.group_key());

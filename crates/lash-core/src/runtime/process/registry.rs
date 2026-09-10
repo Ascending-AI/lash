@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use crate::plugin::PluginError;
 
 use super::engine::PersistedSegmentHandover;
@@ -37,16 +39,16 @@ pub enum ProjectionWatermark {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessWorklistCursor {
     backend: String,
-    after_process_id: String,
-    through_process_id: String,
+    after_process_id: ProcessId,
+    through_process_id: ProcessId,
 }
 
 impl ProcessWorklistCursor {
     /// Construct a backend-tagged cursor when implementing a [`ProcessRegistry`].
     pub fn new(
         backend: impl Into<String>,
-        after_process_id: impl Into<String>,
-        through_process_id: impl Into<String>,
+        after_process_id: impl Into<ProcessId>,
+        through_process_id: impl Into<ProcessId>,
     ) -> Self {
         Self {
             backend: backend.into(),
@@ -83,7 +85,7 @@ pub struct ProcessWorklistPage {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProcessParentEndPlan {
     /// Terminal parent whose completion made the plan executable.
-    pub process_id: String,
+    pub process_id: ProcessId,
     /// Ordered, replay-keyed actions retained for crash redrive.
     pub actions: Vec<crate::ToolIntentParentEndAction>,
 }
@@ -330,8 +332,8 @@ mod wake_delivery_identity_tests {
         let wake = ProcessWakeDelivery {
             version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             wake_id: format!("wake:v1:blake3:{}", "a".repeat(64)),
-            target_session_id: "session".to_string(),
-            process_id: "process".to_string(),
+            target_session_id: SessionId::from("session"),
+            process_id: ProcessId::from("process"),
             process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
             sequence: 1,
             event_type: "process.wake".to_string(),
@@ -359,8 +361,8 @@ mod wake_delivery_identity_tests {
             let wake = ProcessWakeDelivery {
                 version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
                 wake_id: wake_id.to_string(),
-                target_session_id: "session".to_string(),
-                process_id: "process".to_string(),
+                target_session_id: SessionId::from("session"),
+                process_id: ProcessId::from("process"),
                 process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
                 sequence: 1,
                 event_type: "process.wake".to_string(),
@@ -392,8 +394,8 @@ pub enum WakeDeliveryClaimOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WakeDeliveryBlockedGroup {
-    pub target_session_id: String,
-    pub process_id: String,
+    pub target_session_id: SessionId,
+    pub process_id: ProcessId,
     pub blocking_delivery_id: String,
     pub blocking_sequence: u64,
     pub reason: WakeDiscardReason,
@@ -503,22 +505,22 @@ impl WakeDeliveryReport {
 pub trait ProcessContinuationStore: Send + Sync {
     async fn put_segment_handover(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         handover: PersistedSegmentHandover,
     ) -> Result<(), PluginError>;
 
     async fn get_segment_handover(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         segment_ordinal: u64,
     ) -> Result<Option<PersistedSegmentHandover>, PluginError>;
 
     async fn latest_segment_handover(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<PersistedSegmentHandover>, PluginError>;
 
-    async fn delete_segment_handovers(&self, process_id: &str) -> Result<(), PluginError>;
+    async fn delete_segment_handovers(&self, process_id: &ProcessId) -> Result<(), PluginError>;
 }
 
 /// Test-only probes on a process registry.
@@ -536,8 +538,8 @@ pub trait ProcessRegistryTestSupport: Send + Sync {
     /// Raw sender-floor probe for cross-backend conformance tests.
     async fn wake_allocation_floor_for_testing(
         &self,
-        target_session_id: &str,
-        process_id: &str,
+        target_session_id: &SessionId,
+        process_id: &ProcessId,
     ) -> Result<Option<u64>, PluginError> {
         let _ = (target_session_id, process_id);
         Ok(None)
@@ -604,7 +606,7 @@ impl<T> ProcessRegistry for T where
 struct TriggerDeliveryReconciliationPlan {
     surveyed_count: usize,
     candidates: Vec<crate::TriggerDeliveryRetentionCandidate>,
-    deleted_session_ids: Vec<String>,
+    deleted_session_ids: Vec<SessionId>,
 }
 
 async fn prepare_pruned_trigger_delivery_reconciliation(

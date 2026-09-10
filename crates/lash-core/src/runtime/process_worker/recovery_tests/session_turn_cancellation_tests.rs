@@ -15,7 +15,7 @@ async fn repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_aband
     let foreign_session_id = "cleanup-failure-foreign-root";
     factory
         .create_store(&crate::SessionStoreCreateRequest {
-            session_id: foreign_session_id.to_string(),
+            session_id: SessionId::from(foreign_session_id.to_string()),
             relation: crate::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             policy: policy.clone(),
@@ -43,15 +43,19 @@ async fn repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_aband
     let process_id = "session-turn-repeated-cleanup-failure";
     registry
         .register_process(
-            session_turn_registration(process_id, foreign_session_id).with_max_attempts(Some(2)),
+            session_turn_registration(
+                &ProcessId::from(process_id),
+                &SessionId::from(foreign_session_id),
+            )
+            .with_max_attempts(Some(2)),
         )
         .await
         .expect("register cleanup-failure SessionTurn");
     registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::cancel_requested(
-                process_id,
+                &ProcessId::from(process_id),
                 Some("exercise repeated cleanup failure".to_string()),
             ),
         )
@@ -86,7 +90,7 @@ async fn repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_aband
         .await
         .expect("failed cleanup attempt leaves the worker idle");
         let record = registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("read failed cleanup process")
             .expect("failed cleanup process remains retained");
@@ -119,8 +123,8 @@ async fn repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_aband
         .await
         .expect("admit exhausted cleanup process");
     assert_eq!(report.admitted, vec![process_id.to_string()]);
-    await_terminal(&registry, process_id).await;
-    let evidence = abandoned_evidence(&registry, process_id).await;
+    await_terminal(&registry, &ProcessId::from(process_id)).await;
+    let evidence = abandoned_evidence(&registry, &ProcessId::from(process_id)).await;
     assert_eq!(evidence.writer, AbandonWriter::EngineGaveUp);
     assert_eq!(
         sink.faults().len(),

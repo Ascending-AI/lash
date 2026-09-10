@@ -33,7 +33,7 @@ async fn assert_renewal_response_refused(
     let ((guard, presented), capture) = capturing(|| async {
         let guard = SessionExecutionLeaseGuard::try_acquire(
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-            TEST_SESSION_ID,
+            &SessionId::from(TEST_SESSION_ID),
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             "assert-renewal-response-refused-executor",
             timings,
@@ -227,7 +227,7 @@ async fn renewal_with_wrong_executor_marks_lost_and_never_installs() {
 #[tokio::test]
 async fn renewal_with_wrong_session_marks_lost_and_never_installs() {
     assert_renewal_response_refused(
-        |_, response| response.session_id = "other-session".to_string(),
+        |_, response| response.session_id = SessionId::from("other-session"),
         crate::SessionExecutionLeaseRenewalInstallMismatch::Session,
         "session",
     )
@@ -256,7 +256,7 @@ async fn renewal_with_advanced_expiry_installs() {
     .expect("test lease timings");
     let guard = SessionExecutionLeaseGuard::try_acquire(
         Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-        TEST_SESSION_ID,
+        &SessionId::from(TEST_SESSION_ID),
         &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
         "renewal-with-advanced-expiry-installs-executor",
         timings,

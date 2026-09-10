@@ -1,3 +1,4 @@
+use crate::SessionId;
 use crate::llm::transport::LlmTransportError;
 use crate::llm::types::{
     AttachmentSource, LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage, LlmOutputSpec,
@@ -62,7 +63,7 @@ pub struct DirectRequest {
     #[serde(default, skip)]
     pub stream_events: Option<LlmEventSender>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caused_by: Option<crate::CausalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -773,7 +774,7 @@ mod tests {
             .into_handle();
         let mut client = DirectLlmClient::new(provider);
         let mut request = DirectRequest::json("direct-model", "answer as json");
-        request.session_id = Some("direct-session".to_string());
+        request.session_id = Some(SessionId::from("direct-session"));
 
         let response = client
             .complete(request)

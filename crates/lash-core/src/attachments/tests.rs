@@ -3,7 +3,7 @@ use lash_sansio::{AttachmentTypeMetadata, MediaType};
 
 #[derive(Default)]
 struct RecordingManifest {
-    entries: Mutex<HashMap<(String, AttachmentId), crate::AttachmentManifestEntry>>,
+    entries: Mutex<HashMap<(SessionId, AttachmentId), crate::AttachmentManifestEntry>>,
 }
 
 impl AttachmentManifest for RecordingManifest {
@@ -26,12 +26,15 @@ impl AttachmentManifest for RecordingManifest {
 
     fn commit_refs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_ids: &[AttachmentId],
     ) -> Result<(), crate::StoreError> {
         let mut entries = self.entries.lock_recover();
         for attachment_id in attachment_ids {
-            if let Some(entry) = entries.get_mut(&(session_id.to_string(), attachment_id.clone())) {
+            if let Some(entry) = entries.get_mut(&(
+                SessionId::from(session_id.to_string()),
+                attachment_id.clone(),
+            )) {
                 entry.committed_at_epoch_ms.get_or_insert(1);
             }
         }
@@ -56,12 +59,13 @@ impl AttachmentManifest for RecordingManifest {
 
     fn forget(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_id: &AttachmentId,
     ) -> Result<(), crate::StoreError> {
-        self.entries
-            .lock_recover()
-            .remove(&(session_id.to_string(), attachment_id.clone()));
+        self.entries.lock_recover().remove(&(
+            SessionId::from(session_id.to_string()),
+            attachment_id.clone(),
+        ));
         Ok(())
     }
 
@@ -144,7 +148,7 @@ async fn recording_targeted_probe_does_not_reconcile_aged_intent() {
     manifest
         .record_intent(AttachmentIntent {
             attachment_id: id.clone(),
-            session_id: "targeted-probe".to_string(),
+            session_id: SessionId::from("targeted-probe"),
             canonical_uri: attachment_uri(&id),
             intent_at_epoch_ms: 1,
             owner_kind: None,
@@ -175,7 +179,7 @@ async fn committed_factory_attachment() -> (
     let factory = crate::InMemorySessionStoreFactory::new();
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "explicit-root-factory".to_string(),
+        session_id: SessionId::from("explicit-root-factory"),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
@@ -597,7 +601,10 @@ async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
         .await
         .expect("put live blob");
     manifest
-        .commit_refs("healthy-sweep", std::slice::from_ref(&live.id))
+        .commit_refs(
+            &SessionId::from("healthy-sweep"),
+            std::slice::from_ref(&live.id),
+        )
         .expect("commit live ref");
     let orphan = backend
         .put(vec![4, 2, 5, 0], meta())
@@ -706,10 +713,16 @@ async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
     let ref_b = session_b.put(vec![5, 5, 5], meta()).await.expect("put b");
     assert_eq!(ref_a.id, ref_b.id);
     manifest_a
-        .commit_refs("session-a", std::slice::from_ref(&ref_a.id))
+        .commit_refs(
+            &SessionId::from("session-a"),
+            std::slice::from_ref(&ref_a.id),
+        )
         .expect("commit a");
     manifest_b
-        .commit_refs("session-b", std::slice::from_ref(&ref_b.id))
+        .commit_refs(
+            &SessionId::from("session-b"),
+            std::slice::from_ref(&ref_b.id),
+        )
         .expect("commit b");
     assert_eq!(backend.list().await.expect("list").len(), 1);
 
@@ -1143,11 +1156,11 @@ struct FencedFixture {
         Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<AttachmentWriteFence>>>,
 }
 
-async fn fenced_fixture(session_id: &str) -> FencedFixture {
+async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
     let factory = crate::InMemorySessionStoreFactory::new();
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
@@ -1244,7 +1257,7 @@ impl AttachmentManifest for SignalingManifest {
 
     fn commit_refs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_ids: &[AttachmentId],
     ) -> Result<(), crate::StoreError> {
         self.inner.commit_refs(session_id, attachment_ids)
@@ -1259,7 +1272,7 @@ impl AttachmentManifest for SignalingManifest {
 
     fn forget(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_id: &AttachmentId,
     ) -> Result<(), crate::StoreError> {
         self.inner.forget(session_id, attachment_id)
@@ -1278,7 +1291,7 @@ impl AttachmentManifest for SignalingManifest {
 /// content is present when the sweep returns.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn same_content_put_inside_the_delete_window_survives() {
-    let fixture = fenced_fixture("delete-window-writer").await;
+    let fixture = fenced_fixture(&SessionId::from("delete-window-writer")).await;
     let bytes = vec![7, 1, 7];
     let id = content_id(&bytes);
     // Genuine garbage: identical bytes with no live root, so the sweep is right
@@ -1339,7 +1352,7 @@ async fn same_content_put_inside_the_delete_window_survives() {
 /// sweep never waits for the writer and the writer never waits for the sweep.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn writer_revoking_a_condemnation_defers_the_digest_without_deleting() {
-    let fixture = fenced_fixture("condemned-window-writer").await;
+    let fixture = fenced_fixture(&SessionId::from("condemned-window-writer")).await;
     let bytes = vec![2, 7, 1, 8];
     let id = content_id(&bytes);
     fixture
@@ -1394,7 +1407,7 @@ async fn writer_revoking_a_condemnation_defers_the_digest_without_deleting() {
 /// is deferred, not waited on, and no delete is issued for it.
 #[tokio::test]
 async fn a_peer_sweepers_condemnation_defers_the_digest() {
-    let fixture = fenced_fixture("peer-sweeper").await;
+    let fixture = fenced_fixture(&SessionId::from("peer-sweeper")).await;
     let bytes = vec![3, 3, 3];
     let id = content_id(&bytes);
     fixture
@@ -1452,7 +1465,7 @@ async fn a_peer_sweepers_condemnation_defers_the_digest() {
 /// the blob, and the condemn CAS is what refuses — no age, no clock.
 #[tokio::test]
 async fn a_stuck_intent_retains_the_blob() {
-    let fixture = fenced_fixture("stuck-intent").await;
+    let fixture = fenced_fixture(&SessionId::from("stuck-intent")).await;
     let binding = fixture.session.bind_turn_scoped("turn-that-never-commits");
     let reference = fixture
         .session
@@ -1502,7 +1515,7 @@ async fn session_facade_records_bound_owner_on_put() {
     {
         let entries = manifest.entries.lock_recover();
         let entry = entries
-            .get(&("session-1".to_string(), reference.id))
+            .get(&(SessionId::from("session-1"), reference.id))
             .expect("manifest entry");
         assert_eq!(entry.owner_kind, Some(crate::AttachmentOwnerKind::Turn));
         assert_eq!(entry.owner_id.as_deref(), Some("turn-1"));
@@ -1512,7 +1525,7 @@ async fn session_facade_records_bound_owner_on_put() {
     let host_reference = store.put(vec![11, 12], meta()).await.expect("host put");
     let entries = manifest.entries.lock_recover();
     let host_entry = entries
-        .get(&("session-1".to_string(), host_reference.id))
+        .get(&(SessionId::from("session-1"), host_reference.id))
         .expect("host manifest entry");
     assert_eq!(host_entry.owner_kind, None);
     assert_eq!(host_entry.owner_id, None);
@@ -1537,12 +1550,12 @@ async fn nested_owner_binding_restores_the_previous_owner() {
 
     let entries = manifest.entries.lock_recover();
     let turn = entries
-        .get(&("session-1".to_string(), turn_ref.id))
+        .get(&(SessionId::from("session-1"), turn_ref.id))
         .expect("turn entry");
     assert_eq!(turn.owner_kind, Some(crate::AttachmentOwnerKind::Turn));
     assert_eq!(turn.owner_id.as_deref(), Some("turn-1"));
     let process = entries
-        .get(&("session-1".to_string(), process_ref.id))
+        .get(&(SessionId::from("session-1"), process_ref.id))
         .expect("process entry");
     assert_eq!(
         process.owner_kind,
@@ -1550,7 +1563,7 @@ async fn nested_owner_binding_restores_the_previous_owner() {
     );
     assert_eq!(process.owner_id.as_deref(), Some("process-1"));
     let host = entries
-        .get(&("session-1".to_string(), host_ref.id))
+        .get(&(SessionId::from("session-1"), host_ref.id))
         .expect("host entry");
     assert_eq!(host.owner_kind, None);
     assert_eq!(host.owner_id, None);
@@ -1573,7 +1586,7 @@ fn persistence_manifest_adapter_forwards_root_tracking() {
     let attachment_id = AttachmentId::parse("adapter-forwarding").expect("valid attachment id");
     let intent = AttachmentIntent {
         attachment_id: attachment_id.clone(),
-        session_id: "adapter-session".to_string(),
+        session_id: SessionId::from("adapter-session"),
         canonical_uri: attachment_uri(&attachment_id),
         intent_at_epoch_ms: 10,
         owner_kind: None,

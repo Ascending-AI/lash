@@ -10,6 +10,7 @@
 //! `runtime_persistence` conformance suite.
 
 use super::LeaseOwnerIdentity;
+use crate::SessionId;
 use crate::{
     DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkClaim, QueuedWorkClaimBoundary,
     QueuedWorkClaimPolicy, QueuedWorkKind, QueuedWorkPayload, StoreError, TurnCause,
@@ -897,7 +898,7 @@ pub struct WorkClaimLease {
 impl WorkClaimLease {
     pub fn derive_queued_work(
         head: &ClaimCandidate,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         now_epoch_ms: u64,
         session_lease_generation: u64,
@@ -921,7 +922,7 @@ impl WorkClaimLease {
         dialect: ClaimIdDialect,
         enqueue_seq: u64,
         claim_fencing_token: u64,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         now_epoch_ms: u64,
         session_lease_generation: u64,
@@ -953,7 +954,7 @@ impl WorkClaimLease {
 /// `nonce` disambiguates batches enqueued within the same millisecond;
 /// backends whose id uniqueness already comes from elsewhere pass `None`.
 pub fn derive_batch_id(
-    session_id: &str,
+    session_id: &SessionId,
     source_key: Option<&str>,
     now_epoch_ms: u64,
     nonce: Option<u64>,

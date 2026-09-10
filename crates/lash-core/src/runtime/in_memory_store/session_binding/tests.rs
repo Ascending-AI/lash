@@ -1,18 +1,18 @@
 use super::*;
 use crate::store::SessionCommitStore;
 
-fn commit_for(session_id: &str) -> crate::RuntimeCommit {
+fn commit_for(session_id: &SessionId) -> crate::RuntimeCommit {
     let mut state = crate::RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     crate::RuntimeCommit::persisted_state_for_test(&state, &[])
 }
 
-fn metadata_for(session_id: &str) -> crate::SessionMeta {
+fn metadata_for(session_id: &SessionId) -> crate::SessionMeta {
     crate::SessionMeta {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation: crate::SessionRelation::Root,
         pending_observer_intents: Vec::new(),
     }
@@ -22,7 +22,7 @@ fn metadata_for(session_id: &str) -> crate::SessionMeta {
 async fn every_entry_point_reports_the_authoritative_binding() {
     let store = InMemorySessionStore::new();
     store
-        .commit_runtime_state(commit_for("bound"))
+        .commit_runtime_state(commit_for(&SessionId::from("bound")))
         .await
         .expect("seed direct store");
     // Deliberately disagree with the binding: cached rows are not authorities.
@@ -44,11 +44,11 @@ async fn every_entry_point_reports_the_authoritative_binding() {
             .await
             .expect_err("admission mismatch"),
         store
-            .save_session_meta(metadata_for("other"))
+            .save_session_meta(metadata_for(&SessionId::from("other")))
             .await
             .expect_err("metadata mismatch"),
         store
-            .commit_runtime_state(commit_for("other"))
+            .commit_runtime_state(commit_for(&SessionId::from("other")))
             .await
             .expect_err("commit mismatch"),
     ];
@@ -68,7 +68,7 @@ async fn unbound_handle_refuses_fresh_bind_against_foreign_head_row() {
     // store hydrated with another session's data presents itself.
     *store.session_head_meta.lock_recover() = Some(crate::SessionHeadMeta::assemble(
         crate::SessionHeadPayload {
-            session_id: "head-session".to_string(),
+            session_id: SessionId::from("head-session"),
             ..crate::SessionHeadPayload::default()
         },
         0,
@@ -76,7 +76,7 @@ async fn unbound_handle_refuses_fresh_bind_against_foreign_head_row() {
         None,
     ));
     let error = store
-        .commit_runtime_state(commit_for("other"))
+        .commit_runtime_state(commit_for(&SessionId::from("other")))
         .await
         .expect_err("foreign head row must refuse a fresh bind");
     assert!(
@@ -90,7 +90,7 @@ async fn unbound_handle_refuses_fresh_bind_against_foreign_head_row() {
     );
     // A commit matching the head row binds normally.
     store
-        .commit_runtime_state(commit_for("head-session"))
+        .commit_runtime_state(commit_for(&SessionId::from("head-session")))
         .await
         .expect("matching session binds");
     assert_eq!(
@@ -122,7 +122,7 @@ fn admission_uses_metadata_presence_without_rebinding_from_metadata() {
         crate::SessionAdmission::Rebound
     );
     store
-        .replace_session_meta(metadata_for("bound"))
+        .replace_session_meta(metadata_for(&SessionId::from("bound")))
         .expect("binding owns metadata replacement");
     assert_eq!(
         store

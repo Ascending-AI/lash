@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::{Mutex as StdMutex, Weak};
@@ -11,12 +12,12 @@ pub struct PluginHost {
     factories: Arc<Vec<Arc<dyn PluginFactory>>>,
     pub(super) export_plugin_namespaces: bool,
     extensions: PluginExtensions,
-    sessions: Arc<StdMutex<BTreeMap<String, Weak<PluginSession>>>>,
+    sessions: Arc<StdMutex<BTreeMap<SessionId, Weak<PluginSession>>>>,
 }
 
 struct BuildPluginSessionRequest<'a> {
-    session_id: String,
-    parent_session_id: Option<String>,
+    session_id: SessionId,
+    parent_session_id: Option<SessionId>,
     materialization: PluginSessionMaterializationRequest<'a>,
     tool_catalog_overlay: ToolCatalogContribution,
     tool_snapshot: Option<crate::ToolState>,
@@ -163,7 +164,7 @@ impl PluginHost {
 
     pub fn build_session(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
     ) -> Result<Arc<PluginSession>, PluginError> {
         self.build_session_with_overlay(
             session_id,
@@ -175,7 +176,7 @@ impl PluginHost {
 
     pub fn rematerialize_session(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         snapshot: &PluginState,
         config: RecordedSessionConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
@@ -195,8 +196,8 @@ impl PluginHost {
     /// is treated as a root session by default.
     pub fn build_session_with_parent(
         &self,
-        session_id: impl Into<String>,
-        parent_session_id: Option<String>,
+        session_id: impl Into<SessionId>,
+        parent_session_id: Option<SessionId>,
         config: SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
         self.build_session_with_parent_and_overlay(
@@ -210,8 +211,8 @@ impl PluginHost {
 
     pub fn rematerialize_session_with_parent(
         &self,
-        session_id: impl Into<String>,
-        parent_session_id: Option<String>,
+        session_id: impl Into<SessionId>,
+        parent_session_id: Option<SessionId>,
         snapshot: &PluginState,
         config: RecordedSessionConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
@@ -227,8 +228,8 @@ impl PluginHost {
 
     pub fn build_session_with_parent_and_overlay(
         &self,
-        session_id: impl Into<String>,
-        parent_session_id: Option<String>,
+        session_id: impl Into<SessionId>,
+        parent_session_id: Option<SessionId>,
         tool_catalog_overlay: ToolCatalogContribution,
         tool_snapshot: Option<crate::ToolState>,
         config: SessionCreationConfig,
@@ -247,7 +248,7 @@ impl PluginHost {
 
     pub fn build_session_with_overlay(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         tool_catalog_overlay: ToolCatalogContribution,
         tool_snapshot: Option<crate::ToolState>,
         config: SessionCreationConfig,
@@ -266,8 +267,8 @@ impl PluginHost {
 
     pub(super) fn build_forked_session_with_parent_and_overlay(
         &self,
-        session_id: impl Into<String>,
-        parent_session_id: Option<String>,
+        session_id: impl Into<SessionId>,
+        parent_session_id: Option<SessionId>,
         seed_snapshot: &PluginState,
         tool_catalog_overlay: ToolCatalogContribution,
         tool_snapshot: Option<crate::ToolState>,
@@ -287,8 +288,8 @@ impl PluginHost {
 
     pub fn rematerialize_session_with_parent_and_overlay(
         &self,
-        session_id: impl Into<String>,
-        parent_session_id: Option<String>,
+        session_id: impl Into<SessionId>,
+        parent_session_id: Option<SessionId>,
         snapshot: &PluginState,
         tool_catalog_overlay: ToolCatalogContribution,
         tool_snapshot: Option<crate::ToolState>,
@@ -308,7 +309,7 @@ impl PluginHost {
 
     pub fn rematerialize_session_with_overlay(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         snapshot: &PluginState,
         tool_catalog_overlay: ToolCatalogContribution,
         tool_snapshot: Option<crate::ToolState>,
@@ -452,7 +453,7 @@ impl PluginHost {
 
     pub(crate) fn build_core_tool_registry(&self) -> Result<Arc<crate::ToolRegistry>, PluginError> {
         let ctx = PluginSessionContext {
-            session_id: "lash-core-tool-catalog".to_string(),
+            session_id: SessionId::from("lash-core-tool-catalog"),
             tool_access: SessionToolAccess::default(),
             subagent: None,
             plugin_options: PluginOptions::default(),
@@ -467,7 +468,7 @@ impl PluginHost {
 
     fn register_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session: &Arc<PluginSession>,
     ) -> Result<(), PluginError> {
         let mut sessions = self.sessions.lock_recover();
@@ -479,11 +480,14 @@ impl PluginHost {
             }
             return Ok(());
         }
-        sessions.insert(session_id.to_string(), Arc::downgrade(session));
+        sessions.insert(
+            SessionId::from(session_id.to_string()),
+            Arc::downgrade(session),
+        );
         Ok(())
     }
 
-    pub fn unregister_session(&self, session_id: &str) -> Result<(), PluginError> {
+    pub fn unregister_session(&self, session_id: &SessionId) -> Result<(), PluginError> {
         let mut sessions = self.sessions.lock_recover();
         sessions.remove(session_id);
         Ok(())
@@ -491,7 +495,7 @@ impl PluginHost {
 
     pub fn session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Arc<PluginSession>, PluginOperationInvokeError> {
         let mut sessions = self.sessions.lock_recover();
         let Some(weak) = sessions.get(session_id).cloned() else {

@@ -8,7 +8,7 @@ use super::*;
 
 pub(super) async fn claim_process_lease(
     registry: &TestLocalProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
     owner: &crate::LeaseOwnerIdentity,
     lease_ttl_ms: u64,
 ) -> Result<ProcessLeaseClaimOutcome, PluginError> {
@@ -37,7 +37,7 @@ pub(super) async fn claim_process_lease(
         lease_ttl_ms,
     ) {
         registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {
-            leases.insert(process_id.to_string(), lease.clone());
+            leases.insert(ProcessId::from(process_id.to_string()), lease.clone());
             Ok(ProcessLeaseClaimOutcome::Acquired(lease))
         }
         registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {
@@ -57,7 +57,7 @@ pub(super) async fn claim_process_lease(
                 now,
                 lease_ttl_ms,
             );
-            leases.insert(process_id.to_string(), lease.clone());
+            leases.insert(ProcessId::from(process_id.to_string()), lease.clone());
             Ok(ProcessLeaseClaimOutcome::Acquired(lease))
         }
     }
@@ -65,7 +65,7 @@ pub(super) async fn claim_process_lease(
 
 pub(super) async fn reclaim_process_lease(
     registry: &TestLocalProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
     owner: &crate::LeaseOwnerIdentity,
     observed_holder: &ProcessLease,
     lease_ttl_ms: u64,
@@ -101,7 +101,7 @@ pub(super) async fn reclaim_process_lease(
         now,
         lease_ttl_ms,
     );
-    leases.insert(process_id.to_string(), lease.clone());
+    leases.insert(ProcessId::from(process_id.to_string()), lease.clone());
     Ok(ProcessLeaseClaimOutcome::Acquired(lease))
 }
 
@@ -129,13 +129,16 @@ pub(super) async fn renew_process_lease(
         expires_at_epoch_ms: now.saturating_add(lease_ttl_ms),
         ..lease.clone()
     };
-    leases.insert(lease.process_id.clone(), renewed.clone());
+    leases.insert(
+        ProcessId::from(lease.process_id.clone().to_string()),
+        renewed.clone(),
+    );
     Ok(renewed)
 }
 
 pub(super) async fn get_process_lease(
     registry: &TestLocalProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<Option<ProcessLease>, PluginError> {
     Ok(registry
         .leases
@@ -172,7 +175,7 @@ pub(super) async fn complete_process_lease(
 impl crate::runtime::process::registry::ProcessLeases for TestLocalProcessRegistry {
     async fn claim_process_lease(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         owner: &crate::LeaseOwnerIdentity,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLeaseClaimOutcome, PluginError> {
@@ -181,7 +184,7 @@ impl crate::runtime::process::registry::ProcessLeases for TestLocalProcessRegist
 
     async fn reclaim_process_lease(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         owner: &crate::LeaseOwnerIdentity,
         observed_holder: &ProcessLease,
         lease_ttl_ms: u64,
@@ -199,7 +202,7 @@ impl crate::runtime::process::registry::ProcessLeases for TestLocalProcessRegist
 
     async fn get_process_lease(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<ProcessLease>, PluginError> {
         *self.process_lease_point_reads.lock().await += 1;
         leases::get_process_lease(self, process_id).await

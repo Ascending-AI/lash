@@ -7,6 +7,7 @@
 //! Split out of `plugin/mod.rs` for file size; outer path preserved by
 //! `pub use` in `plugin/mod.rs`.
 
+use crate::SessionId;
 use std::sync::Arc;
 
 use super::{
@@ -407,7 +408,7 @@ pub enum PluginSessionMaterialization {
 
 #[derive(Clone, Debug)]
 pub struct PluginSessionContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub tool_access: SessionToolAccess,
     pub subagent: Option<SubagentSessionContext>,
     pub plugin_options: PluginOptions,
@@ -421,7 +422,7 @@ pub struct PluginSessionContext {
     /// a root session; any subagent / compaction / forked-child session
     /// carries the parent here so plugin factories can gate themselves
     /// on root-only behavior (e.g. `update_plan`'s sticky plan dock).
-    pub parent_session_id: Option<String>,
+    pub parent_session_id: Option<SessionId>,
 }
 
 impl PluginSessionContext {
@@ -436,7 +437,7 @@ impl PluginSessionContext {
 #[derive(Clone)]
 pub struct SessionReadyContext {
     pub state: super::PluginStateStore,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub host: PluginHost,
 }
 

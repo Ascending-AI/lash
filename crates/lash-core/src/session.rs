@@ -1,3 +1,4 @@
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, OnceLock};
 
@@ -102,14 +103,14 @@ pub enum SessionError {
     ProviderMismatch {
         expected: String,
         actual: String,
-        session_id: String,
+        session_id: SessionId,
     },
     #[error("provider is not configured for session `{session_id}`")]
-    ProviderUnconfigured { session_id: String },
+    ProviderUnconfigured { session_id: SessionId },
     #[error("provider `{provider_id}` is not registered for session `{session_id}`")]
     ProviderUnavailable {
         provider_id: String,
-        session_id: String,
+        session_id: SessionId,
     },
     #[error("{context}: {source}")]
     Store {
@@ -134,7 +135,7 @@ pub struct ExecRequest {
 }
 
 pub struct Session {
-    session_id: String,
+    session_id: SessionId,
     services: RuntimeServices,
     include_base_tools: bool,
     context_overlay_revision: u64,
@@ -155,10 +156,13 @@ pub struct Session {
 }
 
 impl Session {
-    pub async fn new(services: RuntimeServices, session_id: &str) -> Result<Self, SessionError> {
+    pub async fn new(
+        services: RuntimeServices,
+        session_id: &SessionId,
+    ) -> Result<Self, SessionError> {
         let tool_registry = services.plugins.tool_registry();
         let mut session = Self {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             services,
             include_base_tools: true,
             context_overlay_revision: 0,
@@ -291,7 +295,7 @@ impl Session {
 
     fn build_tool_catalog_entry(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         tool_registry: Arc<crate::ToolRegistry>,
         tool_access: crate::SessionToolAccess,
         subagent: Option<crate::SubagentSessionContext>,
@@ -303,7 +307,7 @@ impl Session {
             Arc::new(move |name: &str| contract_provider.resolve_contract(name));
         let tool_catalog = Arc::new(self.plugins().resolve_tool_catalog(
             crate::plugin::ToolCatalogContext {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 tools,
                 resolve_contract: Some(Arc::clone(&resolve_contract)),
                 tool_access,
@@ -329,7 +333,7 @@ impl Session {
 
     fn tool_catalog_cache_entry(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
         let tool_access = self.plugins().tool_access().clone();
         let subagent = self.plugins().subagent_context().cloned();
@@ -350,7 +354,7 @@ impl Session {
 
     fn active_tool_surface_entry(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
         if let Some((_, entry)) = self.tool_catalog_cache.lock_recover().as_ref() {
             return Ok(entry.clone());
@@ -367,7 +371,7 @@ impl Session {
     /// use for calls from that request.
     pub(crate) fn pin_tool_surface(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         tool_access: &crate::SessionToolAccess,
         subagent: Option<&crate::SubagentSessionContext>,
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
@@ -395,7 +399,7 @@ impl Session {
 
     pub fn resolved_tool_catalog(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
         Ok(self.active_tool_surface_entry(session_id)?.tool_catalog())
     }
@@ -426,14 +430,14 @@ impl Session {
 
     pub(crate) fn shared_tool_catalog(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
         Ok(self.active_tool_surface_entry(session_id)?.catalog())
     }
 
     pub fn tool_catalog(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
         Ok(self.shared_tool_catalog(session_id)?.as_ref().clone())
     }
@@ -444,7 +448,7 @@ impl Session {
     )]
     pub(crate) fn code_execution_context<'run>(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         agent_frame_id: crate::FrameNodeId,
         sessions: Arc<dyn crate::plugin::SessionStateService>,
         session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService>,
@@ -477,7 +481,7 @@ impl Session {
             direct_completions: direct_completions.clone(),
             parent_invocation: None,
             execution_env_spec: execution_env_spec.clone(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             agent_frame_id,
             event_tx,
             checkpoint_messages,
@@ -489,7 +493,7 @@ impl Session {
             clock: Arc::clone(&self.services.clock),
         });
         Ok(RuntimeExecutionContext::new(
-            session_id.to_string(),
+            SessionId::from(session_id.to_string()),
             dispatch,
             Arc::clone(&self.services.process_env_store),
             Arc::clone(&self.services.attachment_store),
@@ -614,13 +618,20 @@ mod tool_catalog_cache_tests {
         let plugins = crate::PluginHost::new(factories)
             .build_session("pinned-surface")
             .expect("plugin session");
-        let session = Session::new(crate::RuntimeServices::new(plugins), "pinned-surface")
-            .await
-            .expect("runtime session");
+        let session = Session::new(
+            crate::RuntimeServices::new(plugins),
+            &SessionId::from("pinned-surface"),
+        )
+        .await
+        .expect("runtime session");
         let reads_before_pin = manifest_reads.load(Ordering::SeqCst);
 
         let first = session
-            .pin_tool_surface("pinned-surface", &crate::SessionToolAccess::default(), None)
+            .pin_tool_surface(
+                &SessionId::from("pinned-surface"),
+                &crate::SessionToolAccess::default(),
+                None,
+            )
             .expect("first request surface");
         assert_eq!(
             manifest_reads.load(Ordering::SeqCst),
@@ -639,7 +650,11 @@ mod tool_catalog_cache_tests {
         );
 
         let second = session
-            .pin_tool_surface("pinned-surface", &crate::SessionToolAccess::default(), None)
+            .pin_tool_surface(
+                &SessionId::from("pinned-surface"),
+                &crate::SessionToolAccess::default(),
+                None,
+            )
             .expect("next request surface");
         assert_eq!(
             manifest_reads.load(Ordering::SeqCst),
@@ -663,12 +678,12 @@ mod tool_catalog_cache_tests {
             hidden_tools: ["alpha".to_string()].into_iter().collect(),
         };
         let hidden = session
-            .pin_tool_surface("pinned-surface", &hidden_access, None)
+            .pin_tool_surface(&SessionId::from("pinned-surface"), &hidden_access, None)
             .expect("authority-hidden request surface");
         assert!(!hidden.tool_catalog().has_callable_tool("alpha"));
         assert!(
             !session
-                .resolved_tool_catalog("pinned-surface")
+                .resolved_tool_catalog(&SessionId::from("pinned-surface"))
                 .expect("active hidden request surface")
                 .has_callable_tool("alpha"),
             "consumers retain the exact request pin even when session-construction authority differs"
@@ -684,7 +699,11 @@ mod tool_catalog_cache_tests {
         );
 
         let unhidden = session
-            .pin_tool_surface("pinned-surface", &crate::SessionToolAccess::default(), None)
+            .pin_tool_surface(
+                &SessionId::from("pinned-surface"),
+                &crate::SessionToolAccess::default(),
+                None,
+            )
             .expect("next request with broader authority");
         assert!(
             unhidden.tool_catalog().has_callable_tool("alpha"),

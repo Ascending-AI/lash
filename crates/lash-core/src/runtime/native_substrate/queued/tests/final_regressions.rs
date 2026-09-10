@@ -17,7 +17,7 @@ struct ContentionThenFailureRunHandle {
 impl QueuedWorkRunHandle for ContentionThenFailureRunHandle {
     async fn peek_claimable_queued_work(
         &self,
-        _session_id: Option<&str>,
+        _session_id: Option<&SessionId>,
     ) -> Result<Option<bool>, QueuedWorkRunError> {
         Ok(Some(true))
     }
@@ -31,7 +31,7 @@ impl QueuedWorkRunHandle for ContentionThenFailureRunHandle {
 
     async fn claim_and_run_pending_with_progress(
         &self,
-        _session_id: Option<&str>,
+        _session_id: Option<&SessionId>,
         _reason: &str,
     ) -> Result<QueuedWorkRunProgress, QueuedWorkRunError> {
         let pass = self.passes.fetch_add(1, Ordering::SeqCst);
@@ -54,7 +54,10 @@ async fn contention_preserves_the_full_transient_error_attempt_budget() {
     let driver =
         NativeQueuedWork::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
 
-    driver.notify_pending_work(Some("session-contended-then-failing"), "queued_turn_input");
+    driver.notify_pending_work(
+        Some(&SessionId::from("session-contended-then-failing")),
+        "queued_turn_input",
+    );
     for _ in 0..(default_wake_attempts() * 3) {
         tokio::task::yield_now().await;
         tokio::time::advance(default_retry_max()).await;
@@ -75,7 +78,7 @@ struct UnknownClaimabilityTransientRunHandle {
 impl QueuedWorkRunHandle for UnknownClaimabilityTransientRunHandle {
     async fn peek_claimable_queued_work(
         &self,
-        _session_id: Option<&str>,
+        _session_id: Option<&SessionId>,
     ) -> Result<Option<bool>, QueuedWorkRunError> {
         Ok(None)
     }
@@ -89,7 +92,7 @@ impl QueuedWorkRunHandle for UnknownClaimabilityTransientRunHandle {
 
     async fn claim_and_run_pending_with_progress(
         &self,
-        _session_id: Option<&str>,
+        _session_id: Option<&SessionId>,
         _reason: &str,
     ) -> Result<QueuedWorkRunProgress, QueuedWorkRunError> {
         self.attempts.fetch_add(1, Ordering::SeqCst);
@@ -107,7 +110,10 @@ async fn unknown_claimability_transient_errors_exhaust_then_notification_rearms(
     let driver =
         NativeQueuedWork::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
 
-    driver.notify_pending_work(Some("session-unknown-failing"), "first_enqueue");
+    driver.notify_pending_work(
+        Some(&SessionId::from("session-unknown-failing")),
+        "first_enqueue",
+    );
     for _ in 0..(default_wake_attempts() * 2) {
         tokio::task::yield_now().await;
         tokio::time::advance(default_retry_max()).await;
@@ -126,7 +132,10 @@ async fn unknown_claimability_transient_errors_exhaust_then_notification_rearms(
         "exhausted unknown-claimability demand must remain idle"
     );
 
-    driver.notify_pending_work(Some("session-unknown-failing"), "second_enqueue");
+    driver.notify_pending_work(
+        Some(&SessionId::from("session-unknown-failing")),
+        "second_enqueue",
+    );
     for _ in 0..(default_wake_attempts() * 2) {
         tokio::task::yield_now().await;
         tokio::time::advance(default_retry_max()).await;
@@ -155,7 +164,10 @@ async fn indefinite_contention_emits_repeating_typed_heartbeats() {
                 Duration::from_millis(50),
             );
             let mut blocked = handle.blocked.notified();
-            driver.notify_pending_work(Some("session-contended"), "queued_turn_input");
+            driver.notify_pending_work(
+                Some(&SessionId::from("session-contended")),
+                "queued_turn_input",
+            );
             // Each blocked pass is the rendezvous that proves the prior virtual
             // retry window completed. The extra final pass proves the preceding
             // retry reacquired its queued-work permit before capture is released.

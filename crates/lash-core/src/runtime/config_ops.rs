@@ -519,11 +519,12 @@ impl LashRuntime {
 #[cfg(test)]
 mod reopen_seed_identity_tests {
     use super::reopen_seed_operation;
+    use crate::SessionId;
 
     #[test]
     fn reopen_seed_identity_is_stable_for_replay_and_distinguishes_seeds() {
         let mut state = crate::RuntimeSessionState {
-            session_id: "reopen-seed-identity".to_string(),
+            session_id: SessionId::from("reopen-seed-identity"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))

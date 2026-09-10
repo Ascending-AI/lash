@@ -1,9 +1,10 @@
 use super::{GraphAppend, OperationId, StoreError, derive_history_node_id};
+use crate::SessionId;
 
 impl GraphAppend {
     pub fn derive_node_ids(
         &mut self,
-        session_id: &str,
+        session_id: &SessionId,
         operation: &OperationId,
     ) -> Result<Vec<(String, String)>, StoreError> {
         let mut remapped = std::collections::HashMap::<String, String>::new();

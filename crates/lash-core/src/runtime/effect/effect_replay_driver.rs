@@ -75,6 +75,7 @@
 //! decides a lease: it only sleeps — `Sleep` effect due times, busy-retry
 //! backoff, and the lease renewal interval.
 
+use crate::SessionId;
 mod adapter;
 pub use adapter::{StoreReplayAdapter, StoreReplayController, StoreReplayHost};
 
@@ -351,7 +352,7 @@ pub struct EffectClaimRequest {
     /// Durable journal identity of the executing scope.
     pub scope_id: String,
     /// Owning session, when the scope has one. `NULL` rows are session-free.
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     /// Replay key, unique within `scope_id`.
     pub replay_key: String,
     /// Canonical envelope hash, the replay identity of this effect.
@@ -1221,7 +1222,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
     /// Tombstone a session and drop its promise rows.
     pub async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), RuntimeError> {
         self.await_events.revoke_session(session_id).await
     }
@@ -1229,7 +1230,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
     /// Sweep a session's unresolved non-turn-control promises to `Cancelled`.
     pub async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), RuntimeError> {
         self.await_events.cancel_session(session_id).await
     }
@@ -1479,7 +1480,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             .map_err(RuntimeEffectControllerError::from)?;
         let request = EffectClaimRequest {
             scope_id: journal_identity.key().to_string(),
-            session_id: journal_identity.session_id().map(str::to_string),
+            session_id: journal_identity.session_id().cloned(),
             replay_key,
             envelope_hash: reconstructed_envelope.hash().to_string(),
             envelope_json,

@@ -1,3 +1,4 @@
+use crate::SessionId;
 use crate::TurnId;
 use serde::{Deserialize, Serialize};
 
@@ -9,7 +10,7 @@ use crate::facade_support::{ScopedEffectControllerFacadeOps, ToolStateFacadeOps}
 pub trait SessionStateService: Send + Sync {
     async fn turn_scope(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _turn_id: &TurnId,
     ) -> Result<crate::ExecutionScope, PluginError> {
         Err(PluginError::Session(
@@ -23,13 +24,19 @@ pub trait SessionStateService: Send + Sync {
         ))
     }
 
-    async fn snapshot_session(&self, _session_id: &str) -> Result<SessionSnapshot, PluginError> {
+    async fn snapshot_session(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<SessionSnapshot, PluginError> {
         Err(PluginError::Session(
             "session lookup is unavailable in this runtime".to_string(),
         ))
     }
 
-    async fn tool_catalog(&self, _session_id: &str) -> Result<Vec<serde_json::Value>, PluginError> {
+    async fn tool_catalog(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Vec<serde_json::Value>, PluginError> {
         Err(PluginError::Session(
             "tool catalogs are unavailable in this runtime".to_string(),
         ))
@@ -37,12 +44,12 @@ pub trait SessionStateService: Send + Sync {
 
     async fn shared_tool_catalog(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<std::sync::Arc<Vec<serde_json::Value>>, PluginError> {
         Ok(std::sync::Arc::new(self.tool_catalog(session_id).await?))
     }
 
-    async fn tool_state(&self, _session_id: &str) -> Result<crate::ToolState, PluginError> {
+    async fn tool_state(&self, _session_id: &SessionId) -> Result<crate::ToolState, PluginError> {
         Err(PluginError::Session(
             "tool state is unavailable in this session".to_string(),
         ))
@@ -50,7 +57,7 @@ pub trait SessionStateService: Send + Sync {
 
     async fn apply_tool_state(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _snapshot: crate::ToolState,
     ) -> Result<u64, PluginError> {
         Err(PluginError::Session(
@@ -63,7 +70,7 @@ pub trait SessionStateService: Send + Sync {
     /// keeping their state for later re-add.
     async fn set_tool_membership(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         tool_names: &[String],
         present: bool,
     ) -> Result<u64, PluginError> {
@@ -93,7 +100,7 @@ pub trait SessionLifecycleService: Send + Sync {
         ))
     }
 
-    async fn close_session(&self, _session_id: &str) -> Result<(), PluginError> {
+    async fn close_session(&self, _session_id: &SessionId) -> Result<(), PluginError> {
         Err(PluginError::Session(
             "session closing is unavailable in this runtime".to_string(),
         ))
@@ -124,7 +131,7 @@ pub trait SessionLifecycleService: Send + Sync {
 pub trait SessionGraphService: Send + Sync {
     async fn append_session_nodes(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _request: AppendSessionNodesRequest,
     ) -> Result<AppendSessionNodesOutcome, PluginError> {
         Err(PluginError::Session(
@@ -158,7 +165,7 @@ pub struct DirectLlmCompletion {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionTurnInput {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub turn_id: TurnId,
     pub input: TurnInput,
 }
@@ -188,7 +195,7 @@ impl<'run> SessionTurnRequest<'run> {
     /// registration and its live-usage entry are both released when the turn
     /// completes or when the running turn future is dropped.
     pub fn new(
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         turn_id: impl Into<TurnId>,
         mut input: TurnInput,
         scoped_effect_controller: crate::ScopedEffectController<'run>,
@@ -205,7 +212,7 @@ impl<'run> SessionTurnRequest<'run> {
                 "session turn `{turn_id}` requires an effect turn scope with the same id"
             )));
         }
-        if scoped_effect_controller.execution_scope().session_id() != Some(session_id.as_str()) {
+        if scoped_effect_controller.execution_scope().session_id() != Some(&session_id) {
             return Err(PluginError::Session(format!(
                 "session turn `{turn_id}` requires an execution scope for session `{session_id}`"
             )));

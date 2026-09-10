@@ -6,7 +6,7 @@ impl RuntimeScenarioContext {
         for ingress in &phase.queue {
             enqueued.push(
                 self.store()
-                    .enqueue_queued_work(ingress.batch_draft(self.session_id))
+                    .enqueue_queued_work(ingress.batch_draft(&self.session_id))
                     .await
                     .expect("enqueue runtime scenario queued work"),
             );
@@ -36,7 +36,7 @@ impl RuntimeScenarioContext {
                 text,
                 source_key,
             } => {
-                let mut draft = pending_next_turn_input_draft(self.session_id, text);
+                let mut draft = pending_next_turn_input_draft(&self.session_id, text);
                 if let Some(source_key) = source_key {
                     draft = draft.with_source_key(*source_key);
                 }
@@ -59,7 +59,7 @@ impl RuntimeScenarioContext {
                 let input = self
                     .store()
                     .enqueue_pending_turn_input(
-                        pending_next_turn_input_draft(self.session_id, text)
+                        pending_next_turn_input_draft(&self.session_id, text)
                             .with_source_key(*source_key),
                     )
                     .await
@@ -105,7 +105,7 @@ impl RuntimeScenarioContext {
                 let err = self
                     .store()
                     .enqueue_pending_turn_input(
-                        pending_next_turn_input_draft(self.session_id, text)
+                        pending_next_turn_input_draft(&self.session_id, text)
                             .with_source_key(*source_key),
                     )
                     .await
@@ -142,7 +142,7 @@ impl RuntimeScenarioContext {
                 let input = self
                     .store()
                     .enqueue_pending_turn_input(pending_active_turn_input_draft(
-                        self.session_id,
+                        &self.session_id,
                         &TurnId::from(*turn_id),
                         *min_boundary,
                         text,
@@ -165,7 +165,7 @@ impl RuntimeScenarioContext {
         });
         let outcome = self
             .store()
-            .cancel_pending_turn_input(self.session_id, &input.input_id)
+            .cancel_pending_turn_input(&self.session_id, &input.input_id)
             .await
             .unwrap_or_else(|err| {
                 panic!(

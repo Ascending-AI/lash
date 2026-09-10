@@ -1,3 +1,4 @@
+use crate::SessionId;
 pub mod message;
 pub mod prompt;
 
@@ -442,7 +443,7 @@ pub enum SessionStreamEvent {
     },
     #[serde(rename = "child_token_usage")]
     ChildTokenUsage {
-        session_id: String,
+        session_id: SessionId,
         source: String,
         model: String,
         protocol_iteration: usize,

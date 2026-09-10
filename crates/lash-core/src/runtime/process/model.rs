@@ -15,8 +15,7 @@ use super::validation::prepare_process_registration;
 mod execution;
 pub use execution::*;
 
-pub type ProcessId = String;
-pub type SessionId = String;
+pub use lash_sansio::{ProcessId, SessionId};
 pub type ProcessOutcome = ProcessAwaitOutput;
 
 /// Store-minted identity of one lifetime of a reusable [`ProcessId`].
@@ -639,7 +638,7 @@ impl ProcessStartRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionScope {
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_frame_id: Option<crate::FrameNodeId>,
 }
@@ -725,7 +724,7 @@ impl ProcessOriginator {
                 .as_ref()
                 .map(|scope| format!("host:{scope}"))
                 .unwrap_or_else(|| "host".to_string()),
-            Self::Session { session_id, .. } => session_id.clone(),
+            Self::Session { session_id, .. } => session_id.to_string(),
         }
     }
 }
@@ -733,7 +732,7 @@ impl ProcessOriginator {
 impl SessionScope {
     /// Constructs a `SessionScope` for store, effect-host, and protocol implementors while
     /// materializing, executing, or persisting a session turn.
-    pub fn new(session_id: impl Into<String>) -> Self {
+    pub fn new(session_id: impl Into<SessionId>) -> Self {
         Self {
             session_id: session_id.into(),
             agent_frame_id: None,
@@ -743,7 +742,7 @@ impl SessionScope {
     /// Constructs a frame-scoped session identity for process-engine implementors binding work to
     /// one durable agent frame.
     pub fn for_agent_frame(
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         agent_frame_id: crate::FrameNodeId,
     ) -> Self {
         Self {
@@ -1204,7 +1203,7 @@ impl ProcessIdentity {
                     .as_ref()
                     .map(|subagent| subagent.capability.clone())
                     .or_else(|| create_request.usage_source.clone())
-                    .or_else(|| create_request.session_id.clone());
+                    .or_else(|| create_request.session_id.clone().map(Into::into));
                 Self::new("session_turn").with_label(label)
             }
             ProcessInput::External { metadata } => {
@@ -1229,10 +1228,10 @@ impl ProcessIdentity {
 pub const PROCESS_LEASE_SCHEMA_VERSION: u32 = 2;
 
 /// Durable session stores owned exclusively by one process execution.
-pub fn process_runtime_session_ids(process_id: &str) -> [String; 2] {
+pub fn process_runtime_session_ids(process_id: &ProcessId) -> [SessionId; 2] {
     [
-        format!("process-env:{process_id}"),
-        format!("process-session-turn:{process_id}"),
+        SessionId::from(format!("process-env:{process_id}")),
+        SessionId::from(format!("process-session-turn:{process_id}")),
     ]
 }
 
@@ -1614,9 +1613,9 @@ impl ProcessListMode {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessSessionDeleteReport {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub removed_observer_count: usize,
     pub discarded_wake_delivery_count: usize,
     pub cleared_subscription_count: usize,

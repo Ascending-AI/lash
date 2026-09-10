@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use std::collections::BTreeMap;
 
 use serde::de::{Error as DeError, MapAccess, Visitor};
@@ -66,7 +68,7 @@ pub enum ProcessParentEndPolicy {
 /// can be reconstructed after a crash without consulting live side state.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolIntentParentEnd {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub policy: ProcessParentEndPolicy,
 }
 
@@ -87,15 +89,15 @@ pub struct ToolIntentParentEndAction {
 pub enum ToolIntentParentEndOutcome {
     Abandoned {
         identity: ToolIntentIdentity,
-        process_id: String,
+        process_id: ProcessId,
     },
     Cancelled {
         identity: ToolIntentIdentity,
-        process_id: String,
+        process_id: ProcessId,
     },
     Refused {
         identity: ToolIntentIdentity,
-        process_id: String,
+        process_id: ProcessId,
         code: String,
         message: String,
     },
@@ -103,7 +105,7 @@ pub enum ToolIntentParentEndOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolIntentIdentity {
-    pub session_id: String,
+    pub session_id: SessionId,
     /// The enclosing execution-scope id: a turn id for turn scope and a
     /// process id for process scope.
     pub execution_scope_id: String,

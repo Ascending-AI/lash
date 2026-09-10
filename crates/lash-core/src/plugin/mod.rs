@@ -129,6 +129,7 @@ pub(crate) fn builtin_plugin_factories() -> Vec<Arc<dyn PluginFactory>> {
 
 #[cfg(test)]
 mod tests {
+    use crate::SessionId;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
@@ -146,7 +147,7 @@ mod tests {
     #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
     struct TypedEchoOutput {
         value: String,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
     }
 
     struct TypedEchoOp;
@@ -296,7 +297,7 @@ mod tests {
     }
 
     struct MockPlugin {
-        session_id: String,
+        session_id: SessionId,
     }
 
     use crate::testing::MockSessionManager;
@@ -431,7 +432,7 @@ mod tests {
         assert!(tool_names.contains("batch"));
         let contributions = session
             .collect_prompt_contributions(PromptHookContext {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
                 sessions: Arc::new(MockSessionManager::default()),
                 state: SessionReadView::from_snapshot(&SessionSnapshot::new(
                     crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -740,7 +741,7 @@ mod tests {
             .query_plugin(
                 "mock.echo",
                 json!({"ok":true}),
-                Some("root".to_string()),
+                Some(SessionId::from("root")),
                 false,
                 Arc::new(NoopSessionManager),
                 Arc::new(NoopSessionManager),
@@ -769,7 +770,7 @@ mod tests {
             .query_plugin(
                 "mock.echo",
                 json!({"ok":true}),
-                Some("child".to_string()),
+                Some(SessionId::from("child")),
                 false,
                 Arc::new(NoopSessionManager),
                 Arc::new(NoopSessionManager),
@@ -792,9 +793,10 @@ mod tests {
     fn plugin_host_unregisters_sessions() {
         let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
         let _session = host.build_session("root").expect("session");
-        assert!(host.session("root").is_ok());
-        host.unregister_session("root").expect("unregister");
-        match host.session("root") {
+        assert!(host.session(&SessionId::from("root")).is_ok());
+        host.unregister_session(&SessionId::from("root"))
+            .expect("unregister");
+        match host.session(&SessionId::from("root")) {
             Err(PluginOperationInvokeError::UnknownSession(id)) => assert_eq!(id, "root"),
             Ok(_) => panic!("expected missing session"),
             Err(other) => panic!("unexpected error: {other}"),

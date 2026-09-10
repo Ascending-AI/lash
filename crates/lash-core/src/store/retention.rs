@@ -1,5 +1,6 @@
 //! Explicit host policy for terminal-session evidence reclamation (FIG-653).
 
+use crate::SessionId;
 /// Host-selected exclusive horizon for commit evidence.
 ///
 /// Only receipts in a durably deleted session and strictly before this bound
@@ -82,7 +83,7 @@ impl FacadePluginOperation {
 /// `run_plugin_command(.., scope)` never passes through here, so its scope is
 /// never swept.
 pub fn mint_facade_operation_id(
-    session_id: &str,
+    session_id: &SessionId,
     operation: FacadePluginOperation,
     name: &str,
 ) -> String {
@@ -127,8 +128,16 @@ mod tests {
     /// stable id nor a lookalike without the activity segment passes.
     #[test]
     fn facade_mint_and_sweep_predicate_agree() {
-        let command = mint_facade_operation_id("sess-1", FacadePluginOperation::Command, "deploy");
-        let task = mint_facade_operation_id("sess-1", FacadePluginOperation::Task, "index");
+        let command = mint_facade_operation_id(
+            &SessionId::from("sess-1"),
+            FacadePluginOperation::Command,
+            "deploy",
+        );
+        let task = mint_facade_operation_id(
+            &SessionId::from("sess-1"),
+            FacadePluginOperation::Task,
+            "index",
+        );
         assert!(command.starts_with("sess-1:plugin_command:deploy:"));
         assert!(task.starts_with("sess-1:plugin_task:index:"));
         assert!(is_facade_minted_operation_id(&command));

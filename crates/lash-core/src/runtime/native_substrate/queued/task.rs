@@ -1,3 +1,4 @@
+use crate::SessionId;
 #[cfg(test)]
 use std::future::Future;
 #[cfg(test)]
@@ -210,7 +211,7 @@ impl QueuedWorkTaskDriver {
                     if state.active == 0 {
                         tracing::warn!(
                             target: "lash_core::queued_work",
-                            session_id = session_id.as_deref(),
+                            session_id = session_id.as_ref().map(SessionId::as_str),
                             event = "queued_work.scheduler_accounting",
                             "queued-work execution completed without an active scheduler entry"
                         );
@@ -474,7 +475,7 @@ impl QueuedWorkTaskDriver {
         let session_id = demand.session_id.clone();
         let run = async move {
             let claimable = run_handle
-                .peek_claimable_queued_work(session_id.as_deref())
+                .peek_claimable_queued_work(session_id.as_ref())
                 .await?;
             if claimable == Some(false) {
                 return Ok(QueuedWorkRunAttemptOutcome::Idle);
@@ -485,7 +486,7 @@ impl QueuedWorkTaskDriver {
             // `run_demand`, after which the demand idles until a new notification
             // re-arms it.
             let progress = run_handle
-                .claim_and_run_pending_with_progress(session_id.as_deref(), reason)
+                .claim_and_run_pending_with_progress(session_id.as_ref(), reason)
                 .await?;
             Ok(match progress {
                 QueuedWorkRunProgress::Blocked if claimable == Some(true) => {

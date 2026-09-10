@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use crate::TurnId;
 use std::sync::Arc;
 
@@ -25,7 +27,7 @@ const PROCESS_TRANSFER_FAMILY_VERSION: u8 = 1;
 ///
 /// Version 1 has no sum variants: it preserves the caller's ordered process
 /// id sequence. Retired tags remain burned when variants are introduced.
-fn process_transfer_set_preimage(process_ids: &[String]) -> Vec<u8> {
+fn process_transfer_set_preimage(process_ids: &[ProcessId]) -> Vec<u8> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
         "lash.process-transfer-set",
         PROCESS_TRANSFER_FAMILY_VERSION,
@@ -36,7 +38,7 @@ fn process_transfer_set_preimage(process_ids: &[String]) -> Vec<u8> {
     identity.finish()
 }
 
-fn process_transfer_set_identity(process_ids: &[String]) -> String {
+fn process_transfer_set_identity(process_ids: &[ProcessId]) -> String {
     crate::stable_identity::rendered_hash(
         "process-transfer-set",
         PROCESS_TRANSFER_FAMILY_VERSION,
@@ -201,7 +203,7 @@ impl RuntimeInvocation {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeScope {
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -213,7 +215,7 @@ pub struct RuntimeScope {
 impl RuntimeScope {
     /// Constructs a `RuntimeScope` for store, effect-host, and protocol implementors while
     /// materializing, executing, or persisting a session turn.
-    pub fn new(session_id: impl Into<String>) -> Self {
+    pub fn new(session_id: impl Into<SessionId>) -> Self {
         Self {
             session_id: session_id.into(),
             turn_id: None,
@@ -225,7 +227,7 @@ impl RuntimeScope {
     /// Constructs the complete turn scope effect-host implementors persist with an effect,
     /// including turn index and protocol iteration.
     pub fn for_turn(
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         turn_id: impl Into<TurnId>,
         turn_index: usize,
         protocol_iteration: usize,
@@ -262,10 +264,10 @@ pub enum RuntimeSubject {
         kind: RuntimeEffectKind,
     },
     Process {
-        process_id: String,
+        process_id: ProcessId,
     },
     ProcessEvent {
-        process_id: String,
+        process_id: ProcessId,
         sequence: u64,
         event_type: String,
     },
@@ -569,7 +571,7 @@ pub enum ProcessCommand {
     Start {
         registration: ProcessRegistration,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        observers: Vec<String>,
+        observers: Vec<SessionId>,
         /// Captured environment carried inside the journal admission and
         /// persisted by the local executor before process registration.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -588,10 +590,10 @@ pub enum ProcessCommand {
     Transfer {
         from_scope: SessionScope,
         to_scope: SessionScope,
-        process_ids: Vec<String>,
+        process_ids: Vec<ProcessId>,
     },
     DeleteSession {
-        session_id: String,
+        session_id: SessionId,
     },
     Await {
         process_ref: crate::ProcessRef,
@@ -603,13 +605,13 @@ pub enum ProcessCommand {
         replay: Option<crate::RuntimeReplay>,
     },
     CancelRefused {
-        process_id: String,
+        process_id: ProcessId,
         reason: Option<String>,
         refusal: crate::PluginError,
     },
     ParentEnd {
         identity: crate::ToolIntentIdentity,
-        process_id: String,
+        process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
         reason: String,
     },
@@ -620,7 +622,7 @@ pub enum ProcessCommand {
         request: crate::ProcessEventAppendRequest,
     },
     EmitEvent {
-        process_id: String,
+        process_id: ProcessId,
         request: crate::ProcessEventAppendRequest,
     },
 }
@@ -631,7 +633,7 @@ enum ProcessCommandDecode {
     Start {
         registration: ProcessRegistration,
         #[serde(default)]
-        observers: Vec<String>,
+        observers: Vec<SessionId>,
         #[serde(default)]
         env_spec: Box<Option<crate::ProcessExecutionEnvSpec>>,
         #[serde(default)]
@@ -645,10 +647,10 @@ enum ProcessCommandDecode {
     Transfer {
         from_scope: SessionScope,
         to_scope: SessionScope,
-        process_ids: Vec<String>,
+        process_ids: Vec<ProcessId>,
     },
     DeleteSession {
-        session_id: String,
+        session_id: SessionId,
     },
     Await {
         process_ref: crate::ProcessRef,
@@ -660,13 +662,13 @@ enum ProcessCommandDecode {
         replay: Option<crate::RuntimeReplay>,
     },
     CancelRefused {
-        process_id: String,
+        process_id: ProcessId,
         reason: Option<String>,
         refusal: crate::PluginError,
     },
     ParentEnd {
         identity: crate::ToolIntentIdentity,
-        process_id: String,
+        process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
         reason: String,
     },
@@ -677,7 +679,7 @@ enum ProcessCommandDecode {
         request: crate::ProcessEventAppendRequest,
     },
     EmitEvent {
-        process_id: String,
+        process_id: ProcessId,
         request: crate::ProcessEventAppendRequest,
     },
 }
@@ -1432,9 +1434,9 @@ mod rejection_tests {
     #[test]
     fn process_transfer_v1_identity_golden() {
         let process_ids = vec![
-            "process:a:b".to_string(),
-            "process\0b".to_string(),
-            "λ".to_string(),
+            ProcessId::from("process:a:b"),
+            ProcessId::from("process\0b"),
+            ProcessId::from("λ"),
         ];
         assert_eq!(
             hex(&process_transfer_set_preimage(&process_ids)),
@@ -1484,7 +1486,7 @@ mod rejection_tests {
     fn rejects_non_effect_subject() {
         let mut value = invocation(RuntimeEffectKind::Sleep);
         value.subject = RuntimeSubject::Process {
-            process_id: "process".to_string(),
+            process_id: ProcessId::from("process"),
         };
         assert_rejected(
             value,

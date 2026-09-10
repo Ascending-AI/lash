@@ -6,6 +6,7 @@
 //! session from the store factory — so even an in-memory host needs a factory.
 //! This explicit opt-in has no silent in-memory default and holds the same `RuntimePersistence` contract as the
 //! durable backend (verified by the `runtime_persistence` conformance suite).
+use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_sansio::sync::MutexExt;
@@ -56,7 +57,7 @@ struct InMemoryPendingTurnInput {
 fn settlement_mismatch<'a, R>(
     rows: &'a [R],
     row_ids: &'a [String],
-    session_id: &str,
+    session_id: &SessionId,
     identity: impl Fn(&R) -> (&str, &str),
     matches: impl Fn(&R) -> bool,
 ) -> Option<(Option<&'a String>, Option<&'a R>)> {
@@ -108,11 +109,11 @@ enum InMemoryQueuedWorkClaimKind {
     },
 }
 
-type InMemoryNodeAnchorRecord = (crate::BlobRef, crate::HydratedSessionCheckpoint, String);
+type InMemoryNodeAnchorRecord = (crate::BlobRef, crate::HydratedSessionCheckpoint, SessionId);
 type InMemoryNodeAnchors = Arc<Mutex<HashMap<String, InMemoryNodeAnchorRecord>>>;
 /// Session id -> component blob refs its live checkpoint references.
-pub(crate) type SharedCheckpointBlobRoots = Arc<Mutex<HashMap<String, HashSet<crate::BlobRef>>>>;
-pub(crate) type SharedSessionCatalog = Arc<Mutex<HashMap<String, crate::SessionSummary>>>;
+pub(crate) type SharedCheckpointBlobRoots = Arc<Mutex<HashMap<SessionId, HashSet<crate::BlobRef>>>>;
+pub(crate) type SharedSessionCatalog = Arc<Mutex<HashMap<SessionId, crate::SessionSummary>>>;
 
 #[cfg(any(test, feature = "testing"))]
 pub type RawPendingTurnInputForTesting = (
@@ -160,7 +161,7 @@ pub struct InMemorySessionStore {
     /// must remain host-code-free: read clocks and invoke any other dynamic
     /// host surface before acquiring this lock, then carry inert values in.
     write_transaction: Arc<Mutex<()>>,
-    pub(crate) bound_session_id: Mutex<Option<String>>,
+    pub(crate) bound_session_id: Mutex<Option<SessionId>>,
     pub(crate) session_head_meta: Mutex<Option<crate::SessionHeadMeta>>,
     pub(crate) session_meta: Mutex<Option<crate::SessionMeta>>,
     /// Independently readable mutable-continuation generation beside binding metadata.
@@ -170,13 +171,13 @@ pub struct InMemorySessionStore {
     /// Shared leafless node catalog; never treated as a resident graph without a real leaf grafted
     /// first.
     global_session_graph: Arc<Mutex<crate::SessionGraph>>,
-    global_node_owners: Arc<Mutex<HashMap<String, String>>>,
-    global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
+    global_node_owners: Arc<Mutex<HashMap<String, SessionId>>>,
+    global_session_heads: Arc<Mutex<HashMap<SessionId, Option<String>>>>,
     node_anchors: InMemoryNodeAnchors,
     tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
     /// Permanent per-factory deletion ledger. Maintenance never prunes this:
     /// an id, once used and deleted in this store, must never be reused.
-    deleted_session_ids: Arc<Mutex<HashSet<String>>>,
+    deleted_session_ids: Arc<Mutex<HashSet<SessionId>>>,
     session_catalog: SharedSessionCatalog,
     pub(crate) checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
     checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
@@ -190,7 +191,7 @@ pub struct InMemorySessionStore {
     pub(crate) usage_deltas: Mutex<Vec<crate::store::RuntimeUsageDelta>>,
     pub(crate) runtime_commit_count: Mutex<usize>,
     runtime_turn_commits: Mutex<RuntimeTurnCommitMap>,
-    session_execution_leases: Mutex<HashMap<String, InMemorySessionExecutionLease>>,
+    session_execution_leases: Mutex<HashMap<SessionId, InMemorySessionExecutionLease>>,
     queued_work: Mutex<Vec<InMemoryQueuedBatch>>,
     queued_work_next_seq: Mutex<u64>,
     /// Receiver-side sender allocation floor. This is a redelivery fence, not
@@ -304,13 +305,13 @@ impl InMemorySessionStore {
         clock: Arc<dyn crate::Clock>,
         write_transaction: Arc<Mutex<()>>,
         global_session_graph: Arc<Mutex<crate::SessionGraph>>,
-        global_node_owners: Arc<Mutex<HashMap<String, String>>>,
-        global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
+        global_node_owners: Arc<Mutex<HashMap<String, SessionId>>>,
+        global_session_heads: Arc<Mutex<HashMap<SessionId, Option<String>>>>,
         node_anchors: InMemoryNodeAnchors,
         checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
         checkpoint_blob_roots: SharedCheckpointBlobRoots,
         tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
-        deleted_session_ids: Arc<Mutex<HashSet<String>>>,
+        deleted_session_ids: Arc<Mutex<HashSet<SessionId>>>,
         session_catalog: SharedSessionCatalog,
         attachment_condemnations: SharedAttachmentCondemnations,
         attachment_manifest: SharedAttachmentManifest,
@@ -401,7 +402,7 @@ impl InMemorySessionStore {
 
     fn verify_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         fence: &crate::SessionExecutionLeaseAuthority,
         now: u64,
     ) -> Result<(), crate::store::StoreError> {
@@ -420,7 +421,7 @@ impl InMemorySessionStore {
     /// `None` when no live lease holds the session. A queued-work or turn-input
     /// claim is live for lease-less host callers exactly when the generation it
     /// pins equals this value (ADR 0029).
-    fn live_session_lease_generation(&self, session_id: &str, now: u64) -> Option<u64> {
+    fn live_session_lease_generation(&self, session_id: &SessionId, now: u64) -> Option<u64> {
         let leases = self.session_execution_leases.lock_recover();
         leases
             .get(session_id)
@@ -462,12 +463,12 @@ impl InMemorySessionStore {
     }
 
     fn in_memory_session_execution_lease(
-        session_id: &str,
+        session_id: &SessionId,
         current: &InMemorySessionExecutionLease,
     ) -> crate::SessionExecutionLease {
         match current.held_fields() {
             Some(fields) => crate::SessionExecutionLease {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 owner: fields.owner.clone(),
                 executor_id: fields.executor_id.to_string(),
                 lease_token: fields.lease_token.to_string(),
@@ -481,7 +482,7 @@ impl InMemorySessionStore {
     }
 
     fn acquire_session_execution_lease_in_memory(
-        session_id: &str,
+        session_id: &SessionId,
         owner: &crate::LeaseOwnerIdentity,
         executor_id: &str,
         lease_token: &str,
@@ -506,7 +507,7 @@ impl InMemorySessionStore {
 
     fn claim_ready_queued_work_in_memory(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         kind: InMemoryQueuedWorkClaimKind,
@@ -527,7 +528,7 @@ impl InMemorySessionStore {
 
     fn claim_ready_queued_work_after_lease_validation(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         kind: InMemoryQueuedWorkClaimKind,
@@ -546,7 +547,7 @@ impl InMemorySessionStore {
 
     fn claim_ready_queued_work_for_state(
         queued: &mut [InMemoryQueuedBatch],
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         kind: InMemoryQueuedWorkClaimKind,
@@ -677,7 +678,7 @@ impl InMemorySessionStore {
         }
         Ok(crate::QueuedWorkClaimOutcome::Claimed(
             crate::QueuedWorkClaim {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 claim_id,
                 owner: owner.clone(),
                 lease_token,
@@ -695,7 +696,7 @@ impl InMemorySessionStore {
 
     fn claim_pending_turn_inputs_in_memory(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         max_inputs: usize,
@@ -718,7 +719,7 @@ impl InMemorySessionStore {
 
     fn claim_pending_turn_inputs_after_lease_validation(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         max_inputs: usize,
@@ -739,7 +740,7 @@ impl InMemorySessionStore {
 
     fn claim_pending_turn_inputs_for_state(
         pending: &mut [InMemoryPendingTurnInput],
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         max_inputs: usize,
@@ -825,7 +826,7 @@ impl InMemorySessionStore {
             inputs.push(entry.input.clone());
         }
         Ok(Some(crate::TurnInputClaim {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             claim_id,
             owner: owner.clone(),
             lease_token,
@@ -841,7 +842,7 @@ impl InMemorySessionStore {
 
     fn checkpoint_work_pending_in_memory(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         generation: u64,
         turn_id: &TurnId,
         checkpoint: crate::CheckpointKind,
@@ -1186,7 +1187,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             let new_leaf_node_id = commit.graph.leaf_node_id().cloned();
             let mut tombstoned = self.tombstoned_node_ids.lock_recover().clone();
             let mut session_heads = self.global_session_heads.lock_recover().clone();
-            session_heads.insert(commit.session_id.clone(), new_leaf_node_id.clone());
+            session_heads.insert(
+                SessionId::from(commit.session_id.clone().to_string()),
+                new_leaf_node_id.clone(),
+            );
             let anchored_node_ids = self
                 .node_anchors
                 .lock_recover()
@@ -1313,7 +1317,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                             })
                     {
                         fences
-                            .entry((entry.batch.session_id.clone(), process_id))
+                            .entry((
+                                entry.batch.session_id.clone().to_string(),
+                                process_id.to_string(),
+                            ))
                             .and_modify(|allocation_floor| {
                                 *allocation_floor = (*allocation_floor).max(sequence);
                             })
@@ -1424,7 +1431,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         *self.tombstoned_node_ids.lock_recover() = staged_tombstoned_node_ids;
         *self.global_session_heads.lock_recover() = staged_session_heads;
         for node in incoming_nodes {
-            global_node_owners.insert(node.node_id.clone(), commit.session_id.clone());
+            global_node_owners.insert(
+                node.node_id.clone(),
+                SessionId::from(commit.session_id.clone().to_string()),
+            );
         }
         drop(global_node_owners);
         {
@@ -1458,7 +1468,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             // component edges replace the superseded set wholesale.
             self.checkpoint_blob_roots
                 .lock_recover()
-                .insert(commit.session_id.clone(), roots);
+                .insert(commit.session_id.clone().clone(), roots);
         }
         *self.checkpoint.lock_recover() = Some(hydrated_checkpoint);
         self.commit_turn_attachment_intents(
@@ -1474,7 +1484,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         let durable_relation = session_meta_before_commit.map(|meta| meta.relation);
         self.session_catalog
             .lock_recover()
-            .entry(session_id.clone())
+            .entry(SessionId::from(session_id.clone().to_string()))
             .and_modify(|summary| {
                 summary.last_commit_at_ms = Some(transaction_now);
                 summary.head_revision = head_revision;
@@ -1493,7 +1503,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 parent_session_id: durable_relation
                     .as_ref()
                     .and_then(crate::SessionRelation::parent_session_id)
-                    .map(ToOwned::to_owned),
+                    .map(ToOwned::to_owned)
+                    .map(Into::into),
                 deleted: false,
             });
         *self.runtime_commit_count.lock_recover() += 1;
@@ -1508,7 +1519,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         };
         let mut runtime_turn_commits = self.runtime_turn_commits.lock_recover();
         runtime_turn_commits.insert(
-            (session_id.clone(), receipt.operation_key.to_string()),
+            (
+                session_id.clone().clone(),
+                receipt.operation_key.to_string(),
+            ),
             stored_receipt.clone(),
         );
         if commit.turn_commit.operation.key == "session-command" {
@@ -1522,7 +1536,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     batch_id,
                 )?;
                 runtime_turn_commits.insert(
-                    (session_id.clone(), marker),
+                    (session_id.clone().clone(), marker),
                     RuntimeTurnCommitRecord {
                         append_request_identity: crate::AppendRequestIdentity::PlainCommit,
                         ..stored_receipt.clone()
@@ -1559,7 +1573,11 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         {
             summary.relation = crate::SessionRelationKind::from_relation(&meta.relation);
             summary.durable_relation = Some(meta.relation.clone());
-            summary.parent_session_id = meta.relation.parent_session_id().map(ToOwned::to_owned);
+            summary.parent_session_id = meta
+                .relation
+                .parent_session_id()
+                .map(ToOwned::to_owned)
+                .map(Into::into);
         }
         Ok(())
     }
@@ -1575,4 +1593,4 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
 pub use factory::lineage_conformance_support::handles as in_memory_lineage_handles;
 
 type SharedAttachmentManifest =
-    Arc<Mutex<HashMap<(String, crate::AttachmentId), crate::AttachmentManifestEntry>>>;
+    Arc<Mutex<HashMap<(SessionId, crate::AttachmentId), crate::AttachmentManifestEntry>>>;

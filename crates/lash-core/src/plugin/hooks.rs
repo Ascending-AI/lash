@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -82,7 +83,7 @@ pub type AssistantStreamFinishedHook =
 
 #[derive(Clone)]
 pub struct PromptHookContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub sessions: Arc<dyn SessionStateService>,
     pub state: SessionReadView,
     pub protocol_turn_options: ProtocolTurnOptions,
@@ -91,7 +92,7 @@ pub struct PromptHookContext {
 
 #[derive(Clone)]
 pub struct TurnHookContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub state: SessionReadView,
     pub sessions: Arc<dyn SessionStateService>,
     pub turn_context: crate::TurnContext,
@@ -99,7 +100,7 @@ pub struct TurnHookContext {
 
 #[derive(Clone)]
 pub struct SessionConfigChangedContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub previous: SessionPolicy,
     pub current: SessionPolicy,
     pub sessions: Arc<dyn SessionStateService>,
@@ -107,7 +108,7 @@ pub struct SessionConfigChangedContext {
 
 #[derive(Clone)]
 pub struct SessionStateChangedContext<'run> {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub state: SessionReadView,
     pub sessions: Arc<dyn SessionStateService>,
     pub session_graph: Arc<dyn SessionGraphService>,
@@ -153,7 +154,7 @@ impl TurnHookReport {
 
 #[derive(Clone)]
 pub struct ToolCallHookContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub tool_name: String,
     pub args: serde_json::Value,
     pub argument_projection: crate::ToolArgumentProjectionPolicy,
@@ -163,7 +164,7 @@ pub struct ToolCallHookContext {
 
 impl ToolCallHookContext {
     pub fn new(
-        session_id: String,
+        session_id: SessionId,
         tool_name: String,
         args: serde_json::Value,
         argument_projection: crate::ToolArgumentProjectionPolicy,
@@ -197,7 +198,7 @@ impl ToolCallHookContext {
 
 #[derive(Clone)]
 pub struct ToolResultHookContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub tool_name: String,
     pub args: serde_json::Value,
     pub result: ToolOutcome,
@@ -208,7 +209,7 @@ pub struct ToolResultHookContext {
 
 impl ToolResultHookContext {
     pub fn new(
-        session_id: String,
+        session_id: SessionId,
         tool_name: String,
         args: serde_json::Value,
         result: ToolOutcome,
@@ -244,7 +245,7 @@ impl ToolResultHookContext {
 
 #[derive(Clone)]
 pub struct ToolResultProjectionContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub call_id: String,
     pub tool_name: String,
     pub args: serde_json::Value,
@@ -254,14 +255,14 @@ pub struct ToolResultProjectionContext {
 
 #[derive(Clone)]
 pub struct TurnResultHookContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub turn: Arc<TurnHookReport>,
     pub sessions: Arc<dyn SessionStateService>,
 }
 
 #[derive(Clone)]
 pub struct CheckpointHookContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub checkpoint: CheckpointKind,
     pub state: SessionReadView,
     pub sessions: Arc<dyn SessionStateService>,
@@ -271,7 +272,7 @@ pub struct CheckpointHookContext {
 
 #[derive(Clone)]
 pub struct AssistantStreamHookContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub chunk: String,
 }
 
@@ -291,7 +292,7 @@ pub struct AssistantStreamTransform {
 
 #[derive(Clone)]
 pub struct AssistantResponseHookContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub response: crate::LlmResponse,
 }
 
@@ -314,6 +315,6 @@ pub enum AssistantStreamFinishReason {
 
 #[derive(Clone)]
 pub struct AssistantStreamFinishedContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub reason: AssistantStreamFinishReason,
 }

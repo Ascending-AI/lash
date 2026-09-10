@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -168,7 +170,7 @@ pub enum TriggerDeliveryEmitOutcome {
 pub struct TriggerDeliveryEmitReceipt {
     pub occurrence_id: String,
     pub subscription_id: String,
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub outcome: TriggerDeliveryEmitOutcome,
 }
 
@@ -192,7 +194,7 @@ impl TriggerEmitReport {
         }
     }
 
-    pub fn started_process_ids(&self) -> Vec<String> {
+    pub fn started_process_ids(&self) -> Vec<ProcessId> {
         self.deliveries
             .iter()
             .filter(|delivery| delivery.outcome == TriggerDeliveryEmitOutcome::Started)
@@ -238,7 +240,7 @@ pub struct TriggerOccurrenceRequest {
     /// Optional host routing scope. When present, only subscriptions
     /// registered by this session can reserve deliveries for the occurrence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "TriggerOccurrenceOutcome::is_fired")]
     pub outcome: TriggerOccurrenceOutcome,
 }
@@ -272,7 +274,7 @@ impl TriggerOccurrenceRequest {
 
     /// Restricts occurrence delivery reservation to subscriptions registered by one session for
     /// trigger-store implementors enforcing host routing scope.
-    pub fn for_session(mut self, session_id: impl Into<String>) -> Self {
+    pub fn for_session(mut self, session_id: impl Into<SessionId>) -> Self {
         self.session_id = Some(session_id.into());
         self
     }
@@ -296,7 +298,7 @@ pub struct TriggerOccurrenceRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "TriggerOccurrenceOutcome::is_fired")]
     pub outcome: TriggerOccurrenceOutcome,
     pub occurred_at_ms: u64,
@@ -560,7 +562,7 @@ pub fn validate_subscription_key(key: &str, internal: bool) -> Result<(), Plugin
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TriggerOwnerScope {
-    Session { session_id: String },
+    Session { session_id: SessionId },
     Host { binding_id: String },
     Platform,
 }
@@ -568,7 +570,7 @@ pub enum TriggerOwnerScope {
 impl TriggerOwnerScope {
     /// Constructs a `TriggerOwnerScope` using session semantics for store and process-engine
     /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
-    pub fn session(session_id: impl Into<String>) -> Self {
+    pub fn session(session_id: impl Into<SessionId>) -> Self {
         Self::Session {
             session_id: session_id.into(),
         }
@@ -598,7 +600,7 @@ impl TriggerOwnerScope {
 
     /// Exposes the owning session to trigger-store implementors only for session scope, returning
     /// `None` for host and platform ownership.
-    pub fn session_id(&self) -> Option<&str> {
+    pub fn session_id(&self) -> Option<&SessionId> {
         match self {
             Self::Session { session_id } => Some(session_id),
             Self::Host { .. } | Self::Platform => None,
@@ -651,7 +653,7 @@ impl TriggerSubscriptionRecord {
 
     /// Exposes the registrant session to trigger-store implementors only for session-owned records,
     /// returning `None` for host and platform ownership.
-    pub fn registrant_session_id(&self) -> Option<&str> {
+    pub fn registrant_session_id(&self) -> Option<&SessionId> {
         self.owner_scope.session_id()
     }
 }
@@ -714,7 +716,7 @@ pub struct TriggerSubscriptionFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registrant_scope_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscription_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -732,7 +734,7 @@ pub struct TriggerSubscriptionFilter {
 impl TriggerSubscriptionFilter {
     /// Constructs a `TriggerSubscriptionFilter` using for session semantics for store and
     /// durable-substrate implementors while persisting trigger subscriptions and occurrences.
-    pub fn for_session(session_id: impl Into<String>) -> Self {
+    pub fn for_session(session_id: impl Into<SessionId>) -> Self {
         Self {
             session_id: Some(session_id.into()),
             ..Self::default()
@@ -770,7 +772,7 @@ impl TriggerSubscriptionFilter {
             .is_none_or(|scope_id| record.registrant_scope_id() == scope_id)
             && self
                 .session_id
-                .as_deref()
+                .as_ref()
                 .is_none_or(|session_id| record.registrant_session_id() == Some(session_id))
             && self
                 .subscription_key
@@ -1384,7 +1386,7 @@ pub enum TriggerDeliveryReservationOutcome {
 pub struct TriggerDeliveryReservation {
     pub occurrence: TriggerOccurrenceRecord,
     pub subscription: TriggerSubscriptionRecord,
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub created_at_ms: u64,
     pub reservation_status: TriggerDeliveryReservationOutcome,
 }
@@ -1397,7 +1399,7 @@ pub struct TriggerDeliveryReservation {
 pub struct TriggerDeliveryRetentionCandidate {
     pub occurrence_id: String,
     pub subscription_id: String,
-    pub process_id: String,
+    pub process_id: ProcessId,
 }
 
 /// Counters produced by store implementors after atomic reconciliation.
@@ -1552,7 +1554,10 @@ pub trait TriggerStore: Send + Sync {
         filter: TriggerSubscriptionFilter,
     ) -> Result<Vec<TriggerSubscriptionRecord>, PluginError>;
 
-    async fn delete_session_subscriptions(&self, session_id: &str) -> Result<usize, PluginError>;
+    async fn delete_session_subscriptions(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<usize, PluginError>;
 
     async fn ingest_occurrence(
         &self,
@@ -1576,7 +1581,7 @@ pub trait TriggerStore: Send + Sync {
 
     async fn list_deliveries_by_process_id(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Vec<TriggerDeliveryReservation>, PluginError>;
 
     /// List every reserved delivery snapshot, including deliveries whose live
@@ -1587,7 +1592,7 @@ pub trait TriggerStore: Send + Sync {
     /// List the distinct deterministic process ids currently referenced by
     /// delivery rows, without materializing occurrence or subscription JSON.
     /// Process-retention reconciliation uses this narrow worklist query.
-    async fn list_delivery_process_ids(&self) -> Result<Vec<String>, PluginError>;
+    async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, PluginError>;
 
     /// List stable observations for process-retention reconciliation. Deletion
     /// must match every identity field, never just the reusable process id.
@@ -1597,7 +1602,7 @@ pub trait TriggerStore: Send + Sync {
 
     /// Store implementors list session owners found in subscriptions, delivery
     /// snapshots, or receipts for ADR 0049 frontier classification.
-    async fn list_session_owner_ids_for_retention(&self) -> Result<Vec<String>, PluginError>;
+    async fn list_session_owner_ids_for_retention(&self) -> Result<Vec<SessionId>, PluginError>;
 
     /// Store implementors apply one trigger-retention decision atomically.
     ///
@@ -1607,7 +1612,7 @@ pub trait TriggerStore: Send + Sync {
     async fn reconcile_trigger_retention(
         &self,
         candidates: &[TriggerDeliveryRetentionCandidate],
-        deleted_session_ids: &[String],
+        deleted_session_ids: &[SessionId],
     ) -> Result<TriggerRetentionReconciliationReport, PluginError>;
 
     /// Delete only the supplied, previously observed delivery rows.

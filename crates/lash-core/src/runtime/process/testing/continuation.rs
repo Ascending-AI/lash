@@ -1,3 +1,4 @@
+use crate::ProcessId;
 use crate::plugin::PluginError;
 
 use super::super::registry::ProcessContinuationStore;
@@ -7,13 +8,13 @@ use super::TestLocalProcessRegistry;
 impl ProcessContinuationStore for TestLocalProcessRegistry {
     async fn put_segment_handover(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         handover: crate::PersistedSegmentHandover,
     ) -> Result<(), PluginError> {
         if !self.managed.lock().await.contains_key(process_id) {
             return Err(self.process_miss(process_id).await);
         }
-        let key = (process_id.to_string(), handover.segment_ordinal);
+        let key = (process_id.clone(), handover.segment_ordinal);
         let mut handovers = self.handovers.lock().await;
         if let Some(existing) = handovers.get(&key) {
             if existing == &handover {
@@ -34,20 +35,20 @@ impl ProcessContinuationStore for TestLocalProcessRegistry {
 
     async fn get_segment_handover(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         segment_ordinal: u64,
     ) -> Result<Option<crate::PersistedSegmentHandover>, PluginError> {
         Ok(self
             .handovers
             .lock()
             .await
-            .get(&(process_id.to_string(), segment_ordinal))
+            .get(&(ProcessId::from(process_id.to_string()), segment_ordinal))
             .cloned())
     }
 
     async fn latest_segment_handover(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<crate::PersistedSegmentHandover>, PluginError> {
         Ok(self
             .handovers
@@ -59,7 +60,7 @@ impl ProcessContinuationStore for TestLocalProcessRegistry {
             .map(|(_, handover)| handover.clone()))
     }
 
-    async fn delete_segment_handovers(&self, process_id: &str) -> Result<(), PluginError> {
+    async fn delete_segment_handovers(&self, process_id: &ProcessId) -> Result<(), PluginError> {
         self.handovers
             .lock()
             .await

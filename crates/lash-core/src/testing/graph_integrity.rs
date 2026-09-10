@@ -1,5 +1,6 @@
 //! Graph fault injection vocabulary for backend test support.
 
+use crate::SessionId;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GraphIntegrityCorruption {
     OrphanLeaf,
@@ -36,7 +37,7 @@ impl GraphIntegrityRead {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphIntegrityTarget {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub root_node_id: String,
     pub leaf_node_id: String,
     pub missing_node_id: String,

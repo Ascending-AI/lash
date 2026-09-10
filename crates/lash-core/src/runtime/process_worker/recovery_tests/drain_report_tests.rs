@@ -18,7 +18,7 @@ async fn drain_reports_claim_backend_error_and_retries() {
         .expect("register owner-bound row");
     registry
         .record_first_started(
-            process_id,
+            &ProcessId::from(process_id),
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -41,7 +41,7 @@ async fn drain_reports_claim_backend_error_and_retries() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::ClaimLease,
                 error: "plugin session error: injected claim failure".to_string(),
@@ -50,7 +50,7 @@ async fn drain_reports_claim_backend_error_and_retries() {
     );
     assert_recovery_backend_error_event(
         &capture,
-        process_id,
+        &ProcessId::from(process_id),
         "claim_lease",
         "plugin session error: injected claim failure",
     );
@@ -78,7 +78,7 @@ async fn drain_reports_lease_renewal_backend_error_and_retries() {
         .expect("register owner-bound row");
     registry
         .record_first_started(
-            process_id,
+            &ProcessId::from(process_id),
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -101,7 +101,7 @@ async fn drain_reports_lease_renewal_backend_error_and_retries() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::RenewLease,
                 error: "plugin session error: injected lease-renewal failure".to_string(),
@@ -110,7 +110,7 @@ async fn drain_reports_lease_renewal_backend_error_and_retries() {
     );
     assert_recovery_backend_error_event(
         &capture,
-        process_id,
+        &ProcessId::from(process_id),
         "renew_lease",
         "plugin session error: injected lease-renewal failure",
     );
@@ -138,7 +138,7 @@ async fn drain_reports_registry_read_error_instead_of_absent() {
         .expect("register owner-bound row");
     registry
         .record_first_started(
-            process_id,
+            &ProcessId::from(process_id),
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -161,7 +161,7 @@ async fn drain_reports_registry_read_error_instead_of_absent() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::ReadProcess,
                 error: "plugin session error: injected registry read failure".to_string(),
@@ -170,7 +170,7 @@ async fn drain_reports_registry_read_error_instead_of_absent() {
     );
     assert_recovery_backend_error_event(
         &capture,
-        process_id,
+        &ProcessId::from(process_id),
         "read_process",
         "plugin session error: injected registry read failure",
     );
@@ -198,7 +198,7 @@ async fn drain_distinguishes_busy_and_absent_rows() {
             .expect("register owner-bound row");
         registry
             .record_first_started(
-                process_id,
+                &ProcessId::from(process_id),
                 ProcessStarted {
                     owner: owner.clone(),
                     fencing_token: 0,
@@ -211,7 +211,7 @@ async fn drain_distinguishes_busy_and_absent_rows() {
     }
     registry
         .claim_process_lease(
-            "owner-bound-busy",
+            &ProcessId::from("owner-bound-busy"),
             &LeaseOwnerIdentity::opaque("live-peer", "live-peer-incarnation"),
             60_000,
         )
@@ -225,7 +225,7 @@ async fn drain_distinguishes_busy_and_absent_rows() {
     assert_eq!(
         busy.deferred,
         vec![ProcessDrainDeferred {
-            process_id: "owner-bound-busy".to_string(),
+            process_id: ProcessId::from("owner-bound-busy"),
             disposition: ProcessRecoveryAttemptOutcome::Busy,
         }]
     );
@@ -241,7 +241,7 @@ async fn drain_distinguishes_busy_and_absent_rows() {
         .expect("register read-as-absent row");
     registry
         .record_first_started(
-            absent_id,
+            &ProcessId::from(absent_id),
             ProcessStarted {
                 owner: worker.config().lease_owner.clone(),
                 fencing_token: 0,
@@ -257,11 +257,11 @@ async fn drain_distinguishes_busy_and_absent_rows() {
         absent.deferred,
         vec![
             ProcessDrainDeferred {
-                process_id: "owner-bound-busy".to_string(),
+                process_id: ProcessId::from("owner-bound-busy"),
                 disposition: ProcessRecoveryAttemptOutcome::Busy,
             },
             ProcessDrainDeferred {
-                process_id: absent_id.to_string(),
+                process_id: ProcessId::from(absent_id.to_string()),
                 disposition: ProcessRecoveryAttemptOutcome::Absent,
             },
         ]

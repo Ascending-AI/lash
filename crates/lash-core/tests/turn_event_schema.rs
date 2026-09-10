@@ -12,6 +12,7 @@
 //! representative sample for the new variant is added to [`sample_events`], so
 //! the new shape actually gets pinned rather than silently skipped.
 
+use lash_core::SessionId;
 use lash_core::TurnId;
 use std::collections::BTreeSet;
 
@@ -373,7 +374,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 call_id: "call-1".to_string(),
                 outcome: ToolIntentExecutionOutcome::Executed {
                     identity: ToolIntentIdentity {
-                        session_id: "session-1".to_string(),
+                        session_id: SessionId::from("session-1"),
                         execution_scope_id: "turn-1".to_string(),
                         tool_call_id: "call-1".to_string(),
                         intent_index: 0,
@@ -434,7 +435,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "child_usage",
             TurnEvent::ChildUsage {
-                session_id: "child".to_string(),
+                session_id: SessionId::from("child"),
                 source: "delegate".to_string(),
                 model: "m".to_string(),
                 protocol_iteration: 1,

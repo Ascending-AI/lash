@@ -36,7 +36,7 @@ impl RuntimeScenarioContext {
         if phase.pending_turn_inputs_empty_after_commit {
             assert!(
                 self.store()
-                    .list_pending_turn_inputs(self.session_id)
+                    .list_pending_turn_inputs(&self.session_id)
                     .await
                     .unwrap_or_else(|err| panic!(
                         "{} failed to list pending turn inputs after commit: {err}",
@@ -66,7 +66,7 @@ impl RuntimeScenarioContext {
         }
         assert!(
             self.store()
-                .list_queued_work(self.session_id)
+                .list_queued_work(&self.session_id)
                 .await
                 .expect("list queued work after scenario")
                 .is_empty(),

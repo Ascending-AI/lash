@@ -5,6 +5,7 @@ use super::logical_turn::{
 };
 use super::turn_control::ActiveTurnControl;
 use super::*;
+use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::{
     ProtocolTurnOptionsFacadeOps, RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps,
@@ -220,7 +221,7 @@ fn turn_phase_id(parent_turn_id: &TurnId, phase: &str) -> TurnId {
 
 fn scoped_child_turn_controller<'run>(
     scoped_effect_controller: &ScopedEffectController<'run>,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
 ) -> Result<ScopedEffectController<'run>, RuntimeError> {
     let scope = ExecutionScope::turn(session_id, turn_id);
@@ -525,13 +526,13 @@ async fn publish_terminal_after_commit(
     turn_control: &ActiveTurnControl,
     resolver: &dyn AwaitEventResolver,
     terminal: &TurnTerminal,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
 ) {
     if let Err(err) = turn_control.publish_terminal(resolver, terminal).await {
         tracing::warn!(
             error = %err,
-            session_id,
+            session_id = %session_id,
             turn_id = turn_id.as_str(),
             "turn committed but terminal publication failed"
         );
@@ -570,6 +571,7 @@ async fn emit_runtime_stream_event_to_sinks(
 
 #[cfg(test)]
 mod tests {
+    use crate::SessionId;
     use crate::TurnId;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -684,7 +686,7 @@ mod tests {
 
         async fn revoke_await_events_for_session(
             &self,
-            session_id: &str,
+            session_id: &SessionId,
         ) -> Result<(), RuntimeError> {
             self.native
                 .revoke_await_events_for_session(session_id)
@@ -693,7 +695,7 @@ mod tests {
 
         async fn cancel_await_events_for_session(
             &self,
-            session_id: &str,
+            session_id: &SessionId,
         ) -> Result<(), RuntimeError> {
             self.native
                 .cancel_await_events_for_session(session_id)
@@ -834,7 +836,7 @@ mod tests {
                 }),
                 session_revision: Some(1),
             },
-            "committed-session",
+            &SessionId::from("committed-session"),
             &TurnId::from("committed-turn"),
         )
         .await;

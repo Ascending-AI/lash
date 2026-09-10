@@ -27,7 +27,7 @@ mod lease;
 #[derive(Clone, Debug)]
 pub(crate) struct RuntimeScenario {
     pub(crate) name: &'static str,
-    pub(crate) session_id: &'static str,
+    pub(crate) session_id: SessionId,
     pub(crate) host_behavior: RuntimeHostBehavior,
     pub(crate) phases: Vec<RuntimeScenarioPhase>,
 }
@@ -35,13 +35,13 @@ impl RuntimeScenario {
     pub(crate) fn new(name: &'static str) -> Self {
         Self {
             name,
-            session_id: "root",
+            session_id: SessionId::from("root"),
             host_behavior: RuntimeHostBehavior::default(),
             phases: Vec::new(),
         }
     }
 
-    pub(crate) fn session_id(mut self, session_id: &'static str) -> Self {
+    pub(crate) fn session_id(mut self, session_id: SessionId) -> Self {
         self.session_id = session_id;
         self
     }
@@ -129,7 +129,7 @@ impl RuntimeScenario {
 
 struct RuntimeScenarioContext {
     name: &'static str,
-    session_id: &'static str,
+    session_id: SessionId,
     host_behavior: RuntimeHostBehavior,
     clock: Arc<crate::testing::TestClock>,
     store: Arc<RecordingStore>,
@@ -144,13 +144,9 @@ struct RuntimeScenarioContext {
 }
 
 impl RuntimeScenarioContext {
-    fn new(
-        name: &'static str,
-        session_id: &'static str,
-        host_behavior: RuntimeHostBehavior,
-    ) -> Self {
+    fn new(name: &'static str, session_id: SessionId, host_behavior: RuntimeHostBehavior) -> Self {
         let mut state = RuntimeSessionState {
-            session_id: session_id.to_string(),
+            session_id: session_id.clone(),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         state.ensure_agent_frame_initialized();
@@ -174,7 +170,7 @@ impl RuntimeScenarioContext {
 
     async fn execute(&mut self, phase: RuntimeScenarioPhase) {
         self.store
-            .admit_and_bind_session(&crate::SessionBinding::root(self.session_id))
+            .admit_and_bind_session(&crate::SessionBinding::root(&self.session_id))
             .await
             .expect("bind runtime scenario session");
         match phase {
@@ -211,7 +207,7 @@ impl RuntimeScenarioContext {
         let lease = self
             .store()
             .try_claim_session_execution_lease(
-                self.session_id,
+                &self.session_id,
                 &owner,
                 "ensure-lease-executor",
                 60_000,
@@ -535,7 +531,7 @@ pub(crate) enum RuntimeQueueIngress {
 }
 
 impl RuntimeQueueIngress {
-    pub(crate) fn batch_draft(&self, session_id: &str) -> QueuedWorkBatchDraft {
+    pub(crate) fn batch_draft(&self, session_id: &SessionId) -> QueuedWorkBatchDraft {
         match self {
             Self::RefreshToolCatalog { reason } => QueuedWorkBatchDraft::new(
                 session_id,
@@ -547,15 +543,15 @@ impl RuntimeQueueIngress {
             Self::ProcessWake { text } => crate::process_wake_batch_draft(ProcessWakeDelivery {
                 version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
                 wake_id: format!("wake:{session_id}:{text}"),
-                target_session_id: session_id.to_string(),
-                process_id: format!("process:{text}"),
+                target_session_id: SessionId::from(session_id.to_string()),
+                process_id: ProcessId::from(format!("process:{text}")),
                 process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
                 sequence: 1,
                 event_type: "process.wake".to_string(),
                 event_invocation: RuntimeInvocation {
                     scope: RuntimeScope::new(session_id),
                     subject: RuntimeSubject::ProcessEvent {
-                        process_id: format!("process:{text}"),
+                        process_id: ProcessId::from(format!("process:{text}")),
                         sequence: 1,
                         event_type: "process.wake".to_string(),
                     },
@@ -591,7 +587,7 @@ pub(crate) enum RuntimeTurnInputIngress {
         expected_alias: &'static str,
     },
     NextTurnForSession {
-        session_id: &'static str,
+        session_id: SessionId,
         text: &'static str,
     },
     ActiveTurn {
@@ -622,7 +618,10 @@ pub(crate) fn local_lease_owner(owner_id: &str, _process_start: &str) -> LeaseOw
     lease_owner(owner_id)
 }
 
-pub(crate) fn pending_next_turn_input_draft(session_id: &str, text: &str) -> PendingTurnInputDraft {
+pub(crate) fn pending_next_turn_input_draft(
+    session_id: &SessionId,
+    text: &str,
+) -> PendingTurnInputDraft {
     PendingTurnInputDraft::new(
         session_id,
         TurnInputIngress::NextTurn,
@@ -631,7 +630,7 @@ pub(crate) fn pending_next_turn_input_draft(session_id: &str, text: &str) -> Pen
 }
 
 pub(crate) fn pending_active_turn_input_draft(
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     min_boundary: TurnInputCheckpointBoundary,
     text: &str,
@@ -653,7 +652,7 @@ pub(crate) fn pending_input_text(input: &PendingTurnInput) -> Option<&str> {
 async fn assert_pending_turn_inputs(
     scenario_name: &str,
     store: &RecordingStore,
-    session_id: &str,
+    session_id: &SessionId,
     enqueued_turn_inputs: &HashMap<&'static str, PendingTurnInput>,
     expectations: &[RuntimePendingTurnInputExpectation],
 ) {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::SessionId;
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_sansio::sync::MutexExt;
 
@@ -8,20 +9,20 @@ use lash_sansio::sync::MutexExt;
 #[derive(Clone)]
 pub struct InMemorySessionStoreFactory {
     pub(super) clock: Arc<dyn crate::Clock>,
-    pub(super) stores: Arc<Mutex<HashMap<String, Arc<InMemorySessionStore>>>>,
-    pub(super) retired_stores: Arc<Mutex<HashMap<String, Arc<InMemorySessionStore>>>>,
+    pub(super) stores: Arc<Mutex<HashMap<SessionId, Arc<InMemorySessionStore>>>>,
+    pub(super) retired_stores: Arc<Mutex<HashMap<SessionId, Arc<InMemorySessionStore>>>>,
     pub(super) write_transaction: Arc<Mutex<()>>,
     pub(super) global_session_graph: Arc<Mutex<crate::SessionGraph>>,
-    pub(super) global_node_owners: Arc<Mutex<HashMap<String, String>>>,
-    pub(super) global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
-    pub(super) fork_plans: Arc<Mutex<HashMap<String, crate::store::ForkPlan>>>,
+    pub(super) global_node_owners: Arc<Mutex<HashMap<String, SessionId>>>,
+    pub(super) global_session_heads: Arc<Mutex<HashMap<SessionId, Option<String>>>>,
+    pub(super) fork_plans: Arc<Mutex<HashMap<SessionId, crate::store::ForkPlan>>>,
     pub(super) node_anchors: InMemoryNodeAnchors,
     pub(super) checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
     /// Factory-global session -> live checkpoint component edges; see
     /// [`InMemorySessionStore::checkpoint_blob_roots`].
     pub(super) checkpoint_blob_roots: super::SharedCheckpointBlobRoots,
     pub(super) tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
-    pub(super) deleted_session_ids: Arc<Mutex<HashSet<String>>>,
+    pub(super) deleted_session_ids: Arc<Mutex<HashSet<SessionId>>>,
     pub(super) session_catalog: super::SharedSessionCatalog,
     /// Factory-global attachment GC condemnation state: the digest is global to
     /// the factory, so every store it creates shares this map and the writer's
@@ -126,7 +127,7 @@ impl InMemorySessionStoreFactory {
         }
         let mut stores = self.stores.lock_recover();
         let store = stores
-            .entry(request.session_id.clone())
+            .entry(SessionId::from(request.session_id.clone().to_string()))
             .or_insert_with(|| {
                 let store = Arc::new(InMemorySessionStore::with_shared_history(
                     Arc::clone(&self.clock),
@@ -156,7 +157,7 @@ impl InMemorySessionStoreFactory {
             .clone();
         self.session_catalog
             .lock_recover()
-            .entry(request.session_id.clone())
+            .entry(SessionId::from(request.session_id.clone().to_string()))
             .or_insert_with(|| crate::SessionSummary {
                 session_id: request.session_id.clone(),
                 created_at_ms,
@@ -164,7 +165,11 @@ impl InMemorySessionStoreFactory {
                 head_revision: 0,
                 relation: crate::SessionRelationKind::from_relation(&binding.relation),
                 durable_relation: Some(binding.relation.clone()),
-                parent_session_id: binding.relation.parent_session_id().map(ToOwned::to_owned),
+                parent_session_id: binding
+                    .relation
+                    .parent_session_id()
+                    .map(ToOwned::to_owned)
+                    .map(Into::into),
                 deleted: false,
             });
         Ok(store)
@@ -209,7 +214,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
 
     async fn read_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Option<crate::SessionReadView>, crate::StoreError> {
         crate::store::validate_session_id(session_id)?;
         let store = self.stores.lock_recover().get(session_id).cloned();
@@ -240,7 +245,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
 
     async fn open_existing_store_by_id(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
         crate::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
         Ok(self
@@ -279,14 +284,14 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         )))
     }
 
-    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         crate::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
         Ok(self.deleted_session_ids.lock_recover().contains(session_id))
     }
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         crate::store::validate_session_id(session_id)
             .map_err(crate::MaintenanceFailure::failed_before_any_work)?;
@@ -346,7 +351,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 })?;
             self.deleted_session_ids
                 .lock_recover()
-                .insert(session_id.to_string());
+                .insert(SessionId::from(session_id.to_string()));
             if let Some(summary) = self.session_catalog.lock_recover().get_mut(session_id) {
                 summary.deleted = true;
                 summary.durable_relation = None;
@@ -363,7 +368,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             self.stores.lock_recover().remove(session_id);
             self.retired_stores
                 .lock_recover()
-                .insert(session_id.to_string(), store);
+                .insert(SessionId::from(session_id.to_string()), store);
             self.fork_plans.lock_recover().remove(session_id);
             return Ok(report);
         }
@@ -419,7 +424,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             (
                 checkpoint_ref.clone(),
                 checkpoint,
-                source_session_id.clone(),
+                SessionId::from(source_session_id.clone().to_string()),
             ),
         );
         Ok(crate::ForkPoint {
@@ -468,7 +473,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 crate::ForkPoint {
                     node_id: node_id.clone(),
                     checkpoint_ref: checkpoint_ref.clone(),
-                    source_session_id: source_session_id.clone(),
+                    source_session_id: SessionId::from(source_session_id.clone()),
                     config: retained_fork_config(&graph, node_id)?,
                     pinned: true,
                 },
@@ -592,7 +597,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             edge_path.push(crate::store::ForkNodeFacts {
                 node_id: node.node_id.clone(),
                 parent_node_id: node.parent_node_id.clone(),
-                owning_session_id: owner.clone(),
+                owning_session_id: SessionId::from(owner.clone()),
                 generation: generation as u64,
             });
         }
@@ -604,7 +609,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .filter_map(|(generation, node)| {
                 let owner = owners.get(&node.node_id)?;
                 fork_plan
-                    .includes(owner, generation as u64)
+                    .includes(&SessionId::from(owner), generation as u64)
                     .then(|| node.clone())
             })
             .collect();
@@ -617,12 +622,14 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         drop(owners);
         drop(tombstoned);
         drop(graph);
-        self.global_session_heads
-            .lock_recover()
-            .insert(request.session_id.clone(), Some(request.node_id.clone()));
-        self.fork_plans
-            .lock_recover()
-            .insert(request.session_id.clone(), fork_plan);
+        self.global_session_heads.lock_recover().insert(
+            SessionId::from(request.session_id.clone().to_string()),
+            Some(request.node_id.clone()),
+        );
+        self.fork_plans.lock_recover().insert(
+            SessionId::from(request.session_id.clone().to_string()),
+            fork_plan,
+        );
         let store = Arc::new(InMemorySessionStore::with_shared_history(
             Arc::clone(&self.clock),
             Arc::clone(&self.write_transaction),
@@ -646,7 +653,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         // `gc_unreachable` from reclaiming a live fork's components when the
         // session it forked from is deleted.
         self.checkpoint_blob_roots.lock_recover().insert(
-            request.session_id.clone(),
+            request.session_id.clone().clone(),
             checkpoint
                 .components
                 .values()
@@ -673,7 +680,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         *store.session_state_version.lock_recover() =
             Some(crate::store::CURRENT_SESSION_STATE_VERSION);
         self.session_catalog.lock_recover().insert(
-            request.session_id.clone(),
+            SessionId::from(request.session_id.clone().to_string()),
             crate::SessionSummary {
                 session_id: request.session_id.clone(),
                 created_at_ms,
@@ -681,13 +688,18 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 head_revision: 0,
                 relation: crate::SessionRelationKind::from_relation(&request.relation),
                 durable_relation: Some(request.relation.clone()),
-                parent_session_id: request.relation.parent_session_id().map(ToOwned::to_owned),
+                parent_session_id: request
+                    .relation
+                    .parent_session_id()
+                    .map(ToOwned::to_owned)
+                    .map(Into::into),
                 deleted: false,
             },
         );
-        self.stores
-            .lock_recover()
-            .insert(request.session_id.clone(), store);
+        self.stores.lock_recover().insert(
+            SessionId::from(request.session_id.clone().to_string()),
+            store,
+        );
         Ok(crate::ForkSessionReceipt {
             session_id: request.session_id.clone(),
             node_id: request.node_id.clone(),
@@ -886,7 +898,7 @@ pub(crate) mod lineage_conformance_support {
 
     #[async_trait::async_trait]
     impl LineageConformanceInjector for InMemoryLineageInjector {
-        async fn force_lineage(&self, _session_id: &str, _ancestor_node_id: &str) {
+        async fn force_lineage(&self, _session_id: &SessionId, _ancestor_node_id: &str) {
             // The in-memory backend has no lineage read accelerator: reads are
             // always edge-authoritative, so there is no grant row to corrupt.
         }
@@ -900,7 +912,7 @@ pub(crate) mod lineage_conformance_support {
 
         async fn lineage_ancestors(
             &self,
-            session_id: &str,
+            session_id: &SessionId,
         ) -> Vec<crate::store::ForkLineageAncestor> {
             self.factory
                 .fork_plans
@@ -910,7 +922,7 @@ pub(crate) mod lineage_conformance_support {
                 .unwrap_or_default()
         }
 
-        async fn edge_path(&self, session_id: &str) -> Vec<GraphFactObservation> {
+        async fn edge_path(&self, session_id: &SessionId) -> Vec<GraphFactObservation> {
             let facts = self.all_graph_facts().await;
             let by_id = facts
                 .into_iter()
@@ -956,10 +968,12 @@ pub(crate) mod lineage_conformance_support {
                     GraphFactObservation {
                         node_id: node.node_id.clone(),
                         parent_node_id: node.parent_node_id.clone(),
-                        owning_session_id: owners
-                            .get(&node.node_id)
-                            .expect("in-memory graph node has an owner")
-                            .clone(),
+                        owning_session_id: SessionId::from(
+                            owners
+                                .get(&node.node_id)
+                                .expect("in-memory graph node has an owner")
+                                .clone(),
+                        ),
                         generation,
                         frame_node_id: graph
                             .nearest_frame_node_id(Some(&node.node_id))

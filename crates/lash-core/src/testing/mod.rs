@@ -4,6 +4,8 @@
 //! providing a configurable mock implementation plus a couple of small
 //! builders for common policy / turn fixtures.
 
+use crate::ProcessId;
+use crate::SessionId;
 use crate::TurnId;
 use crate::{
     ProcessEventLog as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
@@ -35,7 +37,7 @@ use std::sync::{Arc, Mutex};
 #[doc(hidden)]
 pub fn queued_lane_holder_for_testing(expires_at_epoch_ms: u64) -> crate::QueuedLaneHolder {
     crate::QueuedLaneHolder::new(crate::store::SessionExecutionLease {
-        session_id: "queued-lane-test".to_string(),
+        session_id: SessionId::from("queued-lane-test"),
         owner: crate::LeaseOwnerIdentity::opaque("holder", "holder:incarnation"),
         executor_id: "holder-executor".to_string(),
         lease_token: "holder-token".to_string(),
@@ -551,7 +553,7 @@ where
     let session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService> = host.clone();
     let session_graph: Arc<dyn crate::plugin::SessionGraphService> = host;
     crate::tool_provider::ToolContext::__for_testing(
-        "test-session".to_string(),
+        SessionId::from("test-session".to_string()),
         sessions,
         session_lifecycle,
         session_graph,
@@ -681,7 +683,7 @@ pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
 
 /// Build the stable invocation installed around an `ExecCode` effect.
 pub fn exec_code_invocation(
-    session_id: impl Into<String>,
+    session_id: impl Into<SessionId>,
     turn_id: impl Into<TurnId>,
     turn_index: usize,
     protocol_iteration: usize,
@@ -796,7 +798,7 @@ fn frozen_tool_coordinator_clock_wall_clock_faces_agree() {
 pub async fn coordinate_tool_provider_with_services(
     scoped_effect_controller: crate::ScopedEffectController<'_>,
     processes: Arc<dyn crate::ProcessService>,
-    session_id: &str,
+    session_id: &SessionId,
     definition: crate::ToolDefinition,
     provider: Arc<dyn crate::ToolProvider>,
     call: crate::PreparedToolCall,
@@ -858,7 +860,7 @@ pub async fn coordinate_tool_provider_with_services(
     let mut model_return = dispatch
         .plugins
         .project_tool_result(crate::plugin::ToolResultProjectionContext {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             call_id: call.call_id.clone(),
             tool_name: outcome.record.tool.clone(),
             args: outcome.record.args.clone(),
@@ -890,7 +892,7 @@ pub async fn coordinate_tool_provider_with_services(
 pub async fn execute_tool_intents_with_services(
     scoped_effect_controller: crate::ScopedEffectController<'_>,
     processes: Arc<dyn crate::ProcessService>,
-    session_id: &str,
+    session_id: &SessionId,
     tool_call_id: &str,
     intents: &crate::ToolIntents,
 ) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
@@ -934,7 +936,7 @@ struct EffectBackedProcessService {
 impl EffectBackedProcessService {
     async fn cancel_command(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         reason: Option<String>,
     ) -> Result<crate::ProcessCommand, crate::PluginError> {
         match self.registry.resolve_process_ref(process_id).await {
@@ -946,7 +948,7 @@ impl EffectBackedProcessService {
             Err(refusal @ crate::PluginError::ProcessUnknown { .. })
             | Err(refusal @ crate::PluginError::ProcessNoLongerRetained { .. }) => {
                 Ok(crate::ProcessCommand::CancelRefused {
-                    process_id: process_id.to_string(),
+                    process_id: ProcessId::from(process_id.to_string()),
                     reason,
                     refusal,
                 })
@@ -966,7 +968,7 @@ impl EffectBackedProcessService {
         // command inherits the attempt's replay-key lineage. Use the same
         // helper, not a lookalike.
         let invocation = crate::runtime::causal::process_effect_invocation(
-            "atomic-tool-test-session",
+            &SessionId::from("atomic-tool-test-session"),
             scope.parent_invocation.clone(),
             &effect_id,
         );
@@ -1005,7 +1007,7 @@ impl EffectBackedProcessService {
 impl crate::ProcessService for EffectBackedProcessService {
     async fn list_visible_for_attempt(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         mode: crate::ProcessListMode,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         match mode {
@@ -1026,7 +1028,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn start_from_request(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
@@ -1038,7 +1040,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         let registration = request.into_registration(env_ref);
         let command = crate::ProcessCommand::Start {
             registration,
-            observers,
+            observers: observers.into_iter().map(Into::into).collect(),
             env_spec: None,
             execution_context: Box::new(crate::ProcessExecutionContext::default()),
         };
@@ -1052,7 +1054,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn start_from_recorded_intent(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
@@ -1061,14 +1063,18 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn start(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         registration: crate::ProcessRegistration,
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let command = crate::ProcessCommand::Start {
             registration,
-            observers: options.initial_observers,
+            observers: options
+                .initial_observers
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             env_spec: None,
             execution_context: Box::new(crate::ProcessExecutionContext::default()),
         };
@@ -1082,8 +1088,8 @@ impl crate::ProcessService for EffectBackedProcessService {
     /// (`complete_external_process`), so this route journals nothing.
     async fn complete_external(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         await_output: crate::ProcessAwaitOutput,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
@@ -1098,7 +1104,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn await_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         let command = crate::ProcessCommand::Await {
@@ -1115,7 +1121,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn list_visible(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
@@ -1134,8 +1140,8 @@ impl crate::ProcessService for EffectBackedProcessService {
     /// nothing.
     async fn validate_visible(
         &self,
-        session_id: &str,
-        process_ids: &[String],
+        session_id: &SessionId,
+        process_ids: &[ProcessId],
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
         for process_id in process_ids {
@@ -1150,8 +1156,8 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn cancel(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let command = self
@@ -1166,8 +1172,8 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn cancel_recorded_intent(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         reason: Option<String>,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -1181,9 +1187,9 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn finish_recorded_intent_parent(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         identity: crate::ToolIntentIdentity,
-        process_id: String,
+        process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
         reason: String,
         scope: crate::ProcessOpScope<'_>,
@@ -1207,8 +1213,8 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn signal_possessed(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
@@ -1233,8 +1239,8 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn signal_recorded_intent(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
@@ -1253,15 +1259,15 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn emit_event(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         event_type: String,
         replay_key: String,
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         let command = crate::ProcessCommand::EmitEvent {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             request: crate::ProcessEventAppendRequest::new(event_type, payload)
                 .with_replay_key(replay_key),
         };
@@ -1273,8 +1279,8 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn emit_event_recorded_intent(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         event_type: String,
         replay_key: String,
         payload: serde_json::Value,
@@ -1288,9 +1294,9 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn transfer(
         &self,
-        from_session_id: &str,
-        to_session_id: &str,
-        process_ids: Vec<String>,
+        from_session_id: &SessionId,
+        to_session_id: &SessionId,
+        process_ids: Vec<ProcessId>,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
         let command = crate::ProcessCommand::Transfer {
@@ -1333,10 +1339,10 @@ where
 }
 
 /// Build an empty `AssembledTurn` whose assistant text is `summary`.
-pub fn mock_assembled_turn(session_id: &str, summary: &str) -> AssembledTurn {
+pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTurn {
     AssembledTurn {
         state: SessionSnapshot {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             policy: SessionPolicy::new(crate::TurnBudget::Unbounded),
             ..SessionSnapshot::new(SessionPolicy::new(crate::TurnBudget::Unbounded))
         },
@@ -1386,7 +1392,7 @@ impl Default for MockSessionManager {
             ))
             .to_snapshot(),
             tool_catalog: Vec::new(),
-            turn: mock_assembled_turn("root", ""),
+            turn: mock_assembled_turn(&SessionId::from("root"), ""),
             tool_registry: None,
             process_registry: Arc::new(crate::TestLocalProcessRegistry::default()),
             created: Mutex::new(Vec::new()),
@@ -1430,7 +1436,7 @@ impl MockSessionManager {
 impl crate::plugin::SessionStateService for MockSessionManager {
     async fn turn_scope(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         turn_id: &TurnId,
     ) -> Result<crate::ExecutionScope, PluginError> {
         Ok(crate::ExecutionScope::turn(session_id, turn_id))
@@ -1440,13 +1446,19 @@ impl crate::plugin::SessionStateService for MockSessionManager {
         Ok(self.snapshot.clone())
     }
 
-    async fn snapshot_session(&self, _session_id: &str) -> Result<SessionSnapshot, PluginError> {
+    async fn snapshot_session(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<SessionSnapshot, PluginError> {
         Ok(self.snapshot.clone())
     }
-    async fn tool_catalog(&self, _session_id: &str) -> Result<Vec<serde_json::Value>, PluginError> {
+    async fn tool_catalog(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Vec<serde_json::Value>, PluginError> {
         Ok(self.tool_catalog.clone())
     }
-    async fn tool_state(&self, _session_id: &str) -> Result<crate::ToolState, PluginError> {
+    async fn tool_state(&self, _session_id: &SessionId) -> Result<crate::ToolState, PluginError> {
         self.tool_registry
             .as_ref()
             .map(crate::ToolRegistry::export_state)
@@ -1457,7 +1469,7 @@ impl crate::plugin::SessionStateService for MockSessionManager {
 
     async fn apply_tool_state(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         snapshot: crate::ToolState,
     ) -> Result<u64, PluginError> {
         let Some(tool_registry) = self.tool_registry.as_ref() else {
@@ -1482,14 +1494,18 @@ impl crate::plugin::SessionLifecycleService for MockSessionManager {
             session_id: request
                 .session_id
                 .clone()
-                .unwrap_or_else(|| "child".to_string()),
-            parent_session_id: request.relation.parent_session_id().map(ToOwned::to_owned),
+                .unwrap_or_else(|| SessionId::from("child".to_string())),
+            parent_session_id: request
+                .relation
+                .parent_session_id()
+                .map(ToOwned::to_owned)
+                .map(Into::into),
             policy: request.policy.unwrap_or_else(mock_session_policy),
             observed_processes: Vec::new(),
         })
     }
 
-    async fn close_session(&self, session_id: &str) -> Result<(), PluginError> {
+    async fn close_session(&self, session_id: &SessionId) -> Result<(), PluginError> {
         self.closed.lock_recover().push(session_id.to_string());
         Ok(())
     }
@@ -1499,7 +1515,7 @@ impl crate::plugin::SessionLifecycleService for MockSessionManager {
     ) -> Result<AssembledTurn, PluginError> {
         let (turn, scoped_effect_controller) = request.into_parts();
         self.turns.lock_recover().push((
-            turn.session_id,
+            turn.session_id.to_string(),
             turn.turn_id.clone(),
             turn.input.trace_turn_id,
             scoped_effect_controller.execution_scope().clone(),
@@ -1515,7 +1531,7 @@ impl crate::plugin::SessionGraphService for MockSessionManager {}
 impl crate::ProcessService for MockSessionManager {
     async fn start_from_recorded_intent(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, PluginError> {
@@ -1537,9 +1553,9 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn finish_recorded_intent_parent(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _identity: crate::ToolIntentIdentity,
-        _process_id: String,
+        _process_id: ProcessId,
         _policy: crate::ProcessParentEndPolicy,
         _reason: String,
         _scope: crate::ProcessOpScope<'_>,
@@ -1551,7 +1567,7 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn start(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         registration: crate::ProcessRegistration,
         options: crate::ProcessStartOptions,
         _scope: crate::ProcessOpScope<'_>,
@@ -1585,7 +1601,7 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn await_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, PluginError> {
         let registry: Arc<dyn crate::ProcessRegistry> = self.process_registry.clone();
@@ -1596,7 +1612,7 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn list_visible(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<Vec<crate::ProcessRecord>, PluginError> {
@@ -1623,15 +1639,15 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn validate_visible(
         &self,
-        session_id: &str,
-        handle_ids: &[String],
+        session_id: &SessionId,
+        handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
         let _ = scope;
         for handle_id in handle_ids {
             match self
                 .process_registry
-                .is_observer(session_id, handle_id)
+                .is_observer(session_id, &ProcessId::from(handle_id))
                 .await
             {
                 Ok(true) | Err(PluginError::ProcessNoLongerRetained { .. }) => {}
@@ -1648,8 +1664,8 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn cancel(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
         crate::NativeRuntimeEffectController::request_process_cancel(
@@ -1663,8 +1679,8 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn cancel_recorded_intent(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         reason: Option<String>,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
@@ -1679,8 +1695,8 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn signal_possessed(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
@@ -1700,8 +1716,8 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn signal_recorded_intent(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
@@ -1720,8 +1736,8 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn emit_event_recorded_intent(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         event_type: String,
         replay_key: String,
         payload: serde_json::Value,
@@ -1739,9 +1755,9 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn transfer(
         &self,
-        from_session_id: &str,
-        to_session_id: &str,
-        process_ids: Vec<String>,
+        from_session_id: &SessionId,
+        to_session_id: &SessionId,
+        process_ids: Vec<ProcessId>,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
         let _ = scope;

@@ -264,12 +264,15 @@ async fn inherited_child_session_carries_parent_tool_state() {
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
-    let mut snapshot = manager.tool_state("root").await.expect("tool state");
+    let mut snapshot = manager
+        .tool_state(&SessionId::from("root"))
+        .await
+        .expect("tool state");
     snapshot
         .set_membership(&crate::ToolId::from("tool:memory_probe"), false)
         .expect("opt out of parent tool");
     manager
-        .apply_tool_state("root", snapshot)
+        .apply_tool_state(&SessionId::from("root"), snapshot)
         .await
         .expect("apply dynamic state");
 
@@ -397,7 +400,7 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
     let root_store = Arc::new(RecordingStore::default());
     *root_store.session_meta.lock_recover() = Some(crate::SessionMeta {
         pending_observer_intents: Vec::new(),
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         relation: crate::SessionRelation::Root,
     });
     let bytes = Arc::new(crate::InMemoryAttachmentStore::new());
@@ -410,14 +413,14 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
     let host = crate::EmbeddedRuntimeHost::new(host_config)
         .with_session_store_factory(Arc::new(child_factory.clone()));
     let state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         host,
         crate::PersistentRuntimeServices::new(
-            plugin_session_with_tools("root", Arc::new(AttachmentWritingTool)),
+            plugin_session_with_tools(&SessionId::from("root"), Arc::new(AttachmentWritingTool)),
             Arc::clone(&root_store) as Arc<dyn crate::store::RuntimePersistence>,
         ),
         state,
@@ -533,11 +536,14 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         standard_test_policy(),
         host,
         crate::PersistentRuntimeServices::new(
-            plugin_session_with_orchestrating_tool("root", FirstTurnProcessTool::orchestrating()),
+            plugin_session_with_orchestrating_tool(
+                &SessionId::from("root"),
+                FirstTurnProcessTool::orchestrating(),
+            ),
             root_store as Arc<dyn crate::store::RuntimePersistence>,
         ),
         RuntimeSessionState {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         },
         crate::testing::runtime_lease_owner(),
@@ -652,7 +658,7 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
         .expect("session lifecycle");
     assert!(
         manager
-            .tool_state("root")
+            .tool_state(&SessionId::from("root"))
             .await
             .expect("tool state")
             .contains(&crate::ToolId::from("tool:memory_probe"))
@@ -823,7 +829,10 @@ async fn parent_turn_receives_live_child_token_usage_events() {
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("child-session-usage-parent")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("child-session-usage-parent"),
+                ),
             )
             .with_events(&sink)
             .with_turn_events(&turn_events),
@@ -983,7 +992,10 @@ async fn nested_child_turns_use_independent_default_task_stacks() {
             TurnInput::text("run three levels"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("nested-parent-turn")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("nested-parent-turn"),
+                ),
             ),
         )
         .await
@@ -1071,7 +1083,10 @@ async fn parent_turn_keeps_cached_only_child_usage_live() {
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("child-session-event-parent")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("child-session-event-parent"),
+                ),
             )
             .with_events(&sink),
         )
@@ -1224,7 +1239,7 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         .expect("child session");
 
     let turn_id = "cancelled-child-turn";
-    let request = |session_id: &'static str, turn_id: &TurnId| {
+    let request = |session_id: &SessionId, turn_id: &TurnId| {
         crate::SessionTurnRequest::new(
             session_id,
             turn_id,
@@ -1233,8 +1248,12 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         )
         .expect("child turn request")
     };
-    let mut turn =
-        Box::pin(lifecycle.start_turn(request("cancelled-child", &TurnId::from(turn_id))));
+    let cancelled_child_session_id = SessionId::from("cancelled-child");
+    let cancelled_child_turn_id = TurnId::from(turn_id);
+    let mut turn = Box::pin(lifecycle.start_turn(request(
+        &cancelled_child_session_id,
+        &cancelled_child_turn_id,
+    )));
     tokio::select! {
         _ = started_rx.recv() => {}
         outcome = turn.as_mut() => panic!("parked child turn must not complete: {outcome:?}"),
@@ -1270,8 +1289,10 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         )
         .await
         .expect("retry child session");
+    let retry_child_session_id = SessionId::from("retry-child");
+    let retry_child_turn_id = TurnId::from(turn_id);
     let retried = lifecycle
-        .start_turn(request("retry-child", &TurnId::from(turn_id)))
+        .start_turn(request(&retry_child_session_id, &retry_child_turn_id))
         .await
         .expect("retried child turn");
     assert!(matches!(
@@ -1284,11 +1305,10 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         "the retried turn's live usage must be reported against a reclaimed entry"
     );
 
+    let recovered_session_id = SessionId::from("cancelled-child");
+    let recovered_turn_id = TurnId::from("cancelled-child-turn-2");
     let recovered = lifecycle
-        .start_turn(request(
-            "cancelled-child",
-            &TurnId::from("cancelled-child-turn-2"),
-        ))
+        .start_turn(request(&recovered_session_id, &recovered_turn_id))
         .await
         .expect("the dropped turn future returns the child runtime's session loan");
     assert_eq!(
@@ -1302,7 +1322,7 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
     );
 
     lifecycle
-        .close_session("cancelled-child")
+        .close_session(&SessionId::from("cancelled-child"))
         .await
         .expect("a cancelled child turn must not keep its session open forever");
 }

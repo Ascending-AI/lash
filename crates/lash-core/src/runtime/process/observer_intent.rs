@@ -1,4 +1,5 @@
 use super::{ProcessObserverBy, ProcessRegistry};
+use crate::SessionId;
 use crate::store::{RuntimePersistence, StoreError};
 use crate::{
     SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionObserverIntent,
@@ -29,7 +30,7 @@ pub enum SessionObserverIntentSource<'a> {
 /// session-creation path happened to publish it.
 pub async fn reconcile_session_process_observer_intents(
     process_registry: Option<&dyn ProcessRegistry>,
-    session_id: &str,
+    session_id: &SessionId,
     source: SessionObserverIntentSource<'_>,
 ) -> Result<Vec<SessionObservedProcessReceipt>, StoreError> {
     let (pending_observer_intents, persisted) = match source {
@@ -67,7 +68,7 @@ pub async fn reconcile_session_process_observer_intents(
 
 async fn apply_process_observers(
     process_registry: Option<&dyn ProcessRegistry>,
-    session_id: &str,
+    session_id: &SessionId,
     intents: &[SessionObserverIntent],
 ) -> Vec<SessionObservedProcessReceipt> {
     let mut results = Vec::with_capacity(intents.len());
@@ -91,7 +92,7 @@ async fn apply_process_observers(
 
 async fn apply_process_observer(
     process_registry: Option<&dyn ProcessRegistry>,
-    session_id: &str,
+    session_id: &SessionId,
     intent: &SessionObserverIntent,
     observer_by: ProcessObserverBy,
 ) -> SessionObservedProcessOutcome {
@@ -214,6 +215,7 @@ async fn apply_process_observer(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ProcessId;
     use crate::{ProcessLifecycle as _, ProcessRegistrar as _, ProcessRetention as _};
 
     #[tokio::test]
@@ -232,7 +234,7 @@ mod tests {
             .expect("register process before pruning");
         let pruned = registry
             .complete_process(
-                "pruned-process",
+                &ProcessId::from("pruned-process"),
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                     serde_json::Value::Null,
                 )),
@@ -251,7 +253,7 @@ mod tests {
 
         let receipts = reconcile_session_process_observer_intents(
             Some(&registry),
-            "noproc-session",
+            &SessionId::from("noproc-session"),
             SessionObserverIntentSource::Unstored(vec![
                 SessionObserverIntent::host_requested("unknown-host"),
                 SessionObserverIntent::fork_inherited("unknown-fork"),

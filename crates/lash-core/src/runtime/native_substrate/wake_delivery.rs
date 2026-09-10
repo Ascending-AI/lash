@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -45,8 +47,8 @@ enum WakeDeliverySettlement {
 
 #[derive(Clone, Copy, Debug)]
 struct SequenceRewindDiscardLog<'a> {
-    session_id: &'a str,
-    process_id: &'a str,
+    session_id: &'a SessionId,
+    process_id: &'a ProcessId,
     sequence: u64,
     allocation_floor: u64,
 }
@@ -349,7 +351,9 @@ impl WakeDeliveryDriver {
                     // before settling the outbox claim so Applied, ClaimLost,
                     // and terminal-mark failures all re-arm the durable row.
                     queued_work.notify_session_work(
-                        SessionWorkTarget::Session(target_session_id.clone()),
+                        SessionWorkTarget::Session(SessionId::from(
+                            target_session_id.clone().to_string(),
+                        )),
                         "process_wake",
                     );
                     if enqueue_outcome.process_wake_was_absorbed() {
@@ -622,13 +626,15 @@ impl WakeDeliveryDriver {
 
 #[cfg(test)]
 mod tests {
+    use crate::ProcessId;
+    use crate::SessionId;
     use crate::{ProcessLifecycle as _, ProcessRegistrar as _, ProcessRetention as _};
     use std::sync::Arc;
     use std::time::Duration;
 
     use super::{WakeDeliveryDriver, WorkCadencePolicy, retry_delay_ms};
 
-    fn external_registration(process_id: &str) -> crate::ProcessRegistration {
+    fn external_registration(process_id: &ProcessId) -> crate::ProcessRegistration {
         crate::ProcessRegistration::new(
             process_id,
             crate::ProcessInput::External {
@@ -643,7 +649,9 @@ mod tests {
     async fn superseded_wake_delivery_is_refused_before_enqueueing_the_successor() {
         let registry = Arc::new(crate::TestLocalProcessRegistry::default());
         let old = registry
-            .register_process(external_registration("reused-wake-delivery"))
+            .register_process(external_registration(&ProcessId::from(
+                "reused-wake-delivery",
+            )))
             .await
             .expect("register old incarnation");
         registry
@@ -661,7 +669,9 @@ mod tests {
             .await
             .expect("prune old incarnation");
         let current = registry
-            .register_process(external_registration("reused-wake-delivery"))
+            .register_process(external_registration(&ProcessId::from(
+                "reused-wake-delivery",
+            )))
             .await
             .expect("register successor incarnation");
         assert_ne!(old.incarnation, current.incarnation);
@@ -669,7 +679,7 @@ mod tests {
             .insert_wake_delivery_for_testing(crate::ProcessWakeDelivery {
                 version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
                 wake_id: format!("wake:v1:blake3:{}", "a".repeat(64)),
-                target_session_id: "wake-target".to_string(),
+                target_session_id: SessionId::from("wake-target"),
                 process_id: old.id.clone(),
                 process_incarnation: old.incarnation,
                 sequence: 1,

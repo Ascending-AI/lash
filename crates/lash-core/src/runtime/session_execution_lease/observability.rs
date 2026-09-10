@@ -1,4 +1,5 @@
 use super::SessionExecutionLeaseCommitEvidence;
+use crate::SessionId;
 use crate::{SessionExecutionLease, SessionExecutionLeaseAcquisition, StoreError};
 
 /// Report a successful claim, including the atomic displacement evidence when
@@ -20,13 +21,13 @@ pub(crate) fn trace_acquisition(acquisition: &SessionExecutionLeaseAcquisition) 
     }
 }
 
-pub(super) fn trace_commit_busy_advisory(session_id: &str, holder: &SessionExecutionLease) {
+pub(super) fn trace_commit_busy_advisory(session_id: &SessionId, holder: &SessionExecutionLease) {
     let holder_owner_id_sha256 = crate::stable_hash::sha256_hex(holder.owner.owner_id.as_bytes());
     let holder_incarnation_id_sha256 =
         crate::stable_hash::sha256_hex(holder.owner.incarnation_id.as_bytes());
     let holder_executor_id_sha256 = crate::stable_hash::sha256_hex(holder.executor_id.as_bytes());
     tracing::info!(
-        session_id,
+        session_id = %session_id,
         holder_owner_id_sha256,
         holder_incarnation_id_sha256,
         holder_executor_id_sha256,
@@ -74,7 +75,7 @@ fn trace_taken_over(
 /// proceeded lane-less. A rejection after `lost` / `taken_over` is an ordinary
 /// handoff. Non-CAS store failures are left to their own error paths.
 pub(in crate::runtime) fn trace_commit_cas_rejected(
-    session_id: &str,
+    session_id: &SessionId,
     evidence: Option<&SessionExecutionLeaseCommitEvidence>,
     claimant: &crate::LeaseOwnerIdentity,
     claimant_executor_id: &str,
@@ -91,7 +92,7 @@ pub(in crate::runtime) fn trace_commit_cas_rejected(
         evidence.executor_id.as_str()
     });
     tracing::warn!(
-        session_id,
+        session_id = %session_id,
         fencing_token = evidence.map(|evidence| evidence.fencing_token),
         owner_id = %owner.owner_id,
         incarnation_id = %owner.incarnation_id,
@@ -108,13 +109,13 @@ pub(in crate::runtime) fn trace_commit_cas_rejected(
 }
 
 pub(crate) fn trace_busy(
-    session_id: &str,
+    session_id: &SessionId,
     claimant: &crate::LeaseOwnerIdentity,
     claimant_executor_id: &str,
     holder: &SessionExecutionLease,
 ) {
     tracing::debug!(
-        session_id,
+        session_id = %session_id,
         claimant_owner_id = %claimant.owner_id,
         claimant_incarnation_id = %claimant.incarnation_id,
         claimant_executor_id,

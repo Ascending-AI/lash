@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -83,7 +84,7 @@ impl PluginOperationInvocation {
         }
     }
 
-    fn into_context(self, session_id: Option<String>) -> PluginOperationContext {
+    fn into_context(self, session_id: Option<SessionId>) -> PluginOperationContext {
         match self {
             Self::Query {
                 sessions,
@@ -182,7 +183,7 @@ where
 pub struct PluginSession {
     pub(super) state: Arc<std::sync::Mutex<PluginStateRegistry>>,
     pub(super) host: PluginHost,
-    pub(super) session_id: String,
+    pub(super) session_id: SessionId,
     pub(super) plugins: Vec<Arc<dyn SessionPlugin>>,
     pub(super) tools: Arc<dyn ToolProvider>,
     pub(super) tool_registry: Arc<crate::ToolRegistry>,
@@ -493,14 +494,14 @@ impl PluginSession {
 
     pub async fn transform_assistant_stream(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         chunk: String,
     ) -> Result<Vec<PluginOwned<AssistantStreamTransform>>, PluginError> {
         let mut current = chunk;
         let mut transforms = Vec::new();
         for registered in &self.contributions.assistant_stream_hooks {
             let transform = (registered.hook)(AssistantStreamHookContext {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 chunk: current.clone(),
             })
             .await?;
@@ -515,14 +516,14 @@ impl PluginSession {
 
     pub async fn transform_assistant_response(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         response: crate::llm::types::LlmResponse,
     ) -> Result<Vec<PluginOwned<AssistantResponseTransform>>, PluginError> {
         let mut current = response;
         let mut transforms = Vec::new();
         for registered in &self.contributions.assistant_response_hooks {
             let transform = (registered.hook)(AssistantResponseHookContext {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 response: current.clone(),
             })
             .await?;
@@ -537,12 +538,12 @@ impl PluginSession {
 
     pub async fn finish_assistant_stream(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         reason: AssistantStreamFinishReason,
     ) -> Result<(), PluginError> {
         for registered in &self.contributions.assistant_stream_finished_hooks {
             (registered.hook)(AssistantStreamFinishedContext {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 reason,
             })
             .await?;
@@ -703,7 +704,7 @@ impl PluginSession {
 
     pub fn fork_for_session(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         config: super::SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
         let snapshot = self.capture_state();
@@ -719,8 +720,8 @@ impl PluginSession {
 
     pub fn fork_for_child_session(
         &self,
-        session_id: impl Into<String>,
-        parent_session_id: Option<String>,
+        session_id: impl Into<SessionId>,
+        parent_session_id: Option<SessionId>,
         config: super::SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
         let snapshot = self.capture_state();
@@ -736,7 +737,7 @@ impl PluginSession {
 
     pub fn fork_for_session_with_tool_catalog(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         tool_catalog_overlay: ToolCatalogContribution,
         config: super::SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
@@ -755,7 +756,7 @@ impl PluginSession {
         &self,
         name: &str,
         session_param: SessionParam,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
         default_to_current_session: bool,
     ) -> Result<Option<String>, PluginOperationInvokeError> {
         let effective_session = session_id.or_else(|| {
@@ -777,14 +778,14 @@ impl PluginSession {
             }
             _ => {}
         }
-        Ok(effective_session)
+        Ok(effective_session.map(Into::into))
     }
 
     async fn invoke_plugin_operation(
         &self,
         name: &str,
         args: serde_json::Value,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
         default_to_current_session: bool,
         invocation: PluginOperationInvocation,
     ) -> Result<(String, ErasedPluginOperationOutcome), PluginOperationInvokeError> {
@@ -801,7 +802,10 @@ impl PluginSession {
             default_to_current_session,
         )?;
         let outcome = operation
-            .invoke(invocation.into_context(effective_session), args)
+            .invoke(
+                invocation.into_context(effective_session.map(Into::into)),
+                args,
+            )
             .await
             .map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;
         Ok((operation.plugin_id().to_string(), outcome))
@@ -811,7 +815,7 @@ impl PluginSession {
         &self,
         name: &str,
         args: serde_json::Value,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
         default_to_current_session: bool,
         sessions: Arc<dyn SessionReadService>,
         processes: Arc<dyn ProcessReadService>,
@@ -839,7 +843,7 @@ impl PluginSession {
         &self,
         name: &str,
         args: serde_json::Value,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
         default_to_current_session: bool,
         sessions: Arc<dyn SessionStateService>,
         session_lifecycle: Arc<dyn SessionLifecycleService>,
@@ -877,7 +881,7 @@ impl PluginSession {
         &self,
         name: &str,
         args: serde_json::Value,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
         default_to_current_session: bool,
         sessions: Arc<dyn SessionStateService>,
         session_lifecycle: Arc<dyn SessionLifecycleService>,
@@ -907,7 +911,7 @@ impl PluginSession {
         &self,
         name: &str,
         args: serde_json::Value,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
         default_to_current_session: bool,
         sessions: Arc<dyn SessionStateService>,
         session_lifecycle: Arc<dyn SessionLifecycleService>,
@@ -949,7 +953,7 @@ impl PluginSession {
         &self,
         name: &str,
         args: serde_json::Value,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
         default_to_current_session: bool,
         sessions: Arc<dyn SessionStateService>,
         session_lifecycle: Arc<dyn SessionLifecycleService>,

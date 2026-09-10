@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 pub(crate) mod replay;
@@ -153,7 +155,7 @@ impl RuntimeObservation {
         &self,
         name: &str,
         args: serde_json::Value,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
     ) -> Result<(String, serde_json::Value), crate::PluginOperationInvokeError> {
         let Some(plugin_session) = self.plugin_session.as_ref().cloned() else {
             return Err(crate::PluginOperationInvokeError::Unknown(
@@ -284,7 +286,8 @@ impl RuntimeHandle {
         live_replay_store: Arc<dyn LiveReplayStore>,
     ) -> Self {
         let revision = SessionRevision::from_runtime(&runtime);
-        let cursor = live_replay_store.current_cursor(runtime.session_id(), revision);
+        let cursor =
+            live_replay_store.current_cursor(&SessionId::from(runtime.session_id()), revision);
         let (state, read_view, usage_report) = export_observation_state(&runtime);
         let observation = RuntimeObservation::from_runtime(
             &runtime,
@@ -369,7 +372,7 @@ impl RuntimeHandle {
         drafts.push(LiveReplayEventDraft::new(turn_id, payload));
 
         let prepared = match self.live_replay_store.prepare_publication(
-            runtime.session_id(),
+            &SessionId::from(runtime.session_id()),
             revision,
             drafts,
         ) {
@@ -382,7 +385,7 @@ impl RuntimeHandle {
                 );
                 next.cursor = self
                     .live_replay_store
-                    .current_cursor(runtime.session_id(), revision);
+                    .current_cursor(&SessionId::from(runtime.session_id()), revision);
                 self.observation.store(Arc::new(next));
                 return;
             }
@@ -400,7 +403,7 @@ impl RuntimeHandle {
 
     fn publish_live_events(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         revision: SessionRevision,
         drafts: Vec<LiveReplayEventDraft>,
         failure: &'static str,
@@ -421,7 +424,7 @@ impl RuntimeHandle {
     pub fn record_turn_activity(&self, turn_id: Option<&TurnId>, activity: crate::TurnActivity) {
         let observation = self.observe();
         self.publish_live_events(
-            observation.session_id(),
+            &SessionId::from(observation.session_id()),
             observation.session_revision(),
             vec![LiveReplayEventDraft::new(
                 turn_id,
@@ -434,7 +437,7 @@ impl RuntimeHandle {
     pub fn record_queue_changed(&self, kind: SessionQueueEventKind, batch_ids: Vec<String>) {
         let observation = self.observe();
         self.publish_live_events(
-            observation.session_id(),
+            &SessionId::from(observation.session_id()),
             observation.session_revision(),
             vec![LiveReplayEventDraft::new(
                 None::<String>,
@@ -444,10 +447,14 @@ impl RuntimeHandle {
         );
     }
 
-    pub fn record_process_changed(&self, kind: SessionProcessEventKind, process_ids: Vec<String>) {
+    pub fn record_process_changed(
+        &self,
+        kind: SessionProcessEventKind,
+        process_ids: Vec<ProcessId>,
+    ) {
         let observation = self.observe();
         self.publish_live_events(
-            observation.session_id(),
+            &SessionId::from(observation.session_id()),
             observation.session_revision(),
             vec![LiveReplayEventDraft::new(
                 None::<String>,
@@ -466,7 +473,7 @@ impl RuntimeHandle {
         cursor: &SessionCursor,
     ) -> Result<SessionResume, LiveReplayStoreError> {
         let observation = self.observe();
-        let requested = cursor.parse_for_session(observation.session_id())?;
+        let requested = cursor.parse_for_session(&SessionId::from(observation.session_id()))?;
         match self.live_replay_store.replay_after_cursor(cursor)? {
             LiveReplayOutcome::Replayed(events)
                 if Self::has_replacement_evidence(
@@ -497,7 +504,7 @@ impl RuntimeHandle {
         cursor: &SessionCursor,
     ) -> Result<SessionObservationSubscription, LiveReplayStoreError> {
         let observation = self.observe();
-        let requested = cursor.parse_for_session(observation.session_id())?;
+        let requested = cursor.parse_for_session(&SessionId::from(observation.session_id()))?;
         match self.live_replay_store.subscribe_after_cursor(cursor)? {
             LiveReplaySubscribeOutcome::Subscribed(subscription)
                 if requested.revision == observation.session_revision()
@@ -548,11 +555,11 @@ impl RuntimeHandle {
         let observation_cursor = observation.cursor();
         let current_cursor = self
             .live_replay_store
-            .current_cursor(observation.session_id(), latest_revision);
+            .current_cursor(&SessionId::from(observation.session_id()), latest_revision);
         let latest_cursor = match (
-            requested_cursor.parse_for_session(observation.session_id()),
-            observation_cursor.parse_for_session(observation.session_id()),
-            current_cursor.parse_for_session(observation.session_id()),
+            requested_cursor.parse_for_session(&SessionId::from(observation.session_id())),
+            observation_cursor.parse_for_session(&SessionId::from(observation.session_id())),
+            current_cursor.parse_for_session(&SessionId::from(observation.session_id())),
         ) {
             (Ok(requested), Ok(observation), Ok(current)) => [
                 (observation.live_position, observation_cursor.clone()),
@@ -570,7 +577,7 @@ impl RuntimeHandle {
                 cursor: latest_cursor.clone(),
             },
             LiveReplayGap {
-                session_id: observation.session_id().to_string(),
+                session_id: SessionId::from(observation.session_id().to_string()),
                 requested_cursor: requested_cursor.clone(),
                 latest_cursor,
                 latest_revision,
@@ -592,7 +599,7 @@ impl RuntimeHandle {
             .ok_or_else(super::session_api::queued_turn_input_store_required)?;
         let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
         super::session_api::enqueue_turn_input_to_store(
-            observation.session_id.as_ref().to_string(),
+            SessionId::from(observation.session_id.as_ref().to_string()),
             store,
             Arc::clone(&observation.queued_work),
             input,
@@ -614,7 +621,7 @@ impl RuntimeHandle {
 
     pub async fn cancel_pending_turn_input(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         input_id: &str,
     ) -> Result<crate::PendingTurnInputCancelOutcome, crate::RuntimeError> {
         let observation = self.observe();
@@ -643,7 +650,7 @@ impl RuntimeHandle {
 
     pub async fn cancel_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         targets: &[crate::PendingTurnInputCancelTarget],
     ) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, crate::RuntimeError> {
         let observation = self.observe();
@@ -678,7 +685,7 @@ impl RuntimeHandle {
 
     pub async fn cancel_pending_turn_input_suffix(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         anchor: &crate::PendingTurnInputCancelTarget,
     ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, crate::RuntimeError> {
         let observation = self.observe();
@@ -779,7 +786,7 @@ impl RuntimeHandle {
 
     pub async fn cancel_queued_work_batch(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, crate::RuntimeError> {
         let observation = self.observe();
@@ -866,7 +873,7 @@ mod tests {
     impl LiveReplayStore for FailCommittedLiveReplayStore {
         fn prepare_publication(
             &self,
-            session_id: &str,
+            session_id: &SessionId,
             revision: SessionRevision,
             events: Vec<LiveReplayEventDraft>,
         ) -> Result<PreparedLiveReplayPublication, LiveReplayStoreError> {
@@ -904,11 +911,15 @@ mod tests {
             self.inner.subscribe_after_cursor(cursor)
         }
 
-        fn current_cursor(&self, session_id: &str, revision: SessionRevision) -> SessionCursor {
+        fn current_cursor(
+            &self,
+            session_id: &SessionId,
+            revision: SessionRevision,
+        ) -> SessionCursor {
             self.inner.current_cursor(session_id, revision)
         }
 
-        fn trim_session(&self, session_id: &str) -> Result<(), LiveReplayStoreError> {
+        fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
             self.inner.trim_session(session_id)
         }
     }
@@ -916,7 +927,7 @@ mod tests {
     impl LiveReplayStore for PanicLiveReplayStore {
         fn prepare_publication(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
             _revision: SessionRevision,
             _events: Vec<LiveReplayEventDraft>,
         ) -> Result<PreparedLiveReplayPublication, LiveReplayStoreError> {
@@ -944,11 +955,15 @@ mod tests {
             panic!("subscribe_after_cursor should not be called for rejected cursors")
         }
 
-        fn current_cursor(&self, session_id: &str, revision: SessionRevision) -> SessionCursor {
+        fn current_cursor(
+            &self,
+            session_id: &SessionId,
+            revision: SessionRevision,
+        ) -> SessionCursor {
             SessionCursor::new("panic-replay-incarnation", session_id, revision, 0)
         }
 
-        fn trim_session(&self, _session_id: &str) -> Result<(), LiveReplayStoreError> {
+        fn trim_session(&self, _session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
             Ok(())
         }
     }

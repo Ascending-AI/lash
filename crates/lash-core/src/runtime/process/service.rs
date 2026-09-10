@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use crate::plugin::PluginError;
 
 use super::events::{ProcessAwaitOutput, ProcessEvent};
@@ -34,7 +36,7 @@ pub trait ProcessService: Send + Sync {
     /// Controller-free read view used by recorded leaf attempts.
     async fn list_visible_for_attempt(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         mode: ProcessListMode,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
         let _ = (session_id, mode);
@@ -45,7 +47,7 @@ pub trait ProcessService: Send + Sync {
 
     async fn start_from_request(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         request: ProcessStartRequest,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessHandleView, PluginError> {
@@ -60,14 +62,14 @@ pub trait ProcessService: Send + Sync {
     /// or host policy state before crossing the effect-controller boundary.
     async fn start_from_recorded_intent(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         request: ProcessStartRequest,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessHandleView, PluginError>;
 
     async fn start(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         registration: ProcessRegistration,
         options: ProcessStartOptions,
         scope: ProcessOpScope<'_>,
@@ -81,8 +83,8 @@ pub trait ProcessService: Send + Sync {
     /// identical terminal, or lost to a different stored terminal.
     async fn complete_external(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         await_output: ProcessAwaitOutput,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessCompletionOutcome, PluginError> {
@@ -103,8 +105,8 @@ pub trait ProcessService: Send + Sync {
     /// effect, and it is idempotent, so nothing about replay depends on it.
     async fn report_caller_departure(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
     ) -> Result<ProcessRecord, PluginError> {
         let _ = (session_id, process_id);
         Err(PluginError::Session(
@@ -114,7 +116,7 @@ pub trait ProcessService: Send + Sync {
 
     async fn await_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessAwaitOutput, PluginError>;
 
@@ -128,21 +130,21 @@ pub trait ProcessService: Send + Sync {
 
     async fn list_visible(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         mode: ProcessListMode,
         scope: ProcessOpScope<'_>,
     ) -> Result<Vec<ProcessRecord>, PluginError>;
 
     async fn validate_visible(
         &self,
-        session_id: &str,
-        process_ids: &[String],
+        session_id: &SessionId,
+        process_ids: &[ProcessId],
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError>;
 
     async fn validate_visible_refs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         process_refs: &[ProcessRef],
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
@@ -155,15 +157,15 @@ pub trait ProcessService: Send + Sync {
 
     async fn cancel(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError>;
 
     async fn cancel_with_reason(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         reason: Option<String>,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError> {
@@ -174,8 +176,8 @@ pub trait ProcessService: Send + Sync {
     /// Journal-first cancellation used only by the recorded intent protocol.
     async fn cancel_recorded_intent(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         reason: Option<String>,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError>;
@@ -188,9 +190,9 @@ pub trait ProcessService: Send + Sync {
     /// explicitly refuse the capability.
     async fn finish_recorded_intent_parent(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         identity: crate::ToolIntentIdentity,
-        process_id: String,
+        process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
         reason: String,
         scope: ProcessOpScope<'_>,
@@ -198,7 +200,7 @@ pub trait ProcessService: Send + Sync {
 
     async fn cancel_all_visible(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         scope: ProcessOpScope<'_>,
     ) -> Result<Vec<ProcessCancelReceipt>, PluginError> {
         let entries = self
@@ -221,8 +223,8 @@ pub trait ProcessService: Send + Sync {
     /// Journal-first signal used only by the recorded intent protocol.
     async fn signal_recorded_intent(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
@@ -231,8 +233,8 @@ pub trait ProcessService: Send + Sync {
 
     async fn emit_event(
         &self,
-        _session_id: &str,
-        _process_id: &str,
+        _session_id: &SessionId,
+        _process_id: &ProcessId,
         _event_type: String,
         _replay_key: String,
         _payload: serde_json::Value,
@@ -246,8 +248,8 @@ pub trait ProcessService: Send + Sync {
     /// Journal-first event emission used only by the recorded intent protocol.
     async fn emit_event_recorded_intent(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         event_type: String,
         replay_key: String,
         payload: serde_json::Value,
@@ -256,8 +258,8 @@ pub trait ProcessService: Send + Sync {
 
     async fn signal_possessed(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
@@ -266,9 +268,9 @@ pub trait ProcessService: Send + Sync {
 
     async fn transfer(
         &self,
-        from_session_id: &str,
-        to_session_id: &str,
-        process_ids: Vec<String>,
+        from_session_id: &SessionId,
+        to_session_id: &SessionId,
+        process_ids: Vec<ProcessId>,
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError>;
 }
@@ -279,7 +281,7 @@ pub struct UnavailableProcessService;
 impl ProcessService for UnavailableProcessService {
     async fn start_from_recorded_intent(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _request: ProcessStartRequest,
         _scope: ProcessOpScope<'_>,
     ) -> Result<ProcessHandleView, PluginError> {
@@ -290,9 +292,9 @@ impl ProcessService for UnavailableProcessService {
 
     async fn finish_recorded_intent_parent(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _identity: crate::ToolIntentIdentity,
-        _process_id: String,
+        _process_id: ProcessId,
         _policy: crate::ProcessParentEndPolicy,
         _reason: String,
         _scope: ProcessOpScope<'_>,
@@ -304,7 +306,7 @@ impl ProcessService for UnavailableProcessService {
 
     async fn start(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _registration: ProcessRegistration,
         _options: ProcessStartOptions,
         _scope: ProcessOpScope<'_>,
@@ -316,7 +318,7 @@ impl ProcessService for UnavailableProcessService {
 
     async fn await_process(
         &self,
-        _process_id: &str,
+        _process_id: &ProcessId,
         _scope: ProcessOpScope<'_>,
     ) -> Result<ProcessAwaitOutput, PluginError> {
         Err(PluginError::Session(
@@ -326,7 +328,7 @@ impl ProcessService for UnavailableProcessService {
 
     async fn list_visible(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _mode: ProcessListMode,
         _scope: ProcessOpScope<'_>,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
@@ -337,8 +339,8 @@ impl ProcessService for UnavailableProcessService {
 
     async fn validate_visible(
         &self,
-        _session_id: &str,
-        _process_ids: &[String],
+        _session_id: &SessionId,
+        _process_ids: &[ProcessId],
         _scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
         Err(PluginError::Session(
@@ -348,8 +350,8 @@ impl ProcessService for UnavailableProcessService {
 
     async fn cancel(
         &self,
-        _session_id: &str,
-        _process_id: &str,
+        _session_id: &SessionId,
+        _process_id: &ProcessId,
         _scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError> {
         Err(PluginError::Session(
@@ -359,8 +361,8 @@ impl ProcessService for UnavailableProcessService {
 
     async fn cancel_recorded_intent(
         &self,
-        _session_id: &str,
-        _process_id: &str,
+        _session_id: &SessionId,
+        _process_id: &ProcessId,
         _reason: Option<String>,
         _scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError> {
@@ -371,8 +373,8 @@ impl ProcessService for UnavailableProcessService {
 
     async fn signal_possessed(
         &self,
-        _session_id: &str,
-        _process_id: &str,
+        _session_id: &SessionId,
+        _process_id: &ProcessId,
         _signal_name: String,
         _signal_id: String,
         _payload: serde_json::Value,
@@ -385,8 +387,8 @@ impl ProcessService for UnavailableProcessService {
 
     async fn signal_recorded_intent(
         &self,
-        _session_id: &str,
-        _process_id: &str,
+        _session_id: &SessionId,
+        _process_id: &ProcessId,
         _signal_name: String,
         _signal_id: String,
         _payload: serde_json::Value,
@@ -399,8 +401,8 @@ impl ProcessService for UnavailableProcessService {
 
     async fn emit_event_recorded_intent(
         &self,
-        _session_id: &str,
-        _process_id: &str,
+        _session_id: &SessionId,
+        _process_id: &ProcessId,
         _event_type: String,
         _replay_key: String,
         _payload: serde_json::Value,
@@ -413,9 +415,9 @@ impl ProcessService for UnavailableProcessService {
 
     async fn transfer(
         &self,
-        _from_session_id: &str,
-        _to_session_id: &str,
-        process_ids: Vec<String>,
+        _from_session_id: &SessionId,
+        _to_session_id: &SessionId,
+        process_ids: Vec<ProcessId>,
         _scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
         if process_ids.is_empty() {
@@ -442,15 +444,15 @@ mod tests {
     };
 
     struct RecordingProcessService {
-        visible: HashSet<String>,
-        validate_calls: Mutex<Vec<Vec<String>>>,
-        cancel_calls: Mutex<Vec<String>>,
+        visible: HashSet<ProcessId>,
+        validate_calls: Mutex<Vec<Vec<ProcessId>>>,
+        cancel_calls: Mutex<Vec<ProcessId>>,
         visible_entries: Vec<ProcessRecord>,
         record: ProcessRecord,
     }
 
     impl RecordingProcessService {
-        fn new(visible: impl IntoIterator<Item = String>, record: ProcessRecord) -> Self {
+        fn new(visible: impl IntoIterator<Item = ProcessId>, record: ProcessRecord) -> Self {
             Self {
                 visible: visible.into_iter().collect(),
                 validate_calls: Mutex::new(Vec::new()),
@@ -460,7 +462,10 @@ mod tests {
             }
         }
 
-        fn with_visible_entries(mut self, process_ids: impl IntoIterator<Item = String>) -> Self {
+        fn with_visible_entries(
+            mut self,
+            process_ids: impl IntoIterator<Item = ProcessId>,
+        ) -> Self {
             self.visible_entries = process_ids
                 .into_iter()
                 .map(|process_id| {
@@ -480,11 +485,11 @@ mod tests {
             self
         }
 
-        fn validate_calls(&self) -> Vec<Vec<String>> {
+        fn validate_calls(&self) -> Vec<Vec<ProcessId>> {
             self.validate_calls.lock_recover().clone()
         }
 
-        fn cancel_calls(&self) -> Vec<String> {
+        fn cancel_calls(&self) -> Vec<ProcessId> {
             self.cancel_calls.lock_recover().clone()
         }
     }
@@ -493,7 +498,7 @@ mod tests {
     impl ProcessService for RecordingProcessService {
         async fn start_from_recorded_intent(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
             _request: ProcessStartRequest,
             _scope: ProcessOpScope<'_>,
         ) -> Result<ProcessHandleView, PluginError> {
@@ -502,9 +507,9 @@ mod tests {
 
         async fn finish_recorded_intent_parent(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
             _identity: crate::ToolIntentIdentity,
-            _process_id: String,
+            _process_id: ProcessId,
             _policy: crate::ProcessParentEndPolicy,
             _reason: String,
             _scope: ProcessOpScope<'_>,
@@ -516,7 +521,7 @@ mod tests {
 
         async fn start(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
             _registration: ProcessRegistration,
             _options: ProcessStartOptions,
             _scope: ProcessOpScope<'_>,
@@ -526,7 +531,7 @@ mod tests {
 
         async fn await_process(
             &self,
-            _process_id: &str,
+            _process_id: &ProcessId,
             _scope: ProcessOpScope<'_>,
         ) -> Result<ProcessAwaitOutput, PluginError> {
             Err(PluginError::Session("await not implemented".to_string()))
@@ -534,7 +539,7 @@ mod tests {
 
         async fn list_visible(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
             _mode: ProcessListMode,
             _scope: ProcessOpScope<'_>,
         ) -> Result<Vec<ProcessRecord>, PluginError> {
@@ -543,8 +548,8 @@ mod tests {
 
         async fn validate_visible(
             &self,
-            _session_id: &str,
-            process_ids: &[String],
+            _session_id: &SessionId,
+            process_ids: &[ProcessId],
             _scope: ProcessOpScope<'_>,
         ) -> Result<(), PluginError> {
             self.validate_calls
@@ -563,22 +568,20 @@ mod tests {
 
         async fn cancel(
             &self,
-            _session_id: &str,
-            process_id: &str,
+            _session_id: &SessionId,
+            process_id: &ProcessId,
             _scope: ProcessOpScope<'_>,
         ) -> Result<ProcessRecord, PluginError> {
-            self.cancel_calls
-                .lock_recover()
-                .push(process_id.to_string());
+            self.cancel_calls.lock_recover().push(process_id.clone());
             let mut record = self.record.clone();
-            record.id = process_id.to_string();
+            record.id = process_id.clone();
             Ok(record)
         }
 
         async fn cancel_recorded_intent(
             &self,
-            session_id: &str,
-            process_id: &str,
+            session_id: &SessionId,
+            process_id: &ProcessId,
             _reason: Option<String>,
             scope: ProcessOpScope<'_>,
         ) -> Result<ProcessRecord, PluginError> {
@@ -587,8 +590,8 @@ mod tests {
 
         async fn signal_possessed(
             &self,
-            _session_id: &str,
-            _process_id: &str,
+            _session_id: &SessionId,
+            _process_id: &ProcessId,
             _signal_name: String,
             _signal_id: String,
             _payload: serde_json::Value,
@@ -599,8 +602,8 @@ mod tests {
 
         async fn signal_recorded_intent(
             &self,
-            session_id: &str,
-            process_id: &str,
+            session_id: &SessionId,
+            process_id: &ProcessId,
             signal_name: String,
             signal_id: String,
             payload: serde_json::Value,
@@ -619,8 +622,8 @@ mod tests {
 
         async fn emit_event_recorded_intent(
             &self,
-            _session_id: &str,
-            _process_id: &str,
+            _session_id: &SessionId,
+            _process_id: &ProcessId,
             _event_type: String,
             _replay_key: String,
             _payload: serde_json::Value,
@@ -633,16 +636,16 @@ mod tests {
 
         async fn transfer(
             &self,
-            _from_session_id: &str,
-            _to_session_id: &str,
-            _process_ids: Vec<String>,
+            _from_session_id: &SessionId,
+            _to_session_id: &SessionId,
+            _process_ids: Vec<ProcessId>,
             _scope: ProcessOpScope<'_>,
         ) -> Result<(), PluginError> {
             Err(PluginError::Session("transfer not implemented".to_string()))
         }
     }
 
-    fn cancelled_record(process_id: &str) -> ProcessRecord {
+    fn cancelled_record(process_id: &ProcessId) -> ProcessRecord {
         let mut record = ProcessRecord::from_registration(
             ProcessRegistration::new(
                 process_id,
@@ -674,12 +677,15 @@ mod tests {
     #[tokio::test]
     async fn cancel_all_visible_cancels_each_visible_live_process() {
         let service = RecordingProcessService::new(
-            ["process-1".to_string(), "process-2".to_string()],
-            cancelled_record("template"),
+            [ProcessId::from("process-1"), ProcessId::from("process-2")],
+            cancelled_record(&ProcessId::from("template")),
         )
-        .with_visible_entries(["process-1".to_string(), "process-2".to_string()]);
+        .with_visible_entries([ProcessId::from("process-1"), ProcessId::from("process-2")]);
         let summaries = service
-            .cancel_all_visible("session-1", test_process_scope("cancel-all"))
+            .cancel_all_visible(
+                &SessionId::from("session-1"),
+                test_process_scope("cancel-all"),
+            )
             .await
             .expect("cancel all visible");
 

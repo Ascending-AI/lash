@@ -6,6 +6,7 @@
 //! process-wide lane before creating any head-derived state. The durable store
 //! CAS still decides whether the attempt advances the head.
 
+use crate::SessionId;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -32,12 +33,12 @@ const COMMIT_ADMISSION_WAIT_TTL: Duration = Duration::from_secs(30);
 /// The only data retained for a queued commit attempt.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CommitAdmissionClaim {
-    session_id: String,
+    session_id: SessionId,
     work_identity: String,
 }
 
 impl CommitAdmissionClaim {
-    fn new(session_id: impl Into<String>, work_identity: impl Into<String>) -> Self {
+    fn new(session_id: impl Into<SessionId>, work_identity: impl Into<String>) -> Self {
         Self {
             session_id: session_id.into(),
             work_identity: work_identity.into(),
@@ -52,7 +53,7 @@ enum CommitAdmissionError {
         "commit admission queue for session `{session_id}` is full at {queue_depth} waiters (limit {max_waiters}); work `{work_identity}` was not admitted"
     )]
     QueueFull {
-        session_id: String,
+        session_id: SessionId,
         work_identity: String,
         queue_depth: usize,
         max_waiters: usize,
@@ -61,7 +62,7 @@ enum CommitAdmissionError {
         "commit admission for session `{session_id}` timed out after {waited_ms}ms; work `{work_identity}` remains durable and may be retried"
     )]
     TimedOut {
-        session_id: String,
+        session_id: SessionId,
         work_identity: String,
         waited_ms: u64,
     },
@@ -69,7 +70,7 @@ enum CommitAdmissionError {
         "commit admission for session `{session_id}` was cancelled; work `{work_identity}` remains durable"
     )]
     Cancelled {
-        session_id: String,
+        session_id: SessionId,
         work_identity: String,
     },
 }
@@ -96,7 +97,7 @@ struct CommitAdmissionInner {
 #[derive(Default)]
 struct CommitAdmissionState {
     next_waiter_id: u64,
-    sessions: HashMap<String, SessionAdmissionState>,
+    sessions: HashMap<SessionId, SessionAdmissionState>,
 }
 
 #[derive(Default)]
@@ -131,7 +132,7 @@ impl CommitAdmissionCoordinator {
 
     async fn run_head_advancing_attempt<T, E, F, Fut>(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         work_identity: impl Into<String>,
         cancellation: CancellationToken,
         attempt: F,
@@ -167,9 +168,10 @@ impl CommitAdmissionCoordinator {
         let queued = {
             let mut state = self.inner.state.lock_recover();
             if !state.sessions.contains_key(&claim.session_id) {
-                state
-                    .sessions
-                    .insert(claim.session_id.clone(), SessionAdmissionState::default());
+                state.sessions.insert(
+                    SessionId::from(claim.session_id.clone().to_string()),
+                    SessionAdmissionState::default(),
+                );
                 None
             } else {
                 let queue_depth = state
@@ -272,7 +274,7 @@ impl CommitAdmissionCoordinator {
         ))
     }
 
-    fn withdraw_waiter(&self, session_id: &str, waiter_id: u64) -> bool {
+    fn withdraw_waiter(&self, session_id: &SessionId, waiter_id: u64) -> bool {
         let mut state = self.inner.state.lock_recover();
         let Some(session) = state.sessions.get_mut(session_id) else {
             return false;
@@ -291,7 +293,7 @@ impl CommitAdmissionCoordinator {
     }
 
     #[cfg(test)]
-    fn queued_work_identities(&self, session_id: &str) -> Vec<String> {
+    fn queued_work_identities(&self, session_id: &SessionId) -> Vec<String> {
         self.inner
             .state
             .lock_recover()
@@ -317,14 +319,14 @@ static PROCESS_COMMIT_ADMISSION: OnceLock<CommitAdmissionCoordinator> = OnceLock
 
 pub(super) fn record_product_commit_admission(
     path: &'static str,
-    session_id: &str,
+    session_id: &SessionId,
     work_identity: &str,
     waited: Duration,
     queue_depth: usize,
 ) {
     tracing::debug!(
         path,
-        session_id,
+        session_id = %session_id,
         work_identity,
         waited_nanos = waited.as_nanos().min(u128::from(u64::MAX)) as u64,
         queue_depth = queue_depth as u64,
@@ -334,7 +336,7 @@ pub(super) fn record_product_commit_admission(
     #[cfg(test)]
     product_observations()
         .lock_recover()
-        .entry(session_id.to_string())
+        .entry(session_id.clone())
         .or_default()
         .push(ProductCommitAdmissionObservation {
             path,
@@ -354,16 +356,17 @@ pub(super) struct ProductCommitAdmissionObservation {
 }
 
 #[cfg(test)]
-fn product_observations() -> &'static Mutex<HashMap<String, Vec<ProductCommitAdmissionObservation>>>
-{
-    static OBSERVATIONS: OnceLock<Mutex<HashMap<String, Vec<ProductCommitAdmissionObservation>>>> =
-        OnceLock::new();
+fn product_observations()
+-> &'static Mutex<HashMap<SessionId, Vec<ProductCommitAdmissionObservation>>> {
+    static OBSERVATIONS: OnceLock<
+        Mutex<HashMap<SessionId, Vec<ProductCommitAdmissionObservation>>>,
+    > = OnceLock::new();
     OBSERVATIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[cfg(test)]
 pub(super) fn take_product_commit_admission_observations(
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Vec<ProductCommitAdmissionObservation> {
     product_observations()
         .lock_recover()
@@ -372,7 +375,7 @@ pub(super) fn take_product_commit_admission_observations(
 }
 
 #[cfg(test)]
-pub(super) fn process_commit_admission_queue_depth(session_id: &str) -> usize {
+pub(super) fn process_commit_admission_queue_depth(session_id: &SessionId) -> usize {
     PROCESS_COMMIT_ADMISSION
         .get()
         .and_then(|coordinator| {
@@ -395,7 +398,7 @@ pub(super) fn process_commit_admission_queue_depth(session_id: &str) -> usize {
 /// claiming an advance. Cross-process publication remains store-CAS governed.
 #[doc(hidden)]
 pub async fn run_head_advancing_commit_attempt<T, E, F, Fut>(
-    session_id: impl Into<String>,
+    session_id: impl Into<SessionId>,
     work_identity: impl Into<String>,
     cancellation: CancellationToken,
     attempt: F,
@@ -490,7 +493,7 @@ mod tests {
 
     async fn wait_for_queue(
         coordinator: &CommitAdmissionCoordinator,
-        session_id: &str,
+        session_id: &SessionId,
         expected: &[&str],
     ) {
         tokio::time::timeout(Duration::from_secs(1), async {
@@ -541,13 +544,16 @@ mod tests {
             } else {
                 vec!["second", "third"]
             };
-            wait_for_queue(&coordinator, "session", &expected).await;
+            wait_for_queue(&coordinator, &SessionId::from("session"), &expected).await;
         }
 
         first.release_after_head_advance();
         let (identity, second) = admitted_rx.recv().await.expect("second admitted");
         assert_eq!(identity, "second");
-        assert_eq!(coordinator.queued_work_identities("session"), ["third"]);
+        assert_eq!(
+            coordinator.queued_work_identities(&SessionId::from("session")),
+            ["third"]
+        );
         assert!(
             admitted_rx.try_recv().is_err(),
             "release wakes only one waiter"
@@ -583,13 +589,17 @@ mod tests {
                     .await
             })
         };
-        wait_for_queue(&coordinator, "session", &["cancelled"]).await;
+        wait_for_queue(&coordinator, &SessionId::from("session"), &["cancelled"]).await;
         cancellation.cancel();
         assert!(matches!(
             waiter.await.expect("waiter joined"),
             Err(CommitAdmissionError::Cancelled { .. })
         ));
-        assert!(coordinator.queued_work_identities("session").is_empty());
+        assert!(
+            coordinator
+                .queued_work_identities(&SessionId::from("session"))
+                .is_empty()
+        );
         drop(first);
         assert_eq!(coordinator.active_session_count(), 0);
     }
@@ -615,7 +625,7 @@ mod tests {
                     .await
             })
         };
-        wait_for_queue(&coordinator, "session", &["timeout"]).await;
+        wait_for_queue(&coordinator, &SessionId::from("session"), &["timeout"]).await;
         let full = coordinator
             .acquire_typed(
                 CommitAdmissionClaim::new("session", "shed"),

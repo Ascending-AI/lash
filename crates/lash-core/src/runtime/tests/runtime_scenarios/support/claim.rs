@@ -8,7 +8,7 @@ impl RuntimeScenarioContext {
             let blocked_turn = self
                 .store()
                 .claim_ready_queued_work(
-                    self.session_id,
+                    &self.session_id,
                     &lease.fence(),
                     owner,
                     QueuedWorkClaimBoundary::Idle,
@@ -27,7 +27,7 @@ impl RuntimeScenarioContext {
 
         let command_claim = self
             .store()
-            .claim_leading_ready_session_command(self.session_id, &lease.fence(), owner)
+            .claim_leading_ready_session_command(&self.session_id, &lease.fence(), owner)
             .await
             .expect("claim leading session command");
         assert_eq!(
@@ -48,7 +48,7 @@ impl RuntimeScenarioContext {
         let turn_claim = self
             .store()
             .claim_ready_queued_work(
-                self.session_id,
+                &self.session_id,
                 &lease.fence(),
                 owner,
                 phase.boundary,
@@ -70,7 +70,7 @@ impl RuntimeScenarioContext {
             assert_pending_turn_inputs(
                 self.name,
                 self.store(),
-                self.session_id,
+                &self.session_id,
                 &self.enqueued_turn_inputs,
                 &phase.pending_turn_inputs_after_queue_claim,
             )
@@ -90,7 +90,7 @@ impl RuntimeScenarioContext {
         let (owner, lease) = self.owner_and_lease();
         let claim = self
             .store()
-            .claim_next_turn_inputs(self.session_id, &lease.fence(), owner, 10)
+            .claim_next_turn_inputs(&self.session_id, &lease.fence(), owner, 10)
             .await
             .unwrap_or_else(|err| panic!("{} failed to claim next-turn inputs: {err}", self.name));
         if phase.expected_aliases.is_empty() {
@@ -141,7 +141,7 @@ impl RuntimeScenarioContext {
         if phase.pending_turn_inputs_hidden_after_claim {
             assert!(
                 self.store()
-                    .list_pending_turn_inputs(self.session_id)
+                    .list_pending_turn_inputs(&self.session_id)
                     .await
                     .unwrap_or_else(|err| panic!(
                         "{} failed to list pending turn inputs after claim: {err}",

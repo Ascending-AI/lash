@@ -1,4 +1,5 @@
 use super::*;
+use crate::SessionId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 use lash_sansio::sync::MutexExt;
 
@@ -481,7 +482,7 @@ impl LashRuntime {
 
     pub async fn cancel_queued_work_batch(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, RuntimeError> {
         let store = self
@@ -639,7 +640,7 @@ impl LashRuntime {
 }
 
 pub(in crate::runtime) async fn enqueue_turn_input_to_store(
-    session_id: String,
+    session_id: SessionId,
     store: Arc<dyn crate::RuntimePersistence>,
     queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
     input: crate::TurnInput,
@@ -660,7 +661,9 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
         .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?;
     if is_next_turn {
         queued_work.notify_session_work(
-            crate::SessionWorkTarget::Session(enqueued.session_id.clone()),
+            crate::SessionWorkTarget::Session(SessionId::from(
+                enqueued.session_id.clone().to_string(),
+            )),
             "queued_turn_input",
         );
     }
@@ -866,7 +869,9 @@ impl LashRuntime {
                     .map_err(super::runtime_error_from_store_commit)?;
             } else {
                 self.host.queued_work().notify_session_work(
-                    crate::SessionWorkTarget::Session(handle.receipt.session_id.clone()),
+                    crate::SessionWorkTarget::Session(SessionId::from(
+                        handle.receipt.session_id.clone().to_string(),
+                    )),
                     "config_settlement",
                 );
             }
@@ -901,7 +906,9 @@ impl LashRuntime {
             .host
             .queued_work()
             .drain_session_work(
-                crate::SessionWorkTarget::Session(receipt.session_id.clone()),
+                crate::SessionWorkTarget::Session(SessionId::from(
+                    receipt.session_id.clone().to_string(),
+                )),
                 "session_command",
             )
             .await
@@ -1200,7 +1207,7 @@ fn runtime_error_from_session_command_refresh(error: SessionError) -> RuntimeErr
 }
 
 fn compaction_frame_key(
-    session_id: &str,
+    session_id: &SessionId,
     boundary_id: &str,
     previous_frame_node_id: &str,
 ) -> crate::FrameKey {
@@ -1217,12 +1224,13 @@ pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::compaction_frame_key;
+    use crate::SessionId;
 
     #[test]
     fn compaction_frame_identity_is_replay_stable() {
-        let first = compaction_frame_key("session", "turn", "frame-before");
-        let replay = compaction_frame_key("session", "turn", "frame-before");
-        let next = compaction_frame_key("session", "turn", "frame-after");
+        let first = compaction_frame_key(&SessionId::from("session"), "turn", "frame-before");
+        let replay = compaction_frame_key(&SessionId::from("session"), "turn", "frame-before");
+        let next = compaction_frame_key(&SessionId::from("session"), "turn", "frame-after");
 
         assert_eq!(first, replay);
         assert_ne!(first, next);

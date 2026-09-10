@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::collections::HashMap;
 
 #[derive(Clone)]
@@ -8,4 +9,4 @@ pub(super) struct RuntimeTurnCommitRecord {
     pub(super) append_request_identity: crate::AppendRequestIdentity,
 }
 
-pub(super) type RuntimeTurnCommitMap = HashMap<(String, String), RuntimeTurnCommitRecord>;
+pub(super) type RuntimeTurnCommitMap = HashMap<(SessionId, String), RuntimeTurnCommitRecord>;

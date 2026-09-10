@@ -1,4 +1,6 @@
 use super::*;
+use crate::ProcessId;
+use crate::SessionId;
 use crate::{ProcessEventLog as _, ProcessLifecycle as _};
 
 fn recorded_event_intents(event_types: &[&str]) -> crate::ToolIntents {
@@ -8,8 +10,8 @@ fn recorded_event_intents(event_types: &[&str]) -> crate::ToolIntents {
             .enumerate()
             .map(|(index, event_type)| {
                 crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-                    session_id: "session".to_string(),
-                    process_id: "intent-law-target".to_string(),
+                    session_id: SessionId::from("session"),
+                    process_id: ProcessId::from("intent-law-target"),
                     event_type: (*event_type).to_string(),
                     payload: json!({"source_index": index}),
                 })
@@ -39,7 +41,7 @@ async fn register_intent_law_target(
                     semantics: crate::ProcessEventSemanticsSpec::default(),
                 }
             })),
-            &["session".to_string()],
+            &[SessionId::from("session")],
         )
         .await
         .expect("register the intent law target");
@@ -70,7 +72,7 @@ fn runtime_execution_for_intent_law(
 ) -> crate::RuntimeExecutionContext<'static> {
     let attachment_store = Arc::clone(&context.attachment_store);
     crate::RuntimeExecutionContext::new(
-        "session".to_string(),
+        SessionId::from("session"),
         Arc::new(context),
         Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
         attachment_store,
@@ -168,7 +170,7 @@ async fn crash_redrive_law(pause: IntentPausePoint) {
             .all(|outcome| matches!(outcome, crate::ToolIntentExecutionOutcome::Executed { .. }))
     );
     let events = registry
-        .events_after("intent-law-target", 0)
+        .events_after(&ProcessId::from("intent-law-target"), 0)
         .await
         .expect("read crash-law target events");
     assert_eq!(
@@ -217,8 +219,8 @@ async fn public_coordinator_redrive_is_byte_stable_after_live_terminal_mutation(
     let controller = Arc::new(IntentReplayController::new(None));
     let intents = crate::ToolIntents::v1(vec![crate::ToolIntent::SignalProcess(
         crate::SignalProcessIntent {
-            session_id: "session".to_string(),
-            process_id: "intent-law-target".to_string(),
+            session_id: SessionId::from("session"),
+            process_id: ProcessId::from("intent-law-target"),
             signal_name: "redrive.signal".to_string(),
             payload: json!({"recorded": true}),
         },
@@ -234,7 +236,7 @@ async fn public_coordinator_redrive_is_byte_stable_after_live_terminal_mutation(
     let first_bytes = serde_json::to_vec(&first).expect("serialize first public outcome");
     registry
         .complete_process(
-            "intent-law-target",
+            &ProcessId::from("intent-law-target"),
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
                 "terminal after the first drain"
             ))),
@@ -322,7 +324,7 @@ async fn tool_intent_outcome_replay_is_scoped_to_its_minting_emission() {
     );
     assert_eq!(
         registry
-            .events_after("intent-law-target", 0)
+            .events_after(&ProcessId::from("intent-law-target"), 0)
             .await
             .expect("read recovered target events")
             .iter()
@@ -342,14 +344,14 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
     let controller = Arc::new(IntentReplayController::new(None));
     let intents = crate::ToolIntents::v1(vec![
         crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-            session_id: "session".to_string(),
-            process_id: "intent-law-target".to_string(),
+            session_id: SessionId::from("session"),
+            process_id: ProcessId::from("intent-law-target"),
             event_type: "intent.refusal.first".to_string(),
             payload: json!({"committed": true}),
         }),
         crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
-            session_id: "session".to_string(),
-            process_id: "missing-intent-target".to_string(),
+            session_id: SessionId::from("session"),
+            process_id: ProcessId::from("missing-intent-target"),
             reason: Some("literal refusal law".to_string()),
         }),
     ]);
@@ -397,7 +399,7 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
         "the recorded refusal cannot become success after live state changes"
     );
     let events = registry
-        .events_after("intent-law-target", 0)
+        .events_after(&ProcessId::from("intent-law-target"), 0)
         .await
         .expect("read the committed prefix");
     assert_eq!(
@@ -467,7 +469,7 @@ async fn concurrent_batch_drains_intents_in_call_order_then_intent_index() {
             if result.intent_outcomes.len() == 2
     )));
     let events = registry
-        .events_after("intent-law-target", 0)
+        .events_after(&ProcessId::from("intent-law-target"), 0)
         .await
         .expect("read ordered intent events");
     assert_eq!(
@@ -688,7 +690,7 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
                 ))
     ));
     let events = registry
-        .events_after("intent-law-target", 0)
+        .events_after(&ProcessId::from("intent-law-target"), 0)
         .await
         .expect("read post-cancel events");
     assert_eq!(
@@ -717,7 +719,7 @@ async fn parent_end_policies_are_literal_and_redrive_stable() {
             .enumerate()
             .map(|(index, policy)| {
                 crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
-                    session_id: "session".to_string(),
+                    session_id: SessionId::from("session"),
                     request: crate::ProcessStartRequest::external(
                         format!("ignored-parent-policy-{index}"),
                         crate::ProcessOriginator::host_scoped("parent-policy-law"),
@@ -740,7 +742,7 @@ async fn parent_end_policies_are_literal_and_redrive_stable() {
         .iter()
         .map(|outcome| match outcome {
             crate::ToolIntentExecutionOutcome::Executed { identity, .. } => {
-                identity.replay_key.clone()
+                ProcessId::from(identity.replay_key.clone())
             }
             other => panic!("expected executed start, got {other:?}"),
         })
@@ -799,9 +801,13 @@ async fn parent_end_cancel_refusal_is_typed_and_operator_visible() {
     context.processes = crate::testing::effect_backed_process_service(registry);
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(1);
     context.event_tx = event_tx;
-    let identity =
-        crate::derive_tool_intent_identity("session", "turn", Some("missing-parent-end-call"), 0)
-            .expect("derive valid missing-child intent identity");
+    let identity = crate::derive_tool_intent_identity(
+        &SessionId::from("session"),
+        "turn",
+        Some("missing-parent-end-call"),
+        0,
+    )
+    .expect("derive valid missing-child intent identity");
     context
         .recorded_intent_outcomes
         .record(&[crate::ToolIntentExecutionOutcome::Executed {
@@ -809,7 +815,7 @@ async fn parent_end_cancel_refusal_is_typed_and_operator_visible() {
             kind: crate::ToolIntentKind::StartProcess,
             result: json!({"id": "missing-parent-end-child"}),
             parent_end: Some(crate::ToolIntentParentEnd {
-                process_id: "missing-parent-end-child".to_string(),
+                process_id: ProcessId::from("missing-parent-end-child"),
                 policy: crate::ProcessParentEndPolicy::Cancel,
             }),
         }]);
@@ -883,7 +889,7 @@ async fn retry_drains_only_the_final_attempts_intents() {
     assert_eq!(outcome.attempts.len(), 2);
     assert_eq!(outcome.intent_outcomes.len(), 1);
     let events = registry
-        .events_after("retry-intent-target", 0)
+        .events_after(&ProcessId::from("retry-intent-target"), 0)
         .await
         .expect("read retry intent target events");
     assert_eq!(events.len(), 1, "the retried declaration never drains");
@@ -946,7 +952,7 @@ async fn register_trigger_intent_subscription_with_schema(
 fn recorded_trigger_intents() -> crate::ToolIntents {
     crate::ToolIntents::v1(vec![crate::ToolIntent::EmitTrigger(
         crate::EmitTriggerIntent {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             request: crate::TriggerOccurrenceRequest::new(
                 "intent.trigger.emitted",
                 "intent-law-source",

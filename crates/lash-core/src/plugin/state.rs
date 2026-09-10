@@ -1,4 +1,5 @@
 //! Host-mediated plugin state and its deterministic checkpoint representation.
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -77,7 +78,10 @@ pub enum PluginStateEdit {
 /// writes become durable only at the next runtime boundary commit.
 #[derive(Clone)]
 pub struct PluginStateStore {
-    session_id: Arc<str>,
+    // Typed rather than `Arc<str>` so the accessor below can hand back a
+    // borrowed `SessionId`: a shared string here would force every caller to
+    // re-mint the identity it already had.
+    session_id: SessionId,
     plugin_id: Arc<str>,
     state: Arc<Mutex<PluginStateRegistry>>,
 }
@@ -93,7 +97,7 @@ impl std::fmt::Debug for PluginStateStore {
 
 impl PluginStateStore {
     pub(super) fn bind(
-        session_id: &str,
+        session_id: &SessionId,
         plugin_id: &str,
         state: Arc<Mutex<PluginStateRegistry>>,
     ) -> Self {
@@ -104,12 +108,12 @@ impl PluginStateStore {
             .entry(plugin_id.to_owned())
             .or_default();
         Self {
-            session_id: session_id.into(),
+            session_id: session_id.clone(),
             plugin_id: plugin_id.into(),
             state,
         }
     }
-    pub fn session_id(&self) -> &str {
+    pub fn session_id(&self) -> &SessionId {
         &self.session_id
     }
     pub fn plugin_id(&self) -> &str {
@@ -340,7 +344,8 @@ impl PluginStateRegistry {
                 source: None,
             }));
             for (id, edits) in log {
-                PluginStateStore::bind("", &id, candidate.clone()).apply(edits)?;
+                PluginStateStore::bind(&SessionId::from(""), &id, candidate.clone())
+                    .apply(edits)?;
             }
             let mut hydrated = candidate.lock_recover().data.clone();
             for id in self.data.plugins.keys() {

@@ -542,7 +542,7 @@ fn stored_frame_open_rejects_a_raw_frame_key() {
     let frame_key = crate::FrameKey::from_caller_material("strict-durable-frame")
         .expect("non-empty frame material");
     let node = SessionNodeRecord {
-        node_id: frame_node_id("session", frame_key.as_str()).into_inner(),
+        node_id: frame_node_id(&SessionId::from("session"), frame_key.as_str()).into_inner(),
         parent_node_id: None,
         timestamp: "2026-09-01T00:00:00Z".to_string(),
         payload: SessionNodePayload::FrameOpen {
@@ -585,7 +585,7 @@ fn nearest_frame_is_derived_from_ancestry() {
     let mut graph = SessionGraph::default();
     let first_key =
         crate::FrameKey::from_caller_material("first-frame").expect("non-empty frame material");
-    let first = frame_node_id("session", first_key.as_str());
+    let first = frame_node_id(&SessionId::from("session"), first_key.as_str());
     assert!(graph.append_frame_open_with_id_at(
         first.to_string(),
         first_key,
@@ -597,7 +597,7 @@ fn nearest_frame_is_derived_from_ancestry() {
     let first_message = graph.append_message(text_message("m1", MessageRole::User, "first"));
     let second_key =
         crate::FrameKey::from_caller_material("second-frame").expect("non-empty frame material");
-    let second = frame_node_id("session", second_key.as_str());
+    let second = frame_node_id(&SessionId::from("session"), second_key.as_str());
     assert!(graph.append_frame_open_with_id_at(
         second.to_string(),
         second_key,
@@ -799,7 +799,7 @@ fn a_frame_read_model_is_shared_by_identity_until_the_active_path_moves() {
     let mut graph = SessionGraph::default();
     let frame_key =
         crate::FrameKey::from_caller_material("frame").expect("non-empty frame material");
-    let frame = frame_node_id("session", frame_key.as_str());
+    let frame = frame_node_id(&SessionId::from("session"), frame_key.as_str());
     assert!(graph.append_frame_open_with_id_at(
         frame.to_string(),
         frame_key,

@@ -27,7 +27,7 @@ impl InMemorySessionStoreFactory {
             let before = usage.len();
             usage.retain(|delta| {
                 receipts.contains_key(&(
-                    session_id.clone(),
+                    session_id.clone().clone(),
                     delta.identity.operation_storage_key.clone(),
                 ))
             });

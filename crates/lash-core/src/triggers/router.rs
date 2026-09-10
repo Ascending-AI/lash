@@ -345,7 +345,7 @@ pub(super) fn reserve_in_memory_for_occurrence(
                 && record.source_key == occurrence.source_key
                 && occurrence
                     .session_id
-                    .as_deref()
+                    .as_ref()
                     .is_none_or(|session_id| record.registrant_session_id() == Some(session_id))
         })
         .cloned()
@@ -446,14 +446,14 @@ pub fn deterministic_delivery_process_id(
     subscription_id: &str,
     incarnation: &str,
     revision: u64,
-) -> Result<String, PluginError> {
+) -> Result<ProcessId, PluginError> {
     let preimage =
         trigger_delivery_process_preimage(occurrence_id, subscription_id, incarnation, revision);
-    Ok(crate::stable_identity::rendered_hash(
+    Ok(ProcessId::from(crate::stable_identity::rendered_hash(
         "process:trigger-delivery",
         TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION,
         &preimage,
-    ))
+    )))
 }
 
 fn trigger_delivery_process_preimage(
@@ -622,7 +622,12 @@ impl TriggerRouter {
         let args =
             materialize_trigger_process_args(&subscription.input_template, &occurrence.payload)?;
         let target = apply_trigger_inputs(subscription.target.clone(), args)?;
-        let originator_scope_id = subscription.registrant_scope_id();
+        // `registrant_scope_id` is the owner *namespace*, which for session
+        // ownership is the session id and for host/platform ownership is not.
+        // `RuntimeScope::new` already took it as its session id before this
+        // wave; typing it here changes no bytes and does not widen that
+        // pre-existing conflation.
+        let originator_scope_id = SessionId::from(subscription.registrant_scope_id());
         let trigger_causal_ref = crate::CausalRef::TriggerOccurrence {
             occurrence_id: occurrence.occurrence_id.clone(),
             subscription_id: Some(subscription.subscription_id.clone()),
@@ -665,7 +670,7 @@ impl TriggerRouter {
             registration,
             observers: subscription
                 .registrant_session_id()
-                .map(str::to_owned)
+                .cloned()
                 .into_iter()
                 .collect(),
             env_spec: None,
@@ -673,7 +678,7 @@ impl TriggerRouter {
         };
         let effect_id = command.effect_id();
         let invocation = crate::RuntimeInvocation::effect(
-            crate::RuntimeScope::new(originator_scope_id),
+            crate::RuntimeScope::new(originator_scope_id.clone()),
             effect_id.clone(),
             crate::RuntimeEffectKind::Process,
             format!(
@@ -1352,7 +1357,7 @@ mod tests {
     async fn register_for_session(
         store: &InMemoryTriggerStore,
         operation_id: &str,
-        session_id: &str,
+        session_id: &SessionId,
         draft: TriggerSubscriptionDraft,
     ) -> TriggerSubscriptionRecord {
         let outcome = store
@@ -1507,7 +1512,7 @@ mod tests {
         register_for_session(
             store.as_ref(),
             "session-register",
-            "session-owner",
+            &SessionId::from("session-owner"),
             trigger_process_draft(&source_key, "session-owned"),
         )
         .await;
@@ -1529,7 +1534,7 @@ mod tests {
         assert!(
             crate::ProcessObserverRegistry::is_observer(
                 registry.as_ref(),
-                "session-owner",
+                &SessionId::from("session-owner"),
                 process_id
             )
             .await

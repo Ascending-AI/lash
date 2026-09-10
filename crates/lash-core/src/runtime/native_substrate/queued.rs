@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::sync::Arc;
 #[cfg(test)]
 use std::time::Duration;
@@ -249,7 +250,7 @@ impl NativeQueuedWork {
 
     pub(crate) async fn claim_and_run_pending(
         &self,
-        session_id: Option<&str>,
+        session_id: Option<&SessionId>,
         reason: &str,
     ) -> Result<(), PluginError> {
         if let Err(err) = self
@@ -271,18 +272,18 @@ impl NativeQueuedWork {
     /// semaphore bounds admitted executions across sessions. Callers therefore
     /// return their durable acceptance receipt without creating one task per
     /// signal.
-    pub(crate) fn notify_pending_work(&self, session_id: Option<&str>, reason: &str) {
-        let session_id = session_id.map(str::to_string);
+    pub(crate) fn notify_pending_work(&self, session_id: Option<&SessionId>, reason: &str) {
+        let session_id = session_id.cloned();
         let reason = reason.to_string();
         let should_start_dispatcher = {
             let mut state = self.inner.scheduler.lock_state();
             let demand = QueuedWorkDemand::new(session_id.clone(), reason);
-            if state.scheduled.insert(session_id.clone()) {
+            if state.scheduled.insert(session_id.clone().map(Into::into)) {
                 state.pending.push_back(demand);
             } else {
                 state
                     .rerun
-                    .entry(session_id)
+                    .entry(session_id.map(Into::into))
                     .and_modify(|rerun| rerun.merge(demand.clone()))
                     .or_insert(demand);
             }

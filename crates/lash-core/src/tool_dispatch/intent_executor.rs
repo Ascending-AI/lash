@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use std::collections::BTreeMap;
 
 use super::ToolDispatchContext;
@@ -156,7 +158,7 @@ pub(crate) async fn execute_parent_end_actions(
 }
 
 fn admit_batch(
-    session_id: &str,
+    session_id: &SessionId,
     tool_call_id: Option<&str>,
     intents: &crate::ToolIntents,
 ) -> Option<crate::ToolIntentRefusalReason> {
@@ -356,7 +358,7 @@ async fn execute_one(
     match intent {
         crate::ToolIntent::StartProcess(intent) => {
             let mut request = intent.request.clone();
-            request.id = identity.replay_key.clone();
+            request.id = ProcessId::from(identity.replay_key.clone());
             let summary = context
                 .processes
                 .start_from_recorded_intent(&intent.session_id, request, scope)
@@ -477,10 +479,10 @@ fn error_message(error: &crate::PluginError) -> String {
 mod tests {
     use super::*;
 
-    fn signal(session_id: &str, payload: serde_json::Value) -> crate::ToolIntent {
+    fn signal(session_id: &SessionId, payload: serde_json::Value) -> crate::ToolIntent {
         crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
-            session_id: session_id.to_string(),
-            process_id: "process-1".to_string(),
+            session_id: SessionId::from(session_id.to_string()),
+            process_id: ProcessId::from("process-1"),
             signal_name: "continue".to_string(),
             payload,
         })
@@ -491,10 +493,13 @@ mod tests {
         for recorded in [0, 2] {
             let intents = crate::ToolIntents {
                 protocol_version: recorded,
-                intents: vec![signal("session", serde_json::json!({"value": 1}))],
+                intents: vec![signal(
+                    &SessionId::from("session"),
+                    serde_json::json!({"value": 1}),
+                )],
             };
             assert_eq!(
-                admit_batch("session", Some("call"), &intents),
+                admit_batch(&SessionId::from("session"), Some("call"), &intents),
                 Some(crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded })
             );
         }
@@ -504,11 +509,16 @@ mod tests {
     fn admission_is_all_or_nothing_for_total_count_overflow() {
         let intents = crate::ToolIntents::v1(
             (0..=crate::TOOL_INTENT_MAX_COUNT)
-                .map(|index| signal("session", serde_json::json!({"index": index})))
+                .map(|index| {
+                    signal(
+                        &SessionId::from("session"),
+                        serde_json::json!({"index": index}),
+                    )
+                })
                 .collect(),
         );
         assert_eq!(
-            admit_batch("session", Some("call"), &intents),
+            admit_batch(&SessionId::from("session"), Some("call"), &intents),
             Some(crate::ToolIntentRefusalReason::CountBudgetExceeded {
                 actual: 33,
                 maximum: 32,
@@ -520,11 +530,16 @@ mod tests {
     fn admission_is_all_or_nothing_for_per_kind_overflow() {
         let intents = crate::ToolIntents::v1(
             (0..=crate::TOOL_INTENT_MAX_PER_KIND)
-                .map(|index| signal("session", serde_json::json!({"index": index})))
+                .map(|index| {
+                    signal(
+                        &SessionId::from("session"),
+                        serde_json::json!({"index": index}),
+                    )
+                })
                 .collect(),
         );
         assert_eq!(
-            admit_batch("session", Some("call"), &intents),
+            admit_batch(&SessionId::from("session"), Some("call"), &intents),
             Some(crate::ToolIntentRefusalReason::PerKindBudgetExceeded {
                 kind: crate::ToolIntentKind::SignalProcess,
                 actual: 17,
@@ -536,11 +551,11 @@ mod tests {
     #[test]
     fn admission_is_all_or_nothing_for_canonical_byte_overflow() {
         let intents = crate::ToolIntents::v1(vec![signal(
-            "session",
+            &SessionId::from("session"),
             serde_json::json!({"payload": "x".repeat(crate::TOOL_INTENT_MAX_CANONICAL_BYTES)}),
         )]);
         assert!(matches!(
-            admit_batch("session", Some("call"), &intents),
+            admit_batch(&SessionId::from("session"), Some("call"), &intents),
             Some(
                 crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
                     maximum: crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
@@ -553,11 +568,14 @@ mod tests {
     #[test]
     fn admission_refuses_the_entire_batch_on_session_mismatch() {
         let intents = crate::ToolIntents::v1(vec![
-            signal("session", serde_json::json!({"index": 0})),
-            signal("other-session", serde_json::json!({"index": 1})),
+            signal(&SessionId::from("session"), serde_json::json!({"index": 0})),
+            signal(
+                &SessionId::from("other-session"),
+                serde_json::json!({"index": 1}),
+            ),
         ]);
         assert_eq!(
-            admit_batch("session", Some("call"), &intents),
+            admit_batch(&SessionId::from("session"), Some("call"), &intents),
             Some(crate::ToolIntentRefusalReason::SessionMismatch {
                 expected: "session".to_string(),
                 recorded: "other-session".to_string(),
@@ -569,7 +587,7 @@ mod tests {
     fn outcome_model_addenda_have_literal_stable_text() {
         let executed = crate::ToolIntentExecutionOutcome::Executed {
             identity: crate::ToolIntentIdentity {
-                session_id: "session".to_string(),
+                session_id: SessionId::from("session"),
                 execution_scope_id: "turn".to_string(),
                 tool_call_id: "call".to_string(),
                 intent_index: 4,

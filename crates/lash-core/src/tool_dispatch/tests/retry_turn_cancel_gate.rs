@@ -6,6 +6,7 @@
 //! first attempt fails retryably and it journals the sleep before attempt two.
 
 use super::*;
+use crate::ProcessId;
 
 type RetrySleepShape = (bool, Option<crate::ExecutionScope>);
 
@@ -101,7 +102,7 @@ async fn retry_sleep_inside_a_process_body_attaches_no_turn_cancel_gate() {
     let shape = retry_sleep_shape(
         ToolAttemptEffectIdentity::Process {
             parent: None,
-            process_id: "process-1".to_string(),
+            process_id: ProcessId::from("process-1"),
         },
         crate::runtime::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
     )

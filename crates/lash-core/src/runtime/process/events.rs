@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -161,7 +162,7 @@ impl ProcessCompletionAuthority {
     /// SQLite, and Postgres rather than at each scattered caller.
     pub fn validate(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         disposition: RecoveryContract,
         await_output: &ProcessAwaitOutput,
     ) -> Result<(), crate::PluginError> {
@@ -228,7 +229,7 @@ pub fn terminal_event_type_name(status: ProcessStatus) -> &'static str {
 /// and the payload is byte-identical to the historical shape). The
 /// `await_output` selector (`/await_output`) is untouched by the sibling key.
 pub fn terminal_append_request(
-    process_id: &str,
+    process_id: &ProcessId,
     await_output: &ProcessAwaitOutput,
     authority: Option<&ProcessCompletionAuthority>,
 ) -> ProcessEventAppendRequest {
@@ -486,7 +487,7 @@ pub fn process_signal_name_from_event_type(event_type: &str) -> Option<&str> {
     event_type.strip_prefix("signal.")
 }
 
-pub fn process_signal_wait_key(process_id: &str, signal_name: &str, ordinal: u64) -> String {
+pub fn process_signal_wait_key(process_id: &ProcessId, signal_name: &str, ordinal: u64) -> String {
     format!("process:{process_id}:signal.{signal_name}:{ordinal}")
 }
 
@@ -566,7 +567,7 @@ impl ProcessEventAppendRequest {
     /// address. Repeating the same reason is idempotent; a distinct reason
     /// retains the pre-cutover behavior of naming a distinct request without
     /// copying unbounded caller text into an indexed store key.
-    pub fn cancel_requested(process_id: &str, reason: Option<String>) -> Self {
+    pub fn cancel_requested(process_id: &ProcessId, reason: Option<String>) -> Self {
         let replay_key = cancellation_replay_key(process_id, reason.as_deref());
         let payload = serde_json::json!({
             "reason": reason,
@@ -577,7 +578,7 @@ impl ProcessEventAppendRequest {
     /// Builds a first-start event for process-store implementors keyed by attempt number so a retry
     /// cannot alias the preceding execution attempt.
     pub fn first_started(
-        process_id: &str,
+        process_id: &ProcessId,
         started: &super::model::ProcessStarted,
         resumed_from_handover: bool,
     ) -> Self {
@@ -596,7 +597,7 @@ impl ProcessEventAppendRequest {
 
     /// Builds a wait-entry event for process-store implementors keyed by wait identity and start
     /// time so replay cannot duplicate the transition.
-    pub fn wait_entered(process_id: &str, wait: &super::model::WaitState) -> Self {
+    pub fn wait_entered(process_id: &ProcessId, wait: &super::model::WaitState) -> Self {
         Self::new("process.waiting", serde_json::json!({ "wait": wait })).with_replay_key(format!(
             "process:{process_id}:wait:{}:since:{}:entered",
             wait.key(),
@@ -606,7 +607,7 @@ impl ProcessEventAppendRequest {
 
     /// Builds a wait-clear event for process-store implementors keyed to the exact wait identity
     /// and start time being resumed.
-    pub fn wait_cleared(process_id: &str, wait: &super::model::WaitState) -> Self {
+    pub fn wait_cleared(process_id: &ProcessId, wait: &super::model::WaitState) -> Self {
         Self::new("process.resumed", serde_json::json!({ "wait": wait })).with_replay_key(format!(
             "process:{process_id}:wait:{}:since:{}:cleared",
             wait.key(),
@@ -617,7 +618,7 @@ impl ProcessEventAppendRequest {
     /// Builds the single replay-stable external-reference event for process-store implementors
     /// binding durable backend work.
     pub fn external_ref_set(
-        process_id: &str,
+        process_id: &ProcessId,
         external_ref: &super::model::ProcessExternalRef,
     ) -> Self {
         Self::new(
@@ -629,7 +630,10 @@ impl ProcessEventAppendRequest {
 
     /// Builds the replay-stable abandon-request event for process-store implementors; repeated
     /// requests for the process converge on the same append identity.
-    pub fn abandon_requested(process_id: &str, request: &super::model::AbandonRequest) -> Self {
+    pub fn abandon_requested(
+        process_id: &ProcessId,
+        request: &super::model::AbandonRequest,
+    ) -> Self {
         Self::new(
             "process.abandon_requested",
             serde_json::json!({ "request": request }),
@@ -646,14 +650,14 @@ impl ProcessEventAppendRequest {
     /// outcome could be written — and the transition's wall clock is the
     /// event's own `occurred_at`, projected onto `updated_at_ms` like every
     /// other lifecycle append.
-    pub fn caller_departed(process_id: &str) -> Self {
+    pub fn caller_departed(process_id: &ProcessId) -> Self {
         Self::new("process.caller_departed", serde_json::json!({}))
             .with_replay_key(format!("process:{process_id}:caller-departed"))
     }
 
     /// Builds an observer-add event for process-store implementors whose replay key includes
     /// process, session, and observer authority.
-    pub fn observer_added(process_id: &str, session: &str, by: &ProcessObserverBy) -> Self {
+    pub fn observer_added(process_id: &ProcessId, session: &str, by: &ProcessObserverBy) -> Self {
         Self::new(
             "process.observer_added",
             serde_json::json!({ "session": session, "by": by }),
@@ -666,7 +670,7 @@ impl ProcessEventAppendRequest {
 
     /// Builds an observer-remove event for process-store implementors whose replay key includes
     /// process, session, and observer authority.
-    pub fn observer_removed(process_id: &str, session: &str, by: &ProcessObserverBy) -> Self {
+    pub fn observer_removed(process_id: &ProcessId, session: &str, by: &ProcessObserverBy) -> Self {
         Self::new(
             "process.observer_removed",
             serde_json::json!({ "session": session, "by": by }),
@@ -679,7 +683,7 @@ impl ProcessEventAppendRequest {
 
     /// Builds a replay-stable subscription-retarget event for process-store implementors, encoding
     /// an absent target with the reserved `none` replay component.
-    pub fn subscription_retargeted(process_id: &str, target: Option<&str>) -> Self {
+    pub fn subscription_retargeted(process_id: &ProcessId, target: Option<&str>) -> Self {
         Self::new(
             "process.subscription_retargeted",
             serde_json::json!({ "target": target }),
@@ -698,7 +702,7 @@ const PROCESS_CANCELLATION_FAMILY_VERSION: u8 = 1;
 /// Reason presence uses the universal option tags 0/1. The present arm frames
 /// the complete UTF-8 reason; the rendered key hashes that exhaustive preimage
 /// to a backend-safe fixed size.
-fn cancellation_replay_preimage(process_id: &str, reason: Option<&str>) -> Vec<u8> {
+fn cancellation_replay_preimage(process_id: &ProcessId, reason: Option<&str>) -> Vec<u8> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
         "lash.process-cancellation-request",
         PROCESS_CANCELLATION_FAMILY_VERSION,
@@ -708,7 +712,7 @@ fn cancellation_replay_preimage(process_id: &str, reason: Option<&str>) -> Vec<u
     identity.finish()
 }
 
-fn cancellation_replay_key(process_id: &str, reason: Option<&str>) -> String {
+fn cancellation_replay_key(process_id: &ProcessId, reason: Option<&str>) -> String {
     crate::stable_identity::rendered_hash(
         "process-cancellation",
         PROCESS_CANCELLATION_FAMILY_VERSION,
@@ -722,7 +726,7 @@ pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 2;
 pub struct ProcessWakeDelivery {
     pub version: u32,
     pub wake_id: String,
-    pub target_session_id: String,
+    pub target_session_id: SessionId,
     pub process_id: ProcessId,
     pub process_incarnation: ProcessIncarnation,
     pub sequence: u64,
@@ -820,7 +824,7 @@ mod cancellation_identity_tests {
     #[test]
     fn cancellation_replay_identity_has_pinned_bounded_grammar() {
         let reason = "λ".repeat(3_200);
-        let key = cancellation_replay_key("process\0id", Some(&reason));
+        let key = cancellation_replay_key(&ProcessId::from("process\0id"), Some(&reason));
         assert_eq!(
             key.len(),
             95,
@@ -831,12 +835,15 @@ mod cancellation_identity_tests {
             "process-cancellation:v1:blake3:77db45e3a150a0d172e3d62585d286d98911baec6f414a627ec260b317cde22a"
         );
         assert_eq!(
-            hex(&cancellation_replay_preimage("process\0id", None)),
+            hex(&cancellation_replay_preimage(
+                &ProcessId::from("process\0id"),
+                None
+            )),
             "6c6173682d737461626c652d6964656e74697479020100000000000000216c6173682e70726f636573732d63616e63656c6c6174696f6e2d72657175657374000000000000000a70726f6365737300696400"
         );
         assert_ne!(
-            cancellation_replay_key("process\0id", None),
-            cancellation_replay_key("process\0id", Some("")),
+            cancellation_replay_key(&ProcessId::from("process\0id"), None),
+            cancellation_replay_key(&ProcessId::from("process\0id"), Some("")),
             "None and Some(empty) occupy different permanent option arms"
         );
     }

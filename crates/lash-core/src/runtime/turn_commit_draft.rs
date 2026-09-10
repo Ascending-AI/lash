@@ -1,3 +1,4 @@
+use crate::SessionId;
 #[cfg(test)]
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_sansio::core_support::*;
@@ -88,7 +89,7 @@ impl TurnGraphAppendDraft {
     /// not on the active path is a stale branch.
     pub(in crate::runtime) fn record(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         request: &crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
         let operation =
@@ -113,7 +114,7 @@ impl TurnGraphAppendDraft {
                 return Ok(existing.outcome.clone());
             }
             return Err(crate::PluginError::AppendOperationIdentityConflict {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 operation_key: draft_namespace,
             });
         }
@@ -349,7 +350,7 @@ impl TurnCommitDraft {
         self.graph.mark_node_ids_persisted(node_ids);
     }
 
-    pub(super) fn remap_node_ids(&mut self, session_id: &str, mapping: &[(String, String)]) {
+    pub(super) fn remap_node_ids(&mut self, session_id: &SessionId, mapping: &[(String, String)]) {
         self.graph.remap_node_ids(session_id, mapping);
         if let Some(current) = self.state.current_frame_node_id.as_mut()
             && let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current.as_str())
@@ -398,10 +399,10 @@ mod tests {
         }
     }
 
-    fn seeded_state(session_id: &str) -> RuntimeSessionState {
+    fn seeded_state(session_id: &SessionId) -> RuntimeSessionState {
         let clock = crate::SystemClock;
         let mut state = RuntimeSessionState {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         state.ensure_agent_frame_initialized_with_clock(&clock);
@@ -421,12 +422,15 @@ mod tests {
 
     #[test]
     fn recorded_appends_answer_like_durable_appends() {
-        let state = seeded_state("draft-answers");
+        let state = seeded_state(&SessionId::from("draft-answers"));
         let durable_leaf = state.session_graph.leaf_node_id.clone().expect("leaf");
         let draft = TurnGraphAppendDraft::from_resident_state(&state, Arc::new(crate::SystemClock));
 
         let first = draft
-            .record("draft-answers", &plugin_append("op-a", &["a0", "a1"]))
+            .record(
+                &SessionId::from("draft-answers"),
+                &plugin_append("op-a", &["a0", "a1"]),
+            )
             .expect("first append");
         let first_ids = appended_ids(&first);
         assert_eq!(first_ids.len(), 2);
@@ -438,11 +442,17 @@ mod tests {
         // Same identity replays the first answer; a reused id with another
         // request is the typed conflict the store would raise.
         let replayed = draft
-            .record("draft-answers", &plugin_append("op-a", &["a0", "a1"]))
+            .record(
+                &SessionId::from("draft-answers"),
+                &plugin_append("op-a", &["a0", "a1"]),
+            )
             .expect("replayed append");
         assert_eq!(appended_ids(&replayed), first_ids);
         assert!(matches!(
-            draft.record("draft-answers", &plugin_append("op-a", &["changed"])),
+            draft.record(
+                &SessionId::from("draft-answers"),
+                &plugin_append("op-a", &["changed"])
+            ),
             Err(crate::PluginError::AppendOperationIdentityConflict { .. })
         ));
 
@@ -452,7 +462,7 @@ mod tests {
         on_recorded.requires_ancestor_node_id = Some(first_ids[0].clone());
         assert!(matches!(
             draft
-                .record("draft-answers", &on_recorded)
+                .record(&SessionId::from("draft-answers"), &on_recorded)
                 .expect("append on recorded ancestor"),
             AppendSessionNodesOutcome::Appended { .. }
         ));
@@ -460,14 +470,14 @@ mod tests {
         on_durable.requires_ancestor_node_id = Some(durable_leaf);
         assert!(matches!(
             draft
-                .record("draft-answers", &on_durable)
+                .record(&SessionId::from("draft-answers"), &on_durable)
                 .expect("append on durable ancestor"),
             AppendSessionNodesOutcome::Appended { .. }
         ));
         let mut off_path = plugin_append("op-d", &["d0"]);
         off_path.requires_ancestor_node_id = Some("not-on-the-active-path".to_string());
         assert!(matches!(
-            draft.record("draft-answers", &off_path).expect("stale branch answer"),
+            draft.record(&SessionId::from("draft-answers"), &off_path).expect("stale branch answer"),
             AppendSessionNodesOutcome::StaleBranch { required_node_id }
                 if required_node_id == "not-on-the-active-path"
         ));
@@ -475,7 +485,7 @@ mod tests {
 
     #[test]
     fn queued_appends_fold_at_the_next_boundary_after_its_messages() {
-        let state = seeded_state("draft-fold");
+        let state = seeded_state(&SessionId::from("draft-fold"));
         let clock: Arc<dyn crate::Clock> = Arc::new(crate::SystemClock);
         let appends = TurnGraphAppendDraft::from_resident_state(&state, Arc::clone(&clock));
         let mut draft =
@@ -492,7 +502,10 @@ mod tests {
         ]));
         let before_reply = appended_ids(
             &appends
-                .record("draft-fold", &plugin_append("before-reply", &["mid"]))
+                .record(
+                    &SessionId::from("draft-fold"),
+                    &plugin_append("before-reply", &["mid"]),
+                )
                 .expect("append after boundary one"),
         );
 
@@ -515,7 +528,10 @@ mod tests {
         ]));
         let after_reply = appended_ids(
             &appends
-                .record("draft-fold", &plugin_append("after-reply", &["late"]))
+                .record(
+                    &SessionId::from("draft-fold"),
+                    &plugin_append("after-reply", &["late"]),
+                )
                 .expect("append after boundary two"),
         );
         draft.finalize_turn_read_state(
@@ -525,7 +541,10 @@ mod tests {
         let mut state = draft.into_final_state();
         let finalize_hook = appended_ids(
             &appends
-                .record("draft-fold", &plugin_append("finalize-hook", &["hook"]))
+                .record(
+                    &SessionId::from("draft-fold"),
+                    &plugin_append("finalize-hook", &["hook"]),
+                )
                 .expect("finalize-hook append"),
         );
         appends.fold_into_final_state(&mut state);
@@ -588,7 +607,7 @@ mod tests {
     fn prompt_projection_appends_new_messages_from_the_durable_leaf() {
         let clock = crate::SystemClock;
         let mut state = RuntimeSessionState {
-            session_id: "frame-replacement".to_string(),
+            session_id: SessionId::from("frame-replacement"),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         state.ensure_agent_frame_initialized_with_clock(&clock);

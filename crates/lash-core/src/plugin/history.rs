@@ -3,6 +3,7 @@
 //! Split out of `plugin/mod.rs` purely for file size. All types keep
 //! their original module path via `pub use` in `plugin/mod.rs`.
 
+use crate::SessionId;
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_sansio::core_support::*;
 use std::sync::{Arc, OnceLock};
@@ -26,7 +27,7 @@ struct SessionReadState {
 
 #[derive(Clone, Debug)]
 struct SessionReadMeta {
-    session_id: String,
+    session_id: SessionId,
     durable_relation: Option<crate::SessionRelation>,
     policy: SessionPolicy,
     turn_index: usize,
@@ -343,7 +344,7 @@ impl SessionReadView {
 /// Context passed to a turn-context transform.
 #[derive(Clone)]
 pub struct TurnTransformContext<'run> {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub state: SessionReadView,
     pub prompt_usage: Option<crate::runtime::PromptUsage>,
     pub max_context_tokens: Option<usize>,
@@ -357,7 +358,7 @@ pub struct TurnTransformContext<'run> {
 /// Context passed to an explicit compactor.
 #[derive(Clone)]
 pub struct CompactionContext<'run> {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub instructions: Option<String>,
     pub state: SessionReadView,
     pub sessions: Arc<dyn super::SessionStateService>,

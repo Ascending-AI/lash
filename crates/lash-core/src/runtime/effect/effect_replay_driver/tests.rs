@@ -66,7 +66,7 @@ fn pre_bump_journal_does_not_duplicate_existing_visible_text_part() {
 fn request() -> EffectClaimRequest {
     EffectClaimRequest {
         scope_id: "session:s1".to_string(),
-        session_id: Some("s1".to_string()),
+        session_id: Some(SessionId::from("s1")),
         replay_key: "k1".to_string(),
         envelope_hash: "hash-1".to_string(),
         envelope_json: "{\"envelope\":1}".to_string(),

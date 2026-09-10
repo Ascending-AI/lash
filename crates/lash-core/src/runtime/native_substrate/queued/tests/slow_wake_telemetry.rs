@@ -54,7 +54,10 @@ async fn hung_executions_are_bounded_warn_when_slow_and_shutdown_cleanly() {
             THRESHOLD,
         );
         for index in 0..SIGNALS {
-            driver.notify_pending_work(Some(&format!("hung-{index}")), "process_wake");
+            driver.notify_pending_work(
+                Some(&SessionId::from(format!("hung-{index}"))),
+                "process_wake",
+            );
         }
         // Admission needs no timer, so spinning on `yield_now` reaches the
         // saturated state without letting virtual time move.

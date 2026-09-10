@@ -26,6 +26,8 @@
 //! a found version is readable, is one build-wide question that belongs with
 //! the format manifest rather than duplicated per backend.
 
+use crate::ProcessId;
+use crate::SessionId;
 use async_trait::async_trait;
 
 use super::error::StoreError;
@@ -333,9 +335,9 @@ pub struct DurableItem {
     /// meaningful only to the backend that minted it.
     pub cursor: String,
     /// The process this payload belongs to, when it belongs to one.
-    pub process_id: Option<String>,
+    pub process_id: Option<ProcessId>,
     /// The session this payload belongs to, when it belongs to one.
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     /// The store's own status word for the owner, e.g. `waiting`. Reported
     /// verbatim so an operator reads the store's vocabulary rather than a
     /// translation of it.

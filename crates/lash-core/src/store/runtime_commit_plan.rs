@@ -6,6 +6,7 @@
 //! set, and the receipt/result projection. A backend therefore reads typed
 //! facts, asks the planner once, and executes the returned plan.
 
+use crate::SessionId;
 use std::collections::HashSet;
 
 use super::{
@@ -120,7 +121,7 @@ impl RuntimeCommitReplay {
 #[derive(Clone, Debug)]
 pub struct RuntimeCommitReceiptWrite<'a> {
     /// Session namespace for the receipt.
-    pub session_id: &'a str,
+    pub session_id: &'a SessionId,
     /// Canonical operation storage key.
     pub operation_key: &'a str,
     /// Canonical hash of the committed semantic content.
@@ -192,13 +193,13 @@ impl RuntimeCommitPlanner {
     /// preserving the binding fence ahead of receipt replay.
     pub fn validate_session_binding(
         &self,
-        bound_session_id: Option<&str>,
+        bound_session_id: Option<&SessionId>,
     ) -> Result<(), StoreError> {
         if let Some(bound_session_id) = bound_session_id
             && bound_session_id != self.commit.session_id
         {
             return Err(StoreError::SessionBindingMismatch {
-                bound_session_id: bound_session_id.to_string(),
+                bound_session_id: SessionId::from(bound_session_id.to_string()),
                 attempted_session_id: self.commit.session_id.clone(),
             });
         }
@@ -599,7 +600,7 @@ mod tests {
     #[test]
     fn lease_plan_rejects_borrow_xor_release_violation_with_typed_error() {
         let state = crate::RuntimeSessionState {
-            session_id: "lease-plan-conflict".to_string(),
+            session_id: SessionId::from("lease-plan-conflict"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -629,7 +630,7 @@ mod tests {
     #[test]
     fn fresh_commit_plan_refuses_exhausted_head_revision() {
         let state = crate::RuntimeSessionState {
-            session_id: "revision-overflow".to_string(),
+            session_id: SessionId::from("revision-overflow"),
             head_revision: i64::MAX as u64,
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,

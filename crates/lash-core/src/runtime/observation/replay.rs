@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -102,13 +104,13 @@ impl SessionCursor {
 
     pub fn parse_for_session(
         &self,
-        expected_session_id: &str,
+        expected_session_id: &SessionId,
     ) -> Result<ParsedSessionCursor<'_>, SessionCursorError> {
         let parsed = self.parse()?;
         if parsed.session_id != expected_session_id {
             return Err(SessionCursorError::WrongSession {
-                expected_session_id: expected_session_id.to_string(),
-                actual_session_id: parsed.session_id.to_string(),
+                expected_session_id: SessionId::from(expected_session_id.to_string()),
+                actual_session_id: SessionId::from(parsed.session_id.to_string()),
             });
         }
         Ok(parsed)
@@ -188,8 +190,8 @@ pub enum SessionCursorError {
     Malformed { message: String },
     #[error("session cursor belongs to `{actual_session_id}`, not `{expected_session_id}`")]
     WrongSession {
-        expected_session_id: String,
-        actual_session_id: String,
+        expected_session_id: SessionId,
+        actual_session_id: SessionId,
     },
 }
 
@@ -229,11 +231,16 @@ impl SessionObservationEvent {
     }
 
     /// Returns the session named by this event's durable cursor.
-    pub fn session_id(&self) -> &str {
-        self.cursor
-            .parse()
-            .expect("store-created observation event cursor must parse")
-            .session_id
+    ///
+    /// Owned rather than borrowed: the cursor stores the identity as a slice of
+    /// a larger string, and a `&SessionId` cannot be reborrowed out of a `&str`.
+    pub fn session_id(&self) -> SessionId {
+        SessionId::from(
+            self.cursor
+                .parse()
+                .expect("store-created observation event cursor must parse")
+                .session_id,
+        )
     }
 
     /// Returns the replay-store incarnation named by this event's durable cursor.
@@ -287,13 +294,13 @@ pub enum SessionObservationEventPayload {
     },
     ProcessChanged {
         kind: SessionProcessEventKind,
-        process_ids: Vec<String>,
+        process_ids: Vec<ProcessId>,
     },
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LiveReplayGap {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub requested_cursor: SessionCursor,
     pub latest_cursor: SessionCursor,
     pub latest_revision: SessionRevision,
@@ -559,7 +566,7 @@ pub trait LiveReplayStore: Send + Sync {
     /// This must be fast and nonblocking from the runtime's point of view.
     fn prepare_publication(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         revision: SessionRevision,
         events: Vec<LiveReplayEventDraft>,
     ) -> Result<PreparedLiveReplayPublication, LiveReplayStoreError>;
@@ -597,12 +604,12 @@ pub trait LiveReplayStore: Send + Sync {
     /// newer event so replay reconciles the stale snapshot.
     ///
     /// This must be fast and nonblocking from the runtime's point of view.
-    fn current_cursor(&self, session_id: &str, revision: SessionRevision) -> SessionCursor;
+    fn current_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor;
 
     /// Apply best-effort retention trimming for a session.
     ///
     /// This must be fast and nonblocking from the runtime's point of view.
-    fn trim_session(&self, session_id: &str) -> Result<(), LiveReplayStoreError>;
+    fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError>;
 }
 
 #[derive(Clone, Debug)]
@@ -625,7 +632,7 @@ pub struct InMemoryLiveReplayStore {
     replay_incarnation_id: String,
     config: InMemoryLiveReplayStoreConfig,
     clock: Arc<dyn crate::Clock>,
-    sessions: Arc<StdMutex<HashMap<String, LiveReplaySessionBuffer>>>,
+    sessions: Arc<StdMutex<HashMap<SessionId, LiveReplaySessionBuffer>>>,
     #[cfg(any(test, feature = "testing"))]
     before_notification_gate: Option<BeforeNotificationGate>,
 }
@@ -884,7 +891,7 @@ impl InMemoryLiveReplayStore {
 impl LiveReplayStore for InMemoryLiveReplayStore {
     fn prepare_publication(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         revision: SessionRevision,
         drafts: Vec<LiveReplayEventDraft>,
     ) -> Result<PreparedLiveReplayPublication, LiveReplayStoreError> {
@@ -895,7 +902,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         }
         let mut sessions = self.sessions.lock_recover();
         let buffer = sessions
-            .entry(session_id.to_string())
+            .entry(SessionId::from(session_id.to_string()))
             .or_insert_with(LiveReplaySessionBuffer::new);
         let start_position = buffer.tail_position.checked_add(1).ok_or_else(|| {
             LiveReplayStoreError::Store("live replay position overflow".to_string())
@@ -937,7 +944,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let sessions = Arc::clone(&self.sessions);
         let config = self.config.clone();
         let clock = Arc::clone(&self.clock);
-        let abandoned_session_id = session_id.to_string();
+        let abandoned_session_id = SessionId::from(session_id.to_string());
         PreparedLiveReplayPublication::new(reservation_id, events, move |reservation_id| {
             let now = clock.now();
             let mut sessions = sessions.lock_recover();
@@ -965,8 +972,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let session_id = events
             .first()
             .expect("prepared publications are non-empty")
-            .session_id()
-            .to_string();
+            .session_id();
         let mut sessions = self.sessions.lock_recover();
         let buffer = sessions.get_mut(&session_id).ok_or_else(|| {
             LiveReplayStoreError::Store("prepared live replay session is missing".to_string())
@@ -1053,7 +1059,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
         let buffer = sessions
-            .entry(parsed.session_id.to_string())
+            .entry(SessionId::from(parsed.session_id.to_string()))
             .or_insert_with(LiveReplaySessionBuffer::new);
         Self::trim_locked(&self.config, buffer, now);
         if let Some(reason) = Self::gap_reason_for_cursor(Some(buffer), parsed.live_position) {
@@ -1071,7 +1077,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         ))
     }
 
-    fn current_cursor(&self, session_id: &str, revision: SessionRevision) -> SessionCursor {
+    fn current_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor {
         let live_position = self
             .sessions
             .lock_recover()
@@ -1094,7 +1100,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         )
     }
 
-    fn trim_session(&self, session_id: &str) -> Result<(), LiveReplayStoreError> {
+    fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
         if let Some(buffer) = sessions.get_mut(session_id) {
@@ -1113,7 +1119,7 @@ mod tests {
     impl InMemoryLiveReplayStore {
         fn publish_test_event(
             &self,
-            session_id: &str,
+            session_id: &SessionId,
             revision: SessionRevision,
             turn_id: Option<&TurnId>,
             payload: SessionObservationEventPayload,
@@ -1202,7 +1208,7 @@ mod tests {
         assert_eq!(decoded, cursor);
         assert_eq!(format!("{cursor:?}"), "SessionCursor(<opaque>)");
         let parsed = cursor
-            .parse_for_session("session:with:colon")
+            .parse_for_session(&SessionId::from("session:with:colon"))
             .expect("parse");
         assert_eq!(parsed.replay_incarnation_id, "replay-incarnation");
         assert_eq!(parsed.revision, SessionRevision(3));
@@ -1218,10 +1224,10 @@ mod tests {
     fn reserved_cursors_are_valid_until_publication_and_abandonment_forces_gap() {
         let store = InMemoryLiveReplayStore::default();
         let revision = SessionRevision::new(1);
-        let start = store.current_cursor("reserved", revision);
+        let start = store.current_cursor(&SessionId::from("reserved"), revision);
         let prepared = store
             .prepare_publication(
-                "reserved",
+                &SessionId::from("reserved"),
                 revision,
                 vec![LiveReplayEventDraft::new(
                     None::<String>,
@@ -1255,7 +1261,7 @@ mod tests {
                 LiveReplayGapReason::Unavailable
             ))
         ));
-        let retired = store.current_cursor("reserved", revision);
+        let retired = store.current_cursor(&SessionId::from("reserved"), revision);
         assert!(matches!(
             store.replay_after_cursor(&retired),
             Ok(LiveReplayOutcome::Replayed(events)) if events.is_empty()
@@ -1266,17 +1272,17 @@ mod tests {
     fn prepared_batches_become_visible_in_reserved_cursor_order() {
         let store = InMemoryLiveReplayStore::default();
         let revision = SessionRevision::new(1);
-        let start = store.current_cursor("ordered", revision);
+        let start = store.current_cursor(&SessionId::from("ordered"), revision);
         let first = store
             .prepare_publication(
-                "ordered",
+                &SessionId::from("ordered"),
                 revision,
                 vec![LiveReplayEventDraft::new(None::<String>, activity("first"))],
             )
             .expect("reserve first publication");
         let second = store
             .prepare_publication(
-                "ordered",
+                &SessionId::from("ordered"),
                 revision,
                 vec![LiveReplayEventDraft::new(
                     None::<String>,
@@ -1318,12 +1324,12 @@ mod tests {
     fn session_cursor_rejects_malformed_and_wrong_session() {
         let malformed = SessionCursor::from_raw_for_testing("bad");
         assert!(matches!(
-            malformed.parse_for_session("s"),
+            malformed.parse_for_session(&SessionId::from("s")),
             Err(SessionCursorError::Malformed { .. })
         ));
         let cursor = SessionCursor::new("replay-incarnation", "actual", SessionRevision(0), 0);
         assert!(matches!(
-            cursor.parse_for_session("expected"),
+            cursor.parse_for_session(&SessionId::from("expected")),
             Err(SessionCursorError::WrongSession { .. })
         ));
     }
@@ -1331,12 +1337,22 @@ mod tests {
     #[test]
     fn in_memory_replay_store_replays_after_cursor_in_order() {
         let store = InMemoryLiveReplayStore::default();
-        let start = store.current_cursor("s", SessionRevision(0));
+        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
         store
-            .publish_test_event("s", SessionRevision(0), None, activity("a"))
+            .publish_test_event(
+                &SessionId::from("s"),
+                SessionRevision(0),
+                None,
+                activity("a"),
+            )
             .expect("append a");
         store
-            .publish_test_event("s", SessionRevision(0), None, activity("b"))
+            .publish_test_event(
+                &SessionId::from("s"),
+                SessionRevision(0),
+                None,
+                activity("b"),
+            )
             .expect("append b");
         let LiveReplayOutcome::Replayed(events) =
             store.replay_after_cursor(&start).expect("replay")
@@ -1357,13 +1373,18 @@ mod tests {
     fn current_cursor_for_stale_snapshot_replays_newer_revision_events() {
         let store = InMemoryLiveReplayStore::default();
         store
-            .publish_test_event("s", SessionRevision(2), None, activity("worker commit"))
+            .publish_test_event(
+                &SessionId::from("s"),
+                SessionRevision(2),
+                None,
+                activity("worker commit"),
+            )
             .expect("append newer worker commit");
 
         // A runtime can finish loading durable revision 1 just before a separate
         // worker publishes revision 2. Its initial cursor must not skip that
         // newer event merely because the live-replay tail already advanced.
-        let stale_snapshot_cursor = store.current_cursor("s", SessionRevision(1));
+        let stale_snapshot_cursor = store.current_cursor(&SessionId::from("s"), SessionRevision(1));
         let LiveReplayOutcome::Replayed(events) = store
             .replay_after_cursor(&stale_snapshot_cursor)
             .expect("replay from stale snapshot")
@@ -1377,12 +1398,22 @@ mod tests {
     #[test]
     fn in_memory_replay_store_reports_gap_after_capacity_trim() {
         let store = InMemoryLiveReplayStore::with_bounds(1, Duration::from_secs(120));
-        let start = store.current_cursor("s", SessionRevision(0));
+        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
         store
-            .publish_test_event("s", SessionRevision(0), None, activity("a"))
+            .publish_test_event(
+                &SessionId::from("s"),
+                SessionRevision(0),
+                None,
+                activity("a"),
+            )
             .expect("append a");
         store
-            .publish_test_event("s", SessionRevision(0), None, activity("b"))
+            .publish_test_event(
+                &SessionId::from("s"),
+                SessionRevision(0),
+                None,
+                activity("b"),
+            )
             .expect("append b");
         assert!(matches!(
             store.replay_after_cursor(&start).expect("gap"),
@@ -1393,9 +1424,14 @@ mod tests {
     #[test]
     fn in_memory_replay_store_reports_gap_after_ttl_trim() {
         let store = InMemoryLiveReplayStore::with_bounds(16, Duration::from_millis(1));
-        let start = store.current_cursor("s", SessionRevision(0));
+        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
         store
-            .publish_test_event("s", SessionRevision(0), None, activity("a"))
+            .publish_test_event(
+                &SessionId::from("s"),
+                SessionRevision(0),
+                None,
+                activity("a"),
+            )
             .expect("append a");
         std::thread::sleep(Duration::from_millis(5));
         assert!(matches!(
@@ -1417,9 +1453,14 @@ mod tests {
     #[tokio::test]
     async fn in_memory_replay_subscription_yields_replay_then_live() {
         let store = InMemoryLiveReplayStore::default();
-        let start = store.current_cursor("s", SessionRevision(0));
+        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
         store
-            .publish_test_event("s", SessionRevision(0), None, activity("a"))
+            .publish_test_event(
+                &SessionId::from("s"),
+                SessionRevision(0),
+                None,
+                activity("a"),
+            )
             .expect("append a");
         let LiveReplaySubscribeOutcome::Subscribed(mut subscription) =
             store.subscribe_after_cursor(&start).expect("subscribe")
@@ -1432,7 +1473,12 @@ mod tests {
             .expect("replay");
         assert_eq!(first.session_id(), "s");
         store
-            .publish_test_event("s", SessionRevision(0), None, activity("b"))
+            .publish_test_event(
+                &SessionId::from("s"),
+                SessionRevision(0),
+                None,
+                activity("b"),
+            )
             .expect("append b");
         let second = futures_util::StreamExt::next(&mut subscription)
             .await
@@ -1452,7 +1498,7 @@ mod tests {
     async fn measure_streamed_token_allocations() {
         const TOKENS: usize = 1_000;
         let store = InMemoryLiveReplayStore::with_bounds(TOKENS + 1, Duration::from_secs(120));
-        let mut cursor = store.current_cursor("perf-session", SessionRevision(7));
+        let mut cursor = store.current_cursor(&SessionId::from("perf-session"), SessionRevision(7));
         let LiveReplaySubscribeOutcome::Subscribed(mut subscription) = store
             .subscribe_after_cursor(&cursor)
             .expect("subscribe for allocation measurement")
@@ -1466,7 +1512,7 @@ mod tests {
         for ordinal in 0..TOKENS {
             let event = store
                 .publish_test_event(
-                    "perf-session",
+                    &SessionId::from("perf-session"),
                     SessionRevision(7),
                     None,
                     activity(&format!("token-{ordinal}")),
@@ -1500,9 +1546,14 @@ mod tests {
     #[test]
     fn in_memory_replay_store_allocates_live_channel_lazily() {
         let store = InMemoryLiveReplayStore::default();
-        let start = store.current_cursor("s", SessionRevision(0));
+        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
         store
-            .publish_test_event("s", SessionRevision(0), None, activity("a"))
+            .publish_test_event(
+                &SessionId::from("s"),
+                SessionRevision(0),
+                None,
+                activity("a"),
+            )
             .expect("append a");
         {
             let sessions = store.sessions.lock_recover();
@@ -1519,7 +1570,12 @@ mod tests {
         }
         drop(subscription);
         store
-            .publish_test_event("s", SessionRevision(0), None, activity("b"))
+            .publish_test_event(
+                &SessionId::from("s"),
+                SessionRevision(0),
+                None,
+                activity("b"),
+            )
             .expect("append b");
         let sessions = store.sessions.lock_recover();
         assert!(sessions.get("s").expect("buffer").sender.is_none());
@@ -1528,12 +1584,22 @@ mod tests {
     #[test]
     fn in_memory_replay_subscription_reports_gap_after_capacity_trim() {
         let store = InMemoryLiveReplayStore::with_bounds(1, Duration::from_secs(120));
-        let start = store.current_cursor("s", SessionRevision(0));
+        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
         store
-            .publish_test_event("s", SessionRevision(0), None, activity("a"))
+            .publish_test_event(
+                &SessionId::from("s"),
+                SessionRevision(0),
+                None,
+                activity("a"),
+            )
             .expect("append a");
         store
-            .publish_test_event("s", SessionRevision(0), None, activity("b"))
+            .publish_test_event(
+                &SessionId::from("s"),
+                SessionRevision(0),
+                None,
+                activity("b"),
+            )
             .expect("append b");
         assert!(matches!(
             store.subscribe_after_cursor(&start).expect("subscribe"),
@@ -1544,9 +1610,14 @@ mod tests {
     #[test]
     fn in_memory_replay_subscription_reports_gap_after_ttl_trim() {
         let store = InMemoryLiveReplayStore::with_bounds(16, Duration::from_millis(1));
-        let start = store.current_cursor("s", SessionRevision(0));
+        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
         store
-            .publish_test_event("s", SessionRevision(0), None, activity("a"))
+            .publish_test_event(
+                &SessionId::from("s"),
+                SessionRevision(0),
+                None,
+                activity("a"),
+            )
             .expect("append a");
         std::thread::sleep(Duration::from_millis(5));
         assert!(matches!(

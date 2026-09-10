@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::sync::Arc;
 
 use lash_trace::{
@@ -149,7 +150,7 @@ fn merge_context(base: &mut TraceContext, overlay: TraceContext) {
 /// the session root. Records that already carry their own node identity in the
 /// payload, and host-defined custom events, are left untouched.
 fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
-    let session_node = context.session_id.as_deref().map(session_node_id);
+    let session_node = context.session_id.as_ref().map(session_node_id);
     let turn_node = turn_node_id(context);
 
     match event {
@@ -221,7 +222,7 @@ fn set_span(context: &mut TraceContext, self_id: Option<String>, parent_id: Opti
     }
 }
 
-fn session_node_id(session_id: &str) -> String {
+fn session_node_id(session_id: &SessionId) -> String {
     format!("session:{session_id}")
 }
 
@@ -850,7 +851,7 @@ mod span_identity_tests {
         // A subagent caused_by this tool call must resolve to the same node id.
         assert_eq!(
             causal_node_id(&crate::CausalRef::ToolCall {
-                session_id: "sess".to_string(),
+                session_id: SessionId::from("sess"),
                 call_id: "call_abc".to_string(),
             }),
             "tool:call_abc"

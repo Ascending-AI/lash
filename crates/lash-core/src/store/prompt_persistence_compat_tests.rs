@@ -131,7 +131,7 @@ fn committed_prompt_cold_loads_into_the_runtime_policy() {
     let expected_prompt = committed_prompt_layer();
     let committed_head_json = serde_json::to_string(&SessionHeadPayload {
         schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
-        session_id: "committed-session".to_string(),
+        session_id: SessionId::from("committed-session"),
         config: crate::PersistedSessionConfig {
             provider_id: "stored-provider".to_string(),
             model: crate::ModelSpec::default(),
@@ -177,7 +177,7 @@ fn committed_generation_cold_loads_into_the_runtime_policy() {
     };
     let committed_head_json = serde_json::to_string(&SessionHeadPayload {
         schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
-        session_id: "committed-generation".to_string(),
+        session_id: SessionId::from("committed-generation"),
         config: crate::PersistedSessionConfig {
             provider_id: "stored-provider".to_string(),
             model: crate::ModelSpec::default(),

@@ -14,7 +14,7 @@ impl TestLocalProcessRegistry {
         *next
     }
 
-    pub(super) async fn process_miss(&self, process_id: &str) -> PluginError {
+    pub(super) async fn process_miss(&self, process_id: &ProcessId) -> PluginError {
         self.tombstones
             .lock()
             .await
@@ -23,7 +23,7 @@ impl TestLocalProcessRegistry {
             .max_by_key(|tombstone| tombstone.incarnation)
             .map_or_else(
                 || PluginError::ProcessUnknown {
-                    process_id: process_id.to_string(),
+                    process_id: ProcessId::from(process_id.to_string()),
                 },
                 |tombstone| PluginError::ProcessNoLongerRetained {
                     terminal_label: tombstone.terminal_label.clone(),
@@ -63,7 +63,7 @@ impl TestLocalProcessRegistry {
             self.clock.timestamp_ms(),
         );
         managed.insert(
-            id.clone(),
+            ProcessId::from(id.clone().to_string()),
             ManagedProcessRecord {
                 record: record.clone(),
                 change_seq,
@@ -73,7 +73,10 @@ impl TestLocalProcessRegistry {
             },
         );
         if let Some(target) = wake_session_id {
-            self.wake_targets.lock().await.insert(id.clone(), target);
+            self.wake_targets
+                .lock()
+                .await
+                .insert(ProcessId::from(id.clone().to_string()), target);
         }
         for session_id in observer_set {
             self.observers
@@ -81,7 +84,7 @@ impl TestLocalProcessRegistry {
                 .await
                 .entry(session_id)
                 .or_default()
-                .insert(id.clone());
+                .insert(ProcessId::from(id.clone().to_string()));
         }
         Ok(record)
     }

@@ -1,3 +1,4 @@
+use crate::SessionId;
 use lash_trace::{TraceContext, TraceLevel, TraceSink};
 use std::sync::Arc;
 
@@ -409,7 +410,7 @@ impl RuntimeHost {
 
     pub(crate) fn resolve_session_policy(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         policy: crate::SessionPolicy,
     ) -> Result<crate::RuntimeSessionPolicy, crate::SessionError> {
         let provider_id = policy.recorded_provider_id();
@@ -421,20 +422,20 @@ impl RuntimeHost {
             .map_err(|err| match err {
                 crate::ProviderResolutionError::MissingProviderId => {
                     crate::SessionError::ProviderUnconfigured {
-                        session_id: session_id.to_string(),
+                        session_id: SessionId::from(session_id.to_string()),
                     }
                 }
                 crate::ProviderResolutionError::UnknownProvider { provider_id } => {
                     crate::SessionError::ProviderUnavailable {
                         provider_id,
-                        session_id: session_id.to_string(),
+                        session_id: SessionId::from(session_id.to_string()),
                     }
                 }
                 crate::ProviderResolutionError::ProviderIdMismatch { expected, actual } => {
                     crate::SessionError::ProviderMismatch {
                         expected,
                         actual,
-                        session_id: session_id.to_string(),
+                        session_id: SessionId::from(session_id.to_string()),
                     }
                 }
             })?;

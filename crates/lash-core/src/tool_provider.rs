@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 pub(crate) use completion_support::AttemptCompletionSupport;
 use std::sync::{Arc, Mutex};
 
@@ -34,7 +36,7 @@ pub use triggers::ToolTriggerClient;
 /// Integrator class 3 session reads available inside a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptSessionReads {
-    session_id: String,
+    session_id: SessionId,
     sessions: Arc<dyn SessionStateService>,
 }
 
@@ -64,7 +66,9 @@ impl AttemptSessionReads {
         &self,
         session_id: impl AsRef<str>,
     ) -> Result<SessionSnapshot, PluginError> {
-        self.sessions.snapshot_session(session_id.as_ref()).await
+        self.sessions
+            .snapshot_session(&SessionId::from(session_id.as_ref()))
+            .await
     }
 
     /// Integrator class 3 read of the bound session's serialized tool catalog.
@@ -81,7 +85,7 @@ impl AttemptSessionReads {
 /// Integrator class 3 controller-free process reads for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptProcessReads {
-    session_id: String,
+    session_id: SessionId,
     processes: Arc<dyn crate::ProcessService>,
 }
 
@@ -105,14 +109,14 @@ impl AttemptProcessReads {
 /// Integrator class 3 sealed, controller-free environment for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
-    session_id: String,
+    session_id: SessionId,
     execution_scope_id: String,
     agent_frame_id: crate::FrameNodeId,
     sessions: AttemptSessionReads,
     processes: AttemptProcessReads,
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
-    async_process_id: Option<String>,
-    runtime_process_id: Option<String>,
+    async_process_id: Option<ProcessId>,
+    runtime_process_id: Option<ProcessId>,
     attachment_store: Arc<crate::SessionAttachmentStore>,
     /// The dispatch-bound direct-completion client. `pub(crate)` so the
     /// attempt-atomicity laws can reach the *raw* client and prove the binding
@@ -364,7 +368,7 @@ impl ToolCompletionState {
 /// the runtime can add capabilities without breaking tool authors.
 #[derive(Clone)]
 pub struct ToolContext<'run> {
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     pub(crate) agent_frame_id: crate::FrameNodeId,
     pub(crate) sessions: Arc<dyn SessionStateService>,
     pub(crate) session_lifecycle: Arc<dyn SessionLifecycleService>,
@@ -373,8 +377,8 @@ pub struct ToolContext<'run> {
     pub(crate) runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
     pub(crate) runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
     pub(crate) cancellation_token: Option<tokio_util::sync::CancellationToken>,
-    pub(crate) async_process_id: Option<String>,
-    pub(crate) runtime_process_id: Option<String>,
+    pub(crate) async_process_id: Option<ProcessId>,
+    pub(crate) runtime_process_id: Option<ProcessId>,
     pub(crate) process_events: Option<ToolProcessEventContext>,
     pub(crate) attachment_store: Arc<crate::SessionAttachmentStore>,
     pub(crate) direct_completions: crate::DirectCompletionClient<'run>,
@@ -395,7 +399,7 @@ pub struct ToolContext<'run> {
 /// Notification emitted when an orchestrating tool starts a child process.
 pub struct ToolChildProcessStarted {
     /// Stable identity of the child process that started.
-    pub process_id: String,
+    pub process_id: ProcessId,
     /// Optional tool-defined name for the child entry point.
     pub child_entry_name: Option<String>,
 }
@@ -424,7 +428,7 @@ impl ToolChildExecutionTraceHook {
 
 #[derive(Clone)]
 pub(crate) struct ToolProcessEventContext {
-    process_id: String,
+    process_id: ProcessId,
     execution_write_authority: crate::ProcessExecutionWriteAuthority,
     process_work: crate::ProcessWorkWiring,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -436,7 +440,7 @@ pub(crate) struct ToolProcessEventContext {
 }
 
 pub(crate) struct ToolContextBuilder<'run> {
-    session_id: String,
+    session_id: SessionId,
     agent_frame_id: crate::FrameNodeId,
     sessions: Arc<dyn SessionStateService>,
     session_lifecycle: Arc<dyn SessionLifecycleService>,
@@ -446,8 +450,8 @@ pub(crate) struct ToolContextBuilder<'run> {
     runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
     runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
-    async_process_id: Option<String>,
-    runtime_process_id: Option<String>,
+    async_process_id: Option<ProcessId>,
+    runtime_process_id: Option<ProcessId>,
     process_events: Option<ToolProcessEventContext>,
     attachment_store: Arc<crate::SessionAttachmentStore>,
     direct_completions: crate::DirectCompletionClient<'run>,
@@ -524,14 +528,14 @@ impl<'run> ToolContextBuilder<'run> {
         self
     }
 
-    pub(crate) fn runtime_process_id(mut self, process_id: Option<String>) -> Self {
+    pub(crate) fn runtime_process_id(mut self, process_id: Option<ProcessId>) -> Self {
         self.runtime_process_id = process_id;
         self
     }
 
     pub(crate) fn async_process(
         mut self,
-        process_id: impl Into<String>,
+        process_id: impl Into<ProcessId>,
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> Self {
         self.async_process_id = Some(process_id.into());
@@ -542,7 +546,7 @@ impl<'run> ToolContextBuilder<'run> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn process_events(
         mut self,
-        process_id: impl Into<String>,
+        process_id: impl Into<ProcessId>,
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
         process_work: crate::ProcessWorkWiring,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -661,7 +665,7 @@ impl<'run> ToolContext<'run> {
         reason = "testing constructor mirrors the sealed runtime tool context dependencies"
     )]
     pub(crate) fn builder(
-        session_id: String,
+        session_id: SessionId,
         sessions: Arc<dyn SessionStateService>,
         session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
@@ -768,7 +772,7 @@ impl<'run> ToolContext<'run> {
     /// preparing or executing an authorized tool call.
     pub fn emit_child_process_started(
         &self,
-        process_id: impl Into<String>,
+        process_id: impl Into<ProcessId>,
         child_entry_name: Option<String>,
     ) {
         let Some(hook) = &self.child_execution_trace_hook else {
@@ -931,7 +935,7 @@ impl<'run> ToolContext<'run> {
     /// implementors while preparing or executing an authorized tool call.
     pub fn with_async_process(
         mut self,
-        process_id: impl Into<String>,
+        process_id: impl Into<ProcessId>,
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> Self {
         self.async_process_id = Some(process_id.into());
@@ -944,7 +948,7 @@ impl<'run> ToolContext<'run> {
     #[doc(hidden)]
     pub fn with_process_events_for_testing(
         mut self,
-        process_id: impl Into<String>,
+        process_id: impl Into<ProcessId>,
         registry: Arc<dyn crate::ProcessRegistry>,
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
     ) -> Self {
@@ -1014,7 +1018,7 @@ impl<'run> ToolContext<'run> {
         reason = "test-only constructor mirrors the sealed runtime tool context"
     )]
     pub fn __for_testing(
-        session_id: String,
+        session_id: SessionId,
         sessions: Arc<dyn SessionStateService>,
         session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
@@ -1212,7 +1216,7 @@ impl ToolExecutionGrant {
 
 #[derive(Clone)]
 pub struct ToolPrepareContext {
-    session_id: String,
+    session_id: SessionId,
     sessions: Arc<dyn SessionStateService>,
     turn_context: crate::TurnContext,
     tool_call_id: Option<String>,
@@ -1221,7 +1225,7 @@ pub struct ToolPrepareContext {
 
 impl ToolPrepareContext {
     pub(crate) fn with_execution_binding(
-        session_id: String,
+        session_id: SessionId,
         sessions: Arc<dyn SessionStateService>,
         turn_context: crate::TurnContext,
         tool_call_id: Option<String>,
@@ -1517,7 +1521,7 @@ mod tests {
         );
 
         let context = ToolContext::builder(
-            "session-1".to_string(),
+            SessionId::from("session-1"),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
@@ -1556,7 +1560,7 @@ mod tests {
             serde_json::json!({}),
         );
         let context = ToolContext::builder(
-            "session-native-risk".to_string(),
+            SessionId::from("session-native-risk"),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
@@ -1596,7 +1600,7 @@ mod tests {
             serde_json::json!({}),
         );
         let context = ToolContext::builder(
-            "session-controller-risk".to_string(),
+            SessionId::from("session-controller-risk"),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),

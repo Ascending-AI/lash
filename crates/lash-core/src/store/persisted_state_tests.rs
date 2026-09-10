@@ -4,7 +4,7 @@ use super::*;
 fn persisted_state_hydrates_provider_id_without_live_provider_rebinding() {
     let state = persisted_session_state_from_head(
         SessionHead {
-            session_id: "stored".to_string(),
+            session_id: SessionId::from("stored"),
             head_revision: 7,
             current_frame_node_id: None,
             graph: crate::SessionGraph::default(),
@@ -185,7 +185,7 @@ fn head_with_protocol_turn_options(
     let mut config = crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
     config.protocol_turn_options = config_options;
     SessionHead {
-        session_id: "stored".to_string(),
+        session_id: SessionId::from("stored"),
         head_revision: 3,
         current_frame_node_id: None,
         graph: crate::SessionGraph::default(),

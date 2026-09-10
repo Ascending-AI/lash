@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use crate::TurnId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -35,7 +37,7 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         autonomous: false,
         tool_specs: Vec::new().into(),
         system_prompt: Arc::from(""),
-        session_id: "test".to_string(),
+        session_id: SessionId::from("test".to_string()),
         turn_id: TurnId::from("test-turn"),
         emit_llm_trace: false,
         termination: (),
@@ -272,7 +274,7 @@ fn chat_context_projector_projects_event_context_as_user_messages() {
         id: "wake:abc".to_string(),
         event_type: "process.wake".to_string(),
         origin: crate::MessageOrigin::Process {
-            process_id: "process-1".to_string(),
+            process_id: ProcessId::from("process-1".to_string()),
             event_type: "process.wake".to_string(),
             sequence: 7,
             wake_id: Some("wake:abc".to_string()),

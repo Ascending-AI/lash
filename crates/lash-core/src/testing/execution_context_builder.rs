@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::sync::Arc;
 
 use super::{EmptyToolProvider, MockSessionManager, test_code_protocol_factories};
@@ -13,7 +14,7 @@ pub(crate) enum TestEffectController<'run> {
 }
 
 pub(crate) struct TestExecutionContextBuilder<'run> {
-    session_id: String,
+    session_id: SessionId,
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
     trigger_router: Option<crate::TriggerRouter>,
@@ -44,7 +45,7 @@ pub(crate) struct BuiltTestExecutionContext<'run> {
 impl<'run> TestExecutionContextBuilder<'run> {
     pub(crate) fn new() -> Self {
         Self {
-            session_id: "test-session".to_string(),
+            session_id: SessionId::from("test-session"),
             provider: Arc::new(EmptyToolProvider),
             tool_catalog: crate::ToolCatalog::from_tool_definitions(Vec::new()),
             trigger_router: None,
@@ -68,7 +69,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
         }
     }
 
-    pub(crate) fn session_id(mut self, session_id: impl Into<String>) -> Self {
+    pub(crate) fn session_id(mut self, session_id: impl Into<SessionId>) -> Self {
         self.session_id = session_id.into();
         self
     }

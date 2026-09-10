@@ -130,6 +130,8 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
 #[cfg(test)]
 mod tests {
 
+    use crate::SessionId;
+
     use crate::session_graph::SharedJsonValue;
     use crate::store::StoreMaintenance;
     use crate::{
@@ -148,7 +150,7 @@ mod tests {
         let session_id = "vacuum-rebuild-failure";
         let request = SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         };
@@ -178,8 +180,8 @@ mod tests {
             crate::SessionGraph::from_nodes(vec![root.clone(), child], Some(root.node_id.clone()))
                 .expect("seed valid graph");
         factory.global_node_owners.lock_recover().extend([
-            (root.node_id.clone(), session_id.to_string()),
-            ("vacuum-child".to_string(), "other-session".to_string()),
+            (root.node_id.clone(), SessionId::from(session_id)),
+            ("vacuum-child".to_string(), SessionId::from("other-session")),
         ]);
         factory
             .tombstoned_node_ids
@@ -187,7 +189,7 @@ mod tests {
             .insert(root.node_id.clone());
 
         let store = factory
-            .raw_store_for_testing(session_id)
+            .raw_store_for_testing(&SessionId::from(session_id))
             .expect("concrete vacuum test store");
         let error = store
             .vacuum()

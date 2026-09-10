@@ -528,6 +528,7 @@ impl RuntimeExecutionContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SessionId;
     use lash_sansio::sync::MutexExt as _;
     use std::sync::Arc;
     use std::sync::Mutex;
@@ -644,7 +645,7 @@ mod tests {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            session_id: "granted-call-session".to_string(),
+            session_id: SessionId::from("granted-call-session"),
             agent_frame_id: crate::FrameNodeId::default(),
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -658,7 +659,7 @@ mod tests {
         };
         (
             crate::RuntimeExecutionContext::new(
-                "granted-call-session".to_string(),
+                SessionId::from("granted-call-session"),
                 Arc::new(dispatch),
                 Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
                 attachment_store,
@@ -992,7 +993,7 @@ mod tests {
         .expect("plugin session");
         let tools = plugins.tools();
         let tool_catalog = plugins
-            .resolved_tool_catalog("session")
+            .resolved_tool_catalog(&SessionId::from("session"))
             .expect("tool catalog");
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let attachment_store: Arc<crate::SessionAttachmentStore> =
@@ -1016,7 +1017,7 @@ mod tests {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::default(),
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -1029,7 +1030,7 @@ mod tests {
             clock: Arc::new(crate::SystemClock),
         };
         crate::RuntimeExecutionContext::new(
-            "session".to_string(),
+            SessionId::from("session"),
             Arc::new(dispatch),
             Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
             attachment_store,

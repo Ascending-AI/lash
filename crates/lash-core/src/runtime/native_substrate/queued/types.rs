@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -69,14 +70,14 @@ pub const DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY: usize = 64;
 
 #[derive(Clone, Debug)]
 pub struct QueuedWorkRunRequest {
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     pub reason: String,
     pub trace_idle: bool,
 }
 
 impl QueuedWorkRunRequest {
     pub(super) fn new(
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
         reason: impl Into<String>,
         trace_idle: bool,
     ) -> Self {
@@ -160,7 +161,7 @@ pub enum QueuedWorkWakeOutcome {
 /// to the driver's bounded retry limit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueuedWorkWakeFailure {
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     pub reason: String,
     pub attempt: u32,
     pub retry_after_ms: u64,
@@ -173,7 +174,7 @@ pub struct QueuedWorkWakeFailure {
 /// This event is observational only. It never cancels or times out the wake.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueuedWorkSlowWake {
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     pub reason: String,
     pub attempt: u32,
     pub threshold_ms: u64,
@@ -191,7 +192,7 @@ pub struct QueuedWorkSlowWake {
 /// does not expose lease state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueuedWorkWakeContended {
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     pub reason: String,
     pub contended_passes: u32,
     pub contended_ms: u64,
@@ -224,7 +225,7 @@ pub trait QueuedWorkRunHandle: Send + Sync {
     /// [`SessionStoreFactory`](crate::SessionStoreFactory) read.
     async fn peek_claimable_queued_work(
         &self,
-        _session_id: Option<&str>,
+        _session_id: Option<&SessionId>,
     ) -> Result<Option<bool>, QueuedWorkRunError> {
         Ok(None)
     }
@@ -243,11 +244,10 @@ pub trait QueuedWorkRunHandle: Send + Sync {
     /// completion) instead of polling.
     async fn claim_and_run_pending(
         &self,
-        session_id: Option<&str>,
+        session_id: Option<&SessionId>,
         reason: &str,
     ) -> Result<(), QueuedWorkRunError> {
-        let request =
-            QueuedWorkRunRequest::new(session_id.map(str::to_string), reason.to_string(), false);
+        let request = QueuedWorkRunRequest::new(session_id.cloned(), reason.to_string(), false);
         self.run_queued_work(request).await
     }
 
@@ -257,7 +257,7 @@ pub trait QueuedWorkRunHandle: Send + Sync {
     /// handle overrides this to distinguish progress from lease contention.
     async fn claim_and_run_pending_with_progress(
         &self,
-        session_id: Option<&str>,
+        session_id: Option<&SessionId>,
         reason: &str,
     ) -> Result<QueuedWorkRunProgress, QueuedWorkRunError> {
         self.claim_and_run_pending(session_id, reason).await?;

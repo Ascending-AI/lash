@@ -1,4 +1,6 @@
 use super::*;
+use crate::ProcessId;
+use crate::SessionId;
 use crate::TurnId;
 
 /// Stable caller-selected identity for one durable commit operation.
@@ -1042,23 +1044,23 @@ mod append_request_identity_tests {
 
         let causal_cases = [
             crate::CausalRef::Turn {
-                session_id: "s".to_string(),
+                session_id: SessionId::from("s"),
                 turn_id: TurnId::from("t"),
             },
             crate::CausalRef::Effect {
-                session_id: "s".to_string(),
+                session_id: SessionId::from("s"),
                 turn_id: None,
                 effect_id: "e".to_string(),
             },
             crate::CausalRef::ToolCall {
-                session_id: "s".to_string(),
+                session_id: SessionId::from("s"),
                 call_id: "c".to_string(),
             },
             crate::CausalRef::Process {
-                process_id: "p".to_string(),
+                process_id: ProcessId::from("p"),
             },
             crate::CausalRef::ProcessEvent {
-                process_id: "p".to_string(),
+                process_id: ProcessId::from("p"),
                 sequence: u64::MAX,
             },
             crate::CausalRef::TriggerOccurrence {
@@ -1068,7 +1070,7 @@ mod append_request_identity_tests {
                 subscription_revision: None,
             },
             crate::CausalRef::SessionNode {
-                session_id: "s".to_string(),
+                session_id: SessionId::from("s"),
                 node_id: "n".to_string(),
             },
         ];
@@ -1294,7 +1296,7 @@ impl OperationId {
     /// Constructs a turn-scoped idempotency identity for store implementors, binding the operation
     /// key to both session and turn IDs.
     pub fn turn(
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         turn_id: impl Into<TurnId>,
         key: impl Into<String>,
     ) -> Self {
@@ -1327,7 +1329,7 @@ fn failure_evidence_is_empty(evidence: &&[crate::TurnFailureEvidence]) -> bool {
 
 #[derive(serde::Serialize)]
 struct RuntimeCommitIntent<'a> {
-    session_id: &'a str,
+    session_id: &'a SessionId,
     config: &'a crate::PersistedSessionConfig,
     current_frame_node_id: Option<&'a str>,
     graph: GraphCommitIntent<'a>,
@@ -1460,7 +1462,7 @@ impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
 
 #[derive(serde::Serialize)]
 struct CompletedQueueIntent<'a> {
-    session_id: &'a str,
+    session_id: &'a SessionId,
     batch_ids: &'a [String],
 }
 
@@ -1475,7 +1477,7 @@ impl<'a> From<&'a crate::QueuedWorkCompletion> for CompletedQueueIntent<'a> {
 
 #[derive(serde::Serialize)]
 struct CompletedTurnInputIntent<'a> {
-    session_id: &'a str,
+    session_id: &'a SessionId,
     input_ids: &'a [String],
     applications: &'a [crate::TurnInputApplication],
 }
@@ -1492,7 +1494,7 @@ impl<'a> From<&'a crate::TurnInputCompletion> for CompletedTurnInputIntent<'a> {
 
 #[derive(serde::Serialize)]
 struct QueuedBatchIntent<'a> {
-    session_id: &'a str,
+    session_id: &'a SessionId,
     source_key: Option<&'a str>,
     delivery_policy: &'a crate::DeliveryPolicy,
     kind: crate::QueuedWorkKind,
@@ -1524,8 +1526,8 @@ impl<'a> From<&'a crate::QueuedWorkBatchDraft> for QueuedBatchIntent<'a> {
 enum QueuedPayloadIntent<'a> {
     ProcessWake {
         wake_id: &'a str,
-        target_session_id: &'a str,
-        process_id: &'a str,
+        target_session_id: &'a SessionId,
+        process_id: &'a ProcessId,
         sequence: u64,
         event_type: &'a str,
         event_invocation: &'a crate::RuntimeInvocation,
@@ -1607,7 +1609,7 @@ mod blake3_vector_tests {
 }
 
 pub fn derive_history_node_id(
-    session_id: &str,
+    session_id: &SessionId,
     operation: &OperationId,
     ordinal: u64,
 ) -> Result<String, StoreError> {

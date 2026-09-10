@@ -102,7 +102,7 @@ fn process_wake_turn_text_frames_process_id_sequence_and_input() {
 #[test]
 fn process_wake_turn_cause_preserves_process_origin() {
     let process_caused_by = crate::CausalRef::SessionNode {
-        session_id: "target".to_string(),
+        session_id: SessionId::from("target"),
         node_id: "trigger:button".to_string(),
     };
     let wake = wake_delivery("process.ready", Some(process_caused_by.clone()));
@@ -134,7 +134,7 @@ fn process_wake_turn_cause_preserves_process_origin() {
 #[test]
 fn process_wake_delivery_carries_event_invocation_and_process_cause() {
     let process_caused_by = crate::CausalRef::SessionNode {
-        session_id: "target".to_string(),
+        session_id: SessionId::from("target"),
         node_id: "trigger:button".to_string(),
     };
     let wake = wake_delivery("process.ready", Some(process_caused_by.clone()));
@@ -159,20 +159,20 @@ fn wake_delivery(
     ProcessWakeDelivery {
         version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "wake:abc".to_string(),
-        target_session_id: "target".to_string(),
-        process_id: "process-1".to_string(),
+        target_session_id: SessionId::from("target"),
+        process_id: ProcessId::from("process-1"),
         process_incarnation: ProcessIncarnation::from_registration_sequence(1),
         sequence: 7,
         event_type: event_type.clone(),
         event_invocation: crate::RuntimeInvocation {
             scope: crate::RuntimeScope::new("target"),
             subject: crate::RuntimeSubject::ProcessEvent {
-                process_id: "process-1".to_string(),
+                process_id: ProcessId::from("process-1"),
                 sequence: 7,
                 event_type,
             },
             caused_by: Some(crate::CausalRef::Process {
-                process_id: "process-1".to_string(),
+                process_id: ProcessId::from("process-1"),
             }),
             replay: None,
         },
@@ -249,7 +249,8 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
         },
         since_ms: 42,
     };
-    let waiting_request = ProcessEventAppendRequest::wait_entered("process-repair-waiting", &wait);
+    let waiting_request =
+        ProcessEventAppendRequest::wait_entered(&ProcessId::from("process-repair-waiting"), &wait);
     let waiting =
         prepare_process_event_append(&record, waiting_request.clone(), 1, None, None, 42, None)
             .expect("prepare waiting event");
@@ -477,9 +478,9 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
 // backend-agnostic conformance suite so the in-memory and Sqlite registries are
 // held to one spec. See `crate::testing::conformance`.
 
-fn wake_registration(id: &str, target_session_id: &str) -> ProcessRegistration {
+fn wake_registration(id: &str, target_session_id: &SessionId) -> ProcessRegistration {
     registration(id)
-        .with_wake_session_id(Some(target_session_id.to_string()))
+        .with_wake_session_id(Some(SessionId::from(target_session_id.to_string())))
         .with_extra_event_types([ProcessEventType {
             name: "producer.wake".to_string(),
             payload_schema: crate::LashSchema::any(),
@@ -495,7 +496,7 @@ fn wake_registration(id: &str, target_session_id: &str) -> ProcessRegistration {
 
 async fn register_successor(
     registry: &TestLocalProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> (ProcessRef, ProcessRef) {
     let old = registry
         .register_process(registration(process_id))
@@ -528,7 +529,7 @@ async fn register_successor(
 #[tokio::test]
 async fn superseded_event_cursor_is_refused_instead_of_reading_the_successor() {
     let registry = TestLocalProcessRegistry::default();
-    let (old_ref, _) = register_successor(&registry, "reused-event-cursor").await;
+    let (old_ref, _) = register_successor(&registry, &ProcessId::from("reused-event-cursor")).await;
 
     let result = registry.events_after_ref(&old_ref, 0).await;
 
@@ -544,11 +545,12 @@ async fn superseded_event_cursor_is_refused_instead_of_reading_the_successor() {
 #[tokio::test]
 async fn superseded_observer_edge_is_refused_instead_of_attaching_to_the_successor() {
     let registry = TestLocalProcessRegistry::default();
-    let (old_ref, _) = register_successor(&registry, "reused-observer-edge").await;
+    let (old_ref, _) =
+        register_successor(&registry, &ProcessId::from("reused-observer-edge")).await;
 
     let result = registry
         .add_observer_ref(
-            "stale-observer",
+            &SessionId::from("stale-observer"),
             &old_ref,
             ProcessObserverBy::host("stale-edge"),
         )
@@ -566,7 +568,8 @@ async fn superseded_observer_edge_is_refused_instead_of_attaching_to_the_success
 #[tokio::test]
 async fn reuse_retains_the_old_tombstone_beside_the_new_live_incarnation() {
     let registry = TestLocalProcessRegistry::default();
-    let (old_ref, current_ref) = register_successor(&registry, "reused-change-feed").await;
+    let (old_ref, current_ref) =
+        register_successor(&registry, &ProcessId::from("reused-change-feed")).await;
 
     let (changes, _) = registry
         .processes_changed_since(ProcessChangeCursor::initial(), 100)
@@ -592,12 +595,15 @@ async fn prune_serializes_same_id_reregistration_and_fresh_wake_cleanup() {
     let process_id = "prune-reregister-race";
     let target_session_id = "prune-reregister-target";
     registry
-        .register_process(wake_registration(process_id, target_session_id))
+        .register_process(wake_registration(
+            process_id,
+            &SessionId::from(target_session_id),
+        ))
         .await
         .expect("register old process incarnation");
     registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "old"}),
@@ -621,7 +627,7 @@ async fn prune_serializes_same_id_reregistration_and_fresh_wake_cleanup() {
         .expect("settle old wake delivery");
     registry
         .complete_process(
-            process_id,
+            &ProcessId::from(process_id),
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!("old done"),
             )),
@@ -642,12 +648,15 @@ async fn prune_serializes_same_id_reregistration_and_fresh_wake_cleanup() {
     let registration_registry = Arc::clone(&registry);
     let fresh = crate::task::spawn(async move {
         registration_registry
-            .register_process(wake_registration(process_id, target_session_id))
+            .register_process(wake_registration(
+                process_id,
+                &SessionId::from(target_session_id),
+            ))
             .await
             .expect("re-register process");
         registration_registry
             .append_event(
-                process_id,
+                &ProcessId::from(process_id),
                 ProcessEventAppendRequest::new(
                     "producer.wake",
                     serde_json::json!({"wake_input": "fresh"}),
@@ -703,12 +712,15 @@ async fn lifecycle_append_serializes_target_cleanup_and_cannot_recreate_sender_f
     let process_id = "lifecycle-target-cleanup-race";
     let target_session_id = "lifecycle-target-cleanup-session";
     registry
-        .register_process(wake_registration(process_id, target_session_id))
+        .register_process(wake_registration(
+            process_id,
+            &SessionId::from(target_session_id),
+        ))
         .await
         .expect("register lifecycle process");
     registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "seed floor"}),
@@ -723,7 +735,7 @@ async fn lifecycle_append_serializes_target_cleanup_and_cannot_recreate_sender_f
     let append = crate::task::spawn(async move {
         append_registry
             .set_external_ref(
-                process_id,
+                &ProcessId::from(process_id),
                 ProcessExternalRef {
                     backend: "test".to_string(),
                     id: "external".to_string(),
@@ -737,7 +749,7 @@ async fn lifecycle_append_serializes_target_cleanup_and_cannot_recreate_sender_f
     let cleanup_registry = Arc::clone(&registry);
     let cleanup = crate::task::spawn(async move {
         cleanup_registry
-            .delete_session_process_state(target_session_id)
+            .delete_session_process_state(&SessionId::from(target_session_id))
             .await
     });
     if registry.transaction_is_locked_for_testing() {
@@ -764,7 +776,10 @@ async fn lifecycle_append_serializes_target_cleanup_and_cannot_recreate_sender_f
 
     assert_eq!(
         registry
-            .wake_allocation_floor_for_testing(target_session_id, process_id)
+            .wake_allocation_floor_for_testing(
+                &SessionId::from(target_session_id),
+                &ProcessId::from(process_id)
+            )
             .await
             .expect("read sender floor after target cleanup"),
         None,
@@ -783,8 +798,8 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
             .expect("register");
         registry
             .add_observer(
-                "deleted",
-                process_id,
+                &SessionId::from("deleted"),
+                &ProcessId::from(process_id),
                 ProcessObserverBy::host(format!("deleted:{process_id}")),
             )
             .await
@@ -792,22 +807,22 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
     }
     registry
         .add_observer(
-            "remaining",
-            "shared",
+            &SessionId::from("remaining"),
+            &ProcessId::from("shared"),
             ProcessObserverBy::host("remaining:shared"),
         )
         .await
         .expect("observe from remaining");
     let sole_events = serde_json::to_vec(
         &registry
-            .events_after("sole", 0)
+            .events_after(&ProcessId::from("sole"), 0)
             .await
             .expect("sole events before delete"),
     )
     .expect("serialize sole events");
     let shared_events = serde_json::to_vec(
         &registry
-            .events_after("shared", 0)
+            .events_after(&ProcessId::from("shared"), 0)
             .await
             .expect("shared events before delete"),
     )
@@ -825,7 +840,7 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
         crate::RuntimeEffectEnvelope::new(
             invocation,
             crate::RuntimeEffectCommand::process(crate::ProcessCommand::DeleteSession {
-                session_id: "deleted".to_string(),
+                session_id: SessionId::from("deleted"),
             }),
         ),
         crate::RuntimeEffectLocalExecutor::processes(
@@ -844,14 +859,19 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
     };
     assert_eq!(report.removed_observer_count, 2);
     assert_eq!(
-        serde_json::to_vec(&registry.events_after("sole", 0).await.expect("sole events"))
-            .expect("serialize sole events"),
+        serde_json::to_vec(
+            &registry
+                .events_after(&ProcessId::from("sole"), 0)
+                .await
+                .expect("sole events")
+        )
+        .expect("serialize sole events"),
         sole_events
     );
     assert_eq!(
         serde_json::to_vec(
             &registry
-                .events_after("shared", 0)
+                .events_after(&ProcessId::from("shared"), 0)
                 .await
                 .expect("shared events")
         )

@@ -225,6 +225,7 @@
 //! after each pass. Released-pin reproducibility starts with the next published alpha;
 //! until then, the committed generators at HEAD are the source of truth.
 
+use lash_sansio::{ProcessId, SessionId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -353,7 +354,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .runtime
         .record_intent(AttachmentIntent {
             attachment_id: attachment_id.clone(),
-            session_id: SESSION_ID.to_string(),
+            session_id: SessionId::from(SESSION_ID.to_string()),
             canonical_uri: "session:durable-read-fixture:sha256:durable-read-attachment"
                 .to_string(),
             intent_at_epoch_ms: 100,
@@ -445,7 +446,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .await
         .expect("pin fixture leaf through session factory");
 
-    let deleted_request = fixture_session_request(DELETED_SESSION_ID);
+    let deleted_request = fixture_session_request(&SessionId::from(DELETED_SESSION_ID));
     handles
         .session_factory
         .create_store(&deleted_request)
@@ -453,7 +454,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("create fixture session that will be retired");
     handles
         .session_factory
-        .delete_session(DELETED_SESSION_ID)
+        .delete_session(&SessionId::from(DELETED_SESSION_ID))
         .await
         .expect("retire fixture session through session factory");
 
@@ -464,7 +465,10 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                 SESSION_ID,
                 DeliveryPolicy::EarliestSafeBoundary,
                 lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(SESSION_ID, "durable-read-frame"),
+                    lash_core::facade_support::frame_node_id(
+                        &SessionId::from(SESSION_ID),
+                        "durable-read-frame",
+                    ),
                     "durable read queued task",
                     None,
                 ),
@@ -495,13 +499,13 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     let registration = waiting_process_registration(process_env_ref.clone());
     handles
         .processes
-        .register_process_with_observers(registration, &[SESSION_ID.to_string()])
+        .register_process_with_observers(registration, &[SessionId::from(SESSION_ID.to_string())])
         .await
         .expect("register waiting fixture process");
     let lease = handles
         .processes
         .claim_process_lease(
-            PROCESS_ID,
+            &ProcessId::from(PROCESS_ID),
             &LeaseOwnerIdentity::opaque("durable-read-owner", "durable-read-incarnation"),
             100,
         )
@@ -512,7 +516,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     handles
         .processes
         .set_process_wait_with_authority(
-            PROCESS_ID,
+            &ProcessId::from(PROCESS_ID),
             fixture_wait_state(),
             &ProcessExecutionWriteAuthority::lease(lease),
         )
@@ -520,7 +524,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("persist fixture process wait state");
     handles
         .continuations
-        .put_segment_handover(PROCESS_ID, fixture_handover())
+        .put_segment_handover(&ProcessId::from(PROCESS_ID), fixture_handover())
         .await
         .expect("persist fixture continuation");
 
@@ -546,14 +550,14 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                     ..ProcessEventSemanticsSpec::default()
                 },
             }])
-            .with_wake_session_id(Some(SESSION_ID.to_string())),
+            .with_wake_session_id(Some(SessionId::from(SESSION_ID.to_string()))),
         )
         .await
         .expect("register fixture wake process");
     let wake_append = handles
         .processes
         .append_event(
-            WAKE_PROCESS_ID,
+            &ProcessId::from(WAKE_PROCESS_ID),
             ProcessEventAppendRequest::new(
                 "fixture.wake",
                 serde_json::json!({"wake_input": "durable read wake"}),
@@ -580,7 +584,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     handles
         .processes
         .complete_process(
-            TOMBSTONE_PROCESS_ID,
+            &ProcessId::from(TOMBSTONE_PROCESS_ID),
             ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!({ "fixture": "retired" }),
             )),
@@ -650,7 +654,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("mint fixture await-event key before session revocation");
     handles
         .effects
-        .revoke_await_events_for_session(REVOKED_SESSION_ID)
+        .revoke_await_events_for_session(&SessionId::from(REVOKED_SESSION_ID))
         .await
         .expect("persist fixture await-event session revocation");
 
@@ -708,7 +712,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     let queue_lease = handles
         .runtime
         .try_claim_session_execution_lease_with_token(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &queue_owner,
             "durable-read-queue-executor",
             &LeaseClaimNonce::for_testing("durable-read-queue-claim-nonce"),
@@ -721,7 +725,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     let wake_claim = handles
         .runtime
         .claim_ready_queued_work_by_batch_ids(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &queue_lease.fence(),
             &queue_owner,
             QueuedWorkClaimBoundary::Idle,
@@ -751,7 +755,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     handles
         .runtime
         .try_claim_session_execution_lease_with_token(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &queue_owner,
             "durable-read-retained-executor",
             &LeaseClaimNonce::for_testing("durable-read-retained-session-lease"),
@@ -902,14 +906,16 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert!(
         handles
             .session_factory
-            .session_was_deleted(DELETED_SESSION_ID)
+            .session_was_deleted(&SessionId::from(DELETED_SESSION_ID))
             .await
             .expect("durable fixture drift: deleted-session probe failed"),
         "durable fixture semantic drift: session tombstone disappeared"
     );
     match handles
         .session_factory
-        .create_store(&fixture_session_request(DELETED_SESSION_ID))
+        .create_store(&fixture_session_request(&SessionId::from(
+            DELETED_SESSION_ID,
+        )))
         .await
     {
         Err(StoreError::SessionDeleted { session_id }) => {
@@ -923,7 +929,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
 
     let session_lease = handles
         .runtime
-        .get_session_execution_lease(SESSION_ID)
+        .get_session_execution_lease(&SessionId::from(SESSION_ID))
         .await
         .expect("durable fixture drift: session lease read failed")
         .lease
@@ -1032,7 +1038,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
 
     let queued = handles
         .runtime
-        .list_queued_work(SESSION_ID)
+        .list_queued_work(&SessionId::from(SESSION_ID))
         .await
         .expect("durable fixture drift: queued-work read failed");
     assert_eq!(queued.len(), 1);
@@ -1043,14 +1049,14 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         matches!(
             &queued[0].items[0].payload,
             QueuedWorkPayload::AgentFrameTask { frame_id, task, .. }
-                if frame_id == &lash_core::facade_support::frame_node_id(SESSION_ID, "durable-read-frame")
+                if frame_id == &lash_core::facade_support::frame_node_id(&SessionId::from(SESSION_ID), "durable-read-frame")
                     && task == "durable read queued task"
         ),
         "durable fixture semantic drift: queued-work payload changed"
     );
     let pending = handles
         .runtime
-        .list_pending_turn_inputs(SESSION_ID)
+        .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
         .await
         .expect("durable fixture drift: pending-input read failed");
     assert_eq!(pending.len(), 1);
@@ -1066,7 +1072,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
 
     let process = handles
         .processes
-        .get_process(PROCESS_ID)
+        .get_process(&ProcessId::from(PROCESS_ID))
         .await
         .expect("durable fixture drift: process read failed")
         .expect("durable fixture drift: process disappeared");
@@ -1075,7 +1081,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(process.env_ref.as_ref(), Some(&expected.process_env_ref));
     let process_events = handles
         .processes
-        .events_after(PROCESS_ID, 0)
+        .events_after(&ProcessId::from(PROCESS_ID), 0)
         .await
         .expect("durable fixture drift: waiting-process event read failed");
     assert_eq!(process_events.len(), 2);
@@ -1099,7 +1105,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(
         handles
             .processes
-            .observers_for_process(PROCESS_ID)
+            .observers_for_process(&ProcessId::from(PROCESS_ID))
             .await
             .expect("durable fixture drift: process-observer read failed"),
         vec![SESSION_ID.to_string()],
@@ -1107,7 +1113,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
     let process_lease = handles
         .processes
-        .get_process_lease(PROCESS_ID)
+        .get_process_lease(&ProcessId::from(PROCESS_ID))
         .await
         .expect("durable fixture drift: process-lease read failed")
         .expect("durable fixture drift: process lease disappeared");
@@ -1141,7 +1147,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(
         handles
             .continuations
-            .latest_segment_handover(PROCESS_ID)
+            .latest_segment_handover(&ProcessId::from(PROCESS_ID))
             .await
             .expect("durable fixture drift: continuation read failed"),
         Some(fixture_handover())
@@ -1158,7 +1164,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .processes
         .register_process_with_observers(
             waiting_process_registration(expected.process_env_ref.clone()),
-            &[SESSION_ID.to_string()],
+            &[SessionId::from(SESSION_ID.to_string())],
         )
         .await
         .expect("durable fixture identity drift: identical process re-registration conflicted");
@@ -1169,7 +1175,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(
         handles
             .processes
-            .get_process(WAKE_PROCESS_ID)
+            .get_process(&ProcessId::from(WAKE_PROCESS_ID))
             .await
             .expect("durable fixture drift: wake process read failed")
             .expect("durable fixture drift: wake process disappeared")
@@ -1178,7 +1184,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
     let wake_events = handles
         .processes
-        .events_after(WAKE_PROCESS_ID, 0)
+        .events_after(&ProcessId::from(WAKE_PROCESS_ID), 0)
         .await
         .expect("durable fixture drift: wake-process event read failed");
     assert_eq!(wake_events.len(), 1);
@@ -1202,7 +1208,10 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(
         handles
             .processes
-            .wake_allocation_floor_for_testing(SESSION_ID, WAKE_PROCESS_ID)
+            .wake_allocation_floor_for_testing(
+                &SessionId::from(SESSION_ID),
+                &ProcessId::from(WAKE_PROCESS_ID)
+            )
             .await
             .expect("durable fixture drift: wake-allocation-floor read failed"),
         Some(1),
@@ -1225,7 +1234,11 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         "durable fixture drift: receiver wake-redelivery fence returned {redelivery}"
     );
 
-    match handles.processes.get_process(TOMBSTONE_PROCESS_ID).await {
+    match handles
+        .processes
+        .get_process(&ProcessId::from(TOMBSTONE_PROCESS_ID))
+        .await
+    {
         Err(lash_core::PluginError::ProcessNoLongerRetained {
             terminal_label,
             pruned_at_ms,
@@ -1615,18 +1628,18 @@ async fn assert_process_change_feed(processes: &dyn ProcessRegistry) {
     assert_eq!(
         observed,
         BTreeMap::from([
-            (PROCESS_ID.to_string(), "upsert".to_string()),
-            (TOMBSTONE_PROCESS_ID.to_string(), "deleted".to_string()),
-            (WAKE_PROCESS_ID.to_string(), "upsert".to_string()),
+            (ProcessId::from(PROCESS_ID), "upsert".to_string()),
+            (ProcessId::from(TOMBSTONE_PROCESS_ID), "deleted".to_string()),
+            (ProcessId::from(WAKE_PROCESS_ID), "upsert".to_string()),
         ]),
         "durable fixture semantic drift: ADR-0020 change-feed rows changed"
     );
 }
 
-fn fixture_session_request(session_id: &str) -> SessionStoreCreateRequest {
+fn fixture_session_request(session_id: &SessionId) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
         policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     }
@@ -1673,7 +1686,7 @@ fn fixture_record_config_operation() -> OperationId {
 
 fn fixture_state() -> RuntimeSessionState {
     RuntimeSessionState {
-        session_id: SESSION_ID.to_string(),
+        session_id: SessionId::from(SESSION_ID.to_string()),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -1702,7 +1715,7 @@ fn fixture_process_env() -> ProcessExecutionEnvSpec {
 
 pub fn expected_process_lease() -> lash_core::ProcessLease {
     lash_core::facade_support::registry_transitions::acquired_process_lease(
-        PROCESS_ID,
+        &ProcessId::from(PROCESS_ID),
         &LeaseOwnerIdentity::opaque("durable-read-owner", "durable-read-incarnation"),
         1,
         FIXTURE_WRITE_MS,

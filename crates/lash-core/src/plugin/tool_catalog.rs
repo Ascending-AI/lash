@@ -1,3 +1,4 @@
+use crate::SessionId;
 use lash_sansio::ToolCallOutput;
 use serde::Serialize;
 use tokio::sync::mpsc;
@@ -6,7 +7,7 @@ use super::*;
 
 #[derive(Clone)]
 pub struct ToolCatalogContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub tools: Vec<ToolManifest>,
     pub resolve_contract: Option<lash_sansio::ToolContractResolver>,
     pub tool_access: SessionToolAccess,
@@ -29,7 +30,7 @@ pub struct TurnPreparation {
 
 #[derive(Clone)]
 pub struct PrepareTurnRequest {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub state: SessionReadView,
     pub messages: crate::MessageSequence,
     pub sessions: Arc<dyn SessionStateService>,

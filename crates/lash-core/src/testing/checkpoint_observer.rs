@@ -1,6 +1,7 @@
 //! Store-factory decorator that observes real runtime-checkpoint commits, so a
 //! harness can render durable-write lines from facts the backend accepted.
 
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -82,11 +83,11 @@ pub struct CheckpointUsageWrite {
 pub struct CheckpointWriteEvent {
     pub schema: String,
     /// The real session id passed to the store commit.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Optional generated-trace attribution for a separately executed contract
     /// proof. Ordinary generated runtime commits use `session_id` directly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attributed_session_id: Option<String>,
+    pub attributed_session_id: Option<SessionId>,
     /// Boundary that caused a separately executed contract proof. Runtime-turn
     /// writes are linked by session plus turn instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -146,15 +147,15 @@ pub struct CheckpointWriteCollector {
 struct CheckpointWriteCollectorState {
     events: Vec<CheckpointWriteEvent>,
     next_commit_by_session: BTreeMap<String, usize>,
-    commit_budgets: BTreeMap<(String, u64), crate::testing::RuntimeCommitBudgetMeasurement>,
-    committed_attachment_ids: BTreeMap<(String, u64), Vec<AttachmentId>>,
+    commit_budgets: BTreeMap<(SessionId, u64), crate::testing::RuntimeCommitBudgetMeasurement>,
+    committed_attachment_ids: BTreeMap<(SessionId, u64), Vec<AttachmentId>>,
     latest_components_by_session:
-        BTreeMap<String, BTreeMap<String, crate::CheckpointComponentDescriptor>>,
+        BTreeMap<SessionId, BTreeMap<String, crate::CheckpointComponentDescriptor>>,
 }
 
 #[derive(Clone, Debug)]
 struct RefOnlyCommitMutation {
-    session_id: String,
+    session_id: SessionId,
     revision_before: u64,
 }
 
@@ -165,7 +166,7 @@ impl CheckpointWriteCollector {
     ///
     /// This is the injected defect that proves a durable-write transcript can
     /// still discriminate a missing component body (ADR 0044's mutation rule).
-    pub fn with_ref_only_mutation(session_id: impl Into<String>, revision_before: u64) -> Self {
+    pub fn with_ref_only_mutation(session_id: impl Into<SessionId>, revision_before: u64) -> Self {
         Self {
             state: Arc::default(),
             ref_only_mutation: Some(RefOnlyCommitMutation {
@@ -198,26 +199,26 @@ impl CheckpointWriteCollector {
     /// successfully committed runtime write.
     pub fn runtime_commit_budget(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         revision_before: u64,
     ) -> Option<crate::testing::RuntimeCommitBudgetMeasurement> {
         self.state
             .lock_recover()
             .commit_budgets
-            .get(&(session_id.to_string(), revision_before))
+            .get(&(session_id.clone(), revision_before))
             .copied()
     }
 
     /// Return the attachment roots submitted by one observed runtime commit.
     pub fn committed_attachment_ids(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         revision_before: u64,
     ) -> Option<Vec<AttachmentId>> {
         self.state
             .lock_recover()
             .committed_attachment_ids
-            .get(&(session_id.to_string(), revision_before))
+            .get(&(session_id.clone(), revision_before))
             .cloned()
     }
 
@@ -274,11 +275,14 @@ impl CheckpointWriteCollector {
         }
     }
 
-    fn record_manifest(&self, session_id: &str, manifest: &crate::SessionCheckpoint) {
+    fn record_manifest(&self, session_id: &SessionId, manifest: &crate::SessionCheckpoint) {
         self.state
             .lock_recover()
             .latest_components_by_session
-            .insert(session_id.to_string(), manifest.components.clone());
+            .insert(
+                SessionId::from(session_id.to_string()),
+                manifest.components.clone(),
+            );
     }
 }
 
@@ -338,7 +342,7 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
 
     async fn read_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Option<crate::SessionReadView>, StoreError> {
         self.inner.read_session(session_id).await
     }
@@ -350,13 +354,13 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
         self.inner.list_sessions(filter).await
     }
 
-    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         self.inner.session_was_deleted(session_id).await
     }
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }
@@ -601,7 +605,7 @@ mod tests {
         let store = factory
             .create_store(&SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: "observed-usage".to_string(),
+                session_id: SessionId::from("observed-usage"),
                 relation: crate::SessionRelation::Root,
                 policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             })
@@ -623,7 +627,7 @@ mod tests {
         let staged = crate::runtime::stage_token_ledger_shared(&pending, &operation)
             .expect("stage recorded usage");
         let mut state = crate::RuntimeSessionState {
-            session_id: "observed-usage".to_string(),
+            session_id: SessionId::from("observed-usage"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -666,7 +670,7 @@ mod tests {
     #[test]
     fn commit_observer_projects_typed_usage_buckets() {
         let state = crate::RuntimeSessionState {
-            session_id: "observed-usage".to_string(),
+            session_id: SessionId::from("observed-usage"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))

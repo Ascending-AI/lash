@@ -17,6 +17,7 @@
 //! must still observe a peer's resolution, and every waiter therefore polls
 //! persisted state with bounded backoff regardless of notifications.
 
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -81,7 +82,7 @@ pub struct AwaitEventRowIdentity {
     /// Canonical JSON of the key's [`AwaitEventWaitIdentity`].
     pub wait_json: String,
     /// Owning session, when the scope has one. `NULL` rows are session-free.
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     /// Whether this promise is turn-control (gate or terminal) machinery.
     pub turn_control: bool,
 }
@@ -183,7 +184,7 @@ pub trait AwaitEventBackend: Send + Sync {
     ///
     /// Read outside any promise fence: it guards key minting only, where there
     /// is no row to race with.
-    async fn session_is_revoked(&self, session_id: &str) -> Result<bool, RuntimeError>;
+    async fn session_is_revoked(&self, session_id: &SessionId) -> Result<bool, RuntimeError>;
 
     /// Whether the scope filed under `scope_id` carries a durable retirement
     /// tombstone.
@@ -236,7 +237,8 @@ pub trait AwaitEventBackend: Send + Sync {
     /// The tombstone is idempotent and must outlive the rows: a host that
     /// reopens the substrate has to keep rejecting keys minted for a deleted
     /// session.
-    async fn revoke_session(&self, session_id: &str, now_ms: u64) -> Result<(), RuntimeError>;
+    async fn revoke_session(&self, session_id: &SessionId, now_ms: u64)
+    -> Result<(), RuntimeError>;
 
     /// Sweep every unresolved non-turn-control promise of `session_id` to
     /// `terminal_json`.
@@ -247,7 +249,7 @@ pub trait AwaitEventBackend: Send + Sync {
     /// terminal publication. The session stays usable afterwards.
     async fn cancel_session_promises(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         terminal_json: &str,
         now_ms: u64,
     ) -> Result<(), RuntimeError>;
@@ -300,7 +302,11 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
         let key_id = promise_semantics::derive_key_id(scope, &wait)?;
         match scope.session_id() {
             Some(session_id) => {
-                if self.backend.session_is_revoked(session_id).await? {
+                if self
+                    .backend
+                    .session_is_revoked(&SessionId::from(session_id))
+                    .await?
+                {
                     return Err(unknown_or_revoked());
                 }
             }
@@ -449,7 +455,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
     /// `await_event_unknown_or_revoked`, its promise rows are dropped, and keys
     /// minted for it stay unusable across reopen. This is session deletion, in
     /// contrast to the recoverable [`cancel_session`](Self::cancel_session).
-    pub async fn revoke_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    pub async fn revoke_session(&self, session_id: &SessionId) -> Result<(), RuntimeError> {
         validate_session_id(session_id)?;
         self.backend
             .revoke_session(session_id, self.clock.timestamp_ms())
@@ -462,7 +468,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
     /// [`Resolution::Cancelled`], leaving the session usable: already-terminal
     /// promises keep their terminal, turn-control promises are untouched, and
     /// promises registered afterwards behave normally.
-    pub async fn cancel_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    pub async fn cancel_session(&self, session_id: &SessionId) -> Result<(), RuntimeError> {
         validate_session_id(session_id)?;
         let terminal_json = self.encode_resolution(&Resolution::Cancelled)?;
         self.backend
@@ -514,7 +520,11 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
             scope_json: serde_json::to_string(&key.scope).map_err(|err| self.encode_error(&err))?,
             scope_id: key.scope.journal_identity()?.key().to_string(),
             wait_json: serde_json::to_string(&key.wait).map_err(|err| self.encode_error(&err))?,
-            session_id: key.scope.session_id().map(ToOwned::to_owned),
+            session_id: key
+                .scope
+                .session_id()
+                .map(ToOwned::to_owned)
+                .map(Into::into),
             turn_control: key.wait.is_turn_control(),
         })
     }
@@ -622,7 +632,7 @@ fn unknown_or_revoked() -> RuntimeError {
 
 /// Session-scoped levers take a session id, not a key, so they validate it
 /// themselves rather than inheriting an authenticated key's guarantees.
-fn validate_session_id(session_id: &str) -> Result<(), RuntimeError> {
+fn validate_session_id(session_id: &SessionId) -> Result<(), RuntimeError> {
     if session_id.trim().is_empty() {
         return Err(RuntimeError::new(
             crate::RuntimeErrorCode::InvalidAwaitEventSessionId,
@@ -655,7 +665,7 @@ mod tests {
     }
 
     impl MemoryBackend {
-        fn revoked_session(&self, session_id: Option<&str>) -> bool {
+        fn revoked_session(&self, session_id: Option<&SessionId>) -> bool {
             session_id.is_some_and(|session_id| {
                 self.revoked
                     .lock_recover()
@@ -665,7 +675,7 @@ mod tests {
         }
 
         fn fenced(&self, identity: &AwaitEventRowIdentity) -> bool {
-            self.revoked_session(identity.session_id.as_deref())
+            self.revoked_session(identity.session_id.as_ref())
                 || self
                     .retired_scopes
                     .lock_recover()
@@ -698,7 +708,7 @@ mod tests {
             }
         }
 
-        async fn session_is_revoked(&self, session_id: &str) -> Result<bool, RuntimeError> {
+        async fn session_is_revoked(&self, session_id: &SessionId) -> Result<bool, RuntimeError> {
             Ok(self.revoked_session(Some(session_id)))
         }
 
@@ -793,7 +803,11 @@ mod tests {
             }
         }
 
-        async fn revoke_session(&self, session_id: &str, _now_ms: u64) -> Result<(), RuntimeError> {
+        async fn revoke_session(
+            &self,
+            session_id: &SessionId,
+            _now_ms: u64,
+        ) -> Result<(), RuntimeError> {
             self.revoked.lock_recover().push(session_id.to_string());
             self.rows
                 .lock_recover()
@@ -803,7 +817,7 @@ mod tests {
 
         async fn cancel_session_promises(
             &self,
-            session_id: &str,
+            session_id: &SessionId,
             terminal_json: &str,
             _now_ms: u64,
         ) -> Result<(), RuntimeError> {
@@ -962,7 +976,7 @@ mod tests {
             .expect("register gate waiter");
 
         coordinator
-            .cancel_session("cancel-session")
+            .cancel_session(&SessionId::from("cancel-session"))
             .await
             .expect("cancel sweep");
         assert_eq!(
@@ -983,7 +997,7 @@ mod tests {
         );
 
         coordinator
-            .revoke_session("cancel-session")
+            .revoke_session(&SessionId::from("cancel-session"))
             .await
             .expect("revoke session");
         assert_eq!(
@@ -1021,11 +1035,11 @@ mod tests {
         let coordinator = coordinator();
         for error in [
             coordinator
-                .revoke_session("  ")
+                .revoke_session(&SessionId::from("  "))
                 .await
                 .expect_err("blank revoke"),
             coordinator
-                .cancel_session("")
+                .cancel_session(&SessionId::from(""))
                 .await
                 .expect_err("blank cancel"),
         ] {

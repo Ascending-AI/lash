@@ -1,4 +1,5 @@
 //! The runtime's settled-session persistence contract and shared store types.
+use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
 mod attachment_manifest;
@@ -101,8 +102,8 @@ pub use testing::{
 pub use usage::{merge_token_ledger_entries_checked, merge_token_ledger_entry_checked};
 pub use work_claim::{WorkClaim, WorkCompletion};
 
-fn default_root_session_id() -> String {
-    "root".to_string()
+fn default_root_session_id() -> SessionId {
+    SessionId::from("root")
 }
 pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 7;
 
@@ -117,7 +118,7 @@ mod persisted_state_tests;
 )]
 #[serde(deny_unknown_fields)]
 pub struct SessionMeta {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub relation: crate::SessionRelation,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
@@ -138,13 +139,13 @@ impl SessionMeta {
 /// filenames, or other constrained namespaces own those boundary rules.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionBinding {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub relation: crate::SessionRelation,
 }
 
 impl SessionBinding {
     /// Builds a root binding for store implementors.
-    pub fn root(session_id: impl Into<String>) -> Self {
+    pub fn root(session_id: impl Into<SessionId>) -> Self {
         Self {
             session_id: session_id.into(),
             relation: crate::SessionRelation::Root,
@@ -174,7 +175,7 @@ pub enum SessionAdmission {
     Rebound,
 }
 
-pub fn validate_session_id(session_id: &str) -> Result<(), StoreError> {
+pub fn validate_session_id(session_id: &SessionId) -> Result<(), StoreError> {
     if !namespace::is_valid_opaque_key(session_id) {
         Err(StoreError::InvalidSessionId {
             reason: "session ids must not be empty or contain NUL",
@@ -216,7 +217,7 @@ impl From<String> for BlobRef {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SessionHead {
     #[serde(default = "default_root_session_id")]
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(skip)]
     pub head_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -239,7 +240,7 @@ pub struct SessionHead {
 pub struct SessionHeadPayload {
     pub schema_version: u32,
     #[serde(default = "default_root_session_id")]
-    pub session_id: String,
+    pub session_id: SessionId,
     pub config: crate::PersistedSessionConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_frame_node_id: Option<crate::FrameNodeId>,
@@ -256,7 +257,7 @@ pub struct SessionHeadPayload {
 #[non_exhaustive]
 pub struct SessionHeadMeta {
     pub schema_version: u32,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub head_revision: u64,
     pub config: crate::PersistedSessionConfig,
     pub current_frame_node_id: Option<crate::FrameNodeId>,
@@ -313,7 +314,7 @@ fn persisted_session_config_from_state(
 
 #[derive(Clone, Debug)]
 pub struct PersistedSessionRead {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub head_revision: u64,
     pub config: crate::PersistedSessionConfig,
     pub current_frame_node_id: Option<crate::FrameNodeId>,
@@ -847,7 +848,7 @@ fn persisted_session_state_from_head(
 impl Default for SessionHead {
     fn default() -> Self {
         Self {
-            session_id: default_root_session_id(),
+            session_id: SessionId::from(default_root_session_id()),
             head_revision: 0,
             current_frame_node_id: None,
             graph: crate::SessionGraph::default(),
@@ -863,7 +864,7 @@ impl Default for SessionHeadPayload {
     fn default() -> Self {
         Self {
             schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
-            session_id: default_root_session_id(),
+            session_id: SessionId::from(default_root_session_id()),
             config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
             current_frame_node_id: None,
         }
@@ -1046,7 +1047,7 @@ pub trait TurnInputStore: Send + Sync {
     /// claim. Expired claims are visible again according to their state.
     async fn list_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::PendingTurnInput>, StoreError>;
 
     /// Read canonical input applications from durable turn-commit records.
@@ -1056,7 +1057,7 @@ pub trait TurnInputStore: Send + Sync {
     /// commit order so a host can reconcile admission identity after a gap.
     async fn list_turn_input_applications(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> Result<Vec<crate::TurnInputApplication>, StoreError> {
         Err(StoreError::Backend(
             "turn input application reconciliation is not implemented by this store".to_string(),
@@ -1071,7 +1072,7 @@ pub trait TurnInputStore: Send + Sync {
     /// primitive.
     async fn cancel_pending_turn_input(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         input_id: &str,
     ) -> Result<crate::PendingTurnInputCancelOutcome, StoreError> {
         let target = crate::PendingTurnInputCancelTarget::input_id(input_id);
@@ -1088,14 +1089,14 @@ pub trait TurnInputStore: Send + Sync {
     /// Atomically cancel a list of pending user inputs by input id or source key.
     async fn cancel_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         targets: &[crate::PendingTurnInputCancelTarget],
     ) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, StoreError>;
 
     /// Atomically cancel the same-session runtime-admission suffix from an anchor.
     async fn cancel_pending_turn_input_suffix(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         anchor: &crate::PendingTurnInputCancelTarget,
     ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, StoreError>;
 
@@ -1106,7 +1107,7 @@ pub trait TurnInputStore: Send + Sync {
     /// exactly while that generation still holds the session lease (ADR 0029).
     async fn claim_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &crate::TurnId,
@@ -1117,7 +1118,7 @@ pub trait TurnInputStore: Send + Sync {
     /// Claim queued next-turn input at idle.
     async fn claim_next_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
@@ -1171,7 +1172,7 @@ pub trait TurnInputStore: Send + Sync {
     /// mine to repair", never as a failure of the work they were doing.
     async fn defer_orphaned_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         scope: OrphanedTurnInputScope<'_>,
     ) -> Result<crate::TurnCancelInputOutcome, StoreError>;
@@ -1242,7 +1243,7 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
     /// directly.
     async fn try_claim_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         executor_id: &str,
         lease_ttl_ms: u64,
@@ -1267,7 +1268,7 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
     /// token so a retry observes one settled rotation instead of rotating again.
     async fn try_claim_session_execution_lease_with_token(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         executor_id: &str,
         claim_nonce: &LeaseClaimNonce,
@@ -1314,7 +1315,7 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
     /// this snapshot for the fence it presents on claim, renew, or release.
     async fn get_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<SessionExecutionLeaseObservation, StoreError>;
 }
 
@@ -1354,7 +1355,7 @@ pub trait QueuedWorkStore: Send + Sync {
     /// required.
     async fn claim_leading_ready_session_command(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;
@@ -1375,7 +1376,7 @@ pub trait QueuedWorkStore: Send + Sync {
     /// the only account of the empty drain a host ever gets.
     async fn claim_ready_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
@@ -1390,7 +1391,7 @@ pub trait QueuedWorkStore: Send + Sync {
     #[allow(clippy::too_many_arguments)]
     async fn claim_checkpoint_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &crate::TurnId,
@@ -1421,7 +1422,7 @@ pub trait QueuedWorkStore: Send + Sync {
     /// barrier, and requested rows after it remain queued.
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
@@ -1454,7 +1455,7 @@ pub trait QueuedWorkStore: Send + Sync {
     /// stale local draft state.
     async fn cancel_queued_work_batch(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, StoreError>;
 
@@ -1465,7 +1466,7 @@ pub trait QueuedWorkStore: Send + Sync {
     #[doc(hidden)]
     async fn queued_work_batch_completed(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<bool, StoreError>;
 
@@ -1476,14 +1477,14 @@ pub trait QueuedWorkStore: Send + Sync {
     /// sides apply the same live-claim filter as the corresponding list read.
     async fn pending_session_work_ordering(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<PendingSessionWorkOrdering, StoreError>;
 
     /// List all queued-work batches for a session, including batches held by a
     /// live claim.
     async fn list_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
 
     /// List queued-work batches that are still pending presentation/editing.
@@ -1500,7 +1501,7 @@ pub trait QueuedWorkStore: Send + Sync {
     /// filtering.
     async fn list_pending_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
 }
 

@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock};
@@ -68,7 +69,7 @@ pub(crate) mod facade_ops {
 
         fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&str>;
 
-        fn agent_frame_records(&self, session_id: &str) -> Vec<crate::AgentFrameRecord>;
+        fn agent_frame_records(&self, session_id: &SessionId) -> Vec<crate::AgentFrameRecord>;
 
         fn extend_node_records<I>(&mut self, nodes: I)
         where
@@ -93,7 +94,7 @@ pub(crate) mod facade_ops {
             Some(self.nodes[idx].node_id.as_str())
         }
 
-        fn agent_frame_records(&self, session_id: &str) -> Vec<crate::AgentFrameRecord> {
+        fn agent_frame_records(&self, session_id: &SessionId) -> Vec<crate::AgentFrameRecord> {
             self.try_agent_frame_records(session_id)
                 .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
         }
@@ -121,7 +122,7 @@ pub(crate) fn draft_node_id(namespace: &str, ordinal: u64) -> String {
 /// FrameOpen ID must be final before runtime effects begin. The host-provided
 /// session id fixes the identity before store admission; binding must leave it
 /// unchanged.
-pub fn frame_node_id(session_id: &str, frame_key: &str) -> crate::FrameNodeId {
+pub fn frame_node_id(session_id: &SessionId, frame_key: &str) -> crate::FrameNodeId {
     let preimage = format!(
         "{}:{session_id}:{}:{frame_key}",
         session_id.len(),
@@ -968,7 +969,7 @@ impl SessionGraph {
         Arc::make_mut(&mut self.inner)
     }
 
-    pub(crate) fn remap_node_ids(&mut self, _session_id: &str, mapping: &[(String, String)]) {
+    pub(crate) fn remap_node_ids(&mut self, _session_id: &SessionId, mapping: &[(String, String)]) {
         if mapping.is_empty() {
             return;
         }
@@ -1192,7 +1193,7 @@ impl SessionGraph {
 
     pub(crate) fn try_agent_frame_records(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::AgentFrameRecord>, crate::StoreError> {
         let mut previous_frame_node_id = None;
         let mut frames = Vec::new();

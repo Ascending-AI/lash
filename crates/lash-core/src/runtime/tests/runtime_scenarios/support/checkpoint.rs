@@ -30,7 +30,7 @@ impl RuntimeScenarioContext {
             assert_pending_turn_inputs(
                 self.name,
                 self.store(),
-                self.session_id,
+                &self.session_id,
                 &self.enqueued_turn_inputs,
                 &phase.pending_turn_inputs_after_deferral,
             )
@@ -43,7 +43,7 @@ impl RuntimeScenarioContext {
             let (owner, lease) = self.owner_and_lease();
             assert!(
                 self.store()
-                    .claim_next_turn_inputs(self.session_id, &lease.fence(), owner, 10)
+                    .claim_next_turn_inputs(&self.session_id, &lease.fence(), owner, 10)
                     .await
                     .unwrap_or_else(|err| panic!(
                         "{} failed to claim next-turn inputs after cancellation: {err}",

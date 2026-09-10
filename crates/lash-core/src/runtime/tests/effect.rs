@@ -327,13 +327,19 @@ impl crate::AwaitEventResolver for RecordingEffectController {
         self.native.await_await_event(key, cancel, deadline).await
     }
 
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.native
             .revoke_await_events_for_session(session_id)
             .await
     }
 
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.native
             .cancel_await_events_for_session(session_id)
             .await
@@ -1115,13 +1121,19 @@ impl crate::AwaitEventResolver for CapturingRuntimeReplayController {
         self.native.await_await_event(key, cancel, deadline).await
     }
 
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.native
             .revoke_await_events_for_session(session_id)
             .await
     }
 
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.native
             .cancel_await_events_for_session(session_id)
             .await
@@ -1969,7 +1981,10 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("exec-without-executor")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("exec-without-executor"),
+            ),
         )
         .await
         .expect("turn");
@@ -2025,7 +2040,7 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
     );
     let mut request = crate::DirectRequest::text("mock-model", "summarize");
     let caused_by = CausalRef::ToolCall {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         call_id: "originating-tool-call".to_string(),
     };
     request.caused_by = Some(caused_by.clone());
@@ -2041,7 +2056,7 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
     let discriminator =
         crate::runtime::causal::direct_request_discriminator(None, Some(&caused_by), 1);
     let expected_replay_key = crate::runtime::causal::direct_effect_invocation(
-        "root",
+        &SessionId::from("root"),
         "direct-test",
         discriminator,
         None,

@@ -48,7 +48,7 @@ impl ManagedSessionCapability {
             tx: event_tx,
             live_usage: Some(LiveChildUsageForwarder {
                 turn_id: turn_id.clone(),
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 source: usage_source,
                 model: policy.model.id.clone(),
                 token_ledger: Arc::clone(&usage.token_ledger),
@@ -125,13 +125,14 @@ impl ManagedSessionCapability {
         turn
     }
 
-    fn child_usage_source(&self, usage: &UsageCapability, session_id: &str) -> String {
+    fn child_usage_source(&self, usage: &UsageCapability, session_id: &SessionId) -> String {
         usage
             .child_sources
             .lock_recover()
             .get(session_id)
             .cloned()
-            .unwrap_or_else(|| "child".to_string())
+            .unwrap_or_else(|| SessionId::from("child".to_string()))
+            .to_string()
     }
 }
 
@@ -185,7 +186,7 @@ static NEXT_MANAGED_TURN_REGISTRATION: std::sync::atomic::AtomicU64 =
 struct ManagedTurnLease {
     turns: ManagedTurnRegistry,
     live_usage: ChildTurnLiveUsage,
-    session_id: String,
+    session_id: SessionId,
     turn_id: TurnId,
     registration: u64,
     /// Shared with this turn's [`LiveChildUsageForwarder`] so an in-flight child
@@ -201,7 +202,7 @@ enum ManagedTurnAdmission {
     },
     TurnIdBusy {
         registered_turns: usize,
-        holder_session_id: String,
+        holder_session_id: SessionId,
         holder_registration: u64,
     },
     SessionBusy {
@@ -220,7 +221,7 @@ impl ManagedTurnLease {
     fn register_with_limit(
         turns: &ManagedTurnRegistry,
         live_usage: &ChildTurnLiveUsage,
-        session_id: &str,
+        session_id: &SessionId,
         turn_id: &TurnId,
         concurrency_limit: std::num::NonZeroUsize,
     ) -> Result<Self, crate::PluginError> {
@@ -237,7 +238,7 @@ impl ManagedTurnLease {
     fn register_with_admission_class(
         turns: &ManagedTurnRegistry,
         live_usage: &ChildTurnLiveUsage,
-        session_id: &str,
+        session_id: &SessionId,
         turn_id: &TurnId,
         concurrency_limit: std::num::NonZeroUsize,
         admission_class: crate::plugin::runtime_host::ManagedTurnAdmissionClass,
@@ -280,7 +281,7 @@ impl ManagedTurnLease {
                 registered.insert(
                     turn_id.clone(),
                     ManagedSessionTurn {
-                        session_id: session_id.to_string(),
+                        session_id: SessionId::from(session_id.to_string()),
                         registration,
                     },
                 );
@@ -296,7 +297,7 @@ impl ManagedTurnLease {
                 holder_registration,
             } => {
                 tracing::debug!(
-                    session_id,
+                    session_id = %session_id,
                     turn_id = %turn_id,
                     registered_turns,
                     holder_session_id = %holder_session_id,
@@ -315,7 +316,7 @@ impl ManagedTurnLease {
                 holder_registration,
             } => {
                 tracing::debug!(
-                    session_id,
+                    session_id = %session_id,
                     turn_id = %turn_id,
                     registered_turns,
                     holder_turn_id = %holder_turn_id,
@@ -333,7 +334,7 @@ impl ManagedTurnLease {
                 limit,
             } => {
                 tracing::debug!(
-                    session_id,
+                    session_id = %session_id,
                     turn_id = %turn_id,
                     registered_turns,
                     limit,
@@ -349,7 +350,7 @@ impl ManagedTurnLease {
                 )));
             }
             ManagedTurnAdmission::Admitted { registered_turns } => tracing::debug!(
-                session_id,
+                session_id = %session_id,
                 turn_id = %turn_id,
                 registration,
                 registered_turns,
@@ -364,7 +365,7 @@ impl ManagedTurnLease {
         Ok(Self {
             turns: Arc::clone(turns),
             live_usage: Arc::clone(live_usage),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             turn_id: turn_id.clone(),
             registration,
             released: Arc::new(AtomicBool::new(false)),
@@ -375,7 +376,7 @@ impl ManagedTurnLease {
     fn register(
         turns: &ManagedTurnRegistry,
         live_usage: &ChildTurnLiveUsage,
-        session_id: &str,
+        session_id: &SessionId,
         turn_id: &TurnId,
     ) -> Result<Self, crate::PluginError> {
         Self::register_with_limit(
@@ -550,9 +551,13 @@ mod tests {
     #[test]
     fn dropped_managed_turn_lease_releases_both_registration_and_live_usage() {
         let (turns, live_usage) = shared_maps();
-        let lease =
-            ManagedTurnLease::register(&turns, &live_usage, "session", &TurnId::from("turn"))
-                .expect("register");
+        let lease = ManagedTurnLease::register(
+            &turns,
+            &live_usage,
+            &SessionId::from("session"),
+            &TurnId::from("turn"),
+        )
+        .expect("register");
         live_usage.lock_recover().insert(
             TurnId::from("turn".to_string()),
             TokenUsage {
@@ -570,9 +575,13 @@ mod tests {
     #[test]
     fn completed_managed_turn_lease_takes_live_usage_exactly_once() {
         let (turns, live_usage) = shared_maps();
-        let lease =
-            ManagedTurnLease::register(&turns, &live_usage, "session", &TurnId::from("turn"))
-                .expect("register");
+        let lease = ManagedTurnLease::register(
+            &turns,
+            &live_usage,
+            &SessionId::from("session"),
+            &TurnId::from("turn"),
+        )
+        .expect("register");
         live_usage.lock_recover().insert(
             TurnId::from("turn".to_string()),
             TokenUsage {
@@ -609,14 +618,18 @@ mod tests {
     #[test]
     fn stale_managed_turn_lease_does_not_evict_a_same_identity_successor() {
         let (turns, live_usage) = shared_maps();
-        let stale =
-            ManagedTurnLease::register(&turns, &live_usage, "session", &TurnId::from("turn"))
-                .expect("register");
+        let stale = ManagedTurnLease::register(
+            &turns,
+            &live_usage,
+            &SessionId::from("session"),
+            &TurnId::from("turn"),
+        )
+        .expect("register");
         // Step 2: the foreign-session overwrite is now denied outright.
         let foreign = match ManagedTurnLease::register(
             &turns,
             &live_usage,
-            "foreign-session",
+            &SessionId::from("foreign-session"),
             &TurnId::from("turn"),
         ) {
             Ok(_) => {
@@ -638,9 +651,13 @@ mod tests {
         // Step 3.
         lock_turns(&turns).remove("turn");
         // Step 4.
-        let successor =
-            ManagedTurnLease::register(&turns, &live_usage, "session", &TurnId::from("turn"))
-                .expect("re-register");
+        let successor = ManagedTurnLease::register(
+            &turns,
+            &live_usage,
+            &SessionId::from("session"),
+            &TurnId::from("turn"),
+        )
+        .expect("re-register");
         live_usage.lock_recover().insert(
             TurnId::from("turn".to_string()),
             TokenUsage {
@@ -675,16 +692,20 @@ mod tests {
     #[test]
     fn managed_turn_lease_rejects_a_second_turn_on_the_same_turn_id() {
         let (turns, live_usage) = shared_maps();
-        let _lease =
-            ManagedTurnLease::register(&turns, &live_usage, "session", &TurnId::from("turn"))
-                .expect("register");
+        let _lease = ManagedTurnLease::register(
+            &turns,
+            &live_usage,
+            &SessionId::from("session"),
+            &TurnId::from("turn"),
+        )
+        .expect("register");
 
         // Live usage is keyed by turn id alone, so a second session may not
         // register the same turn id even though it has no turn of its own.
         let err = match ManagedTurnLease::register(
             &turns,
             &live_usage,
-            "other-session",
+            &SessionId::from("other-session"),
             &TurnId::from("turn"),
         ) {
             Ok(_) => panic!("a turn id identifies at most one live managed turn"),
@@ -700,7 +721,7 @@ mod tests {
             lock_turns(&turns)
                 .get("turn")
                 .map(|turn| turn.session_id.clone()),
-            Some("session".to_string()),
+            Some(SessionId::from("session")),
             "a denied registration must not overwrite the live one"
         );
     }
@@ -712,7 +733,7 @@ mod tests {
         let lease = ManagedTurnLease::register_with_limit(
             &turns,
             &live_usage,
-            "first-session",
+            &SessionId::from("first-session"),
             &TurnId::from("first-turn"),
             limit,
         )
@@ -721,7 +742,7 @@ mod tests {
         let error = match ManagedTurnLease::register_with_limit(
             &turns,
             &live_usage,
-            "second-session",
+            &SessionId::from("second-session"),
             &TurnId::from("second-turn"),
             limit,
         ) {
@@ -742,7 +763,7 @@ mod tests {
         ManagedTurnLease::register_with_limit(
             &turns,
             &live_usage,
-            "second-session",
+            &SessionId::from("second-session"),
             &TurnId::from("second-turn"),
             limit,
         )
@@ -756,7 +777,7 @@ mod tests {
         let _at_cap = ManagedTurnLease::register_with_limit(
             &turns,
             &live_usage,
-            "normal-session",
+            &SessionId::from("normal-session"),
             &TurnId::from("normal-turn"),
             limit,
         )
@@ -765,7 +786,7 @@ mod tests {
         let _compaction = ManagedTurnLease::register_with_admission_class(
             &turns,
             &live_usage,
-            "compaction-session",
+            &SessionId::from("compaction-session"),
             &TurnId::from("compaction-turn"),
             limit,
             crate::plugin::runtime_host::ManagedTurnAdmissionClass::RuntimeInternalCompaction,
@@ -780,7 +801,7 @@ mod tests {
         let denied = match ManagedTurnLease::register_with_limit(
             &turns,
             &live_usage,
-            "second-normal-session",
+            &SessionId::from("second-normal-session"),
             &TurnId::from("second-normal-turn"),
             limit,
         ) {
@@ -804,12 +825,16 @@ mod tests {
     async fn live_usage_emitted_after_release_neither_over_counts_nor_leaks() {
         let (turns, live_usage) = shared_maps();
         let ledger = Arc::new(StdMutex::new(Vec::new()));
-        let lease =
-            ManagedTurnLease::register(&turns, &live_usage, "session", &TurnId::from("turn"))
-                .expect("register");
+        let lease = ManagedTurnLease::register(
+            &turns,
+            &live_usage,
+            &SessionId::from("session"),
+            &TurnId::from("turn"),
+        )
+        .expect("register");
         let forwarder = LiveChildUsageForwarder {
             turn_id: TurnId::from("turn"),
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             source: "child".to_string(),
             model: "mock-model".to_string(),
             token_ledger: Arc::clone(&ledger),
@@ -852,12 +877,16 @@ mod tests {
     async fn live_usage_emit_racing_release_and_staging_is_recorded_exactly_once() {
         let (turns, live_usage) = shared_maps();
         let ledger = Arc::new(StdMutex::new(Vec::new()));
-        let lease =
-            ManagedTurnLease::register(&turns, &live_usage, "session", &TurnId::from("turn"))
-                .expect("register");
+        let lease = ManagedTurnLease::register(
+            &turns,
+            &live_usage,
+            &SessionId::from("session"),
+            &TurnId::from("turn"),
+        )
+        .expect("register");
         let forwarder = LiveChildUsageForwarder {
             turn_id: TurnId::from("turn"),
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             source: "child".to_string(),
             model: "mock-model".to_string(),
             token_ledger: Arc::clone(&ledger),
@@ -892,7 +921,11 @@ mod tests {
 
         let staged_before_record = stage_token_ledger_shared(
             &ledger,
-            &super::super::state::boundary_operation("session", "before-late-emit", "usage-ledger"),
+            &super::super::state::boundary_operation(
+                &SessionId::from("session"),
+                "before-late-emit",
+                "usage-ledger",
+            ),
         )
         .expect("stage while emit is gated");
         assert!(
@@ -918,7 +951,11 @@ mod tests {
         );
         let staged_after_record = stage_token_ledger_shared(
             &ledger,
-            &super::super::state::boundary_operation("session", "after-late-emit", "usage-ledger"),
+            &super::super::state::boundary_operation(
+                &SessionId::from("session"),
+                "after-late-emit",
+                "usage-ledger",
+            ),
         )
         .expect("stage late delta");
         assert_eq!(staged_after_record.deltas().len(), 1);
@@ -936,14 +973,18 @@ mod tests {
     #[test]
     fn managed_turn_lease_rejects_a_second_turn_on_the_same_session() {
         let (turns, live_usage) = shared_maps();
-        let _lease =
-            ManagedTurnLease::register(&turns, &live_usage, "session", &TurnId::from("turn"))
-                .expect("register");
+        let _lease = ManagedTurnLease::register(
+            &turns,
+            &live_usage,
+            &SessionId::from("session"),
+            &TurnId::from("turn"),
+        )
+        .expect("register");
 
         let err = match ManagedTurnLease::register(
             &turns,
             &live_usage,
-            "session",
+            &SessionId::from("session"),
             &TurnId::from("other-turn"),
         ) {
             Ok(_) => panic!("a session runs at most one managed turn"),

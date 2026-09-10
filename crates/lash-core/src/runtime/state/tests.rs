@@ -6,9 +6,21 @@ use lash_sansio::sync::MutexExt;
 
 #[test]
 fn commit_operation_identity_depends_on_caller_boundary_not_head_revision() {
-    let first = boundary_operation("session", "request-42", "append-session-nodes");
-    let retry = boundary_operation("session", "request-42", "append-session-nodes");
-    let next = boundary_operation("session", "request-43", "append-session-nodes");
+    let first = boundary_operation(
+        &SessionId::from("session"),
+        "request-42",
+        "append-session-nodes",
+    );
+    let retry = boundary_operation(
+        &SessionId::from("session"),
+        "request-42",
+        "append-session-nodes",
+    );
+    let next = boundary_operation(
+        &SessionId::from("session"),
+        "request-43",
+        "append-session-nodes",
+    );
 
     assert_eq!(first, retry);
     assert_ne!(first, next);
@@ -535,7 +547,7 @@ fn descriptorless_execution_state_leaves_without_a_root_remain_corrupt() {
 #[test]
 fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips() {
     let mut state = RuntimeSessionState {
-        session_id: "snapshot-test".to_string(),
+        session_id: SessionId::from("snapshot-test"),
         policy: SessionPolicy {
             provider_id: "mock".to_string(),
             ..SessionPolicy::new(crate::TurnBudget::Unbounded)
@@ -586,7 +598,7 @@ fn boxed_runtime_authority_keeps_flat_json_and_legacy_defaults() {
         .hidden_tools
         .insert("hidden".to_string());
     state.authority.subagent = Some(crate::SubagentSessionContext {
-        parent_session_id: "parent".to_string(),
+        parent_session_id: SessionId::from("parent"),
         capability: "research".to_string(),
         depth: 1,
         max_depth: 3,
@@ -625,7 +637,8 @@ fn reconciled_generation_forces_next_plugin_state_export() {
     let tools: Arc<dyn crate::ToolProvider> = Arc::new(DynamicSnapshotTools {
         names: Arc::clone(&names),
     });
-    let plugins = crate::runtime::tests::helpers::plugin_session_with_tools("root", tools);
+    let plugins =
+        crate::runtime::tests::helpers::plugin_session_with_tools(&SessionId::from("root"), tools);
     let snapshot = plugins.tool_registry().export_state();
     let persisted_generation = snapshot.generation();
     let mut projected =

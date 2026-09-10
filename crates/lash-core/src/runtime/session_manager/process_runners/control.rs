@@ -41,7 +41,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
     async fn start(
         &self,
         registration: crate::ProcessRegistration,
-        observers: Vec<String>,
+        observers: Vec<SessionId>,
         env_spec: Option<crate::ProcessExecutionEnvSpec>,
         execution_context: crate::ProcessExecutionContext,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -109,7 +109,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn cancel_named(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         reason: Option<String>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         match self.registry.resolve_process_ref(process_id).await {
@@ -118,7 +118,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
             | Err(refusal @ crate::PluginError::ProcessNoLongerRetained { .. }) => {
                 match self
                     .run(crate::ProcessCommand::CancelRefused {
-                        process_id: process_id.to_string(),
+                        process_id: ProcessId::from(process_id.to_string()),
                         reason,
                         refusal,
                     })
@@ -135,7 +135,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
     async fn parent_end(
         &self,
         identity: crate::ToolIntentIdentity,
-        process_id: String,
+        process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
         reason: String,
     ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
@@ -187,12 +187,12 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn emit_event(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         request: crate::ProcessEventAppendRequest,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::EmitEvent {
-                process_id: process_id.to_string(),
+                process_id: ProcessId::from(process_id.to_string()),
                 request,
             })
             .await?
@@ -222,7 +222,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         &self,
         from_scope: crate::SessionScope,
         to_scope: crate::SessionScope,
-        process_ids: Vec<String>,
+        process_ids: Vec<ProcessId>,
     ) -> Result<(), crate::PluginError> {
         match self
             .run(crate::ProcessCommand::Transfer {
@@ -328,7 +328,7 @@ impl ProcessCapability {
 
     fn process_scope_for_op(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         agent_frame_id: Option<&crate::FrameNodeId>,
     ) -> crate::SessionScope {
         agent_frame_id
@@ -373,7 +373,7 @@ impl ProcessCapability {
         &self,
         current: &CurrentSessionCapability,
         managed: &ManagedSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
         registration: crate::ProcessRegistration,
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
@@ -419,7 +419,11 @@ impl ProcessCapability {
         runner
             .start(
                 registration,
-                options.initial_observers,
+                options
+                    .initial_observers
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
                 None,
                 execution_context,
             )
@@ -431,7 +435,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn start_process_from_recorded_intent(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -458,7 +462,11 @@ impl ProcessCapability {
         self.command_runner(current, &scope)?
             .start(
                 registration,
-                options.initial_observers,
+                options
+                    .initial_observers
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
                 env_spec,
                 execution_context,
             )
@@ -468,7 +476,7 @@ impl ProcessCapability {
     async fn prepare_process_environment(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
         registration: crate::ProcessRegistration,
     ) -> Result<crate::ProcessRegistration, crate::PluginError> {
         if !matches!(
@@ -501,7 +509,7 @@ impl ProcessCapability {
     async fn validate_and_stamp_engine_start(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
         registration: crate::ProcessRegistration,
         env_spec: Option<&crate::ProcessExecutionEnvSpec>,
     ) -> Result<crate::ProcessRegistration, crate::PluginError> {
@@ -544,7 +552,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn await_process(
         &self,
         current: &CurrentSessionCapability,
-        process_id: &str,
+        process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         let process_ref = match current
@@ -590,8 +598,8 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn complete_external_process(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         await_output: crate::ProcessAwaitOutput,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
@@ -634,8 +642,8 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn report_process_caller_departure(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let registry = current.host.process_registry().ok_or_else(|| {
             crate::PluginError::Session(
@@ -653,7 +661,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn list_process_handles(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
@@ -668,7 +676,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn list_model_tool_process_handles(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
@@ -683,7 +691,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn list_model_tool_process_handles_for_attempt(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
         mode: crate::ProcessListMode,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         let records = self
@@ -697,7 +705,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn list_process_handles_for_attempt(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
         mode: crate::ProcessListMode,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         let registry = current.host.process_registry().ok_or_else(|| {
@@ -725,8 +733,8 @@ impl ProcessCapability {
         &self,
         current: &CurrentSessionCapability,
         managed: &ManagedSessionCapability,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
@@ -740,8 +748,8 @@ impl ProcessCapability {
         &self,
         current: &CurrentSessionCapability,
         managed: &ManagedSessionCapability,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         reason: Option<String>,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -753,7 +761,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn cancel_recorded_intent(
         &self,
         current: &CurrentSessionCapability,
-        process_id: &str,
+        process_id: &ProcessId,
         reason: Option<String>,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -765,7 +773,7 @@ impl ProcessCapability {
         &self,
         current: &CurrentSessionCapability,
         identity: crate::ToolIntentIdentity,
-        process_id: String,
+        process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
         reason: String,
         scope: crate::ProcessOpScope<'_>,
@@ -779,14 +787,14 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn emit_process_event(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         event_type: String,
         replay_key: String,
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.validate_model_tool_process_handles(current, session_id, &[process_id.to_string()])
+        self.validate_model_tool_process_handles(current, session_id, &[process_id.clone()])
             .await?;
         let request =
             crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(replay_key);
@@ -799,8 +807,8 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn signal_possessed_process(
         &self,
         current: &CurrentSessionCapability,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
@@ -814,7 +822,7 @@ impl ProcessCapability {
             .ok_or_else(|| crate::runtime::registry_transitions::unknown_process(process_id))?;
         if record.is_terminal() {
             return Err(crate::PluginError::ProcessAlreadyTerminal {
-                process_id: process_id.to_string(),
+                process_id: ProcessId::from(process_id.to_string()),
                 status: record.status,
             });
         }
@@ -836,7 +844,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn signal_recorded_intent(
         &self,
         current: &CurrentSessionCapability,
-        process_id: &str,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
@@ -856,7 +864,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn emit_event_recorded_intent(
         &self,
         current: &CurrentSessionCapability,
-        process_id: &str,
+        process_id: &ProcessId,
         event_type: String,
         replay_key: String,
         payload: serde_json::Value,
@@ -873,8 +881,8 @@ impl ProcessCapability {
         &self,
         current: &CurrentSessionCapability,
         _managed: &ManagedSessionCapability,
-        session_id: &str,
-        handle_ids: &[String],
+        session_id: &SessionId,
+        handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
         let _ = scope;
@@ -885,8 +893,8 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn validate_model_tool_process_handles(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
-        handle_ids: &[String],
+        session_id: &SessionId,
+        handle_ids: &[ProcessId],
     ) -> Result<(), crate::PluginError> {
         self.validate_process_handles_observed_inner(current, session_id, handle_ids)
             .await?;
@@ -898,9 +906,9 @@ impl ProcessCapability {
         &self,
         current: &CurrentSessionCapability,
         _managed: &ManagedSessionCapability,
-        from_session_id: &str,
-        to_session_id: &str,
-        process_ids: Vec<String>,
+        from_session_id: &SessionId,
+        to_session_id: &SessionId,
+        process_ids: Vec<ProcessId>,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
         if process_ids.is_empty() {
@@ -919,7 +927,7 @@ impl ProcessCapability {
         &self,
         current: &CurrentSessionCapability,
         managed: &ManagedSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), crate::PluginError> {
         if session_id == current.session_id
             || managed.registry.lock().await.contains_key(session_id)
@@ -934,7 +942,7 @@ impl ProcessCapability {
     fn mark_current_process_sync_needed(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
     ) {
         if session_id == current.session_id {
             self.sync_needed.store(true, Ordering::Release);
@@ -943,7 +951,7 @@ impl ProcessCapability {
 
     fn narrow_tool_visible_records(
         current: &CurrentSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
         records: Vec<crate::ProcessRecord>,
     ) -> Vec<crate::ProcessRecord> {
         let Some(filter) = current
@@ -963,7 +971,10 @@ impl ProcessCapability {
             .iter()
             .filter(|process_id| {
                 filter
-                    .narrow(&session_id.to_string(), std::slice::from_ref(process_id))
+                    .narrow(
+                        &SessionId::from(session_id.to_string()),
+                        std::slice::from_ref(process_id),
+                    )
                     .iter()
                     .any(|returned| returned == *process_id)
             })
@@ -995,8 +1006,8 @@ impl ProcessCapability {
     async fn validate_process_handles_observed_inner(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
-        process_ids: &[String],
+        session_id: &SessionId,
+        process_ids: &[ProcessId],
     ) -> Result<(), crate::PluginError> {
         if process_ids.is_empty() {
             return Ok(());
@@ -1017,8 +1028,8 @@ impl ProcessCapability {
     async fn validate_tool_filter(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
-        process_ids: &[String],
+        session_id: &SessionId,
+        process_ids: &[ProcessId],
     ) -> Result<(), crate::PluginError> {
         let Some(filter) = current
             .host
@@ -1030,7 +1041,7 @@ impl ProcessCapability {
             return Ok(());
         };
         for process_id in process_ids {
-            let returned = filter.narrow(&session_id.to_string(), std::slice::from_ref(process_id));
+            let returned = filter.narrow(session_id, std::slice::from_ref(process_id));
             let allowed = returned.iter().any(|returned| returned == process_id);
             tracing::info!(
                 target: "lash::process_tool_visibility",
@@ -1050,8 +1061,8 @@ impl ProcessCapability {
     }
 }
 
-fn process_visibility_miss(process_id: &str) -> crate::PluginError {
+fn process_visibility_miss(process_id: &ProcessId) -> crate::PluginError {
     crate::PluginError::ProcessNotVisible {
-        process_id: process_id.to_string(),
+        process_id: ProcessId::from(process_id.to_string()),
     }
 }

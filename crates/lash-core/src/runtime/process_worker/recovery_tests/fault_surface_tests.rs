@@ -30,7 +30,7 @@ impl crate::ProcessEngine for ImmediateSuccessEngine {
 }
 
 async fn drive_one_faulted_row(
-    process_id: &str,
+    process_id: &ProcessId,
     inject: impl AsyncFnOnce(&Arc<TestLocalProcessRegistry>),
 ) -> (ProcessAdmissionReport, ProcessWorkerFault, usize) {
     let run_handle = Arc::new(LateBoundProcessWork::default());
@@ -59,7 +59,7 @@ async fn drive_one_faulted_row(
 
 fn assert_backend_fault(
     fault: &ProcessWorkerFault,
-    expected_process_id: &str,
+    expected_process_id: &ProcessId,
     expected_operation: ProcessRecoveryOperation,
 ) {
     match fault {
@@ -81,34 +81,44 @@ fn assert_backend_fault(
 
 #[tokio::test]
 async fn a_failed_claim_on_an_admitted_row_reaches_the_fault_surface() {
-    let (report, fault, terminal) = drive_one_faulted_row("fault-claim", async |registry| {
-        registry
-            .set_process_lease_claim_error(Some(PluginError::Session(
-                "injected claim failure".to_string(),
-            )))
-            .await;
-    })
-    .await;
+    let (report, fault, terminal) =
+        drive_one_faulted_row(&ProcessId::from("fault-claim"), async |registry| {
+            registry
+                .set_process_lease_claim_error(Some(PluginError::Session(
+                    "injected claim failure".to_string(),
+                )))
+                .await;
+        })
+        .await;
 
     assert_eq!(report.admitted, vec!["fault-claim".to_string()]);
     assert!(report.deferred.is_empty());
-    assert_backend_fault(&fault, "fault-claim", ProcessRecoveryOperation::ClaimLease);
+    assert_backend_fault(
+        &fault,
+        &ProcessId::from("fault-claim"),
+        ProcessRecoveryOperation::ClaimLease,
+    );
     assert_eq!(terminal, 0, "a failed claim never terminalizes the row");
 }
 
 #[tokio::test]
 async fn a_failed_read_on_an_admitted_row_reaches_the_fault_surface() {
-    let (report, fault, terminal) = drive_one_faulted_row("fault-read", async |registry| {
-        registry
-            .set_process_read_error(Some(PluginError::Session(
-                "injected read failure".to_string(),
-            )))
-            .await;
-    })
-    .await;
+    let (report, fault, terminal) =
+        drive_one_faulted_row(&ProcessId::from("fault-read"), async |registry| {
+            registry
+                .set_process_read_error(Some(PluginError::Session(
+                    "injected read failure".to_string(),
+                )))
+                .await;
+        })
+        .await;
 
     assert_eq!(report.admitted, vec!["fault-read".to_string()]);
-    assert_backend_fault(&fault, "fault-read", ProcessRecoveryOperation::ReadProcess);
+    assert_backend_fault(
+        &fault,
+        &ProcessId::from("fault-read"),
+        ProcessRecoveryOperation::ReadProcess,
+    );
     assert_eq!(terminal, 0, "a failed read never terminalizes the row");
 }
 
@@ -138,9 +148,9 @@ async fn non_session_cancel_watcher_read_failure_preserves_prior_terminalization
         .await
         .expect("admit non-session fixture");
     assert_eq!(report.admitted, vec![process_id.to_string()]);
-    await_terminal(&registry, process_id).await;
+    await_terminal(&registry, &ProcessId::from(process_id)).await;
     let record = registry
-        .get_process(process_id)
+        .get_process(&ProcessId::from(process_id))
         .await
         .expect("read non-session fixture")
         .expect("non-session fixture remains retained");
@@ -153,19 +163,20 @@ async fn non_session_cancel_watcher_read_failure_preserves_prior_terminalization
 
 #[tokio::test]
 async fn a_failed_terminal_write_on_an_admitted_row_reaches_the_fault_surface() {
-    let (report, fault, terminal) = drive_one_faulted_row("fault-write", async |registry| {
-        registry
-            .set_process_terminal_write_error(Some(PluginError::Session(
-                "injected terminal write failure".to_string(),
-            )))
-            .await;
-    })
-    .await;
+    let (report, fault, terminal) =
+        drive_one_faulted_row(&ProcessId::from("fault-write"), async |registry| {
+            registry
+                .set_process_terminal_write_error(Some(PluginError::Session(
+                    "injected terminal write failure".to_string(),
+                )))
+                .await;
+        })
+        .await;
 
     assert_eq!(report.admitted, vec!["fault-write".to_string()]);
     assert_backend_fault(
         &fault,
-        "fault-write",
+        &ProcessId::from("fault-write"),
         ProcessRecoveryOperation::WriteTerminal,
     );
     assert_eq!(
@@ -178,20 +189,21 @@ async fn a_failed_terminal_write_on_an_admitted_row_reaches_the_fault_surface() 
 async fn a_failed_lease_release_on_an_admitted_row_reaches_the_fault_surface() {
     // The row disappears after admission, so the drive's only remaining act is
     // releasing its claim — and that release fails.
-    let (report, fault, _terminal) = drive_one_faulted_row("fault-release", async |registry| {
-        registry.set_process_read_absent(true).await;
-        registry
-            .set_process_lease_release_error(Some(PluginError::Session(
-                "injected release failure".to_string(),
-            )))
-            .await;
-    })
-    .await;
+    let (report, fault, _terminal) =
+        drive_one_faulted_row(&ProcessId::from("fault-release"), async |registry| {
+            registry.set_process_read_absent(true).await;
+            registry
+                .set_process_lease_release_error(Some(PluginError::Session(
+                    "injected release failure".to_string(),
+                )))
+                .await;
+        })
+        .await;
 
     assert_eq!(report.admitted, vec!["fault-release".to_string()]);
     assert_backend_fault(
         &fault,
-        "fault-release",
+        &ProcessId::from("fault-release"),
         ProcessRecoveryOperation::ReleaseLease,
     );
 }
@@ -262,7 +274,7 @@ async fn a_row_this_worker_is_already_running_is_deferred_busy_not_admitted_twic
     assert_eq!(
         second.deferred,
         vec![ProcessAdmissionDeferred {
-            process_id: "held-row".to_string(),
+            process_id: ProcessId::from("held-row"),
             disposition: ProcessRecoveryAttemptOutcome::Busy,
         }],
         "busy stays distinct from absent in the admission report"
@@ -292,7 +304,7 @@ async fn a_sinkless_worker_reports_faults_on_the_tracing_seam() {
 
     let ((), capture) = capturing(|| {
         worker.emit_worker_fault(ProcessWorkerFault::RecoveryRunFailed {
-            process_id: "sinkless-row".to_string(),
+            process_id: ProcessId::from("sinkless-row"),
             error: "engine rebuild failed".to_string(),
         })
     })

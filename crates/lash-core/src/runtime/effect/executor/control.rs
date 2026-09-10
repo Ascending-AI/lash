@@ -1,4 +1,6 @@
 use self::facade_ops::ScopedEffectControllerFacadeOps;
+use crate::ProcessId;
+use crate::SessionId;
 use crate::TurnId;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -28,18 +30,18 @@ use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancel
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExecutionScope {
     Turn {
-        session_id: String,
+        session_id: SessionId,
         turn_id: TurnId,
     },
     Process {
-        process_id: String,
+        process_id: ProcessId,
     },
     QueueDrain {
-        session_id: String,
+        session_id: SessionId,
         drain_id: String,
     },
     SessionDelete {
-        session_id: String,
+        session_id: SessionId,
     },
     RuntimeOperation {
         operation_id: String,
@@ -49,7 +51,7 @@ pub enum ExecutionScope {
 impl ExecutionScope {
     /// Constructs the stable session-and-turn scope effect-host implementors use to key one turn's
     /// durable effects.
-    pub fn turn(session_id: impl Into<String>, turn_id: impl Into<TurnId>) -> Self {
+    pub fn turn(session_id: impl Into<SessionId>, turn_id: impl Into<TurnId>) -> Self {
         Self::Turn {
             session_id: session_id.into(),
             turn_id: turn_id.into(),
@@ -58,7 +60,7 @@ impl ExecutionScope {
 
     /// Constructs the stable process scope effect-host implementors use to key effects that outlive
     /// any one session turn.
-    pub fn process(process_id: impl Into<String>) -> Self {
+    pub fn process(process_id: impl Into<ProcessId>) -> Self {
         Self::Process {
             process_id: process_id.into(),
         }
@@ -66,7 +68,7 @@ impl ExecutionScope {
 
     /// Constructs the stable session-and-drain scope effect-host implementors use to key
     /// queued-work effects outside a turn.
-    pub fn queue_drain(session_id: impl Into<String>, drain_id: impl Into<String>) -> Self {
+    pub fn queue_drain(session_id: impl Into<SessionId>, drain_id: impl Into<String>) -> Self {
         Self::QueueDrain {
             session_id: session_id.into(),
             drain_id: drain_id.into(),
@@ -75,7 +77,7 @@ impl ExecutionScope {
 
     /// Constructs the stable session-delete scope effect-host implementors use to journal deletion
     /// work outside a turn.
-    pub fn session_delete(session_id: impl Into<String>) -> Self {
+    pub fn session_delete(session_id: impl Into<SessionId>) -> Self {
         Self::SessionDelete {
             session_id: session_id.into(),
         }
@@ -129,7 +131,7 @@ impl ExecutionScope {
             version: u8,
             kind: String,
             #[serde(default)]
-            session_id: Option<String>,
+            session_id: Option<SessionId>,
             #[serde(default)]
             execution_id: Option<String>,
         }
@@ -151,7 +153,7 @@ impl ExecutionScope {
                 session_id: wire.session_id?,
             },
             "process" => Self::Process {
-                process_id: wire.execution_id?,
+                process_id: ProcessId::from(wire.execution_id?),
             },
             "op" => Self::RuntimeOperation {
                 operation_id: wire.execution_id?,
@@ -168,7 +170,7 @@ impl ExecutionScope {
     /// Exposes session id to store and durable-substrate implementors and effect-host implementors
     /// while snapshotting or restoring durable session state. Returns `None` when no session id is
     /// present.
-    pub fn session_id(&self) -> Option<&str> {
+    pub fn session_id(&self) -> Option<&SessionId> {
         match self {
             Self::Turn { session_id, .. }
             | Self::QueueDrain { session_id, .. }
@@ -225,7 +227,7 @@ impl ExecutionScope {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EffectJournalIdentity {
     key: String,
-    session_id: Option<String>,
+    session_id: Option<SessionId>,
 }
 
 /// The `version` field every journal key this build writes carries, and the
@@ -239,7 +241,7 @@ impl EffectJournalIdentity {
             version: u8,
             kind: &'static str,
             #[serde(skip_serializing_if = "Option::is_none")]
-            session_id: Option<&'a str>,
+            session_id: Option<&'a SessionId>,
             #[serde(skip_serializing_if = "Option::is_none")]
             execution_id: Option<&'a str>,
         }
@@ -248,14 +250,12 @@ impl EffectJournalIdentity {
             ExecutionScope::Turn {
                 session_id,
                 turn_id,
-            } => ("turn", Some(session_id.as_str()), Some(turn_id.as_str())),
+            } => ("turn", Some(session_id), Some(turn_id.as_str())),
             ExecutionScope::QueueDrain {
                 session_id,
                 drain_id,
-            } => ("drain", Some(session_id.as_str()), Some(drain_id.as_str())),
-            ExecutionScope::SessionDelete { session_id } => {
-                ("delete", Some(session_id.as_str()), None)
-            }
+            } => ("drain", Some(session_id), Some(drain_id.as_str())),
+            ExecutionScope::SessionDelete { session_id } => ("delete", Some(session_id), None),
             ExecutionScope::Process { process_id } => ("process", None, Some(process_id.as_str())),
             ExecutionScope::RuntimeOperation { operation_id } => {
                 ("op", None, Some(operation_id.as_str()))
@@ -270,7 +270,7 @@ impl EffectJournalIdentity {
         .expect("effect journal identity contains only infallible string fields");
         Self {
             key,
-            session_id: session_id.map(str::to_string),
+            session_id: session_id.cloned(),
         }
     }
 
@@ -278,8 +278,8 @@ impl EffectJournalIdentity {
         &self.key
     }
 
-    pub fn session_id(&self) -> Option<&str> {
-        self.session_id.as_deref()
+    pub fn session_id(&self) -> Option<&SessionId> {
+        self.session_id.as_ref()
     }
 }
 
@@ -321,10 +321,10 @@ pub enum EffectRetirementGate {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EffectJournalRetirement {
     Session {
-        session_id: String,
+        session_id: SessionId,
     },
     Process {
-        process_id: String,
+        process_id: ProcessId,
         gate: EffectRetirementGate,
     },
     RuntimeOperation {
@@ -336,7 +336,7 @@ pub enum EffectJournalRetirement {
 impl EffectJournalRetirement {
     /// Constructs a session-wide retirement request for effect-host implementors removing every
     /// durable effect journal entry owned by a deleted session.
-    pub fn session(session_id: impl Into<String>) -> Self {
+    pub fn session(session_id: impl Into<SessionId>) -> Self {
         Self::Session {
             session_id: session_id.into(),
         }
@@ -346,7 +346,7 @@ impl EffectJournalRetirement {
     /// durable effect journal entry owned by a terminal process. The gate is
     /// [`EffectRetirementGate::OwnerTerminal`]: the process registry's prune is
     /// the proof, so in-flight rows go too.
-    pub fn process(process_id: impl Into<String>) -> Self {
+    pub fn process(process_id: impl Into<ProcessId>) -> Self {
         Self::Process {
             process_id: process_id.into(),
             gate: EffectRetirementGate::OwnerTerminal,
@@ -429,7 +429,7 @@ pub enum AwaitEventWaitIdentity {
         tool_call_id: String,
     },
     ProcessSignal {
-        process_id: String,
+        process_id: ProcessId,
         signal_name: String,
         ordinal: u64,
     },
@@ -459,7 +459,7 @@ impl AwaitEventWaitIdentity {
     /// Constructs the stable wait identity effect-host implementors use to resolve one named
     /// process signal without colliding with other signals or attempts.
     pub fn process_signal(
-        process_id: impl Into<String>,
+        process_id: impl Into<ProcessId>,
         signal_name: impl Into<String>,
         ordinal: u64,
     ) -> Self {
@@ -1506,7 +1506,10 @@ pub trait AwaitEventResolver: Send + Sync {
         ))
     }
 
-    async fn revoke_await_events_for_session(&self, _session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         Err(RuntimeError::new(
             crate::RuntimeErrorCode::AwaitEventUnsupported,
             "this effect boundary does not support revoking await-event waits",
@@ -1523,7 +1526,10 @@ pub trait AwaitEventResolver: Send + Sync {
     /// The default errors loudly: an effect boundary that tracks durable waits
     /// must implement this to honor the host lever, and one that cannot must
     /// not silently claim success.
-    async fn cancel_await_events_for_session(&self, _session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         Err(RuntimeError::new(
             crate::RuntimeErrorCode::AwaitEventCancelUnsupported,
             "this effect boundary does not support cancelling durable waits",

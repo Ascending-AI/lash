@@ -1,4 +1,6 @@
 use super::*;
+use crate::ProcessId;
+use crate::SessionId;
 use crate::TurnId;
 #[cfg(any(test, feature = "testing"))]
 use lash_sansio::sync::MutexExt;
@@ -66,7 +68,7 @@ impl CurrentSnapshot {
 }
 
 pub(super) struct ManagedSessionTurn {
-    pub(super) session_id: String,
+    pub(super) session_id: SessionId,
     /// Identity of the registration attempt that created this entry. Only the
     /// lease carrying the same nonce may release it.
     pub(super) registration: u64,
@@ -74,7 +76,7 @@ pub(super) struct ManagedSessionTurn {
 
 #[derive(Clone)]
 pub(in crate::runtime) struct CurrentSessionCapability {
-    pub(in crate::runtime) session_id: String,
+    pub(in crate::runtime) session_id: SessionId,
     snapshot: CurrentSnapshot,
     policy: SessionPolicy,
     pub(in crate::runtime) host: RuntimeHost,
@@ -92,7 +94,7 @@ pub(in crate::runtime) struct CurrentSessionCapability {
 
 #[derive(Clone)]
 struct ManagedSessionCapability {
-    registry: Arc<Mutex<HashMap<String, RuntimeHandle>>>,
+    registry: Arc<Mutex<HashMap<SessionId, RuntimeHandle>>>,
     turns: Arc<StdMutex<HashMap<TurnId, ManagedSessionTurn>>>,
     turn_concurrency_limit: std::num::NonZeroUsize,
 }
@@ -104,7 +106,7 @@ pub(in crate::runtime) struct UsageCapability {
     /// write to the same Arc. Drained at turn-commit time.
     token_ledger: Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     /// Maps child session_id → usage_source label.
-    child_sources: Arc<std::sync::Mutex<HashMap<String, String>>>,
+    child_sources: Arc<std::sync::Mutex<HashMap<SessionId, SessionId>>>,
     /// Tracks live child-turn usage already bubbled into the shared
     /// token ledger so child turn completion can reconcile final usage
     /// without double counting.
@@ -498,7 +500,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
         requires_ancestor_node_id: None,
     };
     let first = graph
-        .append_session_nodes("root", request.clone())
+        .append_session_nodes(&SessionId::from("root"), request.clone())
         .await
         .expect("first mixed-envelope append");
 
@@ -524,7 +526,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
     );
     let replay = retry_services
         .graph_service()
-        .append_session_nodes("root", request)
+        .append_session_nodes(&SessionId::from("root"), request)
         .await
         .expect("lost-response retry replays");
     let (
@@ -541,12 +543,13 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
         panic!("both mixed-envelope attempts must append or replay")
     };
     let operation = super::state::boundary_operation(
-        "root",
+        &SessionId::from("root"),
         "mixed-envelope-lost-response",
         "append-session-nodes",
     );
     let locally_rederived_retry_id =
-        crate::store::derive_history_node_id("root", &operation, 0).expect("retry node derivation");
+        crate::store::derive_history_node_id(&SessionId::from("root"), &operation, 0)
+            .expect("retry node derivation");
     assert_ne!(
         first_node_ids,
         vec![locally_rederived_retry_id],
@@ -565,7 +568,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
     let changed_content_error = retry_services
         .graph_service()
         .append_session_nodes(
-            "root",
+            &SessionId::from("root"),
             crate::AppendSessionNodesRequest {
                 operation_id: "mixed-envelope-lost-response".to_string(),
                 nodes: vec![crate::SessionAppendNode::plugin(
@@ -604,7 +607,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
         .session_graph_service()
         .expect("fresh graph service")
         .append_session_nodes(
-            "root",
+            &SessionId::from("root"),
             crate::AppendSessionNodesRequest {
                 operation_id: "mixed-envelope-natural-commit".to_string(),
                 nodes: vec![crate::SessionAppendNode::plugin(
@@ -661,7 +664,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
     };
     ordinal_services
         .graph_service()
-        .append_session_nodes("root", ordinal_request.clone())
+        .append_session_nodes(&SessionId::from("root"), ordinal_request.clone())
         .await
         .expect("operation A commits U1");
     assert!(
@@ -687,7 +690,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
     );
     let replay_error = ordinal_services
         .graph_service()
-        .append_session_nodes("root", ordinal_request)
+        .append_session_nodes(&SessionId::from("root"), ordinal_request)
         .await
         .expect_err("operation A replay must refuse U1 confirmation against staged U2");
     assert!(matches!(
@@ -716,7 +719,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
     ordinal_services
         .graph_service()
         .append_session_nodes(
-            "root",
+            &SessionId::from("root"),
             crate::AppendSessionNodesRequest {
                 operation_id: "mixed-envelope-ordinal-reuse-b".to_string(),
                 nodes: vec![crate::SessionAppendNode::plugin(
@@ -814,10 +817,11 @@ pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
     let wait_until_worker_queued = arm_and_wait();
     let graph = services.graph_service();
     let cancelled_request = request.clone();
-    let append =
-        crate::task::spawn(
-            async move { graph.append_session_nodes("root", cancelled_request).await },
-        );
+    let append = crate::task::spawn(async move {
+        graph
+            .append_session_nodes(&SessionId::from("root"), cancelled_request)
+            .await
+    });
     let release_worker = wait_until_worker_queued.await;
     append.abort();
     let cancelled = append.await;
@@ -834,7 +838,7 @@ pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
         .expect("cancelled append committed on worker");
     services
         .graph_service()
-        .append_session_nodes("root", request)
+        .append_session_nodes(&SessionId::from("root"), request)
         .await
         .expect("cancelled append retry replays");
     runtime
@@ -845,7 +849,7 @@ pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
         .session_graph_service()
         .expect("fresh graph service")
         .append_session_nodes(
-            "root",
+            &SessionId::from("root"),
             crate::AppendSessionNodesRequest {
                 operation_id: "cancelled-usage-natural-commit".to_string(),
                 nodes: vec![crate::SessionAppendNode::plugin(
@@ -906,7 +910,9 @@ pub(super) async fn emit_session_events(
 #[cfg(test)]
 mod process_visibility_tests {
     use super::{ProcessVisibility, RuntimeSessionProcessService};
+    use crate::ProcessId;
     use crate::ProcessRegistrar as _;
+    use crate::SessionId;
     use crate::TurnId;
 
     use crate::runtime::tests::helpers::{named_turn_scope, standard_test_policy};
@@ -984,7 +990,7 @@ mod process_visibility_tests {
             &env,
             policy.clone(),
             crate::RuntimeSessionState {
-                session_id: SESSION_ID.to_string(),
+                session_id: SessionId::from(SESSION_ID.to_string()),
                 policy,
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
@@ -1012,7 +1018,7 @@ mod process_visibility_tests {
                         payload_schema: crate::LashSchema::any(),
                         semantics: crate::ProcessEventSemanticsSpec::default(),
                     }]),
-                    &[SESSION_ID.to_string()],
+                    &[SessionId::from(SESSION_ID.to_string())],
                 )
                 .await
                 .expect("register observed process for visibility table");
@@ -1032,7 +1038,7 @@ mod process_visibility_tests {
 
     fn scope() -> crate::ProcessOpScope<'static> {
         crate::ProcessOpScope::new(named_turn_scope(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &TurnId::from(uuid::Uuid::new_v4().to_string()),
         ))
     }
@@ -1069,7 +1075,7 @@ mod process_visibility_tests {
                     Operation::ListVisible => {
                         let records = crate::ProcessService::list_visible(
                             &service,
-                            SESSION_ID,
+                            &SessionId::from(SESSION_ID),
                             crate::ProcessListMode::Live,
                             scope(),
                         )
@@ -1080,7 +1086,7 @@ mod process_visibility_tests {
                     Operation::ListVisibleForAttempt => {
                         let records = crate::ProcessService::list_visible_for_attempt(
                             &service,
-                            SESSION_ID,
+                            &SessionId::from(SESSION_ID),
                             crate::ProcessListMode::Live,
                         )
                         .await
@@ -1090,8 +1096,8 @@ mod process_visibility_tests {
                     Operation::ValidateVisible => {
                         let result = crate::ProcessService::validate_visible(
                             &service,
-                            SESSION_ID,
-                            &[HIDDEN_PROCESS_ID.to_string()],
+                            &SessionId::from(SESSION_ID),
+                            &[ProcessId::from(HIDDEN_PROCESS_ID.to_string())],
                             scope(),
                         )
                         .await;
@@ -1102,8 +1108,8 @@ mod process_visibility_tests {
                         // signal_possessed must not evaluate the filter a second time.
                         crate::ProcessService::signal_possessed(
                             &service,
-                            SESSION_ID,
-                            HIDDEN_PROCESS_ID,
+                            &SessionId::from(SESSION_ID),
+                            &ProcessId::from(HIDDEN_PROCESS_ID),
                             "ready".to_string(),
                             uuid::Uuid::new_v4().to_string(),
                             serde_json::Value::Null,
@@ -1130,7 +1136,7 @@ mod process_visibility_tests {
 
         let records = crate::plugin::ProcessReadService::list_visible(
             &service,
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             crate::ProcessListMode::Live,
             scope(),
         )

@@ -300,11 +300,12 @@ impl RuntimeCommit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SessionId;
 
     #[test]
     fn rejects_node_count_over_limit() {
         let state = crate::RuntimeSessionState {
-            session_id: "budget-nodes".to_string(),
+            session_id: SessionId::from("budget-nodes"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -344,7 +345,7 @@ mod tests {
     #[test]
     fn adopted_intent_rows_count_against_the_node_budget() {
         let state = crate::RuntimeSessionState {
-            session_id: "budget-adoption-rows".to_string(),
+            session_id: SessionId::from("budget-adoption-rows"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -376,7 +377,7 @@ mod tests {
         #[cfg(feature = "otel-trace")]
         let metrics = crate::operational_metrics::TestMetrics::install();
         let state = crate::RuntimeSessionState {
-            session_id: "budget-bytes".to_string(),
+            session_id: SessionId::from("budget-bytes"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -474,7 +475,7 @@ mod tests {
         let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
         policy.prompt = prompt;
         let state = crate::RuntimeSessionState {
-            session_id: "budget-head-prompt".to_string(),
+            session_id: SessionId::from("budget-head-prompt"),
             policy,
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
@@ -498,7 +499,7 @@ mod tests {
     fn queue_batch_bytes_can_exceed_the_commit_budget_alone() {
         const BYTE_LIMIT: usize = 2_048;
         let state = crate::RuntimeSessionState {
-            session_id: "budget-queue-batch".to_string(),
+            session_id: SessionId::from("budget-queue-batch"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -535,7 +536,7 @@ mod tests {
     fn agent_frame_bytes_can_exceed_the_commit_budget_alone() {
         const BYTE_LIMIT: usize = 2_048;
         let state = crate::RuntimeSessionState {
-            session_id: "budget-agent-frame".to_string(),
+            session_id: SessionId::from("budget-agent-frame"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -566,7 +567,7 @@ mod tests {
     fn usage_delta_bytes_can_exceed_the_commit_budget_alone() {
         const BYTE_LIMIT: usize = 2_048;
         let state = crate::RuntimeSessionState {
-            session_id: "budget-usage-delta".to_string(),
+            session_id: SessionId::from("budget-usage-delta"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -603,7 +604,7 @@ mod tests {
     fn turn_result_bytes_can_exceed_the_commit_budget_alone() {
         const BYTE_LIMIT: usize = 2_048;
         let state = crate::RuntimeSessionState {
-            session_id: "budget-turn-result".to_string(),
+            session_id: SessionId::from("budget-turn-result"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -635,7 +636,7 @@ mod tests {
     fn commit_with_every_payload_family_present_fits_its_byte_budget() {
         const BYTE_LIMIT: usize = 64 * 1024;
         let mut state = crate::RuntimeSessionState {
-            session_id: "budget-all-families".to_string(),
+            session_id: SessionId::from("budget-all-families"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))

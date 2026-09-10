@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -172,14 +173,14 @@ pub(crate) fn plugin_operation_spec<Op: PluginOperation>() -> PluginOperationSpe
 
 #[derive(Clone)]
 pub struct PluginQueryContext {
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     pub sessions: Arc<dyn SessionReadService>,
     pub processes: Arc<dyn ProcessReadService>,
 }
 
 #[derive(Clone)]
 pub struct PluginCommandContext {
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     pub sessions: Arc<dyn SessionStateService>,
     pub session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub session_graph: Arc<dyn SessionGraphService>,
@@ -188,7 +189,7 @@ pub struct PluginCommandContext {
 
 #[derive(Clone)]
 pub struct PluginTaskContext {
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     pub sessions: Arc<dyn SessionStateService>,
     pub session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub session_graph: Arc<dyn SessionGraphService>,
@@ -205,13 +206,19 @@ pub trait SessionReadService: Send + Sync {
         ))
     }
 
-    async fn snapshot_session(&self, _session_id: &str) -> Result<SessionSnapshot, PluginError> {
+    async fn snapshot_session(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<SessionSnapshot, PluginError> {
         Err(PluginError::Session(
             "session lookup is unavailable in this runtime".to_string(),
         ))
     }
 
-    async fn tool_catalog(&self, _session_id: &str) -> Result<Vec<serde_json::Value>, PluginError> {
+    async fn tool_catalog(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Vec<serde_json::Value>, PluginError> {
         Err(PluginError::Session(
             "tool catalogs are unavailable in this runtime".to_string(),
         ))
@@ -219,12 +226,12 @@ pub trait SessionReadService: Send + Sync {
 
     async fn shared_tool_catalog(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Arc<Vec<serde_json::Value>>, PluginError> {
         Ok(Arc::new(self.tool_catalog(session_id).await?))
     }
 
-    async fn tool_state(&self, _session_id: &str) -> Result<crate::ToolState, PluginError> {
+    async fn tool_state(&self, _session_id: &SessionId) -> Result<crate::ToolState, PluginError> {
         Err(PluginError::Session(
             "tool state is unavailable in this session".to_string(),
         ))
@@ -235,7 +242,7 @@ pub trait SessionReadService: Send + Sync {
 pub trait ProcessReadService: Send + Sync {
     async fn list_visible(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _mode: crate::ProcessListMode,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<Vec<crate::ProcessRecord>, PluginError> {

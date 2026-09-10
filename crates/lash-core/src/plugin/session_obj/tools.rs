@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -6,14 +7,14 @@ use super::*;
 impl PluginSession {
     pub fn resolved_tool_catalog(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Arc<crate::ToolCatalog>, PluginError> {
         let tools = self.tools.tool_manifests();
         let contract_provider = Arc::clone(&self.tools);
         let resolve_contract: lash_sansio::ToolContractResolver =
             Arc::new(move |name: &str| contract_provider.resolve_contract(name));
         Ok(Arc::new(self.resolve_tool_catalog(ToolCatalogContext {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             tools,
             resolve_contract: Some(Arc::clone(&resolve_contract)),
             tool_access: self.tool_access.clone(),
@@ -24,7 +25,10 @@ impl PluginSession {
 
     /// Project every Tool Catalog member to a JSON record for host-owned
     /// discovery (e.g. the production `tools.search` path in agent-workbench).
-    pub fn tool_catalog(&self, session_id: &str) -> Result<Vec<serde_json::Value>, PluginError> {
+    pub fn tool_catalog(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<serde_json::Value>, PluginError> {
         let catalog = self.resolved_tool_catalog(session_id)?;
         Ok(crate::tool_registry::project_tool_catalog(
             catalog.tools.iter().cloned(),

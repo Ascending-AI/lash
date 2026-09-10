@@ -6,6 +6,7 @@
 //! path changes.
 
 use super::{InMemoryPendingTurnInput, InMemorySessionStore};
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
 impl InMemoryPendingTurnInput {
@@ -56,7 +57,7 @@ impl InMemoryPendingTurnInput {
 
 fn find_pending_turn_input_index(
     pending: &[InMemoryPendingTurnInput],
-    session_id: &str,
+    session_id: &SessionId,
     target: &crate::PendingTurnInputCancelTarget,
 ) -> Option<usize> {
     pending.iter().position(|entry| {
@@ -168,7 +169,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
 
     async fn list_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::PendingTurnInput>, crate::store::StoreError> {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
@@ -194,7 +195,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
 
     async fn list_turn_input_applications(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::TurnInputApplication>, crate::store::StoreError> {
         let mut commits = self
             .runtime_turn_commits
@@ -218,7 +219,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
 
     async fn cancel_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         targets: &[crate::PendingTurnInputCancelTarget],
     ) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, crate::store::StoreError> {
         let now = self.clock.timestamp_ms();
@@ -244,7 +245,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
 
     async fn cancel_pending_turn_input_suffix(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         anchor: &crate::PendingTurnInputCancelTarget,
     ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, crate::store::StoreError> {
         let now = self.clock.timestamp_ms();
@@ -276,7 +277,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
 
     async fn claim_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         turn_id: &crate::TurnId,
@@ -297,7 +298,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
 
     async fn claim_next_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         max_inputs: usize,
@@ -341,7 +342,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
 
     async fn defer_orphaned_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         scope: crate::OrphanedTurnInputScope<'_>,
     ) -> Result<crate::TurnCancelInputOutcome, crate::store::StoreError> {

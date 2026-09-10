@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -9,9 +10,9 @@ use crate::facade_support::SessionGraphFacadeOps;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionHandle {
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_session_id: Option<String>,
+    pub parent_session_id: Option<SessionId>,
     pub policy: SessionPolicy,
     /// Per-id outcome for observer edges requested at session creation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -99,7 +100,7 @@ pub enum SessionObservedProcessOutcome {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionSnapshot {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub policy: SessionPolicy,
     /// Derived convenience view of `session_graph` FrameOpen nodes.
     #[serde(skip)]
@@ -143,7 +144,7 @@ impl SessionSnapshot {
     /// Construct an empty snapshot with an explicitly chosen session policy.
     pub fn new(policy: SessionPolicy) -> Self {
         Self {
-            session_id: String::new(),
+            session_id: SessionId::new(String::new()),
             policy,
             agent_frames: Vec::new(),
             current_frame_node_id: None,
@@ -210,7 +211,7 @@ impl SessionSnapshot {
 pub enum SessionStartPoint {
     Empty,
     CurrentSession,
-    ExistingSession { session_id: String },
+    ExistingSession { session_id: SessionId },
     Snapshot { snapshot: Box<SessionSnapshot> },
 }
 
@@ -447,7 +448,7 @@ impl AgentFrameAssignment {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentFrameRecord {
     pub frame_node_id: FrameNodeId,
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_frame_node_id: Option<FrameNodeId>,
     #[serde(default)]
@@ -462,7 +463,7 @@ impl AgentFrameRecord {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_at(
         frame_node_id: FrameNodeId,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         previous_frame_node_id: Option<FrameNodeId>,
         reason: AgentFrameReason,
         assignment: AgentFrameAssignment,
@@ -548,7 +549,7 @@ pub enum SessionRelation {
     #[default]
     Root,
     Child {
-        parent_session_id: String,
+        parent_session_id: SessionId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         caused_by: Option<crate::CausalRef>,
     },
@@ -559,7 +560,7 @@ pub enum SessionRelation {
         /// repeated rewinds legitimately name superseded intermediate
         /// sessions, while [`crate::ForkSessionReceipt::source_session_id`]
         /// always reports the original writer.
-        source_session_id: String,
+        source_session_id: SessionId,
         /// Host-declared source node, persisted alongside
         /// [`Self::Fork::source_session_id`] and equally unvalidated.
         source_node_id: String,
@@ -585,7 +586,7 @@ impl SessionRelation {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionCreateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     #[serde(default)]
     pub relation: SessionRelation,
     pub start: SessionStartPoint,
@@ -625,7 +626,7 @@ impl SessionCreateRequest {
     /// new independent session.
     pub fn root(start: SessionStartPoint, plugin_options: PluginOptions) -> Self {
         Self {
-            session_id: Some(uuid::Uuid::new_v4().to_string()),
+            session_id: Some(SessionId::from(uuid::Uuid::new_v4().to_string())),
             relation: SessionRelation::Root,
             start,
             policy: None,
@@ -643,12 +644,12 @@ impl SessionCreateRequest {
     /// Builds a child-session request with a fresh UUID and inherited policy selection for protocol
     /// implementors materializing nested work.
     pub fn child_session(
-        parent_session_id: impl Into<String>,
+        parent_session_id: impl Into<SessionId>,
         start: SessionStartPoint,
         plugin_options: PluginOptions,
     ) -> Self {
         Self {
-            session_id: Some(uuid::Uuid::new_v4().to_string()),
+            session_id: Some(SessionId::from(uuid::Uuid::new_v4().to_string())),
             relation: SessionRelation::Child {
                 parent_session_id: parent_session_id.into(),
                 caused_by: None,
@@ -669,7 +670,7 @@ impl SessionCreateRequest {
     /// Builds a child-session request with an explicit policy and usage-ledger source for protocol
     /// and process-engine implementors materializing nested work.
     pub fn child(
-        parent_session_id: impl Into<String>,
+        parent_session_id: impl Into<SessionId>,
         start: SessionStartPoint,
         policy: SessionPolicy,
         plugin_options: PluginOptions,
@@ -695,7 +696,7 @@ impl SessionCreateRequest {
         usage_source: impl Into<String>,
     ) -> Self {
         Self {
-            session_id: Some(uuid::Uuid::new_v4().to_string()),
+            session_id: Some(SessionId::from(uuid::Uuid::new_v4().to_string())),
             relation,
             start,
             policy,
@@ -719,7 +720,7 @@ impl SessionCreateRequest {
 
     /// Sets the session id carried by a `SessionCreateRequest` for store, effect-host, and protocol
     /// implementors while materializing, executing, or persisting a session turn.
-    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+    pub fn with_session_id(mut self, session_id: impl Into<SessionId>) -> Self {
         self.session_id = Some(session_id.into());
         self
     }
@@ -799,7 +800,7 @@ impl SessionToolAccess {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubagentSessionContext {
-    pub parent_session_id: String,
+    pub parent_session_id: SessionId,
     pub capability: String,
     pub depth: u8,
     pub max_depth: u8,

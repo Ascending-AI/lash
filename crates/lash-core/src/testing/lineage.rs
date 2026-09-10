@@ -5,7 +5,7 @@ use std::sync::Arc;
 pub struct GraphFactObservation {
     pub node_id: String,
     pub parent_node_id: Option<String>,
-    pub owning_session_id: String,
+    pub owning_session_id: SessionId,
     pub generation: u64,
     pub frame_node_id: String,
     pub is_frame: bool,
@@ -13,10 +13,13 @@ pub struct GraphFactObservation {
 
 #[async_trait::async_trait]
 pub trait LineageConformanceInjector: Send + Sync {
-    async fn force_lineage(&self, session_id: &str, ancestor_node_id: &str);
+    async fn force_lineage(&self, session_id: &SessionId, ancestor_node_id: &str);
     async fn tombstone_node(&self, node_id: &str);
-    async fn lineage_ancestors(&self, session_id: &str) -> Vec<crate::store::ForkLineageAncestor>;
-    async fn edge_path(&self, session_id: &str) -> Vec<GraphFactObservation>;
+    async fn lineage_ancestors(
+        &self,
+        session_id: &SessionId,
+    ) -> Vec<crate::store::ForkLineageAncestor>;
+    async fn edge_path(&self, session_id: &SessionId) -> Vec<GraphFactObservation>;
     async fn all_graph_facts(&self) -> Vec<GraphFactObservation>;
 }
 

@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use crate::TurnId;
 use crate::{
     CausalRef, ObserverInheritance, SessionMeta, SessionObserverIntent,
@@ -17,11 +19,11 @@ pub enum SessionMetaWrite {
 #[derive(Default)]
 pub struct CausalColumns {
     pub kind: Option<String>,
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     pub turn_id: Option<TurnId>,
     pub effect_id: Option<String>,
     pub call_id: Option<String>,
-    pub process_id: Option<String>,
+    pub process_id: Option<ProcessId>,
     pub process_event_sequence: Option<String>,
     pub occurrence_id: Option<String>,
     pub subscription_id: Option<String>,
@@ -150,22 +152,22 @@ impl CausalColumns {
 
 /// Backend-neutral representation of one stored observer intent.
 pub struct StoredObserverIntent {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub process_incarnation: Option<i64>,
     pub attribution: String,
 }
 
 /// Backend-neutral representation of one stored session relation and its lists.
 pub struct StoredRelation {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub relation_kind: String,
-    pub parent_session_id: Option<String>,
+    pub parent_session_id: Option<SessionId>,
     pub cause: CausalColumns,
-    pub source_session_id: Option<String>,
+    pub source_session_id: Option<SessionId>,
     pub source_node_id: Option<String>,
     pub observer_inheritance_kind: Option<String>,
     pub pending_observer_intents: Vec<StoredObserverIntent>,
-    pub fork_inheritance_processes: Vec<String>,
+    pub fork_inheritance_processes: Vec<ProcessId>,
 }
 
 /// Shared session-metadata codec and stored-data validator for SQL backends.
@@ -279,7 +281,7 @@ impl SessionMetaCodec {
                 return Err(self.corrupt("observer-intent process indexes are not contiguous"));
             }
             stored.pending_observer_intents.push(StoredObserverIntent {
-                process_id,
+                process_id: process_id.into(),
                 process_incarnation,
                 attribution,
             });
@@ -396,7 +398,7 @@ impl SessionMetaCodec {
         value.ok_or_else(|| self.corrupt(format!("required column `{field}` is NULL")))
     }
 
-    fn require_empty(self, values: &[String], field: &'static str) -> Result<(), StoreError> {
+    fn require_empty(self, values: &[ProcessId], field: &'static str) -> Result<(), StoreError> {
         if values.is_empty() {
             Ok(())
         } else {
@@ -408,13 +410,13 @@ impl SessionMetaCodec {
         self,
         rows: Vec<(i64, String)>,
         field: &'static str,
-    ) -> Result<Vec<String>, StoreError> {
+    ) -> Result<Vec<ProcessId>, StoreError> {
         let mut process_ids = Vec::with_capacity(rows.len());
         for (process_index, process_id) in rows {
             if self.read_index(process_index, field)? != process_ids.len() {
                 return Err(self.corrupt("process indexes are not contiguous"));
             }
-            process_ids.push(process_id);
+            process_ids.push(ProcessId::from(process_id));
         }
         Ok(process_ids)
     }

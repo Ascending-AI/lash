@@ -1,6 +1,7 @@
 //! How a turn's protocol-owned execution-state capture is probed, taken,
 //! applied, and settled.
 
+use crate::SessionId;
 use crate::{PluginSession, Session, SessionError, StoreError};
 
 use super::RuntimeSessionState;
@@ -39,7 +40,7 @@ pub(super) async fn capture_execution_state_update(
     let snapshot = code_executor
         .snapshot_execution_state(crate::plugin::ProtocolSessionContext::new(
             session,
-            &session_id,
+            &SessionId::from(session_id),
         ))
         .await?;
     Ok(if snapshot.root.is_some() {
@@ -73,7 +74,7 @@ pub(super) async fn probe_execution_state_capture(
     code_executor
         .probe_execution_state_capture(crate::plugin::ProtocolSessionContext::new(
             session,
-            &session_id,
+            &SessionId::from(session_id),
         ))
         .await
 }

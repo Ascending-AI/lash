@@ -19,13 +19,13 @@ pub struct TestLocalProcessRegistry {
     pub(super) process_lease_release_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) next_change_seq: Arc<Mutex<u64>>,
     pub(super) tombstone_compaction_horizon: Arc<Mutex<u64>>,
-    pub(super) observers: Arc<Mutex<HashMap<SessionId, HashSet<String>>>>,
-    pub(super) wake_targets: Arc<Mutex<HashMap<String, SessionId>>>,
+    pub(super) observers: Arc<Mutex<HashMap<SessionId, HashSet<ProcessId>>>>,
+    pub(super) wake_targets: Arc<Mutex<HashMap<ProcessId, SessionId>>>,
     pub(super) tombstones: Arc<Mutex<HashMap<(String, ProcessIncarnation), ProcessTombstone>>>,
     pub(super) leases: Arc<Mutex<ManagedLeaseMap>>,
     pub(crate) process_lease_point_reads: Arc<Mutex<usize>>,
     pub(crate) process_lease_batch_reads: Arc<Mutex<usize>>,
-    pub(super) handovers: Arc<Mutex<HashMap<(String, u64), crate::PersistedSegmentHandover>>>,
+    pub(super) handovers: Arc<Mutex<HashMap<(ProcessId, u64), crate::PersistedSegmentHandover>>>,
     pub(super) tool_intent_submissions:
         Arc<Mutex<HashMap<String, crate::ToolIntentSubmissionRecord>>>,
     pub(super) execution_write_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
@@ -35,7 +35,7 @@ pub struct TestLocalProcessRegistry {
     pub(super) prune_managed_removal_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
     pub(super) wake_delivery_config: crate::WakeDeliveryConfig,
     pub(super) wake_deliveries: Arc<Mutex<HashMap<String, crate::WakeDelivery>>>,
-    pub(super) wake_allocation_floors: Arc<Mutex<HashMap<(SessionId, String), u64>>>,
+    pub(super) wake_allocation_floors: Arc<Mutex<HashMap<(SessionId, ProcessId), u64>>>,
     pub(super) worklist_page_reads: Arc<Mutex<WorklistPageReads>>,
     pub(super) worklist_page_error_plan: Arc<Mutex<WorklistPageErrorPlan>>,
     pub(super) worklist_page_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
@@ -51,16 +51,16 @@ pub struct TestLocalProcessRegistry {
 #[doc(hidden)]
 pub struct RawProcessRegistryStateForTesting {
     pub records: Vec<(ProcessRecord, u64)>,
-    pub events: Vec<(String, ProcessEvent)>,
-    pub observers: Vec<(String, String, u64)>,
+    pub events: Vec<(ProcessId, ProcessEvent)>,
+    pub observers: Vec<(SessionId, ProcessId, u64)>,
     pub leases: Vec<ProcessLease>,
     pub wake_deliveries: Vec<crate::WakeDelivery>,
-    pub wake_allocation_floors: Vec<(SessionId, String, u64)>,
+    pub wake_allocation_floors: Vec<(SessionId, ProcessId, u64)>,
     pub tombstones: Vec<ProcessTombstone>,
 }
 
-pub(super) type ManagedProcessMap = HashMap<String, ManagedProcessRecord>;
-pub(super) type ManagedLeaseMap = HashMap<String, ProcessLease>;
+pub(super) type ManagedProcessMap = HashMap<ProcessId, ManagedProcessRecord>;
+pub(super) type ManagedLeaseMap = HashMap<ProcessId, ProcessLease>;
 type WorklistPageReads = Vec<(usize, Option<crate::ProcessWorklistCursor>)>;
 type WorklistPageErrorPlan = Option<(usize, VecDeque<PluginError>)>;
 

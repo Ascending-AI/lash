@@ -1,5 +1,6 @@
 //! Reachability-derived graph retirement for the in-memory store.
 
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::{HashMap, HashSet};
 
@@ -32,7 +33,7 @@ impl InMemorySessionStore {
         live_child_counts: &mut HashMap<String, usize>,
         tombstoned: &mut HashSet<String>,
         first_node_id: &str,
-        session_heads: &HashMap<String, Option<String>>,
+        session_heads: &HashMap<SessionId, Option<String>>,
         anchored_node_ids: &HashSet<String>,
     ) {
         let mut node_id = first_node_id.to_string();
@@ -64,7 +65,7 @@ impl InMemorySessionStore {
     /// from a live child, another session head, or an explicit anchor.
     pub(super) fn reclaim_history_for_delete(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), crate::StoreError> {
         // The whole read-modify-write below runs inside the factory's write
         // transaction (see `InMemorySessionStoreFactory::delete_session`), so
@@ -174,6 +175,7 @@ impl InMemorySessionStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::SessionId;
     use crate::SessionStoreFactory;
     use crate::runtime::in_memory_store::InMemorySessionStoreFactory;
     use crate::session_graph::SharedJsonValue;
@@ -213,7 +215,7 @@ mod tests {
         let factory = InMemorySessionStoreFactory::new();
         let session_id = "delete-rebuild-failure";
         let request = session_store_request(
-            session_id,
+            &SessionId::from(session_id),
             "delete-rebuild-failure-model",
             crate::SessionRelation::Root,
         );
@@ -245,10 +247,10 @@ mod tests {
         factory
             .global_session_heads
             .lock_recover()
-            .insert(session_id.to_string(), Some(root.node_id.clone()));
+            .insert(SessionId::from(session_id), Some(root.node_id.clone()));
         factory.global_node_owners.lock_recover().extend([
-            (root.node_id.clone(), session_id.to_string()),
-            ("delete-child".to_string(), "other-session".to_string()),
+            (root.node_id.clone(), SessionId::from(session_id)),
+            ("delete-child".to_string(), SessionId::from("other-session")),
         ]);
         factory
             .tombstoned_node_ids
@@ -256,10 +258,10 @@ mod tests {
             .insert("delete-child".to_string());
 
         let store = factory
-            .raw_store_for_testing(session_id)
+            .raw_store_for_testing(&SessionId::from(session_id))
             .expect("concrete delete test store");
         let error = store
-            .reclaim_history_for_delete(session_id)
+            .reclaim_history_for_delete(&SessionId::from(session_id))
             .expect_err("dangling parent must fail the rebuild");
 
         assert!(matches!(
@@ -283,7 +285,7 @@ mod tests {
     async fn delete_reclaims_tombstone_orphaned_by_unpin_after_owner_delete() {
         let factory = InMemorySessionStoreFactory::new();
         let owner = session_store_request(
-            "orphan-owner",
+            &SessionId::from("orphan-owner"),
             "tombstone-model",
             crate::SessionRelation::Root,
         );
@@ -326,7 +328,7 @@ mod tests {
         );
 
         let sweeper = session_store_request(
-            "orphan-sweeper",
+            &SessionId::from("orphan-sweeper"),
             "tombstone-model",
             crate::SessionRelation::Root,
         );
@@ -359,7 +361,7 @@ mod tests {
     async fn delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete() {
         let factory = InMemorySessionStoreFactory::new();
         let parent = session_store_request(
-            "orphan-fork-parent",
+            &SessionId::from("orphan-fork-parent"),
             "tombstone-model",
             crate::SessionRelation::Root,
         );
@@ -389,7 +391,7 @@ mod tests {
         factory
             .fork_at(&crate::ForkSessionRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: child_session_id.clone(),
+                session_id: SessionId::from(child_session_id.clone()),
                 node_id: parent_leaf.clone(),
                 relation: crate::SessionRelation::Root,
                 policy: parent.policy.clone(),
@@ -400,7 +402,7 @@ mod tests {
             let child = factory
                 .open_existing_store(&crate::SessionStoreCreateRequest {
                     pending_observer_intents: Vec::new(),
-                    session_id: child_session_id.clone(),
+                    session_id: SessionId::from(child_session_id.clone()),
                     relation: crate::SessionRelation::Root,
                     policy: parent.policy.clone(),
                 })
@@ -432,7 +434,7 @@ mod tests {
         );
 
         factory
-            .delete_session(&child_session_id)
+            .delete_session(&SessionId::from(child_session_id))
             .await
             .expect("delete forked child session");
 

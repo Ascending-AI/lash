@@ -1,3 +1,4 @@
+use crate::ProcessId;
 use std::num::NonZeroUsize;
 
 use crate::{PluginError, ProcessParentEndPlan};
@@ -17,7 +18,7 @@ pub(super) async fn list(
                 .parent_end_actions
                 .as_ref()
                 .map(|actions| ProcessParentEndPlan {
-                    process_id: process_id.clone(),
+                    process_id: ProcessId::from(process_id.clone()),
                     actions: actions.clone(),
                 })
         })
@@ -29,7 +30,7 @@ pub(super) async fn list(
 
 pub(super) async fn get(
     registry: &TestLocalProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<Option<ProcessParentEndPlan>, PluginError> {
     let _transaction = registry.transaction.lock().await;
     Ok(registry
@@ -42,7 +43,7 @@ pub(super) async fn get(
                 .parent_end_actions
                 .as_ref()
                 .map(|actions| ProcessParentEndPlan {
-                    process_id: process_id.to_string(),
+                    process_id: ProcessId::from(process_id.to_string()),
                     actions: actions.clone(),
                 })
         }))
@@ -50,7 +51,7 @@ pub(super) async fn get(
 
 pub(super) async fn complete(
     registry: &TestLocalProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<(), PluginError> {
     let _transaction = registry.transaction.lock().await;
     if let Some(record) = registry.managed.lock().await.get_mut(process_id) {

@@ -1,3 +1,4 @@
+use crate::ProcessId;
 use crate::facade_support::ScopedEffectControllerFacadeOps;
 use crate::{
     PreparedToolCall, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeInvocation,
@@ -22,7 +23,7 @@ pub(crate) enum ToolAttemptEffectIdentity {
     },
     Process {
         parent: Option<RuntimeInvocation>,
-        process_id: String,
+        process_id: ProcessId,
     },
 }
 
@@ -757,6 +758,7 @@ async fn sleep_before_retry(
 #[cfg(test)]
 mod projection_tests {
     use super::*;
+    use crate::SessionId;
 
     fn refusal(reason: crate::ToolIntentRefusalReason) -> crate::ToolIntentExecutionOutcome {
         crate::ToolIntentExecutionOutcome::Refused {
@@ -770,7 +772,7 @@ mod projection_tests {
     fn signal_outcome(sequence: u64) -> crate::ToolIntentExecutionOutcome {
         crate::ToolIntentExecutionOutcome::Executed {
             identity: crate::ToolIntentIdentity {
-                session_id: "session".to_string(),
+                session_id: SessionId::from("session"),
                 execution_scope_id: "turn".to_string(),
                 tool_call_id: "call".to_string(),
                 intent_index: 0,

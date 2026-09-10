@@ -47,7 +47,7 @@ async fn run_composition_probe_turn(runtime: &mut LashRuntime, turn_id: &TurnId)
         .run_turn_assembled(
             TurnInput::text(turn_id),
             CancellationToken::new(),
-            named_turn_scope("root", turn_id),
+            named_turn_scope(&SessionId::from("root"), turn_id),
         )
         .await
         .expect("composition probe turn");
@@ -398,7 +398,10 @@ async fn provider_spans_are_children_of_the_turn_span() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("provider-span-parentage")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("provider-span-parentage"),
+            ),
         )
         .instrument(turn_span)
         .await
@@ -474,7 +477,10 @@ async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("trace-standard-tool-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("trace-standard-tool-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -589,7 +595,10 @@ async fn standard_runtime_trace_records_stream_event_entries() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("trace-stream-events-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("trace-stream-events-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -797,7 +806,10 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("trace-provider-stream-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("trace-provider-stream-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -916,7 +928,7 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
                     turn_context: crate::TurnContext::default(),
                 },
                 CancellationToken::new(),
-                named_turn_scope("root", turn_id),
+                named_turn_scope(&SessionId::from("root"), turn_id),
             )
             .await
             .expect("turn");
@@ -989,7 +1001,10 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("trace-standard-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("trace-standard-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -1062,7 +1077,10 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("trace-failed-llm-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("trace-failed-llm-turn"),
+            ),
         )
         .await
         .expect("turn");

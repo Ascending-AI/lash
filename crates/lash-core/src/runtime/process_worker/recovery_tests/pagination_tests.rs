@@ -531,7 +531,7 @@ fn an_absorbed_nested_report_is_never_re_reported_as_busy() {
     };
     outer.absorb(ProcessAdmissionReport {
         intake: ProcessAdmissionIntake::Scanned,
-        admitted: vec!["nested-row".to_string()],
+        admitted: vec![ProcessId::from("nested-row")],
         deferred: Vec::new(),
     });
     assert_eq!(
@@ -544,14 +544,14 @@ fn an_absorbed_nested_report_is_never_re_reported_as_busy() {
     // page's own untouched row.
     outer.absorb(ProcessAdmissionReport {
         intake: ProcessAdmissionIntake::Scanned,
-        admitted: vec!["outer-row".to_string()],
+        admitted: vec![ProcessId::from("outer-row")],
         deferred: vec![
             ProcessAdmissionDeferred {
-                process_id: "nested-row".to_string(),
+                process_id: ProcessId::from("nested-row"),
                 disposition: ProcessRecoveryAttemptOutcome::Busy,
             },
             ProcessAdmissionDeferred {
-                process_id: "peer-row".to_string(),
+                process_id: ProcessId::from("peer-row"),
                 disposition: ProcessRecoveryAttemptOutcome::Busy,
             },
         ],
@@ -564,7 +564,7 @@ fn an_absorbed_nested_report_is_never_re_reported_as_busy() {
     assert_eq!(
         outer.deferred,
         vec![ProcessAdmissionDeferred {
-            process_id: "peer-row".to_string(),
+            process_id: ProcessId::from("peer-row"),
             disposition: ProcessRecoveryAttemptOutcome::Busy,
         }],
         "another owner's contention survives; this call's own admission does not become it"

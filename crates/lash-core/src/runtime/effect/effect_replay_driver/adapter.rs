@@ -17,6 +17,7 @@
 //! API.
 
 use super::*;
+use crate::SessionId;
 use crate::{AwaitEventResolver, EffectHost, RuntimeEffectController, ScopedEffectController};
 
 /// Names the driver a store-owned host or controller forwards to.
@@ -142,13 +143,19 @@ impl<T: StoreReplayAdapter> AwaitEventResolver for T {
             .await
     }
 
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.replay_driver()
             .revoke_await_events_for_session(session_id)
             .await
     }
 
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.replay_driver()
             .cancel_await_events_for_session(session_id)
             .await

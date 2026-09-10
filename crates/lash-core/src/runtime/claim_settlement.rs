@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::collections::HashMap;
 
 pub(super) struct ClaimSettlement<C> {
@@ -101,7 +102,7 @@ impl TurnClaimSettlement {
 }
 
 pub(super) struct Supersession<'a> {
-    session_id: &'a str,
+    session_id: &'a SessionId,
     claim_id: &'a str,
     row_id: &'a str,
     superseding_claim_id: &'a Option<Box<str>>,
@@ -164,7 +165,7 @@ impl<C: SettlementRows> ClaimSettlement<C> {
             target: "lash_core::claim_settlement",
             event = "claim_settlement.recovered_row_dropped",
             decision_basis = "superseded_recovered_claim",
-            session_id,
+            session_id = %session_id,
             row_kind = C::ROW_KIND,
             row_id,
             stale_claim_id = claim_id,
@@ -271,7 +272,7 @@ mod tests {
 
     fn completion() -> crate::QueuedWorkCompletion {
         crate::QueuedWorkCompletion {
-            session_id: "fig905".to_string(),
+            session_id: SessionId::from("fig905"),
             claim_id: "stale-claim".to_string(),
             lease_token: "stale-token".to_string(),
             data: crate::QueuedWorkCompletionData {
@@ -282,7 +283,7 @@ mod tests {
 
     fn superseded_error(row_id: Option<Box<str>>) -> crate::StoreError {
         crate::StoreError::QueuedWorkClaimSuperseded {
-            session_id: "fig905".to_string(),
+            session_id: SessionId::from("fig905"),
             claim_id: "stale-claim".to_string(),
             row_id,
             superseding_claim_id: Some("live-claim".into()),
@@ -292,7 +293,7 @@ mod tests {
 
     fn turn_input_completion() -> crate::TurnInputCompletion {
         crate::TurnInputCompletion {
-            session_id: "fig905".to_string(),
+            session_id: SessionId::from("fig905"),
             claim: Some(crate::TurnInputSettlementClaim {
                 claim_id: "stale-claim".to_string(),
                 lease_token: "stale-token".to_string(),
@@ -306,7 +307,7 @@ mod tests {
 
     fn turn_input_superseded_error() -> crate::StoreError {
         crate::StoreError::TurnInputClaimSuperseded {
-            session_id: "fig905".to_string(),
+            session_id: SessionId::from("fig905"),
             claim_id: "stale-claim".to_string(),
             row_id: Some("fig905-row".into()),
             superseding_claim_id: Some("live-claim".into()),
@@ -333,7 +334,7 @@ mod tests {
 
     fn foreign_row_completion() -> crate::QueuedWorkCompletion {
         crate::QueuedWorkCompletion {
-            session_id: "fig905".to_string(),
+            session_id: SessionId::from("fig905"),
             claim_id: "stale-claim".to_string(),
             lease_token: "stale-token".to_string(),
             data: crate::QueuedWorkCompletionData {
@@ -344,7 +345,7 @@ mod tests {
 
     fn foreign_row_turn_input_completion() -> crate::TurnInputCompletion {
         crate::TurnInputCompletion {
-            session_id: "fig905".to_string(),
+            session_id: SessionId::from("fig905"),
             claim: Some(crate::TurnInputSettlementClaim {
                 claim_id: "stale-claim".to_string(),
                 lease_token: "stale-token".to_string(),

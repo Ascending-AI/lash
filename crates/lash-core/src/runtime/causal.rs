@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use crate::TurnId;
 use crate::sansio::EffectId;
 use crate::{
@@ -5,7 +7,7 @@ use crate::{
 };
 
 pub(crate) fn turn_effect_invocation(
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     turn_index: usize,
     protocol_iteration: usize,
@@ -35,7 +37,7 @@ pub(crate) fn turn_effect_invocation(
 /// engine reconstructs identically — so a redriven handler journals the same
 /// entry and re-derives the admission instead of admitting a second turn.
 pub(crate) fn turn_acceptance_effect_invocation(
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     turn_index: usize,
 ) -> RuntimeInvocation {
@@ -75,7 +77,7 @@ pub(crate) fn turn_phase_effect_invocation(
 }
 
 fn turn_effect_replay_key(
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     turn_index: usize,
     protocol_iteration: usize,
@@ -131,7 +133,7 @@ pub(crate) fn tool_retry_sleep_invocation(
 }
 
 pub(crate) fn process_sleep_invocation(
-    session_id: &str,
+    session_id: &SessionId,
     parent: Option<&RuntimeInvocation>,
     scope: &str,
     sequence: u64,
@@ -155,9 +157,9 @@ pub(crate) fn process_sleep_invocation(
 }
 
 pub(crate) fn process_await_event_invocation(
-    session_id: &str,
+    session_id: &SessionId,
     parent: Option<&RuntimeInvocation>,
-    process_id: &str,
+    process_id: &ProcessId,
     signal_name: &str,
     ordinal: u64,
 ) -> RuntimeInvocation {
@@ -180,14 +182,14 @@ pub(crate) fn process_await_event_invocation(
 }
 
 pub(crate) fn process_effect_invocation(
-    session_id: &str,
+    session_id: &SessionId,
     parent: Option<RuntimeInvocation>,
     effect_id: &str,
 ) -> RuntimeInvocation {
     if let Some(parent) = parent {
         let scope = if let Some(turn_id) = parent.scope.turn_id.clone() {
             RuntimeScope {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 turn_id: Some(turn_id),
                 turn_index: parent.scope.turn_index,
                 protocol_iteration: parent.scope.protocol_iteration,
@@ -221,7 +223,7 @@ pub(crate) fn process_effect_invocation(
 }
 
 pub fn process_event_invocation(
-    process_id: &str,
+    process_id: &ProcessId,
     sequence: u64,
     event_type: &str,
     replay: Option<RuntimeReplay>,
@@ -229,19 +231,19 @@ pub fn process_event_invocation(
     RuntimeInvocation {
         scope: RuntimeScope::new("runtime"),
         subject: RuntimeSubject::ProcessEvent {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             sequence,
             event_type: event_type.to_string(),
         },
         caused_by: Some(CausalRef::Process {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
         }),
         replay,
     }
 }
 
 pub(crate) fn trigger_occurrence_invocation(
-    session_id: &str,
+    session_id: &SessionId,
     occurrence_id: &str,
 ) -> RuntimeInvocation {
     RuntimeInvocation {
@@ -258,7 +260,7 @@ pub(crate) fn trigger_occurrence_invocation(
 }
 
 pub(crate) fn direct_effect_invocation(
-    session_id: &str,
+    session_id: &SessionId,
     usage_source: &str,
     replay_discriminator: String,
     turn_id: Option<&TurnId>,
@@ -277,7 +279,7 @@ pub(crate) fn direct_effect_invocation(
     );
     RuntimeInvocation::effect(
         RuntimeScope {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             turn_id: turn_id.cloned(),
             turn_index: None,
             protocol_iteration: None,
@@ -292,7 +294,7 @@ pub(crate) fn direct_effect_invocation(
 const DIRECT_EFFECT_FAMILY_VERSION: u8 = 2;
 
 fn direct_effect_replay_preimage(
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: Option<&TurnId>,
     usage_source: &str,
     replay_discriminator: &str,
@@ -475,14 +477,14 @@ mod tests {
         let causes = [
             (
                 CausalRef::Turn {
-                    session_id: "ab".to_string(),
+                    session_id: SessionId::from("ab"),
                     turn_id: TurnId::from("c"),
                 },
                 "direct-discriminator:v2:blake3:990084fc9028c4cdec32cdc3182e323cdc03bf1fef212862fbd9442d60a69d42",
             ),
             (
                 CausalRef::Effect {
-                    session_id: "s".to_string(),
+                    session_id: SessionId::from("s"),
                     turn_id: None,
                     effect_id: "e".to_string(),
                 },
@@ -490,20 +492,20 @@ mod tests {
             ),
             (
                 CausalRef::ToolCall {
-                    session_id: "s".to_string(),
+                    session_id: SessionId::from("s"),
                     call_id: "c".to_string(),
                 },
                 "direct-discriminator:v2:blake3:e54157dc19ee5d6d23ca76d9e7eb671f67422b83fd18519a279c1adf1f949202",
             ),
             (
                 CausalRef::Process {
-                    process_id: "p".to_string(),
+                    process_id: ProcessId::from("p"),
                 },
                 "direct-discriminator:v2:blake3:ae12c1bd5c974ce1df6254fdff30ce90dfba1332bf8317caadc39d1cc32a9d36",
             ),
             (
                 CausalRef::ProcessEvent {
-                    process_id: "p".to_string(),
+                    process_id: ProcessId::from("p"),
                     sequence: 0,
                 },
                 "direct-discriminator:v2:blake3:0644b6d881b463c4a0af5439e1215e344eedf6722cb58aadcf0cb85936086304",
@@ -519,7 +521,7 @@ mod tests {
             ),
             (
                 CausalRef::SessionNode {
-                    session_id: "s".to_string(),
+                    session_id: SessionId::from("s"),
                     node_id: "n".to_string(),
                 },
                 "direct-discriminator:v2:blake3:16c84d9fc9b0b5190737be74c70df27637aa93a72558ff00fc639cfb17188403",
@@ -557,7 +559,7 @@ mod tests {
             direct_request_discriminator(
                 None,
                 Some(&CausalRef::Turn {
-                    session_id: "ab".to_string(),
+                    session_id: SessionId::from("ab"),
                     turn_id: TurnId::from("c"),
                 }),
                 1,
@@ -568,7 +570,7 @@ mod tests {
             direct_request_discriminator(
                 None,
                 Some(&CausalRef::Turn {
-                    session_id: "a".to_string(),
+                    session_id: SessionId::from("a"),
                     turn_id: TurnId::from("bc"),
                 }),
                 1,
@@ -577,15 +579,25 @@ mod tests {
         );
 
         let discriminator = direct_request_discriminator(None, None, 1);
-        let preimage =
-            direct_effect_replay_preimage("s", Some(&TurnId::from("t")), "u", &discriminator);
+        let preimage = direct_effect_replay_preimage(
+            &SessionId::from("s"),
+            Some(&TurnId::from("t")),
+            "u",
+            &discriminator,
+        );
         assert_eq!(
             hex(&preimage),
             "6c6173682d737461626c652d6964656e746974790202000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76323a626c616b65333a63646236306335326563653334356438396261353435633835626163323238343534653562353834336132646534306536376632386434343464323364323064"
         );
         assert_eq!(
-            direct_effect_invocation("s", "u", discriminator, Some(&TurnId::from("t")), None)
-                .replay_key(),
+            direct_effect_invocation(
+                &SessionId::from("s"),
+                "u",
+                discriminator,
+                Some(&TurnId::from("t")),
+                None
+            )
+            .replay_key(),
             Some(
                 "direct:v2:blake3:c92b5337c6f126eb1f8951b3c0c5eea412be5953c0e254bc4369e08d29d33451"
             )
@@ -599,14 +611,18 @@ mod tests {
             None,
             0,
         );
-        let first_preimage =
-            direct_effect_replay_preimage("s", Some(&TurnId::from("t")), "u", &first_discriminator);
+        let first_preimage = direct_effect_replay_preimage(
+            &SessionId::from("s"),
+            Some(&TurnId::from("t")),
+            "u",
+            &first_discriminator,
+        );
         assert_eq!(
             hex(&first_preimage),
             "6c6173682d737461626c652d6964656e746974790202000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76323a626c616b65333a38356537333765643465663038366634653336616436386263396330333632393264363665623430613831646130383031356436363163653530373435303263"
         );
         let first = direct_effect_invocation(
-            "s",
+            &SessionId::from("s"),
             "u",
             first_discriminator,
             Some(&TurnId::from("t")),
@@ -620,7 +636,7 @@ mod tests {
         );
         let second_discriminator = direct_request_discriminator(None, None, 1);
         let second_preimage = direct_effect_replay_preimage(
-            "s",
+            &SessionId::from("s"),
             Some(&TurnId::from("t")),
             "u:direct:v2:caller:21:x",
             &second_discriminator,
@@ -630,7 +646,7 @@ mod tests {
             "6c6173682d737461626c652d6964656e746974790202000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b6579000000000000000173010000000000000001740000000000000017753a6469726563743a76323a63616c6c65723a32313a78000000000000005f6469726563742d6469736372696d696e61746f723a76323a626c616b65333a63646236306335326563653334356438396261353435633835626163323238343534653562353834336132646534306536376632386434343464323364323064"
         );
         let second = direct_effect_invocation(
-            "s",
+            &SessionId::from("s"),
             "u:direct:v2:caller:21:x",
             second_discriminator,
             Some(&TurnId::from("t")),

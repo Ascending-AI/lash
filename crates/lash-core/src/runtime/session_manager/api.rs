@@ -9,7 +9,7 @@ impl crate::plugin::SessionReadService for RuntimeSessionStateService {
 
     async fn snapshot_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<SessionSnapshot, crate::PluginError> {
         self.services
             .current
@@ -19,7 +19,7 @@ impl crate::plugin::SessionReadService for RuntimeSessionStateService {
 
     async fn tool_catalog(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
         self.services
             .current
@@ -29,7 +29,7 @@ impl crate::plugin::SessionReadService for RuntimeSessionStateService {
 
     async fn shared_tool_catalog(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
         self.services
             .current
@@ -37,7 +37,10 @@ impl crate::plugin::SessionReadService for RuntimeSessionStateService {
             .await
     }
 
-    async fn tool_state(&self, session_id: &str) -> Result<crate::ToolState, crate::PluginError> {
+    async fn tool_state(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<crate::ToolState, crate::PluginError> {
         self.services
             .current
             .tool_state(&self.services.managed, session_id)
@@ -49,7 +52,7 @@ impl crate::plugin::SessionReadService for RuntimeSessionStateService {
 impl crate::plugin::SessionStateService for RuntimeSessionStateService {
     async fn turn_scope(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         turn_id: &TurnId,
     ) -> Result<crate::ExecutionScope, crate::PluginError> {
         self.services
@@ -64,7 +67,7 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
 
     async fn snapshot_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<SessionSnapshot, crate::PluginError> {
         self.services
             .current
@@ -74,7 +77,7 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
 
     async fn tool_catalog(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
         self.services
             .current
@@ -84,7 +87,7 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
 
     async fn shared_tool_catalog(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
         self.services
             .current
@@ -92,7 +95,10 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
             .await
     }
 
-    async fn tool_state(&self, session_id: &str) -> Result<crate::ToolState, crate::PluginError> {
+    async fn tool_state(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<crate::ToolState, crate::PluginError> {
         self.services
             .current
             .tool_state(&self.services.managed, session_id)
@@ -101,7 +107,7 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
 
     async fn apply_tool_state(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         snapshot: crate::ToolState,
     ) -> Result<u64, crate::PluginError> {
         self.services
@@ -125,7 +131,7 @@ impl crate::plugin::SessionLifecycleService for RuntimeSessionLifecycleService {
         .await
     }
 
-    async fn close_session(&self, session_id: &str) -> Result<(), crate::PluginError> {
+    async fn close_session(&self, session_id: &SessionId) -> Result<(), crate::PluginError> {
         self.services
             .managed
             .close_session(&self.services.current, &self.services.usage, session_id)
@@ -147,7 +153,7 @@ impl crate::plugin::SessionLifecycleService for RuntimeSessionLifecycleService {
 impl crate::plugin::SessionGraphService for RuntimeSessionGraphService {
     async fn append_session_nodes(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
         self.services
@@ -174,7 +180,7 @@ impl crate::plugin::SessionGraphService for RuntimeSessionGraphService {
 impl crate::plugin::ProcessReadService for RuntimeSessionProcessService {
     async fn list_visible(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
@@ -199,7 +205,7 @@ impl crate::plugin::ProcessReadService for RuntimeSessionProcessService {
 impl crate::ProcessService for RuntimeSessionProcessService {
     async fn list_visible_for_attempt(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         mode: crate::ProcessListMode,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         if self
@@ -224,7 +230,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn start_from_request(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
@@ -259,7 +265,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn start_from_recorded_intent(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
@@ -273,7 +279,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn start(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         registration: crate::ProcessRegistration,
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
@@ -293,8 +299,8 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn complete_external(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         await_output: crate::ProcessAwaitOutput,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
@@ -312,8 +318,8 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn report_caller_departure(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         self.services
             .processes
@@ -323,7 +329,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn await_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         self.services
@@ -345,7 +351,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn list_visible(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
@@ -367,8 +373,8 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn validate_visible(
         &self,
-        session_id: &str,
-        handle_ids: &[String],
+        session_id: &SessionId,
+        handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
         if self
@@ -395,7 +401,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn validate_visible_refs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         process_refs: &[crate::ProcessRef],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
@@ -421,8 +427,8 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn cancel(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         self.services
@@ -439,8 +445,8 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn cancel_with_reason(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         reason: Option<String>,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -459,8 +465,8 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn cancel_recorded_intent(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         reason: Option<String>,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -472,9 +478,9 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn finish_recorded_intent_parent(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         identity: crate::ToolIntentIdentity,
-        process_id: String,
+        process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
         reason: String,
         scope: crate::ProcessOpScope<'_>,
@@ -494,8 +500,8 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn signal_recorded_intent(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
@@ -516,8 +522,8 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn emit_event(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         event_type: String,
         replay_key: String,
         payload: serde_json::Value,
@@ -539,8 +545,8 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn emit_event_recorded_intent(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         event_type: String,
         replay_key: String,
         payload: serde_json::Value,
@@ -561,8 +567,8 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn signal_possessed(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
@@ -584,9 +590,9 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn transfer(
         &self,
-        from_session_id: &str,
-        to_session_id: &str,
-        process_ids: Vec<String>,
+        from_session_id: &SessionId,
+        to_session_id: &SessionId,
+        process_ids: Vec<ProcessId>,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
         self.services

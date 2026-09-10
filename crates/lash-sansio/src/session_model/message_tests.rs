@@ -814,7 +814,7 @@ fn message_origins_written_before_turn_input_provenance_still_deserialize() {
     assert_eq!(
         msgs[2].origin,
         Some(MessageOrigin::Process {
-            process_id: "p1".to_string(),
+            process_id: ProcessId::from("p1".to_string()),
             event_type: "finished".to_string(),
             sequence: 3,
             wake_id: None,

@@ -49,15 +49,15 @@ impl ToolIntentOutcomeSink for ToolIntentGateSink {
 
 fn test_tool_intent() -> (crate::ToolIntentIdentity, crate::ToolIntent) {
     let identity = crate::derive_tool_intent_identity(
-        "tool-intent-gate-session",
+        &SessionId::from("tool-intent-gate-session"),
         "tool-intent-gate-turn",
         Some("tool-intent-gate-call"),
         0,
     )
     .expect("tool-intent gate identity");
     let intent = crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
-        session_id: "tool-intent-gate-session".to_string(),
-        process_id: "tool-intent-gate-process".to_string(),
+        session_id: SessionId::from("tool-intent-gate-session"),
+        process_id: ProcessId::from("tool-intent-gate-process"),
         reason: None,
     });
     (identity, intent)
@@ -211,7 +211,7 @@ impl QueuedLaneProbe for FakeQueuedLaneProbe {
 
 fn queued_lane_holder(expires_at_epoch_ms: u64) -> QueuedLaneHolder {
     QueuedLaneHolder(crate::store::SessionExecutionLease {
-        session_id: "queued-lane-test".to_string(),
+        session_id: SessionId::from("queued-lane-test"),
         owner: crate::LeaseOwnerIdentity::opaque("holder", "holder:incarnation"),
         executor_id: "holder-executor".to_string(),
         lease_token: "holder-token".to_string(),
@@ -229,7 +229,7 @@ async fn queued_lane_guard() -> QueuedLaneGuard {
     ));
     let guard = crate::runtime::session_execution_lease::SessionExecutionLeaseGuard::try_acquire(
         store as Arc<dyn crate::store::RuntimePersistence>,
-        "queued-lane-test",
+        &SessionId::from("queued-lane-test"),
         &crate::LeaseOwnerIdentity::opaque("owner", "owner:incarnation"),
         "queued-lane-test-executor",
         crate::LeaseTimings::default(),
@@ -459,7 +459,7 @@ fn journal_identity_is_typed_and_session_qualified() {
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(keys.len(), scopes.len());
     for identity in &identities[..3] {
-        assert_eq!(identity.session_id(), Some("session"));
+        assert_eq!(identity.session_id(), Some(&SessionId::from("session")));
     }
     for identity in &identities[3..] {
         assert_eq!(identity.session_id(), None);

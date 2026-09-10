@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 /// The returned renewal field that made a resident lease unsafe to replace.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -88,8 +90,8 @@ pub enum StoreError {
         "store is already bound to session `{bound_session_id}` and cannot be reused for `{attempted_session_id}`"
     )]
     SessionBindingMismatch {
-        bound_session_id: String,
-        attempted_session_id: String,
+        bound_session_id: SessionId,
+        attempted_session_id: SessionId,
     },
     /// A session-scoped operation was attempted on a store handle that is not bound to a session.
     #[error("store handle is not bound to a session")]
@@ -100,7 +102,7 @@ pub enum StoreError {
     )]
     SessionResolutionAmbiguous { session_count: u64 },
     #[error("session `{session_id}` was admitted without durable session metadata")]
-    SessionBindingNotMaterialized { session_id: String },
+    SessionBindingNotMaterialized { session_id: SessionId },
     #[error(
         "session state version {found} is newer than this runtime's version {current}; upgrade the runtime before opening this session"
     )]
@@ -114,7 +116,7 @@ pub enum StoreError {
     #[error(
         "session `{session_id}` was used and deleted; session ids cannot be reused in this store"
     )]
-    SessionDeleted { session_id: String },
+    SessionDeleted { session_id: SessionId },
     #[error("store does not support `{operation}`")]
     UnsupportedStoreOperation { operation: &'static str },
     #[error("store head revision conflict: expected {expected}, actual {actual}")]
@@ -130,7 +132,7 @@ pub enum StoreError {
         "runtime operation `{operation_key}` for session `{session_id}` was retried with different commit content; reuse an operation identity only for the same logical operation"
     )]
     RuntimeTurnCommitConflict {
-        session_id: String,
+        session_id: SessionId,
         /// The commit operation identity, not a turn identity: every caller
         /// passes the operation storage key the conflicting retry reused.
         operation_key: String,
@@ -138,7 +140,7 @@ pub enum StoreError {
     #[error(
         "runtime commit for session `{session_id}` cannot both borrow and release the session execution lease"
     )]
-    RuntimeCommitLeaseAuthorityConflict { session_id: String },
+    RuntimeCommitLeaseAuthorityConflict { session_id: SessionId },
     /// One append operation id was reused for different semantic request content.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
@@ -148,7 +150,7 @@ pub enum StoreError {
         "append operation `{operation_key}` for session `{session_id}` was reused with different request content"
     )]
     AppendOperationIdentityConflict {
-        session_id: String,
+        session_id: SessionId,
         operation_key: String,
     },
     /// One semantic-boundary operation id was reused for different canonical
@@ -161,7 +163,7 @@ pub enum StoreError {
         "semantic-boundary operation `{operation_key}` for session `{session_id}` was reused with different request content"
     )]
     SemanticBoundaryIdentityConflict {
-        session_id: String,
+        session_id: SessionId,
         operation_key: String,
     },
     /// A matching append receipt carries contradictory requested-node counts.
@@ -173,7 +175,7 @@ pub enum StoreError {
     )]
     AppendReceiptRequestedNodeCountCorrupt {
         /// Session whose receipt failed its contracted count cross-check.
-        session_id: String,
+        session_id: SessionId,
         /// Canonical operation storage key of the corrupt receipt.
         operation_key: String,
         /// Count stored with the first attempt, or `None` when corruptly absent.
@@ -236,13 +238,16 @@ pub enum StoreError {
     #[error("runtime commit node id `{node_id}` already exists in durable session history")]
     NodeIdCollision { node_id: String },
     #[error("runtime commit generation {generation} already exists for session `{session_id}`")]
-    GraphGenerationCollision { session_id: String, generation: u64 },
+    GraphGenerationCollision {
+        session_id: SessionId,
+        generation: u64,
+    },
     #[error("runtime commit leaf {leaf_node_id:?} does not resolve to a live graph node")]
     InvalidGraphLeaf { leaf_node_id: Option<String> },
     #[error("node `{node_id}` has no retained continuation anchor")]
     ForkPointNotRetained { node_id: String },
     #[error("fork target session `{session_id}` already exists")]
-    ForkSessionAlreadyExists { session_id: String },
+    ForkSessionAlreadyExists { session_id: SessionId },
     #[error("runtime commit node `{node_id}` has invalid parent {actual:?}; expected {expected:?}")]
     InvalidGraphParent {
         node_id: String,
@@ -271,7 +276,7 @@ pub enum StoreError {
         "queued work claim `{claim_id}` for session `{session_id}` is superseded at row {row_id:?} by claim {superseding_claim_id:?} in session-lease generation {superseding_session_lease_generation:?}"
     )]
     QueuedWorkClaimSuperseded {
-        session_id: String,
+        session_id: SessionId,
         claim_id: String,
         row_id: Option<Box<str>>,
         superseding_claim_id: Option<Box<str>>,
@@ -286,7 +291,7 @@ pub enum StoreError {
         "turn input claim `{claim_id}` for session `{session_id}` is superseded at row {row_id:?} by claim {superseding_claim_id:?} in session-lease generation {superseding_session_lease_generation:?}"
     )]
     TurnInputClaimSuperseded {
-        session_id: String,
+        session_id: SessionId,
         claim_id: String,
         row_id: Option<Box<str>>,
         superseding_claim_id: Option<Box<str>>,
@@ -306,7 +311,7 @@ pub enum StoreError {
         "unclaimed turn-input settlement for session `{session_id}` lost the head CAS at row `{input_id}`: the row is {observed_state:?} and held by claim {superseding_claim_id:?}"
     )]
     UnclaimedTurnInputSettlementSuperseded {
-        session_id: String,
+        session_id: SessionId,
         input_id: String,
         observed_state: Option<Box<str>>,
         superseding_claim_id: Option<Box<str>>,
@@ -315,28 +320,28 @@ pub enum StoreError {
         "runtime commit for session `{session_id}` includes queued-work-derived content without settling claim `{claim_id}`"
     )]
     UnsettledQueuedWorkClaim {
-        session_id: String,
+        session_id: SessionId,
         claim_id: String,
     },
     #[error(
         "runtime commit for session `{session_id}` includes turn-input-derived content without settling claim `{claim_id}`"
     )]
     UnsettledTurnInputClaim {
-        session_id: String,
+        session_id: SessionId,
         claim_id: String,
     },
     #[error(
         "runtime commit for session `{session_id}` attempts to settle foreign queued-work claim `{claim_id}`"
     )]
     ForeignQueuedWorkCompletion {
-        session_id: String,
+        session_id: SessionId,
         claim_id: String,
     },
     #[error(
         "runtime commit for session `{session_id}` attempts to settle foreign turn-input claim `{claim_id}`"
     )]
     ForeignTurnInputCompletion {
-        session_id: String,
+        session_id: SessionId,
         claim_id: String,
     },
     #[error(
@@ -360,7 +365,7 @@ pub enum StoreError {
         "pending turn input source_key `{source_key}` for session `{session_id}` is already bound to input `{existing_input_id}` with different submitted content"
     )]
     PendingTurnInputSourceKeyConflict {
-        session_id: String,
+        session_id: SessionId,
         source_key: String,
         existing_input_id: String,
     },
@@ -368,28 +373,28 @@ pub enum StoreError {
         "process wake `{process_id}` sequence {sequence} for session `{session_id}` has no live receiver row and is at or below the receiver allocation floor {allocation_floor}; the sender store may have been restored or rewound"
     )]
     ProcessWakeSequenceRewound {
-        session_id: String,
-        process_id: String,
+        session_id: SessionId,
+        process_id: ProcessId,
         sequence: u64,
         allocation_floor: u64,
     },
     #[error("session execution lease for session `{session_id}` is missing or expired")]
-    SessionExecutionLeaseExpired { session_id: String },
+    SessionExecutionLeaseExpired { session_id: SessionId },
     #[error(
         "session execution lease renewal for session `{session_id}` was refused because owner or lease token is no longer current"
     )]
-    SessionExecutionLeaseRenewalRefused { session_id: String },
+    SessionExecutionLeaseRenewalRefused { session_id: SessionId },
     #[error(
         "session execution lease renewal response for session `{session_id}` was refused because its {mismatch} field did not preserve the presented lease"
     )]
     SessionExecutionLeaseRenewalInstallRefused {
-        session_id: String,
+        session_id: SessionId,
         mismatch: SessionExecutionLeaseRenewalInstallMismatch,
     },
     #[error(
         "session execution lease release for session `{session_id}` was refused because owner or lease token is no longer current"
     )]
-    SessionExecutionLeaseReleaseRefused { session_id: String },
+    SessionExecutionLeaseReleaseRefused { session_id: SessionId },
     #[error(
         "{record_kind} schema_version {actual} is not supported by this binary (expected {expected})"
     )]

@@ -2,6 +2,8 @@ use super::{
     ProcessEventAppendPlan, prepare_process_event_append, prepare_process_registration,
     process_registration_fingerprint, validate_process_registration,
 };
+use crate::ProcessId;
+use crate::SessionId;
 use crate::TurnId;
 use crate::{
     AbandonRequest, ProcessEventAppendRequest, ProcessExternalRef, ProcessIncarnation,
@@ -83,23 +85,23 @@ fn process_registration_identity_golden_corpus() {
     ];
     let causes = [
         crate::CausalRef::Turn {
-            session_id: "s".to_string(),
+            session_id: SessionId::from("s"),
             turn_id: TurnId::from("t"),
         },
         crate::CausalRef::Effect {
-            session_id: "s".to_string(),
+            session_id: SessionId::from("s"),
             turn_id: None,
             effect_id: "e".to_string(),
         },
         crate::CausalRef::ToolCall {
-            session_id: "s".to_string(),
+            session_id: SessionId::from("s"),
             call_id: "c".to_string(),
         },
         crate::CausalRef::Process {
-            process_id: "p".to_string(),
+            process_id: ProcessId::from("p"),
         },
         crate::CausalRef::ProcessEvent {
-            process_id: "p".to_string(),
+            process_id: ProcessId::from("p"),
             sequence: 0,
         },
         crate::CausalRef::TriggerOccurrence {
@@ -109,7 +111,7 @@ fn process_registration_identity_golden_corpus() {
             subscription_revision: Some(0),
         },
         crate::CausalRef::SessionNode {
-            session_id: "s".to_string(),
+            session_id: SessionId::from("s"),
             node_id: "n".to_string(),
         },
     ];
@@ -145,7 +147,7 @@ fn process_registration_identity_golden_corpus() {
     enriched.provenance.originator =
         crate::ProcessOriginator::session(crate::SessionScope::new("session"));
     enriched.env_ref = Some(crate::ProcessExecutionEnvRef::new("env"));
-    enriched.wake_session_id = Some("wake".to_string());
+    enriched.wake_session_id = Some(SessionId::from("wake"));
     let mut selector_fields = std::collections::BTreeMap::new();
     selector_fields.insert(
         "const".to_string(),
@@ -210,7 +212,11 @@ fn process_registration_identity_golden_corpus() {
     let actual = registrations
         .iter()
         .map(|registration| {
-            let observers = ["ab".to_string(), "a".to_string(), "ab".to_string()];
+            let observers = [
+                SessionId::from("ab"),
+                SessionId::from("a"),
+                SessionId::from("ab"),
+            ];
             (
                 hex(&super::process_registration_fingerprint_preimage(
                     registration,
@@ -460,12 +466,12 @@ fn session_originator_elevation_changes_registration_fingerprint() {
     });
     first.provenance = crate::ProcessProvenance::session(crate::SessionScope::for_agent_frame(
         "session",
-        crate::facade_support::frame_node_id("session", "frame-a"),
+        crate::facade_support::frame_node_id(&SessionId::from("session"), "frame-a"),
     ));
     let mut second = first.clone();
     second.provenance = crate::ProcessProvenance::session(crate::SessionScope::for_agent_frame(
         "session",
-        crate::facade_support::frame_node_id("session", "frame-b"),
+        crate::facade_support::frame_node_id(&SessionId::from("session"), "frame-b"),
     ));
     assert_ne!(
         process_registration_fingerprint(&first, &[]),
