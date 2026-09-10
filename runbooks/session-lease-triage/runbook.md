@@ -5,13 +5,12 @@
 > companion's assertions with manual store reads, and do not treat a green script as the
 > judgment itself.
 
-**Purpose.** Prove that the published stuck-turn triage procedure is the behavior lash
-actually has. A turn that stops producing output has three causes that look identical from
-outside (a hanging provider, a lease that moved to another worker, two writers livelocked
-on one session head), and the operations page claims two surfaces distinguish them: the
-`session_lease_diagnostics` snapshot and the `session_execution_lease.*` trace events.
-The judgment is a comparison: every reading and every event the page promises must appear,
-carry the fields the page names, and mean what the page says it means.
+**Purpose.** Prove that Lash's lease diagnostics distinguish three causes of a turn that
+stops producing output: a hanging provider, a lease that moved to another worker, and two
+writers repeatedly colliding on one session head. The operator procedure below correlates
+the read-only `session_lease_diagnostics` snapshot with
+`session_execution_lease.*` trace events, while treating neither surface as authority to
+kill, fence, or terminalize work.
 
 **Deterministic companion.** Run with a fresh artifact directory:
 
@@ -61,36 +60,29 @@ the case that used to go unreported.
 3. **A lost lease is not a failed turn.** The displaced turn's fate is recorded, not
    assumed. If it committed, no `commit_cas_rejected` may exist for it; if it failed, the
    error is captured. A run that treats lease loss as proof of failure contradicts the
-   contract the docs stake the "do not kill it" instruction on.
+   read-only diagnostic contract.
 4. **Livelock is recurrence, not one collision.** Every round of sustained misrouting must
    produce a rejection carrying `lease_lost = false`, `lane_held = true` (emitted by the
    lease-winning parked executor that lost head CAS to the lane-less busy claimant), and a head
    revision that moved on, with no `taken_over` in the timeline. A single rejection is ordinary
-   concurrent-writer contention and the operations page says so separately; a run that shows
-   one collision has not evidenced the diagnosis that prescribes an identity fix.
+   concurrent-writer contention; recurrence is the signal to inspect host routing and identity
+   configuration for multiple executors driving the same session, not a prescribed repair.
 5. **Diagnostics never authorize an action.** No phase may use the reading to fence, cancel,
    or kill anything. If a step needs the lease to decide behavior, the step is wrong.
 6. **A killed worker's turn is recoverable only if it was accepted first.** The direct-turn
    phase must find the request durable while its provider is still parked, and an unrelated
    worker must drive it to a commit through the ordinary queued drain. A run in which the
    drain finds nothing has not proved recovery; it has proved the request was never admitted.
-7. **Docs claims are assertions.** Each documented statement about triage is scored against
-   an artifact. A claim with no evidence behind it is a finding against the docs, not a pass
-   by default.
+7. **Every claim needs observed evidence.** Each triage conclusion is scored against an
+   artifact. A conclusion with no evidence behind it is a finding, not a pass by default.
 
-## Working material
+## Evidence to inspect
 
 - Companion command and artifacts, from the repository root, as above.
-- Docs surface: serve the checked-in `docs/` directory on an unused loopback port, open
-  `/operations.html`, and stop the server during teardown. The server only exposes static
-  in-repo files.
-- Source truth for the surfaces under test:
-  `crates/lash-core/src/runtime/session_execution_lease.rs` (the lease event surface —
-  the module doc's event table is the authoritative list; do not rely on a fixed count),
-  `crates/lash/src/session_lease.rs` (the reading), and
-  `examples/agent-service/src/lease_triage.rs` (the operator endpoint).
-- Save command output and rendered text in the run artifact directory. Do not edit docs or
-  sources during a judged run; a divergence is a finding.
+- The procedure and expected operator decisions are in this runbook. The companion artifacts
+  are the independent behavior evidence; do not score the prose by reading the prose again.
+- Save the completed scorecard in the run artifact directory. Do not edit the runbook,
+  companion, or artifacts during judgment; a divergence is a finding.
 
 ## Phase 0 — Contract coverage
 
@@ -156,8 +148,8 @@ the loser was alive, so the run silently substituted the easy case for the one u
 
 ## Phase 3 — Livelock: sustained misrouting, repeated rejections
 
-**Setup.** `04-commit-cas-livelock.jsonl`. Three rounds of the misconfiguration the docs
-name, induced at the persistence seam through the product's public state-append path. ADR
+**Setup.** `04-commit-cas-livelock.jsonl`. Three rounds of a shared-session routing
+misconfiguration, induced at the persistence seam through the product's public state-append path. ADR
 0077 state admission correctly refuses a second public turn while the execution lane is held,
 so the fixture holds a real lease fence, then has a public lane-less state append observe that
 holder as Busy and publish under the authoritative head CAS. The holder then submits a stale
@@ -219,28 +211,29 @@ peer could double-drive the running turn's own input), the successor re-commits 
 abandoned turn id, a `source_key` appears, or the row is still pending after a committed
 recovery.
 
-## Phase 4 — Score the documented procedure against the observed run
+## Phase 4 — Judge the triage procedure from observed behavior
 
-Serve `docs/` on loopback and open `/operations.html`. Poll until the **Triaging A Stuck
-Turn** section renders, then score each claim below against the named artifact. Save the
-rendered section text as `06-docs-claims.txt`.
+Correlate the four scenario artifacts; do not accept the companion's pass line as the
+judgment. Distinguish a reading from an event, the winner from the loser, and one CAS
+collision from recurrence across all three rounds.
 
-| Documented claim | Evidence |
+| Required operator conclusion | Independent behavior evidence |
 |---|---|
 | The read is a snapshot that never claims, renews, or releases | `02-provider-hang.jsonl` (repeated reads against a live holder), `01-facade-read-tests.log` |
 | An absent session reads differently from an unheld lane | `01-facade-read-tests.log` |
-| Every lease event carries session id and the applicable owner, incarnation, and executor identities | all three phase artifacts |
-| Acquisition, takeover, loss, and CAS rejection sit at the documented levels | `acquired`/`taken_over` INFO, `lost`/`commit_cas_rejected` WARN, in all three artifacts |
-| `Current` with no `session_execution_lease.lost` means the turn is blocked inside itself | `02-provider-hang.jsonl` |
+| Every emitted lease event carries session id and the identities applicable to its emitter | event records across `02-provider-hang.jsonl`, `03-lease-takeover.jsonl`, and `04-commit-cas-livelock.jsonl` |
+| Acquisition and takeover are INFO; loss and CAS rejection are WARN | event records across the three lease artifacts and the focused trace-event test |
+| `Current` with no lease-trouble event isolates a turn blocked inside itself | `02-provider-hang.jsonl` parked reading, zero counters, then commit and `unheld` |
 | The winner reports `taken_over` naming the holder it displaced, even when that holder is dead | `03-lease-takeover.jsonl` (`lease_lost_count` is 0) |
-| A lost lease does not mean the turn failed, so do not kill the runner | `03-lease-takeover.jsonl` (`turn_committed_after_takeover`) |
+| A lease reading never authorizes killing or terminalizing a runner | repeated reads leave the live provider-hang lane untouched; takeover outcome is recorded separately |
 | A Busy turn claimant proceeds lane-less under the head CAS rather than using the durable queued-drain wait/give-up policy | `04-commit-cas-livelock.jsonl` (`busy_advisory`, zero `busy_wait`/`busy_gave_up`) |
-| One rejection is contention; *repeated* rejections with `lease_lost = false` are livelock, and the fix is worker identity | `04-commit-cas-livelock.jsonl` (per-round records) |
+| One rejection is contention; repeated rejections with `lease_lost = false` and `lane_held = true` are a livelock shape | every per-round record in `04-commit-cas-livelock.jsonl` |
+| Recurrence directs the operator to inspect host routing and identity configuration, without prescribing an unproved repair | distinct per-open executors under one host identity in every livelock round |
 | Only `commit_cas_rejected` proves a turn did not publish | `03-lease-takeover.jsonl` versus `04-commit-cas-livelock.jsonl` |
 | A turn accepted by a worker that then dies is finished by its peer, whichever ingress admitted it | `08-direct-turn-recovery.jsonl` (`claimable_while_parked`, `drain_ran`, `recovered_application_turn_id`) |
 
-A page that promises a reading the companion never produced, or a companion observation the
-page omits, is a **contract violation** between docs and behavior: report it as a finding.
+Missing fields, inconsistent identities, or a conclusion that requires facts outside the
+artifact bundle are failures. Preserve the bundle and report the unsupported claim.
 
 The livelock row's *cause* is only partly observable here: the harness stages the shared host
 identity directly rather than routing two host requests into it, so it evidences distinct
@@ -250,8 +243,8 @@ triples would indicate unintended reentry and must fail the scorecard.
 
 ## Phase 5 — Teardown and score
 
-Stop the static docs server and confirm its loopback port is closed. Require the companion's
-final `panic gate: clean` and `session-lease-triage e2e passed: scenarios=4` lines, and
+Require the companion's final `panic gate: clean` and
+`session-lease-triage e2e passed: scenarios=4` lines, and
 confirm no container or host port was left behind (the companion owns none).
 
 | Item | Objective gate | Verdict | Evidence |
@@ -264,13 +257,13 @@ confirm no container or host port was left behind (the companion owns none).
 | Lease loss is not failure | the sweeping turn's fate recorded and self-consistent | | `03-lease-takeover.jsonl` |
 | CAS livelock recurs | every round: one commit, one rejection with `lease_lost = false` and `lane_held = true` from a different executor under the same host owner | | `04-commit-cas-livelock.jsonl` |
 | Executor recovery dispositions | renewal-backed `current` becomes `unheld`; a lapsed dead holder is named by one winner-emitted `taken_over` with no loser event and a committed successor; Busy proceeds lane-less without wait/give-up and head CAS decides | | `07-executor-recovery-law.json` |
-| Direct-turn acceptance precedes the drive | one pending `ti:` input for the session while the provider is parked; the reported acceptance is the one that settled, with no source key | | `08-direct-turn-recovery.jsonl` |
+| Direct-turn acceptance precedes the drive | no input is claimable while the live driver holds it; after that driver dies, the peer settles the exact accepted `ti:` input with no source key | | `08-direct-turn-recovery.jsonl` |
 | Direct-turn recovery is the ordinary drain | an unrelated worker's queued drain commits the orphaned input under its own turn id and leaves no pending row | | `08-direct-turn-recovery.jsonl` |
 | Backend agreement | every phase and normalized recovery disposition reported the same verdicts on each configured backend | | all phase artifacts, `07-executor-recovery-law.json` |
-| Docs agreement | every scored claim matched an artifact | | `06-docs-claims.txt` |
+| Procedure judgment | every Phase 4 conclusion matched independent observed evidence | | four scenario artifacts, focused logs, completed scorecard |
 | Teardown | panic gate clean; no owned containers or ports remain | | `session-lease-triage-e2e.log` |
 
-**Aggregate:** would an operator who followed only the published procedure have reached the
+**Aggregate:** would an operator who followed only this self-contained procedure have reached the
 right conclusion in all three situations, would that operator have been correctly stopped
 from killing a worker whose turn was about to commit, and — when a worker really was gone —
 would the request it had accepted have been finished by its peer rather than lost?

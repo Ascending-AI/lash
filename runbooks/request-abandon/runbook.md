@@ -4,10 +4,10 @@
 > the deterministic `just request-abandon-e2e` companion. Do not replace the companion's
 > assertions with manual terminal writes, and do not treat a green script as the judgment.
 
-**Purpose.** Prove the stuck-process escape hatch documented in
-`docs/operations.html`: `core.processes().request_abandon` writes a visible durable marker
-without terminalizing or disturbing a live owner's lease; natural lease lapse still writes
-nothing; and the next durable-process-worker sweep reconciles the authorization into
+**Purpose.** Prove the stuck-process escape hatch end to end:
+`core.processes().request_abandon` writes a visible durable marker without terminalizing or
+disturbing a live owner's lease; natural lease lapse still writes nothing; and the next
+durable-process-worker sweep reconciles the authorization into
 `Abandoned{ReconciledRequest}` visible to observers.
 
 **Deterministic companion.** Run with a fresh artifact directory:
@@ -44,16 +44,16 @@ the owner lease to simulate expiry and never writes the terminal directly.
    and resolve `await_output`.
 5. **Observers see both sides.** The seeded observer edge must expose the pending marker
    and the final terminal. A host-wide `get` alone does not satisfy this scenario.
-6. **Docs claims are assertions.** Any mismatch is a real-defect stop; never loosen the
-   lease timing or terminal checks to make a run pass.
+6. **Every claim needs observed evidence.** Any mismatch is a real-defect stop; never
+   loosen the lease timing or terminal checks to make a run pass.
 
-## Working material
+## Evidence to inspect
 
 - Companion artifacts from the command above; `03-observed.jsonl` is backend truth.
-- Docs surface: serve checked-in `docs/` and open `/operations.html#stuck-process`.
-- Source truth: `crates/lash/src/process_admin.rs` and
-  `crates/lash-core/src/runtime/process_worker/mod.rs`.
-- Save rendered text, screenshot, and completed scorecard in the artifact directory.
+- The procedure and expected operator decisions are in this runbook. The companion artifacts
+  are the independent behavior evidence; do not score the prose by reading the prose again.
+- Save the completed scorecard in the artifact directory. Do not edit the runbook, companion,
+  or artifacts during judgment.
 
 ## Phase 0 — Contract and deployment gates
 
@@ -109,30 +109,29 @@ Read `abandon_request_reconciled` and require:
 OwnerBound input, reconciliation occurs before expiry, the evidence names a different
 writer/owner, or the observer and registry disagree.
 
-## Phase 4 — Score the docs against the observed run
+## Phase 4 — Judge the escape hatch from observed behavior
 
-Serve `docs/` on loopback and open `/operations.html#stuck-process`. Poll until
-**Detecting A Stuck Process** renders. Save that section as `04-docs-claims.txt` and
-capture `04-request-abandon.png` with the classification recipe and escape-hatch text
-visible.
+Reconstruct the marker lifecycle from `03-observed.jsonl`; do not accept the companion's
+pass line as the judgment. Compare seed, pending, lapsed-before-sweep, and terminal facts so
+no single self-consistent checkpoint can pass by itself.
 
-| Documented claim | Evidence |
+| Required operator conclusion | Independent behavior evidence |
 |---|---|
-| Stuckness is host classification over raw facts | seeded and pending lease fields |
-| A started OwnerBound row stays non-terminal after lease lapse | pre-sweep fields in reconciled checkpoint |
-| `request_abandon` records who, when, and why | pending checkpoint |
-| The marker is returned and observer-visible while pending | pending checkpoint facade and observer gates |
-| The request never terminalizes or fences the owner | pending lifecycle and exact lease equality |
-| Only a post-lapse sweep produces `Abandoned{ReconciledRequest}` | lapsed pre-sweep and final fields |
-| The final is observable and resolves terminal waiting | final observer and `await_output` gates |
+| Stuckness remains a host classification over raw facts | seed establishes `first_started` and a live lease; the lapsed checkpoint is still `Running` |
+| `request_abandon` records who, when, and why | facade return and independent observer show the same pending marker |
+| The request does not disturb the live owner | every lease field is byte-identical from seed to pending and status remains `Running` |
+| Elapsed time does not write a terminal | expiry is past in the pre-sweep observation while the marked row remains non-terminal |
+| Only a post-lapse sweep reconciles the request | terminal writer is `ReconciledRequest`, names the seeded owner, and appears after the lapsed checkpoint |
+| Reconciliation clears worker authority | final process lease is absent and the worker reports no fault |
+| All observation paths agree | final registry read, seeded observer, and `await_output` carry the same abandonment evidence |
 
-A page promise the companion did not observe, or required companion behavior the page
-omits, is a docs/behavior contract violation. Preserve evidence and stop.
+Missing fields, inconsistent identities, or a conclusion that requires facts outside the
+artifact bundle are failures. Preserve the bundle and report the unsupported claim.
 
 ## Phase 5 — Teardown and score
 
-Require `panic gate: clean`, `request-abandon e2e passed: scenarios=1`, a closed docs
-port, and no `lash-fig897-request-abandon-postgres` container.
+Require `panic gate: clean`, `request-abandon e2e passed: scenarios=1`, and no
+`lash-fig897-request-abandon-postgres` container.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
@@ -143,14 +142,14 @@ port, and no `lash-fig897-request-abandon-postgres` container.
 | Expiry is non-terminal | lapsed lease observed before sweep while row is Running | | reconciled checkpoint pre-sweep fields |
 | Sweep reconciliation | terminal `Abandoned{ReconciledRequest}` names lapsed owner | | reconciled checkpoint |
 | Observer agreement | observer lens sees marker and terminal; awaiter resolves | | pending and reconciled checkpoints |
-| Docs agreement | every scored claim matched observed evidence | | `04-docs-claims.txt`, `04-request-abandon.png` |
-| Teardown | panic gate clean; owned container and docs port gone | | `request-abandon-e2e.log`, container inventory |
+| Procedure judgment | every Phase 4 conclusion matched independent observed evidence | | `03-observed.jsonl`, completed scorecard |
+| Teardown | panic gate clean; owned container gone | | `request-abandon-e2e.log`, container inventory |
 
-**Aggregate:** would an operator following only the published escape hatch preserve a live
+**Aggregate:** would an operator following only this self-contained escape hatch preserve a live
 owner's authority, wait out ambiguity, and obtain exactly one truthful abandonment fact
 that every observer can see?
 
 ---
 
-_Stop triggers and the Abort/RCA protocol are in [../RULES.md](../RULES.md). A docs versus
-behavior divergence is a product finding: preserve artifacts and stop._
+_Stop triggers and the Abort/RCA protocol are in [../RULES.md](../RULES.md). An expected
+behavior versus observed-artifact divergence is a product finding: preserve artifacts and stop._

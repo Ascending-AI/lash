@@ -1,8 +1,6 @@
 //! The operator triage surface for a chat whose turn appears stuck.
 //!
-//! This is the host half of the procedure documented at
-//! `docs/operations.html#stuck-turn`. lash supplies one lever,
-//! [`LashCore::session_lease_diagnostics`], a snapshot read of the session's
+//! lash supplies one lever, [`LashCore::session_lease_diagnostics`], a snapshot read of the session's
 //! execution-lease row, and this example turns that raw reading into the
 //! host-owned classification an operator actually wants, exactly the way the
 //! process rail turns `ObservedProcess`'s raw lease facts into a host verdict.

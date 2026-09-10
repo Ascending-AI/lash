@@ -5,13 +5,12 @@
 > companion's PostgreSQL assertions with manual SQL, and do not treat a green script as the
 > judgment itself.
 
-**Purpose.** Prove that the documented bump story is the behavior lash actually has: an
-older-schema store with live sessions, processes, and triggers is refused rather than
-migrated; a recreated store is refused by the version that came before it, so the bump is
-forward-only with nothing to roll back to; and after the recreation the three durable
-surfaces (sessions, background processes, triggers) work on the new store. The judgment is
-a comparison: every claim the published operations page makes about bumping must match
-what the companion observed.
+**Purpose.** Prove one unsupported-schema recreation path end to end. A store with live
+sessions, processes, and triggers is refused when no explicit migration applies; this
+binary also refuses a store stamped newer than it expects; recreation removes the seeded
+rows; and the scenario host verifies sessions, background processes, and triggers before
+it reopens ingress. Lash supports explicitly declared migrations, so a changed schema is
+not by itself a recreation requirement.
 
 **Deterministic companion.** Run with a fresh artifact directory:
 
@@ -45,36 +44,43 @@ depends on that. Treat any judgment that needs the old table shapes as out of sc
 
 1. **The gate is symmetric.** A recorded version below *and* above the expected one is
    refused, and each refusal names the version found and the version expected. The second
-   direction is the forward-only claim; a run that only proves the older-store refusal has
-   not tested the policy.
-2. **Recreation is destructive, and that is the documented contract.** After the bump, no
-   seeded session row, process row, or committed graph node survives. A run that finds
-   pre-bump rows on the recreated store has found a migration lash does not have.
-3. **Verification precedes ingress.** The health phase reuses the pre-bump session ids:
+   direction proves binary/store incompatibility in the downgrade direction; it says
+   nothing about restoring a host-owned backup.
+2. **This refusal requires recreation because no migration applies.** After the bump, no
+   seeded session row, process row, or committed graph node survives. An explicit supported
+   migration is a different path and must not be generalized into this procedure.
+3. **Verification precedes ingress in this fixture's host policy.** The health phase reuses the pre-bump session ids:
    host-chosen identifiers survive a bump even though their rows do not. All three
    surfaces gate independently. Two out of three is a failed bump.
-4. **Docs claims are assertions.** Each documented statement about bumping is scored
-   against a companion artifact. A claim with no evidence behind it is a finding against
-   the docs, not a pass by default.
+4. **Every claim needs observed evidence.** Each bump conclusion is scored against a
+   companion artifact. A conclusion with no evidence behind it is a finding, not a pass by
+   default.
 5. **A probe that refuses everything proves nothing.** The readability probe is judged in
    both directions or not at all: it must report *ready* on the store this build just wrote
    and on the store the recreation produced, and *refused* on each of the three fixtures.
    A run that only checked the refusals has evidence for a broken probe and a correct one
    alike.
-6. **No rollback leg exists, and none may be invented.** Do not restore, downgrade, or
-   re-stamp a version to make a previous binary open a recreated store. Attempting one is
-   outside the scenario and voids the run.
+6. **Rollback and backup policy are outside this scenario.** Do not restore, downgrade, or
+   re-stamp a version during the run. The newer-store fixture proves an exact-version
+   refusal; it does not prove or prescribe a host's backup-based rollback procedure.
 
-## Working material
+## Recreation procedure and evidence
 
 - Companion command and artifacts, from the repository root, as above.
-- Docs surface: serve the checked-in `docs/` directory on an unused loopback port, open
-  `/operations.html`, and stop the server during teardown. The server only exposes static
-  in-repo files.
-- Release-notes rule: `docs/PUBLISHING.md`, section "Releases that require store
-  recreation".
-- Save command output and rendered text in the run artifact directory. Do not edit docs or
-  sources during a judged run; a divergence is a finding.
+- Use the read-only preflight before opening the store. An exact match is ready and a
+  mismatch names found and expected versions. Then inspect the open refusal; follow this
+  recreation path only when it says no explicit migration applies.
+- Drain or stop the host-owned work that can still be drained, then stop every writer to the
+  trust domain. Recreate the whole Lash trust domain together: session tombstones,
+  await-event revocation state, effect journal, and any Restate state share the session-id
+  lifecycle and must not be reset independently. This PostgreSQL fixture observes only its
+  Lash-owned database objects; it does not exercise a separately deployed Restate journal.
+- Open the empty store with the new binary, rerun the read-only probe, and apply the host's
+  chosen health gates before reopening ingress. This fixture chooses session, process/wake,
+  and trigger gates; Lash does not mandate that exact three-gate checklist.
+- Backup, restore, and rollback are host policy and are not tested here. Save the completed
+  scorecard in the artifact directory, and do not edit the runbook, companion, or artifacts
+  during judgment.
 
 ## Phase 0 — Boot and establish the pre-bump deployment
 
@@ -111,13 +117,14 @@ purpose of the drain list.
 **Action.** Read the `refused_divergent_store`, `refused_older_store`, and
 `refused_newer_store` checkpoints, and the verbatim error and `refusal_kind` each carries.
 
-**Expected observable evidence.** No attempt opened the store. The divergent-store
-refusal is of kind `divergent_artifacts` and enumerates the artifacts its
-`divergent_artifacts` field names. The older-store refusal is of kind
-`no_applicable_migration` and names the seeded version as found and one higher as
-expected. The newer-store refusal carries the same kind, names a version one above
-expected as found, and reports the same expected value, which is the current binary
-standing in for the previous image meeting a recreated store.
+**Expected observable evidence.** No attempt opened the store. This destructive generation
+has no migration arm, so the historically named `refused_divergent_store` checkpoint is
+`no_applicable_migration` and carries an empty `divergent_artifacts` list. It names the
+immediate predecessor as found and the current version as expected. The genuinely older
+store is below every explicit migration source and carries the same refusal kind. The
+newer-store refusal also carries that kind, names a version one above expected as found,
+and reports the same expected value, which models this binary meeting a store created by a
+newer one.
 
 Each checkpoint also carries a `probe` report, taken in summary mode (the shape a host runs
 at boot) against the same fixture the open then refused. Each must report `refused`,
@@ -131,7 +138,7 @@ either version, a summary-mode probe reported a surface it never walked as empty
 refusal's `refusal_kind` is not the one its direction exists to prove (a non-empty refusal
 of the wrong kind is not evidence for that direction), the refusals
 disagree about the expected version, or the newer-store direction is missing (the run then
-proves reject-and-recreate but not forward-only).
+has not proved the symmetric exact-version gate).
 
 ## Phase 2 — The recreation bump
 
@@ -153,8 +160,8 @@ assertion while being useless as a deploy gate.
 
 **Judgment — FAIL if:** the probe of the recreated store is anything but ready with an
 empty drain list, the recreated store records any other version, a seeded session,
-process, or committed node survives, or the bump needed a step the docs do not describe (an
-explicit migration, a manual `lash_schema_versions` edit, or a table-level fixup).
+process, or committed node survives, or this no-applicable-migration fixture needed an
+unexpected migration, a manual `lash_schema_versions` edit, or a table-level fixup.
 
 ## Phase 3 — Post-bump health on the recreated store
 
@@ -175,27 +182,26 @@ trigger's reservation count and delivered process status.
 than the seed, the wake reached a session other than its target, or the fired occurrence
 reserved a delivery whose process never reached a terminal.
 
-## Phase 4 — Score the documented claims against the observed run
+## Phase 4 — Judge the recreation path from observed behavior
 
-Serve `docs/` on loopback and open `/operations.html`. Poll until the **Schema
-Compatibility** and **Bumping lash** sections render, then score each claim below against
-the named artifact. Save the rendered text of both sections as `05-docs-claims.txt` and
-capture `05-bump-policy.png` with the forward-only contract and the checklist visible.
+Correlate the four artifact files; do not accept the companion's pass line as the judgment.
+The seeded ids must connect the pre-bump rows, destruction proof, and fresh health checks,
+while found/expected versions must agree between every refusal and its probe.
 
-| Documented claim | Evidence |
+| Required operator conclusion | Independent behavior evidence |
 |---|---|
 | An exact-match gate refuses a store in either direction, naming found and expected | `02-refusal.jsonl` (all three checkpoints) |
-| Adopting a changed schema means recreating the store from empty | `03-recreation.jsonl` |
-| The previous binary refuses the recreated store, so there is no rollback | `02-refusal.jsonl` (`refused_newer_store`) |
-| Recreation destroys the deployment's durable state | `03-recreation.jsonl` survival counts |
-| Verification covers sessions, processes, and triggers before ingress reopens | `04-health.jsonl` |
-| The page states no backup or restore ships with lash | rendered page; absence of any restore step in this runbook |
+| This fixture uses recreation only after a `no_applicable_migration` refusal | older-store refusal and `premise_refusal_kind` in `03-recreation.jsonl` |
+| This destructive generation has no migration arm, including from its immediate predecessor | `refused_divergent_store` reports `no_applicable_migration` with an empty artifact list |
+| Recreation destroys the seeded PostgreSQL state | seed ids/counts versus `03-recreation.jsonl` dropped-table and zero-survivor facts |
+| This binary refuses a store stamped one version newer | `02-refusal.jsonl` (`refused_newer_store`), without inferring a backup/rollback policy |
+| This fixture verifies sessions, processes, and triggers before its host would reopen ingress | `04-health.jsonl` uses the seeded ids and all three gates pass |
 | A read-only probe answers the readability question before the store is opened, and names what it did not read | `01-seed.jsonl`, `02-refusal.jsonl` probe reports |
 
-Also confirm `docs/PUBLISHING.md` requires a `Breaking:` release note that names
-recreation, states forward-only with no rollback, and points at the checklist. A page that
-promises a procedure the companion never performed, or a companion step the page omits, is
-a **contract violation** between docs and behavior: report it as a finding.
+Missing fields, inconsistent identities or versions, or a conclusion that requires facts
+outside the artifact bundle are failures. Preserve the bundle and report the unsupported
+claim. In particular, this run does not prove that Lash supplies no backup/restore facility
+or that rollback is impossible; neither claim is part of the score.
 
 The store/journal coupling the checklist calls out is only partly observable here: this
 scenario runs no workflow engine, so it evidences the store half (recreated rows are gone,
@@ -205,28 +211,27 @@ coupling was tested end to end.
 
 ## Phase 5 — Teardown and score
 
-Stop the static docs server and confirm its loopback port is closed. Require the
-companion's final `panic gate: clean` and
+Require the companion's final `panic gate: clean` and
 `version-bump recreation e2e passed: phases=4 refusal_cases=3` lines, and confirm its compose project
 and volume no longer exist.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Pre-bump deployment | Assigned PostgreSQL port live; live sessions, process, trigger, and a rewound version | | `00-*`, `01-seed.jsonl` |
-| Divergence refusal | open refused as `divergent_artifacts`; the newer artifacts enumerated | | `02-refusal.jsonl` |
+| Immediate-predecessor refusal | destructive generation refuses as `no_applicable_migration` with no divergence artifacts | | `02-refusal.jsonl` |
 | Older-store refusal | open refused as `no_applicable_migration`; found and expected versions named | | `02-refusal.jsonl` |
-| Forward-only refusal | a store one version ahead is refused identically | | `02-refusal.jsonl` |
+| Newer-store refusal | a store one version ahead is refused identically | | `02-refusal.jsonl` |
 | Recreation bump | every lash table dropped; fresh open records the expected version | | `03-recreation.jsonl` |
 | Destroyed state | zero surviving seeded rows or committed nodes | | `03-recreation.jsonl` |
 | Post-bump health | turns committed, wake delivered and terminal, one reserved trigger delivery finished | | `04-health.jsonl` |
 | Readability probe | ready on both clean stores, refused on all three fixtures, versions agreeing with each refusal | | `01-seed.jsonl`, `02-refusal.jsonl`, `03-recreation.jsonl` |
 | Drain preflight | schema-only divergence produced no drain blockers | | `01-seed.jsonl` probe pair |
-| Docs agreement | every scored claim matched an artifact | | `05-docs-claims.txt`, `05-bump-policy.png` |
+| Procedure judgment | every Phase 4 conclusion matched independent observed evidence | | four artifact files, completed scorecard |
 | Teardown | panic gate clean; no owned containers or volumes remain | | `version-bump-recreation-e2e.log`, container inventory |
 
-**Aggregate:** would an operator who followed only the published checklist have completed
-this bump, and would that operator have been correctly warned that the previous version
-cannot be redeployed once the first store was recreated?
+**Aggregate:** would an operator following only this self-contained procedure recognize the
+no-migration refusal, recreate the in-scope trust domain, verify the new store, and avoid
+claiming an untested backup or rollback guarantee?
 
 ---
 

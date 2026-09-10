@@ -7,9 +7,11 @@ phases, and scorecard.
 `runbooks/` has **two layers**. Scripted deterministic harnesses
 (`runbooks/restate-postgres-workers/`, `runbooks/rlm-smoke/`, and the
 `scripts/*-e2e.sh` runners) are gate **evidence**: they boot real hosts or infrastructure
-and assert exact outcomes, and they stay scripts. Browser runbooks are the **agent-judged semantic
-layer** on top: you (the agent) drive the example apps through browser automation and judge
-the result with your own reasoning, gating on what the browser surface actually renders.
+and assert exact outcomes, and they stay scripts. Runbooks are the **agent-judged semantic
+layer** on top: you (the agent) drive browser scenarios or inspect a deterministic companion's
+artifact bundle, then judge the observed behavior with your own reasoning. A deterministic
+companion runbook must carry the procedure and expected decisions it asks the judge to apply;
+reading a separate copy of those expectations is not independent evidence.
 Keep the layers separate — a runbook never re-implements a scripted harness, and a
 scripted harness never asks for judgement.
 
@@ -21,7 +23,7 @@ scenario's verification gates or the Abort rule below.
 This matrix is the source of truth for the coverage split. **Deterministic CI** means
 the repository's repeatable compile, test, and model-check gates. **Full-host CI** means
 an infrastructure-backed integration leg; it does not imply that a browser journey was
-judged. **Manual judged** is the semantic browser or static-page runbook layer.
+judged. **Manual judged** is the semantic browser or artifact-judgment runbook layer.
 
 | Example | Deterministic CI coverage | Full-host CI coverage | Manual judged coverage |
 | --- | --- | --- | --- |
