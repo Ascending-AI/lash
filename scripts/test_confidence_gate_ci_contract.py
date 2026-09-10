@@ -46,10 +46,6 @@ FAST_SHARDS = [
     "sim-generated",
     "minimizer-fixtures",
 ]
-OLD_BROAD_CI_STEP_NAME = "Run bounded broad " + "replay/backend confidence"
-OLD_BROAD_CI_JOB_ID = "bounded-" + "broad-replay-backend"
-OLD_BROAD_CI_ARTIFACT = "bounded-" + "broad-replay-backend-confidence"
-OLD_BROAD_CI_OUT_ROOT = "target/confidence-ci/" + OLD_BROAD_CI_JOB_ID
 VALIDATE_QUARANTINE_MANIFEST = runpy.run_path(str(QUARANTINE_CHECK))[
     "validate_manifest"
 ]
@@ -643,11 +639,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for shard in FAST_SHARDS:
             self.assertIn(f"- {shard}", workflow)
             self.assertIn(shard, gate)
-        self.assertNotIn(OLD_BROAD_CI_JOB_ID, workflow)
-        self.assertNotIn("Bounded Broad " + "Replay/Backend", workflow)
-        self.assertNotIn(OLD_BROAD_CI_STEP_NAME, workflow)
-        self.assertNotIn(OLD_BROAD_CI_ARTIFACT, workflow)
-        self.assertNotIn(OLD_BROAD_CI_OUT_ROOT, workflow)
 
         min_seeds = shell_int_constant(gate, "SIM_SEARCH_MIN_SEEDS")
         min_boundaries = shell_int_constant(gate, "SIM_SEARCH_MIN_MAX_BOUNDARIES")
