@@ -93,9 +93,11 @@ cargo run -p lash-sim -- run --out target/lash-sim/search \
   instead of accidental.
 - `lash-sim minimize <trace>` writes a minimized package containing the
   minimized trace, replay verdict, oracle verdict, final summary, and package
-  manifest; minimization preserves the failing oracle id and semantic reason
-  when the input is a failure. Failing negative fixtures live under
-  `crates/lash-sim/failure-fixtures/`.
+  manifest. The runner and minimizer share one trace-derived oracle battery;
+  minimization preserves the target id, status, and semantic reason across
+  every artifact, rejects a live-only target that a serialized trace cannot
+  re-evaluate, and completes final replay before publishing the package.
+  Failing negative fixtures live under `crates/lash-sim/failure-fixtures/`.
 - The confidence gate declares sim lane artifacts under flat
   `target/confidence/<worktree-slug>/<lane>/sim/` roots for default/broad/full,
   sharded `target/confidence/<worktree-slug>/fast/<shard>/sim/` roots for the

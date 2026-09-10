@@ -6,24 +6,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::generator::generate_workload;
 use crate::oracles::{
-    abandoned_requires_evidence, backend_failure_observed, cancellation_observed, combine_oracles,
-    cross_session_isolation, durable_effect_exactly_once, exec_code_observed,
-    generated_final_value_semantic_channel, generated_suspend_resume, healthy_long_turn_liveness,
-    ingress_sessions_opened, lease_time_monotonic, observer_convergence,
-    observer_reconnect_observed, operational_coverage, process_never_double_started,
-    process_wake_observed, provider_mutation_rejected, provider_transport_mutation_classified,
-    provider_turn_interleaving_depth, queued_ingress_observed, runtime_session_graph_contract,
-    scenario_contract_mini_oracles, scenario_contract_oracles, scheduler_controlled_delivery,
-    scheduler_owned_runtime_completions, state_machine_semantic_invariants, tool_boundary_observed,
-    trigger_delivery_observed, worker_failover_continues_work, worker_stale_completion_rejected,
+    LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE, combine_oracles, generated_trace_oracles,
 };
 use crate::replay::{ReplayError, replay_trace};
 use crate::runner::run_generated_workload_for_fixture;
 use crate::scheduler::BoundaryKind;
 use crate::store::ModelStore;
 use crate::trace::{
-    AbstractWorldSummary, OracleStatus, OracleVerdict, SimulationTrace, TraceIoError,
-    WorkloadExpectations, read_trace, write_replay_report, write_trace,
+    AbstractWorldSummary, OracleStatus, OracleVerdict, SimulationTrace, TraceIoError, read_trace,
+    write_replay_report, write_trace,
 };
 
 pub const MINIMIZE_REPORT_SCHEMA: &str = "lash.sim.minimize-report.v1";
@@ -77,6 +68,7 @@ pub enum MinimizeError {
     Io(std::io::Error),
     Json(serde_json::Error),
     Fixture(String),
+    Target(String),
 }
 
 impl fmt::Display for MinimizeError {
@@ -89,6 +81,7 @@ impl fmt::Display for MinimizeError {
             Self::Fixture(message) => {
                 write!(f, "failing fixture materialization failed: {message}")
             }
+            Self::Target(message) => write!(f, "minimizer target error: {message}"),
         }
     }
 }
@@ -229,7 +222,6 @@ pub fn minimize_trace(
     trace: &SimulationTrace,
     artifact_root: &Path,
 ) -> Result<MinimizeReport, MinimizeError> {
-    std::fs::create_dir_all(artifact_root)?;
     let target_oracle_id = trace.oracle.oracle_id.clone();
     let target_status = trace.oracle.status.clone();
     let target_oracle_reason = trace.oracle.message.clone();
@@ -238,6 +230,12 @@ pub fn minimize_trace(
         status: &target_status,
         reason: target_oracle_reason.as_str(),
     };
+    if target.oracle_id == LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE {
+        return Err(MinimizeError::Target(format!(
+            "oracle `{}` cannot be re-evaluated from a serialized trace because its live provider failure facts are not recorded; no minimized package was written",
+            target.oracle_id
+        )));
+    }
     let mut best = trace.clone();
     let mut operation_family_reductions = Vec::new();
     for kind in operation_families(&best) {
@@ -252,8 +250,10 @@ pub fn minimize_trace(
         let mut candidate = best.clone();
         candidate.events.retain(|event| event.kind != kind);
         renumber_events(&mut candidate);
-        refresh_trace_verdicts(&mut candidate, Some(target))?;
-        let accepted = preserves_target_failure(&candidate, target)
+        let target_preserved =
+            refresh_trace_verdicts(&mut candidate, Some(target)).unwrap_or(false);
+        let accepted = target_preserved
+            && preserves_target_failure(&candidate, target)
             && replay_trace(Path::new("candidate-family.trace.json"), &candidate).is_ok();
         if accepted {
             best = candidate;
@@ -270,8 +270,10 @@ pub fn minimize_trace(
         let mut candidate = best.clone();
         candidate.events.remove(index);
         renumber_events(&mut candidate);
-        refresh_trace_verdicts(&mut candidate, Some(target))?;
-        if preserves_target_failure(&candidate, target)
+        let target_preserved =
+            refresh_trace_verdicts(&mut candidate, Some(target)).unwrap_or(false);
+        if target_preserved
+            && preserves_target_failure(&candidate, target)
             && replay_trace(Path::new("candidate.trace.json"), &candidate).is_ok()
         {
             best = candidate;
@@ -279,18 +281,23 @@ pub fn minimize_trace(
             index += 1;
         }
     }
-    refresh_trace_verdicts(&mut best, Some(target))?;
+    if !refresh_trace_verdicts(&mut best, Some(target))? {
+        return Err(MinimizeError::Target(format!(
+            "final candidate did not preserve target `{}` with status {:?} and reason `{}`; no minimized package was written",
+            target.oracle_id, target.status, target.reason
+        )));
+    }
 
     let package_dir = artifact_root.join("minimized-regression");
-    std::fs::create_dir_all(&package_dir)?;
     let minimized_trace_path = package_dir.join("trace.json");
     let replay_report_path = package_dir.join("replay.json");
     let oracle_path = package_dir.join("oracle.json");
     let final_summary_path = package_dir.join("final-summary.json");
     let package_path = package_dir.join("package.json");
 
-    write_trace(&minimized_trace_path, &best)?;
     let replay = replay_trace(&minimized_trace_path, &best)?;
+    std::fs::create_dir_all(&package_dir)?;
+    write_trace(&minimized_trace_path, &best)?;
     write_replay_report(&replay_report_path, &replay)?;
     std::fs::write(&oracle_path, serde_json::to_vec_pretty(&best.oracle)?)?;
     std::fs::write(
@@ -364,31 +371,54 @@ fn renumber_events(trace: &mut SimulationTrace) {
 fn refresh_trace_verdicts(
     trace: &mut SimulationTrace,
     target: Option<TargetFailure<'_>>,
-) -> Result<(), MinimizeError> {
+) -> Result<bool, MinimizeError> {
+    let carried_live_provider_oracle = trace
+        .oracles
+        .iter()
+        .find(|oracle| oracle.oracle_id == LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE)
+        .cloned();
     retain_causally_supported_checkpoint_writes(trace);
     let final_summary = summary_for_trace(trace)?;
-    let oracles = generated_oracles(&trace.events, &final_summary, &trace.expectations);
-    let mut oracle = combine_oracles(&oracles);
-    if let Some(target) = target
-        && let Some(target_oracle) = find_target_oracle(&oracles, target)
-    {
-        oracle = target_oracle.clone();
+    let mut oracles = Vec::new();
+    if let Some(verdict) = carried_live_provider_oracle {
+        oracles.push(verdict);
     }
+    oracles.extend(generated_trace_oracles(
+        &trace.events,
+        &final_summary,
+        &trace.durable_writes,
+        &trace.expectations,
+    ));
+    let mut oracle = combine_oracles(&oracles);
+    let target_preserved = target.is_none_or(|target| {
+        if verdict_matches_target(&oracle, target) {
+            true
+        } else if let Some(target_oracle) = find_target_oracle(&oracles, target) {
+            oracle = target_oracle.clone();
+            true
+        } else {
+            false
+        }
+    });
     trace.final_summary = final_summary;
     trace.oracles = oracles;
     trace.oracle = oracle;
-    Ok(())
+    Ok(target_preserved)
 }
 
 fn find_target_oracle<'a>(
     oracles: &'a [OracleVerdict],
     target: TargetFailure<'_>,
 ) -> Option<&'a OracleVerdict> {
-    oracles.iter().find(|oracle| {
-        oracle.oracle_id == target.oracle_id
-            && &oracle.status == target.status
-            && oracle.message == target.reason
-    })
+    oracles
+        .iter()
+        .find(|oracle| verdict_matches_target(oracle, target))
+}
+
+fn verdict_matches_target(oracle: &OracleVerdict, target: TargetFailure<'_>) -> bool {
+    oracle.oracle_id == target.oracle_id
+        && &oracle.status == target.status
+        && oracle.message == target.reason
 }
 
 fn select_fixture_target_oracle(
@@ -747,57 +777,11 @@ fn fixture_boundary_kind(kind: &str) -> Result<BoundaryKind, MinimizeError> {
     }
 }
 
-/// Re-evaluate the generated oracles against a candidate (shrunk) trace.
-///
-/// The workload's declared expectations ride the trace unchanged: shrinking
-/// deletes observations the workload declared, so the coverage-floor oracles are
-/// expected to go red on a minimized candidate. The minimizer accepts a
-/// candidate on the *target* failure alone, so those extra reds neither block
-/// shrinking nor mask the failure being minimized.
-fn generated_oracles(
-    events: &[crate::scheduler::DeliveredBoundary],
-    summary: &AbstractWorldSummary,
-    expectations: &WorkloadExpectations,
-) -> Vec<OracleVerdict> {
-    let mut oracles = vec![
-        scheduler_controlled_delivery(events),
-        scheduler_owned_runtime_completions(events),
-        state_machine_semantic_invariants(events, summary),
-        operational_coverage(events, summary),
-        ingress_sessions_opened(summary, expectations),
-        queued_ingress_observed(summary, events),
-        cancellation_observed(summary, events),
-        trigger_delivery_observed(summary, events),
-        observer_reconnect_observed(summary, events),
-        backend_failure_observed(summary, events),
-        provider_mutation_rejected(summary, events),
-        provider_transport_mutation_classified(events, expectations),
-        provider_turn_interleaving_depth(events, expectations),
-        process_wake_observed(summary, events),
-        process_never_double_started(events),
-        abandoned_requires_evidence(events),
-        tool_boundary_observed(summary, events),
-        exec_code_observed(summary, events),
-        cross_session_isolation(summary),
-        observer_convergence(summary, expectations),
-        runtime_session_graph_contract(summary, expectations),
-        durable_effect_exactly_once(summary),
-        worker_stale_completion_rejected(summary),
-        worker_failover_continues_work(events),
-        healthy_long_turn_liveness(events),
-        lease_time_monotonic(events, expectations),
-        generated_suspend_resume(events),
-        generated_final_value_semantic_channel(events, expectations),
-    ];
-    oracles.extend(scenario_contract_mini_oracles(events, summary));
-    oracles.extend(scenario_contract_oracles(events, summary));
-    oracles
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::generator::generate_workload;
+    use crate::oracles::{runtime_graph_acyclic, runtime_usage_monotonic};
     use crate::runner::run_generated_workload_for_fixture;
 
     #[tokio::test]
@@ -815,6 +799,145 @@ mod tests {
         assert!(report.replay_report_path.exists());
         assert!(report.failure_package_path.exists());
         assert!(report.minimized_event_count <= report.original_event_count);
+    }
+
+    #[tokio::test]
+    async fn minimizer_preserves_runtime_graph_failure_across_every_artifact() {
+        let workload = generate_workload(5, "fast-random", 24).expect("workload");
+        let mut trace = run_generated_workload_for_fixture(workload, "bundle")
+            .await
+            .expect("trace");
+        let rows = trace
+            .durable_writes
+            .iter_mut()
+            .filter_map(|write| write.state.as_mut())
+            .filter_map(|state| state.accepted_raw_rows.as_mut())
+            .filter_map(|raw| raw.get_mut("graph_nodes"))
+            .filter_map(serde_json::Value::as_array_mut)
+            .find(|rows| !rows.is_empty())
+            .expect("seed 5 records accepted raw graph rows");
+        rows.push(rows[0].clone());
+        let target = runtime_graph_acyclic(&trace.durable_writes);
+        assert_eq!(target.status, OracleStatus::Failed);
+        assert!(target.message.contains("duplicate row"));
+        trace.oracle = target.clone();
+        let tmp = tempfile::tempdir().expect("tempdir");
+
+        let report = minimize_trace(Path::new("failing.trace.json"), &trace, tmp.path())
+            .expect("minimize runtime graph failure");
+        let minimized = read_trace(&report.minimized_trace_path).expect("minimized trace");
+        let oracle: OracleVerdict = serde_json::from_slice(
+            &std::fs::read(
+                report
+                    .failure_package_path
+                    .parent()
+                    .expect("package directory")
+                    .join("oracle.json"),
+            )
+            .expect("oracle artifact"),
+        )
+        .expect("oracle artifact JSON");
+        let package: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&report.failure_package_path).expect("failure package"),
+        )
+        .expect("failure package JSON");
+
+        assert_eq!(report.target_oracle_id, target.oracle_id);
+        assert_eq!(report.target_oracle_reason, target.message);
+        assert_eq!(minimized.oracle.oracle_id, report.target_oracle_id);
+        assert_eq!(minimized.oracle.status, OracleStatus::Failed);
+        assert_eq!(minimized.oracle.message, report.target_oracle_reason);
+        assert_eq!(oracle.oracle_id, report.target_oracle_id);
+        assert_eq!(oracle.status, OracleStatus::Failed);
+        assert_eq!(oracle.message, report.target_oracle_reason);
+        assert_eq!(
+            package
+                .pointer("/target_oracle/oracle_id")
+                .and_then(serde_json::Value::as_str),
+            Some(report.target_oracle_id.as_str())
+        );
+        assert_eq!(
+            package
+                .pointer("/target_oracle/status")
+                .and_then(serde_json::Value::as_str),
+            Some("failed")
+        );
+        assert_eq!(
+            package
+                .pointer("/target_oracle/message")
+                .and_then(serde_json::Value::as_str),
+            Some(report.target_oracle_reason.as_str())
+        );
+        assert_eq!(
+            package
+                .get("target_oracle_reason")
+                .and_then(serde_json::Value::as_str),
+            Some(report.target_oracle_reason.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn replay_failure_publishes_no_minimized_package_artifacts() {
+        let workload = generate_workload(5, "fast-random", 24).expect("workload");
+        let mut trace = run_generated_workload_for_fixture(workload, "bundle")
+            .await
+            .expect("trace");
+        let usage = trace
+            .events
+            .iter_mut()
+            .filter(|event| event.kind == BoundaryKind::Provider)
+            .find_map(|event| {
+                event
+                    .observed
+                    .pointer_mut("/runtime_invariant_facts/usage/usage_events_monotonic")
+            })
+            .expect("provider event records usage invariant facts");
+        *usage = serde_json::Value::Bool(false);
+        let target = runtime_usage_monotonic(&trace.events);
+        assert_eq!(target.status, OracleStatus::Failed);
+        trace.oracle = target;
+        let tmp = tempfile::tempdir().expect("tempdir");
+
+        let err = minimize_trace(Path::new("failing.trace.json"), &trace, tmp.path())
+            .expect_err("replay must reject contradictory runtime facts");
+
+        assert!(matches!(err, MinimizeError::Replay(_)), "{err}");
+        assert!(
+            !tmp.path().join("minimized-regression").exists(),
+            "a failed final replay must not publish a partial package"
+        );
+    }
+
+    #[test]
+    fn unsupported_live_provider_target_is_diagnosed_without_artifacts() {
+        let target = OracleVerdict::failed(
+            LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE,
+            "recorded live provider failure",
+        );
+        let trace = SimulationTrace::new(
+            1,
+            "test-generator",
+            "test-profile",
+            "1/1",
+            "test-workload",
+            "0".repeat(64),
+            "bundle",
+            Default::default(),
+            Default::default(),
+            Vec::new(),
+            Vec::new(),
+            target.clone(),
+            vec![target],
+            AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new(), Vec::new()),
+        );
+        let tmp = tempfile::tempdir().expect("tempdir");
+
+        let err = minimize_trace(Path::new("live-failure.trace.json"), &trace, tmp.path())
+            .expect_err("live-only target must be unsupported");
+
+        assert!(matches!(err, MinimizeError::Target(_)), "{err}");
+        assert!(err.to_string().contains("cannot be re-evaluated"));
+        assert!(!tmp.path().join("minimized-regression").exists());
     }
 
     #[tokio::test]

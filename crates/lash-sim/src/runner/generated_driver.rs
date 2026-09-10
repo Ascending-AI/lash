@@ -404,46 +404,13 @@ pub(super) async fn run_generated_workload(
     // stream valid prose then a non-retryable malformed chunk, released through a
     // real BoundaryScheduler, across >1 provider kind and >1 fault position.
     let live_failure_facts = drive_live_provider_failure_turns(workload.seed).await?;
-    let mut oracles = vec![
-        live_provider_failure_coverage(&live_failure_facts),
-        scheduler_controlled_delivery(&events),
-        scheduler_owned_runtime_completions(&events),
-        state_machine_semantic_invariants(&events, &final_summary),
-        operational_coverage(&events, &final_summary),
-        ingress_sessions_opened(&final_summary, &expectations),
-        queued_ingress_observed(&final_summary, &events),
-        cancellation_observed(&final_summary, &events),
-        trigger_delivery_observed(&final_summary, &events),
-        observer_reconnect_observed(&final_summary, &events),
-        backend_failure_observed(&final_summary, &events),
-        provider_mutation_rejected(&final_summary, &events),
-        provider_transport_mutation_classified(&events, &expectations),
-        generated_runtime_provider_matrix_oracle(&events),
-        provider_turn_interleaving_depth(&events, &expectations),
-        process_wake_observed(&final_summary, &events),
-        process_wake_at_most_once(&events),
-        process_never_double_started(&events),
-        abandoned_requires_evidence(&events),
-        tool_boundary_observed(&final_summary, &events),
-        exec_code_observed(&final_summary, &events),
-        cross_session_isolation(&final_summary),
-        observer_convergence(&final_summary, &expectations),
-        runtime_session_graph_contract(&final_summary, &expectations),
-        runtime_graph_acyclic(&durable_writes),
-        runtime_single_active_agent_frame(&events),
-        runtime_usage_monotonic(&events),
-        checkpoint_usage_conservation(&durable_writes),
-        durable_effect_exactly_once(&final_summary),
-        worker_stale_completion_rejected(&final_summary),
-        worker_failover_continues_work(&events),
-        healthy_long_turn_liveness(&events),
-        lease_time_monotonic(&events, &expectations),
-        generated_suspend_resume(&events),
-        generated_final_value_semantic_channel(&events, &expectations),
-        crate::state_checker::checkpoint_state_consistency(&events, &durable_writes, &expectations),
-    ];
-    oracles.extend(scenario_contract_mini_oracles(&events, &final_summary));
-    oracles.extend(scenario_contract_oracles(&events, &final_summary));
+    let mut oracles = vec![live_provider_failure_coverage(&live_failure_facts)];
+    oracles.extend(crate::oracles::generated_trace_oracles(
+        &events,
+        &final_summary,
+        &durable_writes,
+        &expectations,
+    ));
     // The combined oracle rides the trace; callers decide whether a failing
     // oracle aborts the run (evidence/fixture paths) or becomes a persisted
     // failure package (search mode).
