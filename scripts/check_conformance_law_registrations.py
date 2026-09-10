@@ -18,18 +18,15 @@ SITES = (
 )
 IDENT = r"[a-z_][a-z0-9_]*"
 REGISTRATION = re.compile(
-    rf"^\s*async fn (?P<test>{IDENT})\(\)\s*\{{\s*"
-    rf"\$runner\(\$crate::RuntimePersistenceLaw::(?P<law>{IDENT})\)\.await;\s*\}}\s*$",
+    rf"^[ \t]*async fn (?P<test>{IDENT})\(\)[ \t]*\{{[ \t]*"
+    rf"\$runner\(\$crate::RuntimePersistenceLaw::(?P<law>{IDENT})\)\.await;[ \t]*\}}[ \t]*$",
     re.MULTILINE,
 )
 INVOCATION = re.compile(
     rf"(?:{IDENT}::)*(?P<macro>runtime_persistence(?:_reopenable)?_tests)!\s*\("
 )
-ATTRIBUTE_LINE = re.compile(r"^\s*#\s*\[.*\]\s*$")
-TOKIO_TEST_ATTRIBUTE = re.compile(
-    r"^\s*#\s*\[\s*tokio\s*::\s*test(?:\s*\(.*\))?\s*\]\s*$"
-)
-DISABLING_ATTRIBUTE = re.compile(r"^\s*#\s*\[\s*(?:cfg|cfg_attr)\b")
+ATTRIBUTE_START = re.compile(r"#\s*\[")
+ATTRIBUTE_NAME = re.compile(r"#\s*\[\s*(?P<name>[a-z_][a-z0-9_]*(?:\s*::\s*[a-z_][a-z0-9_]*)*)")
 
 
 def block(source: str, marker: str, label: str) -> str:
@@ -87,43 +84,107 @@ def runner_special_laws(source: str, *, reopenable: bool) -> set[str]:
     return laws
 
 
-def attribute_block_before(source: str, position: int) -> tuple[str, ...]:
-    attributes = []
-    for line in reversed(source[:position].splitlines()):
-        if not line.strip():
+def attribute_end(source: str, start: int, limit: int) -> int:
+    opening = ATTRIBUTE_START.match(source, start)
+    if opening is None:
+        raise ValueError("expected outer attribute")
+    depth = 1
+    quote: str | None = None
+    escaped = False
+    cursor = opening.end()
+    while cursor < limit:
+        char = source[cursor]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in {'"', "'"}:
+            quote = char
+        elif char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+            if depth == 0:
+                return cursor + 1
+        cursor += 1
+    raise ValueError("unterminated outer attribute")
+
+
+def attribute_block_before(source: str, position: int) -> tuple[int, tuple[str, ...]]:
+    for candidate in ATTRIBUTE_START.finditer(source, 0, position):
+        cursor = candidate.start()
+        attributes = []
+        try:
+            while cursor < position:
+                end = attribute_end(source, cursor, position)
+                attributes.append(source[cursor:end])
+                cursor = end
+                while cursor < position and source[cursor].isspace():
+                    cursor += 1
+                if cursor == position:
+                    return candidate.start(), tuple(attributes)
+                if ATTRIBUTE_START.match(source, cursor) is None:
+                    break
+        except ValueError:
             continue
-        if not ATTRIBUTE_LINE.fullmatch(line):
-            break
-        attributes.append(line.strip())
-    return tuple(attributes)
+    return position, ()
 
 
-def validate_registration_attributes(region: str, name: str, matches: tuple[re.Match[str], ...]) -> None:
+def attribute_name(attribute: str) -> str:
+    match = ATTRIBUTE_NAME.match(attribute)
+    if match is None:
+        raise ValueError(f"unsupported outer attribute: {attribute.strip()!r}")
+    return re.sub(r"\s+", "", match.group("name"))
+
+
+def validate_registration_attributes(
+    region: str, name: str, matches: tuple[re.Match[str], ...]
+) -> tuple[tuple[int, int], ...]:
+    spans = []
     for match in matches:
-        attributes = attribute_block_before(region, match.start())
-        if any(DISABLING_ATTRIBUTE.match(attribute) for attribute in attributes):
+        start, attributes = attribute_block_before(region, match.start())
+        names = tuple(attribute_name(attribute) for attribute in attributes)
+        if any(attribute in {"cfg", "cfg_attr"} for attribute in names):
             raise ValueError(f"{name} registration {match.group('test')} has a disabling cfg/cfg_attr")
-        if sum(TOKIO_TEST_ATTRIBUTE.fullmatch(attribute) is not None for attribute in attributes) != 1:
+        if "ignore" in names:
+            raise ValueError(f"{name} registration {match.group('test')} has an ignore attribute")
+        if names.count("tokio::test") != 1:
             raise ValueError(f"{name} registration {match.group('test')} must have one tokio::test attribute")
+        spans.append((start, match.end()))
+    return tuple(spans)
+
+
+def validate_macro_region(region: str, name: str, spans: tuple[tuple[int, int], ...]) -> None:
+    remainder = list(region)
+    for start, end in spans:
+        remainder[start:end] = ("\n" if char == "\n" else " " for char in region[start:end])
+    shell = re.compile(
+        rf"\s*macro_rules!\s+{re.escape(name)}\s*\{{\s*"
+        r"\(\s*\$runner\s*:\s*ident\s*\)\s*=>\s*\{\s*"
+        r"\}\s*;\s*\}\s*",
+        re.DOTALL,
+    )
+    if shell.fullmatch("".join(remainder)) is None:
+        raise ValueError(f"unrecognized {name} registration form")
 
 
 def macro_laws(source: str, name: str) -> tuple[tuple[str, str], ...]:
     region = without_comments(block(source, f"macro_rules! {name} {{", name))
     matches = tuple(REGISTRATION.finditer(region))
-    validate_registration_attributes(region, name, matches)
+    spans = validate_registration_attributes(region, name, matches)
     pairs = tuple((m.group("test"), m.group("law")) for m in matches)
     if not pairs:
         raise ValueError(f"{name} has no registrations")
-    if sum("async fn " in line for line in region.splitlines()) != len(pairs):
-        raise ValueError(f"unrecognized {name} registration form")
+    validate_macro_region(region, name, spans)
     return pairs
 
 
 def disabled_invocation(source: str, match: re.Match[str]) -> bool:
-    return any(
-        DISABLING_ATTRIBUTE.match(attribute)
-        for attribute in attribute_block_before(source, match.start())
-    )
+    _, attributes = attribute_block_before(source, match.start())
+    return any(attribute_name(attribute) in {"cfg", "cfg_attr"} for attribute in attributes)
 
 
 def check_repository(root: Path = ROOT) -> list[str]:

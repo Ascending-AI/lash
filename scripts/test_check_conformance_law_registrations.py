@@ -154,6 +154,25 @@ class LawRegistrationTests(unittest.TestCase):
                 + registration,
                 "has a disabling cfg/cfg_attr",
             ),
+            (
+                "multiline cfg",
+                "#[cfg(\n"
+                "    any()\n"
+                ")]\n"
+                + registration,
+                "has a disabling cfg/cfg_attr",
+            ),
+            (
+                "same-line test and cfg",
+                "#[tokio::test(flavor = \"multi_thread\")] #[cfg(any())]\n"
+                "        async fn alpha() { $runner($crate::RuntimePersistenceLaw::alpha).await; }",
+                "has a disabling cfg/cfg_attr",
+            ),
+            (
+                "ignored test",
+                "#[ignore]\n" + registration,
+                "has an ignore attribute",
+            ),
         )
         for name, replacement, expected in mutations:
             with self.subTest(mutation=name):
@@ -171,6 +190,8 @@ class LawRegistrationTests(unittest.TestCase):
             "runtime_persistence_reopenable_tests!(runner);\n",
             "/* ordinary block comment */\n#[cfg_attr(any(), cfg(any()))]\n"
             "#[allow(dead_code)]\nruntime_persistence_reopenable_tests!(runner);\n",
+            "#[cfg(\n    any()\n)]\n"
+            "runtime_persistence_reopenable_tests!(runner);\n",
         ):
             with self.subTest(source=source):
                 with tempfile.TemporaryDirectory() as directory:
@@ -179,6 +200,17 @@ class LawRegistrationTests(unittest.TestCase):
                     (root / CHECKER.SITES[1][1]).write_text(source, encoding="utf-8")
                     errors = CHECKER.check_repository(root)
                 self.assertTrue(any("SQLite registration site" in error and "disables" in error for error in errors), errors)
+
+    def test_registration_macro_rejects_unaccounted_text(self) -> None:
+        malformed = MACROS.replace(
+            "        #[tokio::test]\n"
+            "        async fn fresh_instances() { $runner($crate::RuntimePersistenceLaw::fresh_instances).await; }",
+            "        const UNREGISTERED_ITEM: () = ();\n"
+            "        #[tokio::test]\n"
+            "        async fn fresh_instances() { $runner($crate::RuntimePersistenceLaw::fresh_instances).await; }",
+        )
+        with self.assertRaisesRegex(ValueError, "unrecognized runtime_persistence_tests registration form"):
+            CHECKER.macro_laws(malformed, "runtime_persistence_tests")
 
 
 if __name__ == "__main__":
