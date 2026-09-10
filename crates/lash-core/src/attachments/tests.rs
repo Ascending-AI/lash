@@ -275,6 +275,13 @@ impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
         AttachmentRootSet::release_attachment_condemnation(self.factory, id).await
     }
 
+    async fn recover_abandoned_attachment_write(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<(), crate::StoreError> {
+        AttachmentRootSet::recover_abandoned_attachment_write(self.factory, id).await
+    }
+
     async fn reclaim_attachment_condemnation(
         &self,
         id: &AttachmentId,

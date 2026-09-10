@@ -1871,6 +1871,7 @@ lash::persistence::AttachmentRootSet::fence
 lash::persistence::AttachmentRootSet::has_live_attachment_ref
 lash::persistence::AttachmentRootSet::live_attachment_refs
 lash::persistence::AttachmentRootSet::reclaim_attachment_condemnation
+lash::persistence::AttachmentRootSet::recover_abandoned_attachment_write
 lash::persistence::AttachmentRootSet::release_attachment_condemnation
 lash::persistence::AttachmentStore
 lash::persistence::AttachmentStore::delete

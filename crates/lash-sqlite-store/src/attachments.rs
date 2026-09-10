@@ -556,7 +556,8 @@ impl Store {
         })
     }
 
-    /// Return an abandoned `Condemned` or `Deleting` digest to `Free`.
+    /// Return an abandoned sweep's un-tokened `Condemned` or `Deleting` digest
+    /// to `Free`. A stale sweep cannot clear a restoring writer's token.
     pub(crate) async fn release_attachment_condemnation(
         &self,
         attachment_id: &AttachmentId,
@@ -570,18 +571,61 @@ impl Store {
                        AND (phase = 'deleting'
                             OR (phase = 'condemned' AND write_token IS NULL))",
                     params![attachment_id],
-                )?;
-                tx.execute(
-                    "UPDATE attachment_condemnations SET write_token = NULL
-                     WHERE attachment_id = ?1
-                       AND phase IN ('condemned', 'reclaimed')
-                       AND write_token IS NOT NULL",
-                    params![attachment_id],
                 )
             })
             .await
             .map_err(sqlite_error)?;
         Ok(())
+    }
+
+    /// Clear an abandoned restoring writer under explicit host quiescence,
+    /// preserving its phase and removing only its associated uncommitted intent.
+    pub(crate) async fn recover_abandoned_attachment_write(
+        &self,
+        attachment_id: &AttachmentId,
+    ) -> Result<(), StoreError> {
+        let attachment_id = attachment_id.as_str().to_string();
+        self.conn
+            .write_flow(move |tx| {
+                let outcome: Result<(), StoreError> = (|| {
+                    let claim = tx
+                        .query_row(
+                            "SELECT write_token, write_session_id
+                             FROM attachment_condemnations
+                             WHERE attachment_id = ?1
+                               AND phase IN ('condemned', 'reclaimed')
+                               AND write_token IS NOT NULL",
+                            params![attachment_id],
+                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?;
+                    let Some((token, session_id)) = claim else {
+                        return Ok(());
+                    };
+                    tx.execute(
+                        "DELETE FROM attachment_manifest
+                         WHERE attachment_id = ?1 AND session_id = ?2
+                           AND committed_at_ms IS NULL",
+                        params![attachment_id, session_id],
+                    )
+                    .map_err(sqlite_error)?;
+                    tx.execute(
+                        "UPDATE attachment_condemnations
+                         SET write_token = NULL, write_session_id = NULL
+                         WHERE attachment_id = ?1 AND write_token = ?2",
+                        params![attachment_id, token],
+                    )
+                    .map_err(sqlite_error)?;
+                    Ok(())
+                })();
+                Ok(match outcome {
+                    Ok(()) => TxOutcome::Commit(Ok(())),
+                    Err(err) => TxOutcome::Rollback(Err(err)),
+                })
+            })
+            .await
+            .map_err(sqlite_error)?
     }
 
     /// `Deleting -> Reclaimed` after the physical delete succeeds.
@@ -746,11 +790,11 @@ impl AttachmentManifest for Store {
                                 let claimed = tx
                                     .execute(
                                         "UPDATE attachment_condemnations
-                                         SET write_token = ?2
+                                         SET write_token = ?2, write_session_id = ?3
                                          WHERE attachment_id = ?1
                                            AND phase IN ('condemned', 'reclaimed')
                                            AND write_token IS NULL",
-                                        params![attachment_id, token.as_hex()],
+                                        params![attachment_id, token.as_hex(), session_id.as_str()],
                                     )
                                     .map_err(sqlite_error)?;
                                 if claimed == 0 {
@@ -858,7 +902,8 @@ impl AttachmentManifest for Store {
                             )
                             .map_err(sqlite_error)?;
                             tx.execute(
-                                "UPDATE attachment_condemnations SET write_token = NULL
+                                "UPDATE attachment_condemnations
+                                 SET write_token = NULL, write_session_id = NULL
                                  WHERE attachment_id = ?1 AND write_token = ?2",
                                 params![attachment_id, token],
                             )

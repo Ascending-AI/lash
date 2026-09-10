@@ -36,7 +36,9 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_condemnations (
     attachment_id text NOT NULL,
     phase text NOT NULL,
     write_token text,
-    CONSTRAINT lash_attachment_condemnations_check CHECK (((write_token IS NULL) OR (phase = ANY (ARRAY['condemned'::text, 'reclaimed'::text])))),
+    write_session_id text,
+    CONSTRAINT lash_attachment_condemnations_check CHECK (((write_token IS NULL) = (write_session_id IS NULL))),
+    CONSTRAINT lash_attachment_condemnations_check1 CHECK (((write_token IS NULL) OR (phase = ANY (ARRAY['condemned'::text, 'reclaimed'::text])))),
     CONSTRAINT lash_attachment_condemnations_phase_check CHECK ((phase = ANY (ARRAY['condemned'::text, 'deleting'::text, 'reclaimed'::text])))
 );
 

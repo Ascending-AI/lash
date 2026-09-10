@@ -733,7 +733,14 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         &self,
         id: &lash_core::AttachmentId,
     ) -> Result<(), lash_core::StoreError> {
-        crate::attachments::release_abandoned_attachment_condemnation(&self.pool, id.as_str()).await
+        crate::attachments::release_attachment_condemnation(&self.pool, id.as_str()).await
+    }
+
+    async fn recover_abandoned_attachment_write(
+        &self,
+        id: &lash_core::AttachmentId,
+    ) -> Result<(), lash_core::StoreError> {
+        crate::attachments::recover_abandoned_attachment_write(&self.pool, id.as_str()).await
     }
 
     async fn reclaim_attachment_condemnation(

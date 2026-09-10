@@ -131,9 +131,9 @@ pub(crate) async fn lock_attachment_fence_tx(
     Ok(())
 }
 
-/// Release sweep-owned state, or clear an abandoned writer token while
-/// preserving its prior phase, under the digest's fence lock.
-pub(crate) async fn release_abandoned_attachment_condemnation(
+/// Release only sweep-owned state under the digest's fence lock. A stale sweep
+/// cannot clear a restoring writer's token.
+pub(crate) async fn release_attachment_condemnation(
     pool: &PgPool,
     attachment_id: &str,
 ) -> Result<(), StoreError> {
@@ -149,16 +149,50 @@ pub(crate) async fn release_abandoned_attachment_condemnation(
     .execute(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;
-    sqlx::query(
-        "UPDATE lash_attachment_condemnations SET write_token = NULL
+    tx.commit().await.map_err(store_sqlx_error)
+}
+
+/// Clear an abandoned restoring writer under explicit host quiescence,
+/// preserving its phase and removing only its associated uncommitted intent.
+pub(crate) async fn recover_abandoned_attachment_write(
+    pool: &PgPool,
+    attachment_id: &str,
+) -> Result<(), StoreError> {
+    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+    lock_attachment_fence_tx(&mut tx, attachment_id).await?;
+    let claim = sqlx::query_as::<_, (String, String)>(
+        "SELECT write_token, write_session_id
+         FROM lash_attachment_condemnations
          WHERE attachment_id = $1
            AND phase IN ('condemned', 'reclaimed')
            AND write_token IS NOT NULL",
     )
     .bind(attachment_id)
-    .execute(&mut *tx)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;
+    if let Some((token, session_id)) = claim {
+        sqlx::query(
+            "DELETE FROM lash_attachment_manifest
+             WHERE attachment_id = $1 AND session_id = $2
+               AND committed_at_ms IS NULL",
+        )
+        .bind(attachment_id)
+        .bind(&session_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        sqlx::query(
+            "UPDATE lash_attachment_condemnations
+             SET write_token = NULL, write_session_id = NULL
+             WHERE attachment_id = $1 AND write_token = $2",
+        )
+        .bind(attachment_id)
+        .bind(token)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    }
     tx.commit().await.map_err(store_sqlx_error)
 }
 
@@ -285,13 +319,14 @@ impl AttachmentManifest for PostgresSessionStore {
                     let token = lash_core::AttachmentWriteToken::new();
                     let claimed = sqlx::query(
                         "UPDATE lash_attachment_condemnations
-                         SET write_token = $2
+                         SET write_token = $2, write_session_id = $3
                          WHERE attachment_id = $1
                            AND phase IN ('condemned', 'reclaimed')
                            AND write_token IS NULL",
                     )
                     .bind(intent.attachment_id.as_str())
                     .bind(token.as_hex())
+                    .bind(intent.session_id.as_str())
                     .execute(&mut *tx)
                     .await
                     .map_err(store_sqlx_error)?
@@ -400,7 +435,8 @@ impl AttachmentManifest for PostgresSessionStore {
                 .await
                 .map_err(store_sqlx_error)?;
                 sqlx::query(
-                    "UPDATE lash_attachment_condemnations SET write_token = NULL
+                    "UPDATE lash_attachment_condemnations
+                     SET write_token = NULL, write_session_id = NULL
                      WHERE attachment_id = $1 AND write_token = $2",
                 )
                 .bind(&attachment_id)

@@ -242,6 +242,8 @@ pub async fn cross_owner_attachment_adoption_conformance(f: Arc<dyn SessionStore
     failed_reput_restores_prior_phase(f.clone()).await;
     competing_writer_survives_failed_reput(f.clone()).await;
     sweep_cannot_overwrite_failed_reput_rollback(f.clone()).await;
+    stale_sweep_release_cannot_revoke_restoring_writer(f.clone()).await;
+    abandoned_writer_recovery_is_reputtable_after_reopen(f.clone()).await;
     stale_writer_abort_cannot_clobber_newer_reclamation(f.clone()).await;
     sweep_adoption_race(f.clone()).await;
     sweep_reput_race(f).await;
@@ -500,6 +502,149 @@ async fn sweep_cannot_overwrite_failed_reput_rollback(f: Arc<dyn SessionStoreFac
     );
 }
 
+async fn stale_sweep_release_cannot_revoke_restoring_writer(f: Arc<dyn SessionStoreFactory>) {
+    let namespace = uuid::Uuid::new_v4();
+    let session_id = SessionId::from(format!("stale-sweep-release-{namespace}"));
+    let store = create(&f, &session_id).await;
+    let attachment_id =
+        lash_core::attachments::content_id(format!("stale-sweep-release-{namespace}").as_bytes());
+    assert_eq!(
+        f.condemn_attachment(&attachment_id, 0).await.unwrap(),
+        AttachmentCondemnation::Condemned
+    );
+    let intent = write_intent(&session_id, &attachment_id);
+    let permit = match store
+        .begin_attachment_write(intent.clone())
+        .expect("restoring writer claims Condemned")
+    {
+        AttachmentWriteFence::Granted(permit) => permit,
+        AttachmentWriteFence::ReclamationInFlight => panic!("first restoring writer must win"),
+    };
+
+    // Model an older sweep abandoning the condemnation after the writer won.
+    // Ordinary sweep release has no writer-recovery authority and must be a
+    // no-op against the token-owned phase.
+    f.release_attachment_condemnation(&attachment_id)
+        .await
+        .expect("stale sweep release");
+    assert_eq!(
+        f.arm_attachment_delete(&attachment_id).await.unwrap(),
+        AttachmentDeleteArming::Revoked,
+        "stale sweep release must not make an active writer's Condemned phase armable"
+    );
+    assert!(matches!(
+        store
+            .begin_attachment_write(intent.clone())
+            .expect("same-owner competing write observes the active claim"),
+        AttachmentWriteFence::ReclamationInFlight
+    ));
+
+    store
+        .abort_attachment_write(&intent, permit)
+        .expect("active writer abort restores Condemned");
+    assert_eq!(
+        f.arm_attachment_delete(&attachment_id).await.unwrap(),
+        AttachmentDeleteArming::Armed,
+        "the owning writer, not a stale sweep, settles its token"
+    );
+    f.release_attachment_condemnation(&attachment_id)
+        .await
+        .unwrap();
+}
+
+async fn abandoned_writer_recovery_is_reputtable_after_reopen(f: Arc<dyn SessionStoreFactory>) {
+    for reclaimed in [false, true] {
+        let namespace = uuid::Uuid::new_v4();
+        let session_id = SessionId::from(format!(
+            "abandoned-{}-writer-{namespace}",
+            if reclaimed { "reclaimed" } else { "condemned" }
+        ));
+        let attachment_id = lash_core::attachments::content_id(session_id.as_str().as_bytes());
+        assert_eq!(
+            f.condemn_attachment(&attachment_id, 0).await.unwrap(),
+            AttachmentCondemnation::Condemned
+        );
+        if reclaimed {
+            assert_eq!(
+                f.arm_attachment_delete(&attachment_id).await.unwrap(),
+                AttachmentDeleteArming::Armed
+            );
+            f.reclaim_attachment_condemnation(&attachment_id)
+                .await
+                .unwrap();
+        }
+
+        let intent = write_intent(&session_id, &attachment_id);
+        let crashed_store = create(&f, &session_id).await;
+        let stale_permit = match crashed_store
+            .begin_attachment_write(intent.clone())
+            .expect("writer claims the prior phase")
+        {
+            AttachmentWriteFence::Granted(permit) => permit,
+            AttachmentWriteFence::ReclamationInFlight => panic!("first writer must win"),
+        };
+        assert!(stale_permit.rollback_token().is_some());
+        assert!(matches!(
+            crashed_store
+                .begin_attachment_write(intent.clone())
+                .expect("same-session concurrent write observes the durable claim"),
+            AttachmentWriteFence::ReclamationInFlight
+        ));
+        drop(crashed_store);
+
+        // The host has established quiescence after crash/cancellation. Recovery
+        // reopens the durable authority, clears the token-to-intent association,
+        // and leaves the exact phase available for a fresh re-put.
+        f.recover_abandoned_attachment_write(&attachment_id)
+            .await
+            .expect("recover abandoned restoring writer");
+        let reopened = create(&f, &session_id).await;
+        let fresh_permit = match reopened
+            .begin_attachment_write(intent.clone())
+            .expect("fresh re-put claims the recovered phase")
+        {
+            AttachmentWriteFence::Granted(permit) => permit,
+            AttachmentWriteFence::ReclamationInFlight => {
+                panic!("recovered writer token must not strand the re-put")
+            }
+        };
+        assert!(fresh_permit.rollback_token().is_some());
+
+        reopened
+            .abort_attachment_write(&intent, stale_permit)
+            .expect("stale pre-recovery abort is a no-op");
+        assert!(matches!(
+            reopened
+                .begin_attachment_write(intent.clone())
+                .expect("stale abort cannot revoke the fresh claim"),
+            AttachmentWriteFence::ReclamationInFlight
+        ));
+        reopened
+            .abort_attachment_write(&intent, fresh_permit)
+            .expect("fresh abort restores the recovered phase");
+
+        if reclaimed {
+            let error = reopened
+                .commit_refs(&session_id, std::slice::from_ref(&attachment_id))
+                .expect_err("recovery must preserve Reclaimed");
+            assert!(matches!(
+                error,
+                StoreError::AttachmentBytesReclaimed { ref digest }
+                    if digest == &attachment_id
+            ));
+        } else {
+            assert_eq!(
+                f.arm_attachment_delete(&attachment_id).await.unwrap(),
+                AttachmentDeleteArming::Armed,
+                "recovery must preserve Condemned"
+            );
+            f.release_attachment_condemnation(&attachment_id)
+                .await
+                .unwrap();
+        }
+    }
+}
+
 async fn stale_writer_abort_cannot_clobber_newer_reclamation(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("stale-writer-sweep-{namespace}"));
@@ -523,7 +668,7 @@ async fn stale_writer_abort_cannot_clobber_newer_reclamation(f: Arc<dyn SessionS
 
     // Host recovery makes the first permit stale while preserving its phase.
     // A newer sweep then owns the phase through a completed reclamation.
-    f.release_attachment_condemnation(&attachment_id)
+    f.recover_abandoned_attachment_write(&attachment_id)
         .await
         .unwrap();
     assert_eq!(

@@ -73,7 +73,7 @@ pub enum AttachmentStoreError {
     #[error("attachment store backend failed: {0}")]
     Backend(String),
     #[error(
-        "attachment `{attachment_id}` is being reclaimed or restored: a sweep armed its physical delete, or another writer owns its condemned state, and the state was still held after {attempts} fence attempts. A remote delete or put can outlast the retry window, so retrying the put is the normal response. If no sweep or restoring writer is running, the host may recover abandoned state with `AttachmentRootSet::release_attachment_condemnation`."
+        "attachment `{attachment_id}` is being reclaimed or restored: a sweep armed its physical delete, or another writer owns its condemned state, and the state was still held after {attempts} fence attempts. A remote delete or put can outlast the retry window, so retrying the put is the normal response. If no restoring writer is running, the host may recover an abandoned write with `AttachmentRootSet::recover_abandoned_attachment_write`; a separately abandoned sweep is recovered with `release_attachment_condemnation`."
     )]
     ReclamationInFlight {
         attachment_id: AttachmentId,
@@ -255,7 +255,7 @@ pub trait AttachmentRootSet: Send + Sync {
     /// sweep's unfenced path, which cannot exclude a concurrent writer from the
     /// query/delete window. See [`reclaim_unreferenced_attachments`].
     ///
-    /// # Answering `Fenced` is a six-method claim, across two traits
+    /// # Answering `Fenced` is a nine-method claim, across two traits
     ///
     /// The fence is only real when *all* of the following are implemented
     /// against the same durable store, with each one a single conditional
@@ -276,10 +276,12 @@ pub trait AttachmentRootSet: Send + Sync {
     ///    on the condemnation still being held.
     /// 5. [`Self::reclaim_attachment_condemnation`] — `Deleting -> Reclaimed`
     ///    after the physical delete succeeds.
-    /// 6. [`Self::release_attachment_condemnation`] — an abandoned `Condemned`
-    ///    or `Deleting` transition back to `Free`, or clears an abandoned write
-    ///    token while preserving its `Condemned`/`Reclaimed` phase.
-    /// 7. This method, answering [`AttachmentGcFence::Fenced`].
+    /// 6. [`Self::release_attachment_condemnation`] — an un-tokened abandoned
+    ///    `Condemned` or `Deleting` sweep transition back to `Free`.
+    /// 7. [`Self::recover_abandoned_attachment_write`] — a host-authorized,
+    ///    quiescent recovery that clears one restoring writer's token and intent
+    ///    while preserving its `Condemned`/`Reclaimed` phase.
+    /// 8. This method, answering [`AttachmentGcFence::Fenced`].
     ///
     /// A partial implementation is worse than none: it silences the sweep's
     /// best-effort warning while keeping the loss. As a backstop the sweep
@@ -347,23 +349,42 @@ pub trait AttachmentRootSet: Send + Sync {
         })
     }
 
-    /// Release an abandoned `Condemned` or `Deleting` digest back to `Free`.
+    /// Release an abandoned sweep's `Condemned` or `Deleting` digest to `Free`.
     ///
     /// The sweep calls this on every path where it abandons a digest it had
-    /// condemned, including a failed physical delete. It is also the host-owned
-    /// recovery lever (ADR 0014) for a condemnation left behind by a sweeper
-    /// that died before completing the physical delete: the host asserts that
-    /// no sweep is running and clears the digest, unblocking writers. A
-    /// `Reclaimed` without a write token records that the bytes are absent and
-    /// is never released. Host recovery may clear an abandoned writer's token
-    /// while preserving its exact phase; it must first assert that no sweep or
-    /// restoring writer is running. A fresh
-    /// [`AttachmentManifest::begin_attachment_write`] then claims the phase and
-    /// clears it only after its backend put succeeds. lash never expires a
-    /// condemnation on its own — there is no clock in this protocol.
+    /// condemned, including a failed physical delete. It conditionally removes
+    /// only an un-tokened `Condemned` or `Deleting` row. A stale sweep therefore
+    /// cannot revoke an active restoring writer, and `Reclaimed` is never
+    /// released. Hosts use the same operation after establishing that a sweeper
+    /// died before completing the physical delete.
     async fn release_attachment_condemnation(&self, id: &AttachmentId) -> Result<(), StoreError> {
         let _ = id;
         Ok(())
+    }
+
+    /// Recover one abandoned restoring write without a timer or stale-writer race.
+    ///
+    /// This is an explicit host-policy lever under ADR 0014, separate from
+    /// [`Self::release_attachment_condemnation`] so ordinary sweep cleanup cannot
+    /// clear a live writer's token. Before calling it, the host MUST establish
+    /// that no restoring writer for this digest is running. The operation clears
+    /// the token and precisely associated uncommitted manifest intent in one
+    /// mutation while preserving the exact `Condemned` or `Reclaimed` phase. A
+    /// fresh [`AttachmentManifest::begin_attachment_write`] can then claim that
+    /// phase and re-put the bytes; stale completion or abort from the recovered
+    /// attempt is a no-op. There is no TTL and no elapsed-time authority.
+    ///
+    /// Fenced authorities must override this method in the same durable store as
+    /// the writer half. The default fails loudly so a host never mistakes an
+    /// unimplemented recovery path for success.
+    async fn recover_abandoned_attachment_write(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<(), StoreError> {
+        let _ = id;
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "AttachmentRootSet::recover_abandoned_attachment_write",
+        })
     }
 
     /// Record that an armed physical delete succeeded: `Deleting -> Reclaimed`.

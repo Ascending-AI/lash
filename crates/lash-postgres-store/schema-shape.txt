@@ -28,6 +28,7 @@ version 84
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null
+  column write_session_id text nullable
   column write_token text nullable
   primary-key (attachment_id)
 table lash_attachment_manifest

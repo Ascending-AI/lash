@@ -300,6 +300,8 @@ CREATE TABLE IF NOT EXISTS lash_attachment_condemnations (
     attachment_id TEXT PRIMARY KEY,
     phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed')),
     write_token TEXT,
+    write_session_id TEXT,
+    CHECK ((write_token IS NULL) = (write_session_id IS NULL)),
     CHECK (write_token IS NULL OR phase IN ('condemned', 'reclaimed'))
 );
 

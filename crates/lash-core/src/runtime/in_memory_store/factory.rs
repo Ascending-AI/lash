@@ -803,7 +803,7 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         }
         condemnations.insert(
             id.clone(),
-            super::AttachmentCondemnationPhase::Condemned { write_token: None },
+            super::AttachmentCondemnationPhase::Condemned { write_claim: None },
         );
         Ok(crate::AttachmentCondemnation::Condemned)
     }
@@ -823,9 +823,9 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             | Some(super::AttachmentCondemnationPhase::Deleting)
             | Some(super::AttachmentCondemnationPhase::Reclaimed { .. })
             | Some(super::AttachmentCondemnationPhase::Condemned {
-                write_token: Some(_),
+                write_claim: Some(_),
             }) => Ok(crate::AttachmentDeleteArming::Revoked),
-            Some(super::AttachmentCondemnationPhase::Condemned { write_token: None }) => {
+            Some(super::AttachmentCondemnationPhase::Condemned { write_claim: None }) => {
                 condemnations.insert(id.clone(), super::AttachmentCondemnationPhase::Deleting);
                 Ok(crate::AttachmentDeleteArming::Armed)
             }
@@ -841,28 +841,45 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         if matches!(
             condemnations.get(id),
             Some(
-                super::AttachmentCondemnationPhase::Condemned { write_token: None }
+                super::AttachmentCondemnationPhase::Condemned { write_claim: None }
                     | super::AttachmentCondemnationPhase::Deleting
             )
         ) {
             condemnations.remove(id);
-        } else if let Some(
-            super::AttachmentCondemnationPhase::Condemned {
-                write_token: Some(_),
-            }
-            | super::AttachmentCondemnationPhase::Reclaimed {
-                write_token: Some(_),
-            },
-        ) = condemnations.get(id).copied()
-        {
-            let phase = match condemnations.get(id) {
-                Some(super::AttachmentCondemnationPhase::Condemned { .. }) => {
-                    super::AttachmentCondemnationPhase::Condemned { write_token: None }
-                }
-                _ => super::AttachmentCondemnationPhase::Reclaimed { write_token: None },
-            };
-            condemnations.insert(id.clone(), phase);
         }
+        Ok(())
+    }
+
+    async fn recover_abandoned_attachment_write(
+        &self,
+        id: &crate::AttachmentId,
+    ) -> Result<(), crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        let mut condemnations = self.attachment_condemnations.lock_recover();
+        let (session_id, recovered) = match condemnations.get(id).cloned() {
+            Some(super::AttachmentCondemnationPhase::Condemned {
+                write_claim: Some(claim),
+            }) => (
+                claim.session_id,
+                super::AttachmentCondemnationPhase::Condemned { write_claim: None },
+            ),
+            Some(super::AttachmentCondemnationPhase::Reclaimed {
+                write_claim: Some(claim),
+            }) => (
+                claim.session_id,
+                super::AttachmentCondemnationPhase::Reclaimed { write_claim: None },
+            ),
+            _ => return Ok(()),
+        };
+        let key = (session_id, id.clone());
+        let mut manifest = self.attachment_manifest.lock_recover();
+        if manifest
+            .get(&key)
+            .is_some_and(|entry| entry.committed_at_epoch_ms.is_none())
+        {
+            manifest.remove(&key);
+        }
+        condemnations.insert(id.clone(), recovered);
         Ok(())
     }
 
@@ -878,7 +895,7 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         ) {
             condemnations.insert(
                 id.clone(),
-                super::AttachmentCondemnationPhase::Reclaimed { write_token: None },
+                super::AttachmentCondemnationPhase::Reclaimed { write_claim: None },
             );
         }
         Ok(())
