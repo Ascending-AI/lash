@@ -194,10 +194,12 @@ not in the session usage ledger or `TurnReport` usage.
 [deterministic full-host companion](../../runbooks/slack-clone-deterministic/runbook.md)
 for the exact four-tool, four-layer CI contract.
 
-`lash-plugin-mcp` prefixes imported tools as `mcp__<server>__<tool>`. Ordinary
-native names therefore do not collide. If a host deliberately registers the exact
-same fully prefixed name, Lash rejects the catalog update as a duplicate instead
-of shadowing either implementation.
+`lash-plugin-mcp` imports each tool as a bounded
+`mcp__<server>__<tool>_<identity-digest>` name. The digest is derived from the
+complete raw server/tool identity, so normalized native names remain distinct
+and surviving names do not depend on catalog order. If two identities ever
+produce the same final name, Lash rejects the catalog update instead of
+shadowing either implementation.
 
 The stdio child is demonstration wiring, not a deployment prescription — a real
 deployment more often reaches a separately operated endpoint over

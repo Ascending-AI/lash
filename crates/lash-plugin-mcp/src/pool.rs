@@ -80,10 +80,10 @@ fn entry_shutdown_total_bound(policy: &McpShutdownPolicy) -> Duration {
 /// any killed stdio child unreaped.
 pub struct McpConnectionPool {
     entries: RwLock<BTreeMap<String, Arc<McpEntry>>>,
-    /// Derived uniqueness index for the currently published model names. It
-    /// assigns nothing: names are pure ToolId projections, and collisions are
-    /// refused before an entry's catalog is replaced.
-    published_tool_names: Arc<Mutex<BTreeMap<String, PublishedToolIdentity>>>,
+    /// Current entry incarnations and their derived model-name uniqueness
+    /// index. This assigns no names; it fences publication to entries that are
+    /// still installed in the pool.
+    publication_state: Arc<Mutex<PublicationState>>,
     host_services: McpHostServices,
     shut_down: AtomicBool,
     #[cfg(test)]
@@ -112,7 +112,8 @@ pub struct McpServerStatus {
 }
 
 struct McpEntry {
-    published_tool_names: Arc<Mutex<BTreeMap<String, PublishedToolIdentity>>>,
+    publication_state: Arc<Mutex<PublicationState>>,
+    publication_incarnation: Arc<()>,
     server_name: String,
     config: McpServerConfig,
     host_services: McpHostServices,
@@ -186,8 +187,14 @@ struct ImportedTool {
 
 #[derive(Clone)]
 struct PublishedToolIdentity {
-    server_name: String,
     tool_id: ToolId,
+    entry_incarnation: Arc<()>,
+}
+
+#[derive(Default)]
+struct PublicationState {
+    current_entries: BTreeMap<String, Arc<()>>,
+    tool_names: BTreeMap<String, PublishedToolIdentity>,
 }
 
 #[derive(Clone)]
@@ -206,7 +213,7 @@ impl McpConnectionPool {
     pub(crate) fn empty_with_host_services(host_services: McpHostServices) -> Self {
         Self {
             entries: RwLock::new(BTreeMap::new()),
-            published_tool_names: Arc::new(Mutex::new(BTreeMap::new())),
+            publication_state: Arc::new(Mutex::new(PublicationState::default())),
             host_services,
             shut_down: AtomicBool::new(false),
             #[cfg(test)]
@@ -242,8 +249,8 @@ impl McpConnectionPool {
         let mut entries = Vec::with_capacity(servers.len());
         for (name, config) in servers {
             config.validate(&name)?;
-            let entry = McpEntry::new_with_name_index(
-                Arc::clone(&pool.published_tool_names),
+            let entry = McpEntry::new_with_publication_state(
+                Arc::clone(&pool.publication_state),
                 name.clone(),
                 config,
                 pool.host_services.clone(),
@@ -282,8 +289,8 @@ impl McpConnectionPool {
         }
         config.validate(&server_name)?;
         self.validate_server_prefix_available(&server_name)?;
-        let entry = McpEntry::new_with_name_index(
-            Arc::clone(&self.published_tool_names),
+        let entry = McpEntry::new_with_publication_state(
+            Arc::clone(&self.publication_state),
             server_name.clone(),
             config,
             self.host_services.clone(),
@@ -328,10 +335,13 @@ impl McpConnectionPool {
     pub async fn detach(self: &Arc<Self>, server_name: &str) -> Result<(), McpError> {
         let removed = {
             let mut entries = self.entries.write_recover();
-            entries.remove(server_name)
+            let removed = entries.remove(server_name);
+            if let Some(entry) = &removed {
+                self.retire_publication(entry);
+            }
+            removed
         };
         if let Some(entry) = removed {
-            self.remove_published_names(server_name);
             entry.shutdown().await;
         }
         Ok(())
@@ -364,18 +374,37 @@ impl McpConnectionPool {
                     )),
                 ));
             }
-            entries.insert(server_name, entry)
+            let previous = entries.insert(server_name.clone(), Arc::clone(&entry));
+            let mut publication = self.publication_state.lock_recover();
+            if let Some(previous) = &previous {
+                publication.tool_names.retain(|_, identity| {
+                    !Arc::ptr_eq(
+                        &identity.entry_incarnation,
+                        &previous.publication_incarnation,
+                    )
+                });
+            }
+            publication
+                .current_entries
+                .insert(server_name, Arc::clone(&entry.publication_incarnation));
+            previous
         };
-        if let Some(previous) = &previous {
-            self.remove_published_names(&previous.server_name);
-        }
         Ok(previous)
     }
 
-    fn remove_published_names(&self, server_name: &str) {
-        self.published_tool_names
-            .lock_recover()
-            .retain(|_, identity| identity.server_name != server_name);
+    fn retire_publication(&self, entry: &McpEntry) {
+        let mut publication = self.publication_state.lock_recover();
+        let is_current = publication
+            .current_entries
+            .get(&entry.server_name)
+            .is_some_and(|incarnation| Arc::ptr_eq(incarnation, &entry.publication_incarnation));
+        if !is_current {
+            return;
+        }
+        publication.current_entries.remove(&entry.server_name);
+        publication.tool_names.retain(|_, identity| {
+            !Arc::ptr_eq(&identity.entry_incarnation, &entry.publication_incarnation)
+        });
     }
 
     fn validate_server_prefix_available(&self, server_name: &str) -> Result<(), McpError> {
@@ -499,6 +528,9 @@ impl McpConnectionPool {
         args: &Value,
         context: &AttemptContext<'_>,
     ) -> ToolOutcome {
+        if self.shut_down.load(Ordering::SeqCst) {
+            return pool_shut_down_failure();
+        }
         let Some(target) = self.lookup_by_name(prefixed_name) else {
             return ToolOutcome::err_fmt(format!("Unknown MCP tool: {prefixed_name}"));
         };
@@ -513,6 +545,9 @@ impl McpConnectionPool {
         args: &Value,
         context: &AttemptContext<'_>,
     ) -> ToolOutcome {
+        if self.shut_down.load(Ordering::SeqCst) {
+            return pool_shut_down_failure();
+        }
         let Some(target) = self.lookup_by_id(tool_id) else {
             return ToolOutcome::err_fmt(format!("Unknown MCP tool id: {tool_id}"));
         };
@@ -768,7 +803,11 @@ impl McpConnectionPool {
         }
         let entries: Vec<Arc<McpEntry>> = {
             let mut guard = self.entries.write_recover();
-            std::mem::take(&mut *guard).into_values().collect()
+            let entries: Vec<_> = std::mem::take(&mut *guard).into_values().collect();
+            let mut publication = self.publication_state.lock_recover();
+            publication.current_entries.clear();
+            publication.tool_names.clear();
+            entries
         };
         join_all(entries.iter().map(|entry| entry.shutdown())).await;
     }
@@ -853,16 +892,22 @@ impl McpEntry {
         config: McpServerConfig,
         host_services: McpHostServices,
     ) -> Arc<Self> {
-        Self::new_with_name_index(
-            Arc::new(Mutex::new(BTreeMap::new())),
+        let publication_state = Arc::new(Mutex::new(PublicationState::default()));
+        let entry = Self::new_with_publication_state(
+            Arc::clone(&publication_state),
             server_name,
             config,
             host_services,
-        )
+        );
+        publication_state.lock_recover().current_entries.insert(
+            entry.server_name.clone(),
+            Arc::clone(&entry.publication_incarnation),
+        );
+        entry
     }
 
-    fn new_with_name_index(
-        published_tool_names: Arc<Mutex<BTreeMap<String, PublishedToolIdentity>>>,
+    fn new_with_publication_state(
+        publication_state: Arc<Mutex<PublicationState>>,
         server_name: String,
         config: McpServerConfig,
         host_services: McpHostServices,
@@ -885,7 +930,8 @@ impl McpEntry {
             );
             let actor_handle = tokio::spawn(actor.run());
             Self {
-                published_tool_names,
+                publication_state,
+                publication_incarnation: Arc::new(()),
                 server_name,
                 config,
                 host_services,
@@ -924,10 +970,20 @@ impl McpEntry {
         &self,
         imported: BTreeMap<String, ImportedTool>,
     ) -> Result<(), McpError> {
-        let mut names = self.published_tool_names.lock_recover();
+        let mut publication = self.publication_state.lock_recover();
+        let is_current = publication
+            .current_entries
+            .get(&self.server_name)
+            .is_some_and(|incarnation| Arc::ptr_eq(incarnation, &self.publication_incarnation));
+        if !is_current {
+            return Err(McpError::Protocol(format!(
+                "MCP server entry `{}` is no longer installed; refusing stale tool publication",
+                self.server_name
+            )));
+        }
         for (name, tool) in &imported {
-            if let Some(existing) = names.get(name)
-                && existing.server_name != self.server_name
+            if let Some(existing) = publication.tool_names.get(name)
+                && !Arc::ptr_eq(&existing.entry_incarnation, &self.publication_incarnation)
             {
                 return Err(McpError::Config(format!(
                     "MCP model-facing name collision for `{name}` between tool ids `{}` and `{}`",
@@ -936,16 +992,20 @@ impl McpEntry {
             }
         }
 
-        names.retain(|_, identity| identity.server_name != self.server_name);
-        names.extend(imported.iter().map(|(name, tool)| {
-            (
-                name.clone(),
-                PublishedToolIdentity {
-                    server_name: self.server_name.clone(),
-                    tool_id: tool.definition.manifest.id.clone(),
-                },
-            )
-        }));
+        publication.tool_names.retain(|_, identity| {
+            !Arc::ptr_eq(&identity.entry_incarnation, &self.publication_incarnation)
+        });
+        publication
+            .tool_names
+            .extend(imported.iter().map(|(name, tool)| {
+                (
+                    name.clone(),
+                    PublishedToolIdentity {
+                        tool_id: tool.definition.manifest.id.clone(),
+                        entry_incarnation: Arc::clone(&self.publication_incarnation),
+                    },
+                )
+            }));
         *self.imported_tools.write_recover() = imported;
         Ok(())
     }

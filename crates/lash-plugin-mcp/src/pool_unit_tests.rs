@@ -34,14 +34,14 @@ fn import_refuses_a_forced_final_name_collision_without_overwriting() {
 #[tokio::test]
 async fn publication_refuses_a_forced_cross_server_collision_atomically() {
     let pool = Arc::new(McpConnectionPool::empty());
-    let first = McpEntry::new_with_name_index(
-        Arc::clone(&pool.published_tool_names),
+    let first = McpEntry::new_with_publication_state(
+        Arc::clone(&pool.publication_state),
         "abcdefghijklmno-one".to_string(),
         McpServerConfig::stdio("sh", Vec::new()),
         McpHostServices::default(),
     );
-    let second = McpEntry::new_with_name_index(
-        Arc::clone(&pool.published_tool_names),
+    let second = McpEntry::new_with_publication_state(
+        Arc::clone(&pool.publication_state),
         "abcdefghijklmno-two".to_string(),
         McpServerConfig::stdio("sh", Vec::new()),
         McpHostServices::default(),
@@ -82,8 +82,83 @@ async fn publication_refuses_a_forced_cross_server_collision_atomically() {
             .id
     );
     assert!(second.imported_tools.read_recover().is_empty());
-    assert_eq!(pool.published_tool_names.lock_recover().len(), 1);
+    assert_eq!(pool.publication_state.lock_recover().tool_names.len(), 1);
 
+    pool.shutdown_all().await;
+}
+
+#[tokio::test]
+async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() {
+    let pool = Arc::new(McpConnectionPool::empty());
+    let server_name = "abcdefghijklmno-one";
+    let forced_catalog = |server: &str, tool: &str| {
+        import_tools_with_name_builder(server, vec![advertised_tool(tool)], |server, tool| {
+            naming::build_prefixed_name_with_digest(server, tool, [9; 16])
+        })
+        .expect("one-tool forced catalog")
+    };
+    let old = McpEntry::new_with_publication_state(
+        Arc::clone(&pool.publication_state),
+        server_name.to_string(),
+        McpServerConfig::stdio("sh", Vec::new()),
+        McpHostServices::default(),
+    );
+    pool.install(old.server_name.clone(), Arc::clone(&old))
+        .unwrap_or_else(|(_, error)| panic!("install old entry: {error}"));
+    old.replace_imported_tools(forced_catalog(server_name, "abcdefghijklmnop"))
+        .expect("old entry publishes while current");
+
+    let replacement = McpEntry::new_with_publication_state(
+        Arc::clone(&pool.publication_state),
+        server_name.to_string(),
+        McpServerConfig::stdio("sh", Vec::new()),
+        McpHostServices::default(),
+    );
+    let removed = pool
+        .install(replacement.server_name.clone(), Arc::clone(&replacement))
+        .unwrap_or_else(|(_, error)| panic!("install replacement entry: {error}"))
+        .expect("old entry replaced");
+    replacement
+        .replace_imported_tools(forced_catalog(server_name, "abcdefghijklmnop"))
+        .expect("replacement entry publishes");
+
+    pool.retire_publication(&removed);
+    let advertised = pool.advertised_tools();
+    assert_eq!(advertised.len(), 1);
+    assert_eq!(
+        advertised[0].manifest.id.as_str(),
+        "mcp:19:abcdefghijklmno-one/16:abcdefghijklmnop"
+    );
+
+    let stale_error = old
+        .replace_imported_tools(forced_catalog(server_name, "different-native"))
+        .expect_err("removed actor must not republish a ghost catalog");
+    assert!(
+        stale_error.to_string().contains("stale tool publication"),
+        "{stale_error}"
+    );
+
+    let contender = McpEntry::new_with_publication_state(
+        Arc::clone(&pool.publication_state),
+        "abcdefghijklmno-two".to_string(),
+        McpServerConfig::stdio("sh", Vec::new()),
+        McpHostServices::default(),
+    );
+    pool.install(contender.server_name.clone(), Arc::clone(&contender))
+        .unwrap_or_else(|(_, error)| panic!("install contender entry: {error}"));
+    let collision = contender
+        .replace_imported_tools(forced_catalog(&contender.server_name, "abcdefghijklmnop"))
+        .expect_err("replacement reservation must refuse a forced collision");
+    assert!(
+        collision
+            .to_string()
+            .contains("model-facing name collision"),
+        "{collision}"
+    );
+    assert_eq!(pool.advertised_tools().len(), 1);
+    assert_eq!(pool.publication_state.lock_recover().tool_names.len(), 1);
+
+    removed.shutdown().await;
     pool.shutdown_all().await;
 }
 
@@ -233,6 +308,23 @@ async fn connect_tolerates_unreachable_server() {
         .expect("post-shutdown call must complete with a failure");
     let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
         panic!("post-shutdown call must be a structured failure: {output:?}");
+    };
+    assert_eq!(failure.class, ToolFailureClass::Unavailable);
+    assert_eq!(failure.code, "mcp_pool_shut_down");
+    assert_eq!(failure.retry, ToolRetryStatus::Never);
+
+    let result = pool
+        .call_tool_by_id(
+            &ToolId::from("mcp:4:down/8:anything"),
+            &json!({}),
+            &lash_core::testing::mock_attempt_context(),
+        )
+        .await;
+    let output = result
+        .as_done_output()
+        .expect("post-shutdown by-id call must complete with a failure");
+    let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+        panic!("post-shutdown by-id call must be a structured failure: {output:?}");
     };
     assert_eq!(failure.class, ToolFailureClass::Unavailable);
     assert_eq!(failure.code, "mcp_pool_shut_down");
