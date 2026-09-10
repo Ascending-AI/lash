@@ -6,15 +6,15 @@ use std::sync::Arc;
 fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
     let factory = crate::RlmProtocolPluginFactory::new(
         crate::RlmProtocolPluginConfig::builder()
-            .instruction_limit(crate::InstructionBound::instructions(1000))
-            .wall_clock(crate::WallClockBound::secs(1))
-            .memory_limit(crate::MemoryBound::mebibytes(1))
-            .build()
-            .with_channel(if native {
+            .channel(if native {
                 crate::RlmChannel::NativeTool
             } else {
                 crate::RlmChannel::Cell
-            }),
+            })
+            .instruction_limit(crate::InstructionBound::instructions(1000))
+            .wall_clock(crate::WallClockBound::secs(1))
+            .memory_limit(crate::MemoryBound::mebibytes(1))
+            .build(),
         lashlang::global_in_memory_lashlang_artifact_store(),
     )
     .with_process_lifecycle(false);
@@ -368,11 +368,11 @@ fn native_reasoning_only_is_provider_error() {
 async fn factory_selects_native_abi_and_completed_cell_events() {
     let factory = crate::RlmProtocolPluginFactory::new(
         crate::RlmProtocolPluginConfig::builder()
+            .channel(crate::RlmChannel::NativeTool)
             .instruction_limit(crate::InstructionBound::instructions(1000))
             .wall_clock(crate::WallClockBound::secs(1))
             .memory_limit(crate::MemoryBound::mebibytes(1))
-            .build()
-            .with_channel(crate::RlmChannel::NativeTool),
+            .build(),
         lashlang::global_in_memory_lashlang_artifact_store(),
     )
     .with_process_lifecycle(false);

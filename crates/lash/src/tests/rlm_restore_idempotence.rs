@@ -204,6 +204,7 @@ fn plugin_host_with_plugins(extra_plugins: &[Arc<dyn PluginFactory>]) -> PluginH
     let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(
         RlmProtocolPluginFactory::new(
             RlmProtocolPluginConfig::builder()
+                .channel(crate::rlm::RlmChannel::Cell)
                 .instruction_limit(InstructionBound::instructions(1_000_000))
                 .wall_clock(WallClockBound::secs(30))
                 .memory_limit(MemoryBound::mebibytes(64))
@@ -1096,6 +1097,7 @@ async fn storeless_runtime(
     let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(
         RlmProtocolPluginFactory::new(
             RlmProtocolPluginConfig::builder()
+                .channel(crate::rlm::RlmChannel::Cell)
                 .instruction_limit(InstructionBound::instructions(1_000_000))
                 .wall_clock(WallClockBound::secs(30))
                 .memory_limit(MemoryBound::mebibytes(64))

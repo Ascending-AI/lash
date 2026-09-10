@@ -250,11 +250,11 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
 
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
+            .channel(rlm_channel)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .wall_clock(lash::rlm::WallClockBound::secs(30))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
-            .with_channel(rlm_channel)
             .with_lashlang_abilities(workbench_lashlang_abilities()),
         Arc::clone(&artifact_store),
     )

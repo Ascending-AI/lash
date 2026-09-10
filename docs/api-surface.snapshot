@@ -7624,12 +7624,12 @@ lash::rlm::RlmProtocolPluginConfig::max_output_chars
 lash::rlm::RlmProtocolPluginConfig::memory_limit
 lash::rlm::RlmProtocolPluginConfig::prompt_features
 lash::rlm::RlmProtocolPluginConfig::wall_clock
-lash::rlm::RlmProtocolPluginConfig::with_channel
 lash::rlm::RlmProtocolPluginConfig::with_discovery
 lash::rlm::RlmProtocolPluginConfig::with_lashlang_abilities
 lash::rlm::RlmProtocolPluginConfig::with_lashlang_language_features
 lash::rlm::RlmProtocolPluginConfigBuilder
 lash::rlm::RlmProtocolPluginConfigBuilder::build
+lash::rlm::RlmProtocolPluginConfigBuilder::channel
 lash::rlm::RlmProtocolPluginConfigBuilder::instruction_limit
 lash::rlm::RlmProtocolPluginConfigBuilder::memory_limit
 lash::rlm::RlmProtocolPluginConfigBuilder::wall_clock

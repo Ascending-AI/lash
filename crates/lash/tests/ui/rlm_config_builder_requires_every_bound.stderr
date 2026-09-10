@@ -1,13 +1,14 @@
-error[E0599]: no method named `build` found for struct `RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound>` in the current scope
- --> tests/ui/rlm_config_builder_requires_every_bound.rs:7:10
+error[E0599]: no method named `build` found for struct `RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound, UnsetBound, RlmChannel>` in the current scope
+ --> tests/ui/rlm_config_builder_requires_every_bound.rs:8:10
   |
 4 |       let _config = lash::rlm::RlmProtocolPluginConfig::builder()
   |  ___________________-
-5 | |         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-6 | |         .wall_clock(lash::rlm::WallClockBound::secs(30))
-7 | |         .build();
-  | |         -^^^^^ method not found in `RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound>`
+5 | |         .channel(lash::rlm::RlmChannel::Cell)
+6 | |         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+7 | |         .wall_clock(lash::rlm::WallClockBound::secs(30))
+8 | |         .build();
+  | |         -^^^^^ method not found in `RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound, UnsetBound, RlmChannel>`
   | |_________|
   |
   |
-  = note: the method was found for `RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound, MemoryBound>`
+  = note: the method was found for `RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound, MemoryBound, RlmChannel>`

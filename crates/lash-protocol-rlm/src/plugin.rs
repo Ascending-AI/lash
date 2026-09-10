@@ -11,7 +11,9 @@ mod registration;
 pub(crate) mod runtime_state;
 pub(crate) mod tool_args;
 
-pub use config::{RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, UnsetBound};
+pub use config::{
+    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, UnsetBound, UnsetChannel,
+};
 pub use config_types::{
     ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLanguageFeatures,
     WallClockBound,

@@ -101,6 +101,7 @@ impl ProductionToolCell {
         let rlm_plugin: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
             lash_protocol_rlm::RlmProtocolPluginFactory::new(
                 lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                    .channel(lash_protocol_rlm::RlmChannel::Cell)
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))

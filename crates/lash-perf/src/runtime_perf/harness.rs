@@ -690,6 +690,7 @@ pub(crate) fn build_embed_core(
         RuntimePerfScenario::EmbedRlm => {
             let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
                 lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                    .channel(lash_protocol_rlm::RlmChannel::Cell)
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
@@ -875,6 +876,7 @@ pub(crate) async fn build_runtime_with_store(
         ExecutionMode::Rlm => {
             let mut factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
                 lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                    .channel(lash_protocol_rlm::RlmChannel::Cell)
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
@@ -1318,6 +1320,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
             );
             let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
                 lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                    .channel(lash_protocol_rlm::RlmChannel::Cell)
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
@@ -1434,6 +1437,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
         ExecutionMode::Rlm => {
             let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
                 lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                    .channel(lash_protocol_rlm::RlmChannel::Cell)
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))

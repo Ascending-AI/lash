@@ -449,6 +449,7 @@ mod label_annotation_tests {
 
     fn base_config() -> RlmProtocolPluginConfig {
         RlmProtocolPluginConfig::builder()
+            .channel(crate::RlmChannel::Cell)
             .instruction_limit(InstructionBound::instructions(1_000_000))
             .wall_clock(WallClockBound::secs(30))
             .memory_limit(MemoryBound::mebibytes(64))
@@ -519,6 +520,7 @@ mod label_annotation_tests {
     #[test]
     fn serde_config_without_language_features_keeps_the_default() {
         let config: RlmProtocolPluginConfig = serde_json::from_value(serde_json::json!({
+            "channel": "cell",
             "instruction_limit": { "bounded": 1_000_000 },
             "wall_clock": { "bounded": 30_000 },
             "memory_limit": { "bounded": 67_108_864 }
@@ -527,6 +529,7 @@ mod label_annotation_tests {
         assert!(config.lashlang_language_features.label_annotations);
 
         let config: RlmProtocolPluginConfig = serde_json::from_value(serde_json::json!({
+            "channel": "cell",
             "instruction_limit": { "bounded": 1_000_000 },
             "wall_clock": { "bounded": 30_000 },
             "memory_limit": { "bounded": 67_108_864 },

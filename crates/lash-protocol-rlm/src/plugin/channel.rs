@@ -2,11 +2,10 @@ use lash_core::plugin::PluginSessionMaterialization;
 use lash_core::{PluginError, ProtocolTurnOptions};
 
 /// Session-pinned transport for RLM programs; both channels use the same engine.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RlmChannel {
     /// Programs appear in paired dialect cells.
-    #[default]
     Cell,
     /// Programs appear in the provider's execute_code tool call.
     NativeTool,
@@ -74,6 +73,14 @@ pub(super) fn validate_channel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn from_str_accepts_all_channel_spellings() {
+        assert_eq!("cell".parse(), Ok(RlmChannel::Cell));
+        assert_eq!("native".parse(), Ok(RlmChannel::NativeTool));
+        assert_eq!("native_tool".parse(), Ok(RlmChannel::NativeTool));
+    }
+
     #[test]
     fn recorded_channel_refuses_substitution_and_missing_pin() {
         for channel in [RlmChannel::Cell, RlmChannel::NativeTool] {
