@@ -9,6 +9,8 @@ mod mail;
 mod restate;
 mod restate_ingress;
 mod ui;
+#[cfg(feature = "provider-wire-fixtures")]
+mod valid_empty_completion;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::SocketAddr;

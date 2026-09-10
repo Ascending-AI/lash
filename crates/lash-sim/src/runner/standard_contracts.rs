@@ -4,7 +4,7 @@ pub(super) fn standard_protocol_contract_executions() -> Result<Vec<Value>, Fixe
 {
     Ok(vec![
         standard_initial_request_projection_execution()?,
-        standard_empty_provider_response_error_execution()?,
+        standard_empty_response_finishes_execution()?,
         standard_provider_error_without_checkpoint_execution()?,
         standard_native_tool_loop_reenters_model_execution()?,
         standard_parallel_tool_results_checkpoint_once_execution()?,
@@ -29,20 +29,23 @@ fn standard_initial_request_projection_execution() -> Result<Value, FixedScriptR
     )
 }
 
-fn standard_empty_provider_response_error_execution() -> Result<Value, FixedScriptRunnerError> {
+fn standard_empty_response_finishes_execution() -> Result<Value, FixedScriptRunnerError> {
     let result = run_standard_protocol_contract(
-        "standard empty provider response error",
+        "standard empty provider response finishes",
         "answer with something",
         None,
-        vec![StandardContractStep::Llm {
-            text_streamed: false,
-            parts: vec![],
-        }],
+        vec![
+            StandardContractStep::Llm {
+                text_streamed: false,
+                parts: vec![],
+            },
+            StandardContractStep::Checkpoint,
+        ],
     )?;
     contract_execution_payload(
-        "standard.empty_provider_response_error",
+        "standard.empty_response_finishes",
         "crates/lash-protocol-standard/tests/protocol_scenarios.rs",
-        "standard_protocol_scenario_empty_model_response_stops_provider_error",
+        "standard_protocol_scenario_empty_model_response_finishes_after_checkpoint",
         result,
     )
 }

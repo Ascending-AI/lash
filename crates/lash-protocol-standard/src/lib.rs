@@ -25,10 +25,12 @@ use lash_core::sansio::{
     CheckpointResumeAction, CompletedToolCall, PendingToolCall, ProtocolDriverHandle,
     WaitingExecState, WaitingLlmState,
 };
+#[cfg(test)]
+use lash_core::session_model::PartKind;
 use lash_core::session_model::message::PartAttachment;
 use lash_core::session_model::{
-    ConversationRecord, Message, MessageRole, Part, PartKind, SessionHistoryRecord,
-    SessionStreamEvent, make_error_event, reassign_part_ids, shared_parts,
+    ConversationRecord, Message, MessageRole, Part, SessionHistoryRecord, SessionStreamEvent,
+    reassign_part_ids, shared_parts,
 };
 
 mod batch;
@@ -517,16 +519,6 @@ fn reassemble_standard_response(
     (message_parts, calls)
 }
 
-fn last_message_has_tool_result(ctx: &DriverContextView<'_>) -> bool {
-    ctx.messages().last().is_some_and(|message| {
-        matches!(message.role, MessageRole::User)
-            && message
-                .parts
-                .iter()
-                .any(|part| matches!(part.kind, PartKind::ToolResult))
-    })
-}
-
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::StartLlm {
@@ -569,33 +561,16 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         let (assistant_parts, calls) = reassemble_standard_response(&asst_id, response.parts);
 
         if !has_tool_calls {
-            if assistant_parts.is_empty() {
-                if last_message_has_tool_result(&ctx) {
-                    // A model can intentionally complete a tool-only request
-                    // with an empty final answer, e.g. when the user says
-                    // "do nothing else" after the tool action.
-                    actions.push(DriverAction::StartCheckpoint {
-                        checkpoint: CheckpointKind::BeforeCompletion,
-                        on_empty: CheckpointResumeAction::Finish(TurnOutcome::Finished(
-                            TurnFinish::AssistantMessage {
-                                text: String::new(),
-                            },
-                        )),
-                    });
-                    return actions;
-                }
-                actions.extend(empty_response_actions());
-                return actions;
+            if !assistant_parts.is_empty() {
+                actions.push(DriverAction::AppendEvents(vec![conversation_event(
+                    Message {
+                        id: asst_id,
+                        role: MessageRole::Assistant,
+                        parts: shared_parts(assistant_parts),
+                        origin: None,
+                    },
+                )]));
             }
-
-            actions.push(DriverAction::AppendEvents(vec![conversation_event(
-                Message {
-                    id: asst_id,
-                    role: MessageRole::Assistant,
-                    parts: shared_parts(assistant_parts),
-                    origin: None,
-                },
-            )]));
             actions.push(DriverAction::StartCheckpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
                 on_empty: CheckpointResumeAction::Finish(TurnOutcome::Finished(
@@ -779,18 +754,6 @@ fn append_model_return_parts(
             }
         }
     }
-}
-
-fn empty_response_actions() -> [DriverAction; 2] {
-    [
-        DriverAction::Emit(make_error_event(
-            "llm_provider",
-            Some("empty_response"),
-            "Model returned no assistant text or tool calls.",
-            None,
-        )),
-        DriverAction::Finish(TurnOutcome::Stopped(TurnStop::ProviderError)),
-    ]
 }
 
 fn conversation_event(message: Message) -> SessionHistoryRecord {

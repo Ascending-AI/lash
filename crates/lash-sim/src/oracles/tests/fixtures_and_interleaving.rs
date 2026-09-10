@@ -621,7 +621,7 @@ pub(super) fn replay_contract_execution_fixture(contract: &str) -> serde_json::V
 pub(super) fn contract_execution_fixture_events(start_sequence: usize) -> Vec<DeliveredBoundary> {
     [
         "standard.initial_request_projection",
-        "standard.empty_provider_response_error",
+        "standard.empty_response_finishes",
         "standard.provider_error_without_checkpoint",
         "standard.native_tool_loop_reenters_model",
         "standard.parallel_tool_results_checkpoint_once",

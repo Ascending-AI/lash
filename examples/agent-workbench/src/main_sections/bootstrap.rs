@@ -440,6 +440,17 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/api/lashlang-graphs", get(list_lashlang_graphs))
         .route("/api/lashlang-graph/{graph_key}", get(lashlang_graph))
         .with_state(state);
+    #[cfg(feature = "provider-wire-fixtures")]
+    let app = if dev_provider_scenario
+        == Some(failure_provider::DevProviderScenario::ValidEmptyCompletion)
+    {
+        app.route(
+            "/dev/valid-empty-completion",
+            get(crate::valid_empty_completion::page).post(crate::valid_empty_completion::run),
+        )
+    } else {
+        app
+    };
 
     println!("agent-workbench listening on http://{addr}");
     println!("agent-workbench Restate endpoint listening on http://{restate_endpoint_addr}");

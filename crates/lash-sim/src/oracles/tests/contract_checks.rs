@@ -194,7 +194,7 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
 
     for contract in [
         "standard.initial_request_projection",
-        "standard.empty_provider_response_error",
+        "standard.empty_response_finishes",
         "standard.provider_error_without_checkpoint",
         "standard.native_tool_loop_reenters_model",
         "standard.parallel_tool_results_checkpoint_once",
