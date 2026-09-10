@@ -1,3 +1,4 @@
+use super::function_cases::{assign, call, function, variable};
 use super::*;
 
 #[test]
@@ -1935,4 +1936,329 @@ async fn json_helpers_cover_special_paths() {
     }));
     let record = value.as_record().expect("expected record");
     assert!(matches!(record["a"], Value::List(_)));
+}
+#[test]
+fn existing_execution_site_ids_are_unchanged() {
+    let fixtures = [
+        (
+            r#"
+            @label(title: "Spawn subagent with web search")
+            result = await tools.echo({ value: { ok: true } })?
+            finish result
+            "#,
+            &[
+                "resource_operation:73a040c30e9f9729b4ab1204",
+                "terminal:73a4071bf7a1c8d16ed98b55",
+            ][..],
+        ),
+        (
+            r#"
+            @label(title: "First call")
+            first = await tools.echo({ value: "first" })?
+            if true {
+              @label(title: "Selected call")
+              selected = await tools.echo({ value: first })?
+            } else {
+              @label(title: "Skipped call")
+              selected = await tools.echo({ value: "skipped" })?
+            }
+            @label(title: "Finish selected")
+            finish selected
+            "#,
+            &[
+                "resource_operation:1cb0ce7e5a01032ab0935c82",
+                "branch:025dd501463420f541415f7f",
+                "resource_operation:06a1355ad8e7158222ba3f47",
+                "resource_operation:0faaf5a4a3ad6c368956eb93",
+                "terminal:a082d25e7834a4336778c54c",
+            ],
+        ),
+    ];
+
+    for (source, expected) in fixtures {
+        assert_eq!(
+            execution_site_ids(&compile_labeled_source(source)),
+            expected
+        );
+    }
+
+    let process_source = r#"
+        process search_test() {
+          @label(title: "Spawn subagent with web search")
+          result = await tools.echo({ value: { ok: true } })?
+          wake result
+          finish result
+        }
+        "#;
+    assert_eq!(
+        execution_site_ids(&compile_labeled_process_source(
+            process_source,
+            "search_test"
+        )),
+        [
+            "resource_operation:a27f5176d6e2e5669b60ff3b",
+            "process_event:1ec2b872e0ce7bec713fb2b4",
+            "terminal:f297ff069fbe7fe3a3965b0e",
+        ]
+    );
+}
+
+#[test]
+fn execution_site_nested_assignment_label_remains_a_generic_step_on_both_sides() {
+    let nested_assignment = Program::block(vec![
+        Expr::LabelAnnotated {
+            label: crate::LabelMetadata {
+                title: "Nested assignment".into(),
+                description: None,
+            },
+            expr: Box::new(assign(
+                "outer",
+                assign("inner", Expr::SleepFor(Box::new(Expr::Number(1.0)))),
+            )),
+        },
+        Expr::Finish(Box::new(variable("outer"))),
+    ]);
+    let surface = runtime_test_environment().with_language_features(
+        crate::LashlangLanguageFeatures::default().with_label_annotations(),
+    );
+    let linked = crate::LinkedModule::link(nested_assignment, surface)
+        .expect("nested assignment program should link");
+    let compiled = crate::compile_linked(&linked);
+    let expected = vec![
+        ("step".to_string(), "Nested assignment".to_string(), vec![0]),
+        ("sleep".to_string(), "sleep for".to_string(), vec![0, 0, 0]),
+        ("terminal".to_string(), "result".to_string(), vec![1]),
+    ];
+    assert_eq!(compiled_site_descriptors(&compiled), expected);
+    assert_eq!(graph_site_descriptors(linked.program()), expected);
+}
+
+#[test]
+fn execution_site_function_call_is_projected_with_the_compiler_descriptor() {
+    let call_program = Program::block(vec![
+        assign(
+            "identity",
+            function(None, &["value"], &[], variable("value")),
+        ),
+        Expr::Finish(Box::new(call(
+            variable("identity"),
+            vec![Expr::Number(1.0)],
+        ))),
+    ]);
+    let linked = crate::LinkedModule::link(call_program, runtime_test_environment())
+        .expect("call program should link");
+    let compiled = crate::compile_linked(&linked);
+    let expected = vec![
+        ("terminal".to_string(), "result".to_string(), vec![1]),
+        ("call".to_string(), "function call".to_string(), vec![1, 0]),
+    ];
+    assert_eq!(compiled_site_descriptors(&compiled), expected);
+    assert_eq!(graph_site_descriptors(linked.program()), expected);
+}
+
+#[test]
+fn execution_site_compiler_and_graph_emit_the_complete_descriptor_vocabulary() {
+    let mut program = crate::parse(
+        r#"
+        process worker() signals { ready: null } {
+          payload = wait_signal("ready")
+          yield payload
+          wake payload
+          fail payload
+        }
+
+        @label(title: "Plain step")
+        plain = 1
+        result = await tools.echo({ value: plain })?
+        run = start worker()
+        sleep for 1
+        sleep until 2
+        signal_run(run, "ready", null)
+        if true {} else {}
+        finish result
+        "#,
+    )
+    .expect("descriptor program should parse");
+    let Expr::Block(expressions) = &mut program.main else {
+        panic!("descriptor program main should be a block")
+    };
+    let finish = expressions.pop().expect("descriptor program finish");
+    expressions.push(assign(
+        "identity",
+        function(None, &["value"], &[], variable("value")),
+    ));
+    expressions.push(assign(
+        "called",
+        call(variable("identity"), vec![Expr::Number(1.0)]),
+    ));
+    expressions.push(finish);
+
+    let surface = runtime_test_environment().with_language_features(
+        crate::LashlangLanguageFeatures::default().with_label_annotations(),
+    );
+    let linked =
+        crate::LinkedModule::link(program, surface).expect("descriptor program should link");
+    let main = crate::compile_linked(&linked);
+    let process = crate::compile_linked_process(&linked, "worker")
+        .expect("descriptor process should compile");
+
+    let mut compiler = descriptor_pairs(&main);
+    compiler.extend(descriptor_pairs(&process));
+    compiler.sort();
+    let mut graph = crate::workflow_graph_from_program(linked.program())
+        .nodes()
+        .flat_map(|node| node.execution_sites.iter())
+        .map(|site| (site.kind.clone(), site.label.clone()))
+        .collect::<Vec<_>>();
+    graph.sort();
+    let mut expected = vec![
+        ("branch".to_string(), "if".to_string()),
+        ("call".to_string(), "function call".to_string()),
+        ("child_process".to_string(), "start worker".to_string()),
+        ("process_event".to_string(), "wake".to_string()),
+        ("process_event".to_string(), "yield".to_string()),
+        ("resource_operation".to_string(), "echo".to_string()),
+        ("signal".to_string(), "signal_run".to_string()),
+        ("sleep".to_string(), "sleep for".to_string()),
+        ("sleep".to_string(), "sleep until".to_string()),
+        ("step".to_string(), "Plain step".to_string()),
+        ("terminal".to_string(), "failure".to_string()),
+        ("terminal".to_string(), "result".to_string()),
+        ("wait".to_string(), "wait_signal".to_string()),
+    ];
+    expected.sort();
+    assert_eq!(compiler, expected, "compiler descriptor vocabulary drifted");
+    assert_eq!(
+        graph, expected,
+        "workflow graph descriptor vocabulary drifted"
+    );
+
+    let branch = main
+        .chunk
+        .lashlang_execution_sites
+        .iter()
+        .flatten()
+        .find(|site| site.node_kind == "branch")
+        .expect("compiled branch site");
+    assert!(
+        branch.branch.is_some(),
+        "branch descriptor must use branch_site"
+    );
+}
+
+#[test]
+fn execution_site_aggregate_resource_sites_preserve_their_compiler_paths() {
+    let tuple = compile_labeled_source(
+        r#"
+        result = await (tools.echo({ value: "left" })?, tools.echo({ value: "right" })?)
+        finish result
+        "#,
+    );
+    let tuple_sites = tuple.chunk.resource_operation_batches[0]
+        .leaves
+        .iter()
+        .map(|leaf| leaf.site.as_ref().expect("tuple batch leaf site"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tuple_sites
+            .iter()
+            .map(|site| site.workflow_site.path.clone())
+            .collect::<Vec<_>>(),
+        [vec![0, 0, 0, 0], vec![0, 0, 0, 1]]
+    );
+    assert!(
+        tuple_sites
+            .iter()
+            .all(|site| { site.node_kind == "resource_operation" && site.label == "echo" })
+    );
+
+    let list = compile_labeled_source(
+        r#"
+        results = await [tools.echo({ value: id })? for id in ["a", "b"] if id != "c"]
+        finish results
+        "#,
+    );
+    let list_site = list.chunk.resource_operation_list_batches[0]
+        .site
+        .as_ref()
+        .expect("list batch site");
+    assert_eq!(list_site.workflow_site.path, [0, 0, 0, 2, 0]);
+    assert_eq!(
+        (list_site.node_kind.as_str(), list_site.label.as_str()),
+        ("resource_operation", "echo")
+    );
+}
+
+#[test]
+fn execution_site_wrapped_effect_uses_the_compiler_descriptor_for_its_graph_name() {
+    let program = Program::block(vec![assign(
+        "slept",
+        Expr::ResultUnwrap(Box::new(Expr::SleepFor(Box::new(Expr::Number(1.0))))),
+    )]);
+
+    let graph = crate::workflow_graph_from_program(&program);
+    let node = graph.nodes().next().expect("wrapped sleep graph node");
+    assert!(matches!(
+        &node.kind,
+        crate::WorkflowNodeKind::Effect {
+            effect: crate::WorkflowEffectKind::Sleep,
+            ..
+        }
+    ));
+    assert_eq!(node.name, "sleep for");
+    assert_eq!(
+        node.execution_sites
+            .iter()
+            .map(|site| (site.kind.as_str(), site.label.as_str()))
+            .collect::<Vec<_>>(),
+        [("sleep", "sleep for")]
+    );
+}
+
+fn execution_site_ids(compiled: &CompiledProgram) -> Vec<&str> {
+    compiled
+        .chunk
+        .lashlang_execution_sites
+        .iter()
+        .flatten()
+        .map(|site| site.node_id.as_str())
+        .collect()
+}
+
+fn descriptor_pairs(compiled: &CompiledProgram) -> Vec<(String, String)> {
+    compiled
+        .chunk
+        .lashlang_execution_sites
+        .iter()
+        .flatten()
+        .map(|site| (site.node_kind.clone(), site.label.clone()))
+        .collect()
+}
+
+fn compiled_site_descriptors(compiled: &CompiledProgram) -> Vec<(String, String, Vec<u32>)> {
+    let mut sites = compiled
+        .chunk
+        .lashlang_execution_sites
+        .iter()
+        .flatten()
+        .map(|site| {
+            (
+                site.node_kind.clone(),
+                site.label.clone(),
+                site.workflow_site.path.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    sites.sort_by(|left, right| left.2.cmp(&right.2));
+    sites
+}
+
+fn graph_site_descriptors(program: &Program) -> Vec<(String, String, Vec<u32>)> {
+    let mut sites = crate::workflow_graph_from_program(program)
+        .nodes()
+        .flat_map(|node| node.execution_sites.iter())
+        .map(|site| (site.kind.clone(), site.label.clone(), site.path.clone()))
+        .collect::<Vec<_>>();
+    sites.sort_by(|left, right| left.2.cmp(&right.2));
+    sites
 }

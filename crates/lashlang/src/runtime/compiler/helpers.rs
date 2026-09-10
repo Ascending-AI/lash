@@ -1,5 +1,11 @@
 use super::*;
 
+use std::borrow::Cow;
+
+pub(crate) const BRANCH_EXECUTION_SITE_KIND: &str = "branch";
+pub(crate) const RESOURCE_OPERATION_EXECUTION_SITE_KIND: &str = "resource_operation";
+pub(crate) const STEP_EXECUTION_SITE_KIND: &str = "step";
+
 pub(super) fn expr_supports_forced_effect_site(expr: &Expr) -> bool {
     matches!(expr, Expr::ReceiverCall { .. } | Expr::Await(_))
         || matches!(
@@ -125,6 +131,30 @@ fn collect_lashlang_execution_paths(
         collect_lashlang_execution_paths(child, path, paths);
         path.pop();
     }
+}
+
+pub(crate) fn execution_site_descriptor(expr: &Expr) -> Option<(&'static str, Cow<'_, str>)> {
+    Some(match expr {
+        Expr::ReceiverCall { operation, .. } => (
+            RESOURCE_OPERATION_EXECUTION_SITE_KIND,
+            Cow::Borrowed(operation.as_str()),
+        ),
+        Expr::StartProcess(start) => (
+            "child_process",
+            Cow::Owned(format!("start {}", start.process)),
+        ),
+        Expr::SleepFor(_) => ("sleep", Cow::Borrowed("sleep for")),
+        Expr::SleepUntil(_) => ("sleep", Cow::Borrowed("sleep until")),
+        Expr::WaitSignal { .. } => ("wait", Cow::Borrowed("wait_signal")),
+        Expr::SignalRun { .. } => ("signal", Cow::Borrowed("signal_run")),
+        Expr::Finish(_) => ("terminal", Cow::Borrowed("result")),
+        Expr::Fail(_) => ("terminal", Cow::Borrowed("failure")),
+        Expr::Yield(_) => ("process_event", Cow::Borrowed("yield")),
+        Expr::Wake(_) => ("process_event", Cow::Borrowed("wake")),
+        Expr::If { .. } => (BRANCH_EXECUTION_SITE_KIND, Cow::Borrowed("if")),
+        Expr::Call { .. } => ("call", Cow::Borrowed("function call")),
+        _ => return None,
+    })
 }
 
 pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {

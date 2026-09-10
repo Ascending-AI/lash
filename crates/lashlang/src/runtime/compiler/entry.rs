@@ -573,15 +573,41 @@ impl Compiler {
         tracking.sites[instruction] = Some(site);
     }
 
-    pub(super) fn lashlang_execution_site(
+    pub(super) fn lashlang_execution_site_for_expr(
         &self,
         expression: &Expr,
-        kind: &str,
-        label: impl Into<String>,
+    ) -> Option<LashlangExecutionSite> {
+        self.lashlang_execution_site_for_descriptor(expression, expression)
+    }
+
+    pub(super) fn lashlang_execution_site_for_descriptor(
+        &self,
+        expression: &Expr,
+        descriptor_expression: &Expr,
     ) -> Option<LashlangExecutionSite> {
         let tracking = self.lashlang_execution.as_ref()?;
         let path = tracking.paths.get(&expr_key(expression))?;
-        Some(tracking.context.builder().node_site(path, kind, label))
+        let (kind, label) = execution_site_descriptor(descriptor_expression)?;
+        Some(if kind == BRANCH_EXECUTION_SITE_KIND {
+            tracking.context.builder().branch_site(path)
+        } else {
+            tracking.context.builder().node_site(path, kind, label)
+        })
+    }
+
+    pub(super) fn labeled_step_execution_site(
+        &self,
+        expression: &Expr,
+        label: &str,
+    ) -> Option<LashlangExecutionSite> {
+        let tracking = self.lashlang_execution.as_ref()?;
+        let path = tracking.paths.get(&expr_key(expression))?;
+        Some(
+            tracking
+                .context
+                .builder()
+                .node_site(path, STEP_EXECUTION_SITE_KIND, label),
+        )
     }
 
     pub(super) fn emit_lashlang_execution_step(
@@ -591,15 +617,9 @@ impl Compiler {
     ) {
         let instruction = self.code.len();
         self.code.push(Instruction::ObserveStep);
-        if let Some(site) = self.lashlang_execution_site(expression, "step", label.title.as_str()) {
+        if let Some(site) = self.labeled_step_execution_site(expression, label.title.as_str()) {
             self.mark_lashlang_execution_site(instruction, site);
         }
-    }
-
-    pub(super) fn branch_execution_site(&self, expression: &Expr) -> Option<LashlangExecutionSite> {
-        let tracking = self.lashlang_execution.as_ref()?;
-        let path = tracking.paths.get(&expr_key(expression))?;
-        Some(tracking.context.builder().branch_site(path))
     }
 
     fn compile_block_discarding_values(&mut self, block: &Expr) {
