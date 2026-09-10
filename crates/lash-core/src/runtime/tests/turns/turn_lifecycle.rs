@@ -426,17 +426,6 @@ pub(super) async fn successful_reload_clears_invalidated_state_to_valid() {
     );
 }
 
-/// FIG-1573: a turn that ends without committing must not leave an input
-/// pinned to it - no crash required.
-///
-/// The host routed an input into the running turn, so the row is
-/// `pending_active` and scoped to that turn's id. The commit-time re-defer
-/// (`RuntimeCommit::deferring_interrupted_turn_inputs`) is the only writer that
-/// moves such a row back to `deferred_next_turn`, and this turn never reaches
-/// its commit: the store fences it, exactly as a claim fenced at a checkpoint
-/// does in the field. The teardown owes the row the same repair, and this test
-/// reads the durable row directly so it proves the teardown trigger and not the
-/// drain-time backstop.
 #[tokio::test]
 pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
     let cases = [
@@ -493,6 +482,17 @@ pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
     }
 }
 
+/// FIG-1573: a turn that ends without committing must not leave an input
+/// pinned to it - no crash required.
+///
+/// The host routed an input into the running turn, so the row is
+/// `pending_active` and scoped to that turn's id. The commit-time re-defer
+/// (`RuntimeCommit::deferring_interrupted_turn_inputs`) is the only writer that
+/// moves such a row back to `deferred_next_turn`, and this turn never reaches
+/// its commit: the store fences it, exactly as a claim fenced at a checkpoint
+/// does in the field. The teardown owes the row the same repair, and this test
+/// reads the durable row directly so it proves the teardown trigger and not the
+/// drain-time backstop.
 #[tokio::test]
 pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_deferred_at_teardown() {
     let session_id = "root";
