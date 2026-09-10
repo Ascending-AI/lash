@@ -38,13 +38,17 @@ pub enum RuntimePersistenceLaw {
 MACROS = """\
 macro_rules! runtime_persistence_tests {
     ($runner:ident) => {
+        #[tokio::test]
         async fn alpha() { $runner($crate::RuntimePersistenceLaw::alpha).await; }
+        #[tokio::test]
         async fn fresh_instances() { $runner($crate::RuntimePersistenceLaw::fresh_instances).await; }
     };
 }
 macro_rules! runtime_persistence_reopenable_tests {
     ($runner:ident) => {
+        #[tokio::test]
         async fn alpha() { $runner($crate::RuntimePersistenceLaw::alpha).await; }
+        #[tokio::test]
         async fn reopen_mint_identity() { $runner($crate::RuntimePersistenceLaw::reopen_mint_identity).await; }
     };
 }
@@ -121,6 +125,60 @@ class LawRegistrationTests(unittest.TestCase):
                     (root / CHECKER.SITES[1][1]).write_text(source, encoding="utf-8")
                     errors = CHECKER.check_repository(root)
                 self.assertTrue(any("SQLite registration site" in error and expected in error for error in errors), errors)
+
+    def test_registration_attribute_blocks_fail_closed(self) -> None:
+        registration = (
+            "#[tokio::test]\n"
+            "        async fn alpha() { $runner($crate::RuntimePersistenceLaw::alpha).await; }"
+        )
+        mutations = (
+            (
+                "missing tokio::test",
+                "#[allow(dead_code)]\n"
+                "        async fn alpha() { $runner($crate::RuntimePersistenceLaw::alpha).await; }",
+                "must have one tokio::test attribute",
+            ),
+            (
+                "cfg with intervening attributes and comments",
+                "#[cfg(any())]\n"
+                "// ordinary comment\n"
+                "#[allow(dead_code)]\n\n"
+                + registration,
+                "has a disabling cfg/cfg_attr",
+            ),
+            (
+                "cfg_attr with a block comment",
+                "/* ordinary block comment */\n"
+                "#[cfg_attr(any(), cfg(any()))]\n"
+                "#[allow(dead_code)]\n"
+                + registration,
+                "has a disabling cfg/cfg_attr",
+            ),
+        )
+        for name, replacement, expected in mutations:
+            with self.subTest(mutation=name):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    fixture(root)
+                    path = root / CHECKER.MACROS
+                    path.write_text(MACROS.replace(registration, replacement), encoding="utf-8")
+                    errors = CHECKER.check_repository(root)
+                self.assertTrue(any(expected in error for error in errors), errors)
+
+    def test_invocation_attribute_blocks_reject_disabling_cfg(self) -> None:
+        for source in (
+            "#[cfg(any())]\n// ordinary comment\n#[allow(dead_code)]\n\n"
+            "runtime_persistence_reopenable_tests!(runner);\n",
+            "/* ordinary block comment */\n#[cfg_attr(any(), cfg(any()))]\n"
+            "#[allow(dead_code)]\nruntime_persistence_reopenable_tests!(runner);\n",
+        ):
+            with self.subTest(source=source):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    fixture(root)
+                    (root / CHECKER.SITES[1][1]).write_text(source, encoding="utf-8")
+                    errors = CHECKER.check_repository(root)
+                self.assertTrue(any("SQLite registration site" in error and "disables" in error for error in errors), errors)
 
 
 if __name__ == "__main__":

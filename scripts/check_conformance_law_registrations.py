@@ -25,7 +25,11 @@ REGISTRATION = re.compile(
 INVOCATION = re.compile(
     rf"(?:{IDENT}::)*(?P<macro>runtime_persistence(?:_reopenable)?_tests)!\s*\("
 )
-DISABLED_CFG = re.compile(r"#\s*\[\s*cfg\s*\(\s*any\s*\(\s*\)\s*\)\s*\]")
+ATTRIBUTE_LINE = re.compile(r"^\s*#\s*\[.*\]\s*$")
+TOKIO_TEST_ATTRIBUTE = re.compile(
+    r"^\s*#\s*\[\s*tokio\s*::\s*test(?:\s*\(.*\))?\s*\]\s*$"
+)
+DISABLING_ATTRIBUTE = re.compile(r"^\s*#\s*\[\s*(?:cfg|cfg_attr)\b")
 
 
 def block(source: str, marker: str, label: str) -> str:
@@ -39,8 +43,11 @@ def block(source: str, marker: str, label: str) -> str:
 
 
 def without_comments(source: str) -> str:
-    source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
-    return re.sub(r"//[^\n]*", "", source)
+    def spaces(match: re.Match[str]) -> str:
+        return "".join("\n" if char == "\n" else " " for char in match.group())
+
+    source = re.sub(r"/\*.*?\*/", spaces, source, flags=re.DOTALL)
+    return re.sub(r"//[^\n]*", spaces, source)
 
 
 def enum_laws(source: str) -> tuple[str, ...]:
@@ -80,9 +87,31 @@ def runner_special_laws(source: str, *, reopenable: bool) -> set[str]:
     return laws
 
 
+def attribute_block_before(source: str, position: int) -> tuple[str, ...]:
+    attributes = []
+    for line in reversed(source[:position].splitlines()):
+        if not line.strip():
+            continue
+        if not ATTRIBUTE_LINE.fullmatch(line):
+            break
+        attributes.append(line.strip())
+    return tuple(attributes)
+
+
+def validate_registration_attributes(region: str, name: str, matches: tuple[re.Match[str], ...]) -> None:
+    for match in matches:
+        attributes = attribute_block_before(region, match.start())
+        if any(DISABLING_ATTRIBUTE.match(attribute) for attribute in attributes):
+            raise ValueError(f"{name} registration {match.group('test')} has a disabling cfg/cfg_attr")
+        if sum(TOKIO_TEST_ATTRIBUTE.fullmatch(attribute) is not None for attribute in attributes) != 1:
+            raise ValueError(f"{name} registration {match.group('test')} must have one tokio::test attribute")
+
+
 def macro_laws(source: str, name: str) -> tuple[tuple[str, str], ...]:
     region = without_comments(block(source, f"macro_rules! {name} {{", name))
-    pairs = tuple((m.group("test"), m.group("law")) for m in REGISTRATION.finditer(region))
+    matches = tuple(REGISTRATION.finditer(region))
+    validate_registration_attributes(region, name, matches)
+    pairs = tuple((m.group("test"), m.group("law")) for m in matches)
     if not pairs:
         raise ValueError(f"{name} has no registrations")
     if sum("async fn " in line for line in region.splitlines()) != len(pairs):
@@ -91,8 +120,10 @@ def macro_laws(source: str, name: str) -> tuple[tuple[str, str], ...]:
 
 
 def disabled_invocation(source: str, match: re.Match[str]) -> bool:
-    lines = source[:match.start()].rstrip().splitlines()
-    return bool(lines) and DISABLED_CFG.fullmatch(lines[-1]) is not None
+    return any(
+        DISABLING_ATTRIBUTE.match(attribute)
+        for attribute in attribute_block_before(source, match.start())
+    )
 
 
 def check_repository(root: Path = ROOT) -> list[str]:
