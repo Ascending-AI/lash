@@ -49,7 +49,7 @@ impl crate::SessionStoreFactory for CatalogProbeFactory {
 
     async fn open_existing_store_by_id(
         &self,
-        _session_id: &str,
+        _session_id: &crate::SessionId,
     ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
         self.opens.fetch_add(1, Ordering::SeqCst);
         if self.fail_open {
@@ -58,13 +58,13 @@ impl crate::SessionStoreFactory for CatalogProbeFactory {
         Ok(Some(self.store.clone()))
     }
 
-    async fn session_was_deleted(&self, _session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, _session_id: &crate::SessionId) -> Result<bool, String> {
         Ok(false)
     }
 
     async fn delete_session(
         &self,
-        _session_id: &str,
+        _session_id: &crate::SessionId,
     ) -> crate::store::MaintenanceResult<crate::SessionBlobReclaimReport> {
         Ok(crate::SessionBlobReclaimReport::default())
     }

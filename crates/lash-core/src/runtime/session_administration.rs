@@ -4,6 +4,7 @@ use super::{
     EffectHost, ExecutionScope, ProcessWorkWiring, RuntimeError, ScopedEffectController,
     SessionStoreFactory,
 };
+use crate::SessionId;
 
 /// Lifecycle services selected together for session administration.
 ///
@@ -70,7 +71,7 @@ impl SessionAdministration {
     /// Mint a delete context through this administration's retained host.
     pub fn delete_context(
         &self,
-        session_id: &str,
+        session_id: impl AsRef<str>,
     ) -> Result<SessionDeleteContext<'_>, RuntimeError> {
         SessionDeleteContext::from_execution(self, session_id)
     }
@@ -106,7 +107,7 @@ impl SessionDeleteExecution for SessionAdministration {
 
 /// Owner-issued capability for deleting exactly one session.
 pub struct SessionDeleteContext<'a> {
-    session_id: String,
+    session_id: SessionId,
     administration: SessionAdministration,
     controller: ScopedEffectController<'a>,
 }
@@ -116,20 +117,24 @@ impl<'a> SessionDeleteContext<'a> {
     ///
     /// The session-delete scope is derived here; callers cannot supply a scope
     /// for one session alongside administration services for another.
-    pub fn from_execution<E>(executor: &'a E, session_id: &str) -> Result<Self, RuntimeError>
+    pub fn from_execution<E>(
+        executor: &'a E,
+        session_id: impl AsRef<str>,
+    ) -> Result<Self, RuntimeError>
     where
         E: SessionDeleteExecution + ?Sized,
     {
-        let scope = ExecutionScope::session_delete(session_id);
+        let session_id = SessionId::from(session_id.as_ref());
+        let scope = ExecutionScope::session_delete(&session_id);
         let controller = executor.scoped(scope)?;
         Ok(Self {
-            session_id: session_id.to_string(),
+            session_id,
             administration: executor.administration().clone(),
             controller,
         })
     }
 
-    pub fn session_id(&self) -> &str {
+    pub fn session_id(&self) -> &SessionId {
         &self.session_id
     }
 

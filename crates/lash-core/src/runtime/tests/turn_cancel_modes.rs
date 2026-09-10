@@ -134,7 +134,11 @@ async fn native_harness(
         crate::NativeRuntimeEffectController::default(),
     ));
     let driver_store: Arc<dyn crate::RuntimePersistence> = Arc::new(RecordingStore::default());
-    crate::testing::store_fixtures::bind_conformance_session(&driver_store, "root").await;
+    crate::testing::store_fixtures::bind_conformance_session(
+        &driver_store,
+        &crate::SessionId::from("root"),
+    )
+    .await;
     let driver = crate::TurnWorkDriver::for_session(
         Arc::clone(&config.control.effect_host),
         "root",
@@ -751,7 +755,11 @@ async fn sleeping_retry_harness(
     ))
     .with_clock(host_clock);
     let driver_store: Arc<dyn crate::RuntimePersistence> = Arc::new(RecordingStore::default());
-    crate::testing::store_fixtures::bind_conformance_session(&driver_store, "root").await;
+    crate::testing::store_fixtures::bind_conformance_session(
+        &driver_store,
+        &crate::SessionId::from("root"),
+    )
+    .await;
     let driver = crate::TurnWorkDriver::for_session(
         Arc::clone(&config.control.effect_host),
         "root",

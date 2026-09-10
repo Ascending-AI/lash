@@ -2,6 +2,7 @@ use crate::support::{
     Arc, EffectHost, ProcessWorkWiring, QueuedWorkSubstrate, RuntimeEnvironment,
     RuntimePersistence, SessionStoreFactory,
 };
+use lash_sansio::SessionId;
 
 /// Immutable owner-issued capabilities for one successfully opened session.
 ///
@@ -12,7 +13,7 @@ use crate::support::{
 /// a truthful deployment composition when they wire these capabilities.
 #[derive(Clone)]
 pub(crate) struct BoundSession {
-    session_id: String,
+    session_id: SessionId,
     store: Arc<dyn RuntimePersistence>,
     effect_host: Arc<dyn EffectHost>,
     process: Option<ProcessWorkWiring>,
@@ -26,7 +27,7 @@ pub(crate) struct BoundSession {
 
 impl BoundSession {
     pub(crate) fn new(
-        session_id: String,
+        session_id: SessionId,
         store: Arc<dyn RuntimePersistence>,
         env: &RuntimeEnvironment,
         process: Option<ProcessWorkWiring>,
@@ -47,7 +48,7 @@ impl BoundSession {
         }
     }
 
-    pub(crate) fn session_id(&self) -> &str {
+    pub(crate) fn session_id(&self) -> &SessionId {
         &self.session_id
     }
 

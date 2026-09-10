@@ -533,8 +533,7 @@ lash::SessionAdministration
 lash::SessionAdministration::delete_context
 lash::SessionAdministration::effect_host
 lash::SessionAdministration::new
-lash::SessionAdministration::process_registry
-lash::SessionAdministration::process_work
+lash::SessionAdministration::process
 lash::SessionAdministration::store_factory
 lash::SessionAdministration::trigger_store
 lash::SessionAdministration::with_effect_host
@@ -2092,6 +2091,7 @@ lash::persistence::InMemorySessionStoreFactory::fail_next_session_blob_delete_fo
 lash::persistence::InMemorySessionStoreFactory::new
 lash::persistence::InMemorySessionStoreFactory::raw_node_anchors_for_testing
 lash::persistence::InMemorySessionStoreFactory::raw_store_for_testing
+lash::persistence::InMemorySessionStoreFactory::seed_checkpoint_blob_for_testing
 lash::persistence::InMemorySessionStoreFactory::with_clock
 lash::persistence::LashlangArtifactStore
 lash::persistence::LashlangArtifactStore::durability_tier

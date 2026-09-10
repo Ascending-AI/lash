@@ -634,7 +634,7 @@ impl LashCore {
     pub async fn delete_session(
         context: lash_core::SessionDeleteContext<'_>,
     ) -> Result<SessionDeleteReport> {
-        let session_id = SessionId::from(context.session_id());
+        let session_id = context.session_id().clone();
         let administration = context.administration();
         match lash_core::facade_support::ScopedEffectControllerFacadeOps::execution_scope(
             context.controller(),

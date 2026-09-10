@@ -38,7 +38,7 @@ pub enum PluginError {
     #[error(
         "session store is required before creating session `{session_id}`; configure a session-creation store factory"
     )]
-    MissingSessionStore { session_id: String },
+    MissingSessionStore { session_id: SessionId },
     /// An existing plugin session cannot be reconstructed because a required
     /// protocol-owned field is absent from its durable record.
     #[error("recorded session config for plugin `{plugin_id}` is missing required field `{field}`")]

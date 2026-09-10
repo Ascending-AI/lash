@@ -307,7 +307,7 @@ impl AppState {
         &self,
         context: lash::SessionDeleteContext<'_>,
     ) -> Result<lash::process::ProcessPruneReport, AppError> {
-        let session_id = context.session_id().to_string();
+        let session_id = context.session_id().clone();
         let report = lash::LashCore::delete_session(context)
             .await
             // Audited: delete_session lowers component and factory failures to non-tombstone EmbedError variants.

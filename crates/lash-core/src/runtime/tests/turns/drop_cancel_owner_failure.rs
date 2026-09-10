@@ -157,9 +157,12 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     assert_eq!(dropped.2, crate::TurnInputState::Cancelled);
     assert!(dropped.3.is_none(), "recovery clears the dead turn claim");
 
-    let pending = crate::TurnInputStore::list_pending_turn_inputs(inner_store.as_ref(), SESSION_ID)
-        .await
-        .expect("list inputs eligible for redelivery after recovery");
+    let pending = crate::TurnInputStore::list_pending_turn_inputs(
+        inner_store.as_ref(),
+        &crate::SessionId::from(SESSION_ID),
+    )
+    .await
+    .expect("list inputs eligible for redelivery after recovery");
     assert!(
         pending
             .iter()

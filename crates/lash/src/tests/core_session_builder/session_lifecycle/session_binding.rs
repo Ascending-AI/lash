@@ -20,7 +20,7 @@ impl Default for FailOnceRetirementHost {
 impl lash_core::AwaitEventResolver for FailOnceRetirementHost {
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &lash_core::SessionId,
     ) -> std::result::Result<(), lash_core::RuntimeError> {
         self.inner.revoke_await_events_for_session(session_id).await
     }
@@ -99,7 +99,7 @@ async fn every_created_session_requires_a_store_regardless_of_relation() -> Resu
         (
             "created-child-without-catalog",
             lash_core::SessionRelation::Child {
-                parent_session_id: parent.session_id(),
+                parent_session_id: parent.session_id().into(),
                 caused_by: None,
             },
         ),
@@ -108,7 +108,7 @@ async fn every_created_session_requires_a_store_regardless_of_relation() -> Resu
             .admin()
             .children()
             .create_session(SessionCreateRequest {
-                session_id: Some(session_id.to_string()),
+                session_id: Some(session_id.into()),
                 relation,
                 start: lash_core::SessionStartPoint::Empty,
                 policy: None,
@@ -127,7 +127,7 @@ async fn every_created_session_requires_a_store_regardless_of_relation() -> Resu
             error,
             EmbedError::Plugin(lash_core::PluginError::MissingSessionStore {
                 session_id: ref missing,
-            }) if missing == session_id
+            }) if missing.as_ref() == session_id
         ));
     }
     Ok(())
@@ -187,13 +187,13 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
         .await?;
 
     let store = source_catalog
-        .open_existing_store_by_id("owner-preserved")
+        .open_existing_store_by_id(&lash_core::SessionId::from("owner-preserved"))
         .await
         .expect("read source catalog")
         .expect("source session store");
     let source_driver = lash_core::facade_support::TurnWorkDriver::for_session(
         source_host,
-        "owner-preserved",
+        &lash_core::SessionId::from("owner-preserved"),
         store,
     );
     let duplicate = source_driver
@@ -286,7 +286,7 @@ async fn exact_opened_store_and_session_creation_catalog_remain_distinct() -> Re
         ))
         .await?;
     let catalog_store = root_catalog
-        .open_existing_store_by_id("catalog-root")
+        .open_existing_store_by_id(&lash_core::SessionId::from("catalog-root"))
         .await
         .expect("read root catalog")
         .expect("catalog root store");
@@ -301,9 +301,9 @@ async fn exact_opened_store_and_session_creation_catalog_remain_distinct() -> Re
         .admin()
         .children()
         .create_session(SessionCreateRequest {
-            session_id: Some("explicit-root-child".to_string()),
+            session_id: Some("explicit-root-child".into()),
             relation: lash_core::SessionRelation::Child {
-                parent_session_id: "explicit-root-store".to_string(),
+                parent_session_id: "explicit-root-store".into(),
                 caused_by: None,
             },
             start: lash_core::SessionStartPoint::Empty,
@@ -323,7 +323,7 @@ async fn exact_opened_store_and_session_creation_catalog_remain_distinct() -> Re
         .admin()
         .children()
         .create_session(SessionCreateRequest {
-            session_id: Some("explicit-root-related-root".to_string()),
+            session_id: Some("explicit-root-related-root".into()),
             relation: lash_core::SessionRelation::Root,
             start: lash_core::SessionStartPoint::Empty,
             policy: None,

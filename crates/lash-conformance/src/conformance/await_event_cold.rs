@@ -18,8 +18,9 @@ pub const COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT: usize = 9;
 async fn in_memory_catalog(session_ids: &[&str]) -> Arc<dyn crate::SessionStoreFactory> {
     let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
     for session_id in session_ids {
+        let session_id = SessionId::from(*session_id);
         let request = super::session_store_request(
-            session_id,
+            &session_id,
             "conformance-turn-control",
             crate::SessionRelation::Root,
         );
@@ -27,7 +28,7 @@ async fn in_memory_catalog(session_ids: &[&str]) -> Arc<dyn crate::SessionStoreF
             .create_store(&request)
             .await
             .expect("create explicit conformance session store");
-        super::bind_conformance_session(&store, session_id).await;
+        super::bind_conformance_session(&store, &session_id).await;
     }
     factory
 }
