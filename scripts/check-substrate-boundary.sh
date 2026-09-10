@@ -11,7 +11,7 @@ set -euo pipefail
 #   lash-perf/src/runtime_perf/harness/observation.rs:98;
 #   lash-perf/src/runtime_perf/measurement/checkpoint_curve.rs:360;
 #   lash-perf/src/runtime_perf/measurement/queued_work.rs:263,773;
-#   lash-perf/src/runtime_perf/providers.rs:677,692,696,730,969,1061,1120;
+#   lash-perf/src/runtime_perf/providers/tools.rs:458,473,477,512,761,853,912;
 #   lash-perf/src/runtime_perf/measurement/process_stress.rs:289;
 #   lash-perf/src/runtime_perf/measurement/contention.rs:110,471,636,646,723;
 #   lash-perf/src/runtime_perf/measurement/high_traffic.rs:440;

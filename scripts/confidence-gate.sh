@@ -2221,7 +2221,8 @@ run_lash_sim_runtime_completion_mutation_evidence() {
   run_mutants_recorded "lash-sim scheduler-owned and mini-oracles" "${out_dir}/mutants-lash-sim-oracles-runtime-completion-targeted" \
     cargo mutants \
     -p lash-sim \
-    --file crates/lash-sim/src/oracles.rs \
+    --file crates/lash-sim/src/oracles/recovery_and_scheduling.rs \
+    --file crates/lash-sim/src/oracles/mini_scenarios.rs \
     --re 'scheduler_owned_runtime_completions|mini_rlm_lashlang_cell_exec_continues|mini_agent_parallel_spawn_join|mini_agent_durable_input_resolution|mini_standard_provider_error_without_checkpoint' \
     --baseline skip \
     --jobs "$mutation_jobs" \

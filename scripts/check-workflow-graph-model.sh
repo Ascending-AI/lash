@@ -22,7 +22,7 @@ if [ "$definition_count" != "1" ]; then
 fi
 
 if ! grep -qE 'lash_lashlang_runtime::trace_lashlang_main_map\(artifact\)' \
-  crates/lash-protocol-rlm/src/executor.rs; then
+  crates/lash-protocol-rlm/src/executor/mod.rs; then
   echo "workflow graph model check failed: RLM no longer delegates its trace skeleton" >&2
   exit 1
 fi
