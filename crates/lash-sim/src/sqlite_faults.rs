@@ -286,13 +286,18 @@ fn generated_multi_arm_plan(seed: u64) -> Result<SqliteFaultCompositionPlan, Str
                 && boundary.payload.get("retryable").and_then(Value::as_bool) == Some(false)
         })
         .ok_or_else(|| "generated workload has no terminal backend-failure boundary".to_string())?;
+    let points = match workload.seed % 3 {
+        0 => [SqliteFaultPoint::AfterBegin, SqliteFaultPoint::BeforeCommit],
+        1 => [SqliteFaultPoint::AfterBegin, SqliteFaultPoint::CommitIo],
+        _ => [SqliteFaultPoint::BeforeCommit, SqliteFaultPoint::CommitIo],
+    };
     let occurrence = NonZeroU64::new(1).expect("one is non-zero");
     let arms = vec![
         GeneratedSqliteFaultArm {
             source_boundary_id: retryable.boundary_id.clone(),
             arm: SqliteFaultArm::new(
                 seed ^ retryable.at.rotate_left(17) ^ 0x4649_4731_3135_3501,
-                SqliteFaultPoint::AfterBegin,
+                points[0],
                 occurrence,
             ),
         },
@@ -300,7 +305,7 @@ fn generated_multi_arm_plan(seed: u64) -> Result<SqliteFaultCompositionPlan, Str
             source_boundary_id: terminal.boundary_id.clone(),
             arm: SqliteFaultArm::new(
                 seed ^ terminal.at.rotate_left(17) ^ 0x4649_4731_3135_3502,
-                SqliteFaultPoint::CommitIo,
+                points[1],
                 occurrence,
             ),
         },
@@ -311,7 +316,7 @@ fn generated_multi_arm_plan(seed: u64) -> Result<SqliteFaultCompositionPlan, Str
         workload_profile: PROFILE.to_string(),
         workload_max_boundaries: MAX_BOUNDARIES,
         workload_id: workload.workload_id,
-        selection_policy: "first retryable backend boundary selects after_begin; first terminal backend boundary selects commit_io; both target their first reached occurrence".to_string(),
+        selection_policy: "the generated workload seed selects one of the three ordered pairs of distinct transaction points; its first retryable and first terminal backend boundaries supply arm identities; both target their first reached occurrence".to_string(),
         max_attempts: 2,
         arms,
     })
@@ -899,11 +904,14 @@ mod tests {
     fn generated_multi_arm_plan_round_trips_with_stable_identity_and_order() {
         let plan = generated_multi_arm_plan(DEFAULT_SQLITE_FAULT_SEED_BASE)
             .expect("generated multi-arm plan");
+        let repeated = generated_multi_arm_plan(DEFAULT_SQLITE_FAULT_SEED_BASE)
+            .expect("repeated generated multi-arm plan");
         let encoded = serde_json::to_value(&plan).expect("encode plan");
         let decoded: SqliteFaultCompositionPlan =
             serde_json::from_value(encoded).expect("decode plan");
 
         assert_eq!(decoded, plan);
+        assert_eq!(repeated, plan);
         assert_eq!(plan.max_attempts, 2);
         assert_eq!(plan.arms.len(), 2);
         assert_eq!(plan.arms[0].arm.point, SqliteFaultPoint::AfterBegin);
@@ -911,6 +919,25 @@ mod tests {
         assert_ne!(
             plan.arms[0].source_boundary_id,
             plan.arms[1].source_boundary_id
+        );
+
+        let schedules = (0..3)
+            .map(|offset| {
+                generated_multi_arm_plan(DEFAULT_SQLITE_FAULT_SEED_BASE + offset)
+                    .expect("generated multi-arm schedule")
+                    .arms
+                    .into_iter()
+                    .map(|planned| planned.arm.point)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            schedules,
+            vec![
+                vec![SqliteFaultPoint::AfterBegin, SqliteFaultPoint::CommitIo],
+                vec![SqliteFaultPoint::BeforeCommit, SqliteFaultPoint::CommitIo],
+                vec![SqliteFaultPoint::AfterBegin, SqliteFaultPoint::BeforeCommit,],
+            ]
         );
     }
 
@@ -934,10 +961,17 @@ mod tests {
         assert!(!witness.zero_arm_control.operation_failed);
         assert!(witness.repeat_matches);
 
-        let mut mutated = witness.clone();
-        mutated.paired.operation_failed = false;
-        let error = validate_composition_witness(&mutated)
-            .expect_err("the oracle must reject a paired run reported as successful");
+        let mut omitted_arm_witness = witness.clone();
+        omitted_arm_witness.paired = run_composition_case(
+            tmp.path(),
+            &witness.plan,
+            "paired-omitted-second-arm",
+            vec![0],
+        )
+        .await
+        .expect("real SQLite run with omitted second injector arm");
+        let error = validate_composition_witness(&omitted_arm_witness)
+            .expect_err("the oracle must reject a real run missing its second injector arm");
         assert!(error.contains("paired arms must exhaust"), "{error}");
     }
 

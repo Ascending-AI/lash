@@ -56,13 +56,16 @@ cargo run -p lash-sim -- sqlite-faults \
 Expect `/tmp/lash-sim-sqlite-faults/sqlite-faults.json` to use
 `lash.sim.sqlite-substrate-faults.v2`. Its `composition_witness.plan` records
 the generated workload seed and ID, the two source boundary IDs, arm order,
-point occurrences, and the two-attempt policy. The zero-arm control commits on
-its first attempt. Each single-arm control returns one injected storage failure
-and commits on retry. The paired run fails first at `after_begin`, then at
-`commit_io`, exhausts the two-attempt policy, and leaves the reopened head at
-the prefix revision. `repeated_paired` must record the same arm identities,
-order, attempt outcomes, and final head. This is an injected operation failure
-under the recorded retry bound, not a discovered runtime invariant violation.
+point occurrences, and the two-attempt policy. The workload seed chooses among
+the three ordered pairs of distinct declared points, so a small seed set drives
+different fault schedules while replaying one seed keeps the same plan. The
+zero-arm control commits on its first attempt. Each single-arm control returns
+one injected storage failure and commits on retry. For the documented seed, the
+paired run fails first at `after_begin`, then at `commit_io`, exhausts the
+two-attempt policy, and leaves the reopened head at the prefix revision.
+`repeated_paired` must record the same arm identities, order, attempt outcomes,
+and final head. This is an injected operation failure under the recorded retry
+bound, not a discovered runtime invariant violation.
 
 ## Current executable evidence
 
