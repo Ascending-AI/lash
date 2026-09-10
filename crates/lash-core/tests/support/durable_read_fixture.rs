@@ -16,10 +16,13 @@
 //! test instead of skipping it.
 //!
 //! The fixture format has its own declaration,
-//! `DURABLE_READ_FIXTURE_SCHEMA_VERSION`, the constant below. CI and pre-commit
-//! reject a generated artifact change unless that declaration changes in the same
-//! diff. Store schema versions remain the authority for whether an old store may
-//! be opened.
+//! `DURABLE_READ_FIXTURE_SCHEMA_VERSION`, the constant below.
+//! `scripts/versioned-surfaces.toml` registers that constant with a whole-file
+//! guard over `fixtures/durable-read/*`, so any change to a file in that tree makes
+//! `scripts/check_version_bumps.py` require the declaration to be strictly greater
+//! than its merge-base value in the same diff. That check runs in CI only, not
+//! pre-commit, because it compares against a merge base. Store schema versions
+//! remain the authority for whether an old store may be opened.
 //!
 //! ## Two laws: read-back and write shape
 //!

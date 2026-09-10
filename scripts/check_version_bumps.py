@@ -383,7 +383,11 @@ class CheckError(RuntimeError):
 
 def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
-        ["git", *args], cwd=repo, capture_output=True, text=True
+        ["git", *args],
+        cwd=repo,
+        capture_output=True,
+        encoding="utf-8",
+        errors="surrogateescape",
     )
     if check and result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
@@ -1234,7 +1238,7 @@ def surface_fingerprint(entries: Iterable[tuple[str, str]]) -> str:
     for key, value in entries:
         digest.update(key.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(value.encode("utf-8"))
+        digest.update(value.encode("utf-8", errors="surrogateescape"))
         digest.update(b"\0")
     return f"sha256:{digest.hexdigest()}"
 

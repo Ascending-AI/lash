@@ -365,7 +365,6 @@ jobs:
           python3 scripts/test_api_surface.py
           python3 scripts/test_check_facade_external_types.py
           python3 scripts/test_check_facade_only_examples.py
-          python3 scripts/test_check_durable_read_fixture_version.py
           python3 scripts/test_check_postgres_json_carrier_coverage.py
           python3 scripts/test_check_postgres_payload_shape_version.py
           python3 scripts/test_check_service_gate_pinning.py
@@ -1078,9 +1077,6 @@ jobs:
           # read from the pull request rather than the event payload.
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/check-transcript-diff.py --enforce
-
-      - name: Check durable-read fixture schema declaration
-        run: python3 scripts/check-durable-read-fixture-version.py
 
       - name: Check PostgreSQL payload-shape component version
         run: |

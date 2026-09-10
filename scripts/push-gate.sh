@@ -75,7 +75,6 @@ run_release_script_tests() {
   step "Repository script tests"
   python3 scripts/test_check_facade_external_types.py
   python3 scripts/test_check_facade_only_examples.py
-  python3 scripts/test_check_durable_read_fixture_version.py
   python3 scripts/test_check_judged_build_geometry.py
   python3 scripts/test_check_postgres_json_carrier_coverage.py
   python3 scripts/test_check_postgres_payload_shape_version.py
@@ -422,12 +421,11 @@ run_minio_conformance() {
 #     request body, which does not exist yet at push time; see the comment at
 #     the invocation.
 #
-#   scripts/check-durable-read-fixture-version.py,
 #   scripts/check_version_bump_fixtures.py,
 #   scripts/lint_orchestrating_tools.py, actionlint
 #     Owned by the prek hooks in `.pre-commit-config.yaml`: file-scoped, run
 #     on every commit that touches their inputs, and not worth a second full
-#     pass here. The two that have self-tests still run them above, because a
+#     pass here. The one that has a self-test still runs it above, because a
 #     hook that has stopped working is invisible from the hook itself.
 #
 #   scripts/api_surface.py check
