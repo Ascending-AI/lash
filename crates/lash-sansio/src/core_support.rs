@@ -49,6 +49,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-runtime-effect-envelope/v2",
     "lash-runtime-usage-payload/v2",
     "lash-runtime-usage-payload/v3",
+    "lash-runtime-usage-payload/v4",
     "lash-session-append-draft-fallback/v2",
     "lash-stable-identity/v2",
     "lash-tool-catalog-authority/v2",
@@ -394,10 +395,12 @@ mod blake3_domain_tests {
 
     // Permanently reserved, but no longer used: the plugin snapshot revision
     // after FIG-2113; the v2 usage payload after FIG-2765 moved it to a
-    // disposition-carrying encoding.
+    // disposition-carrying encoding, and the v3 payload after the same ticket's
+    // fix round replaced the hole *count* with per-attempt descriptors.
     const RETIRED_BLAKE3_DOMAINS: &[&str] = &[
         "lash-plugin-snapshot-revision/v2",
         "lash-runtime-usage-payload/v2",
+        "lash-runtime-usage-payload/v3",
     ];
 
     fn rust_sources_below(root: &Path) -> Vec<PathBuf> {

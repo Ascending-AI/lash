@@ -362,11 +362,12 @@ pub fn record_unreported_attempts_shared(
     token_ledger: &Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     source: &str,
     model: &str,
-    attempts: u32,
+    attempts: &[crate::UnreportedLedgerAttempt],
 ) {
-    if attempts == 0 {
+    if attempts.is_empty() {
         return;
     }
+    let incoming = crate::LedgerUsageDisposition::unreported(attempts.iter().cloned());
     let mut ledger = token_ledger.lock_recover();
     if let Some(entry) = ledger.iter_mut().find(|entry| {
         entry.identity.is_none()
@@ -377,16 +378,13 @@ pub fn record_unreported_attempts_shared(
                 crate::LedgerUsageDisposition::Unreported { .. }
             )
     }) {
-        entry
-            .entry
-            .usage_disposition
-            .absorb_saturating(&crate::LedgerUsageDisposition::Unreported { attempts });
+        entry.entry.usage_disposition.absorb_saturating(&incoming);
     } else {
         ledger.push(PendingTokenLedgerEntry::unstaged(TokenLedgerEntry {
             source: source.to_string(),
             model: model.to_string(),
             usage: TokenUsage::default(),
-            usage_disposition: crate::LedgerUsageDisposition::Unreported { attempts },
+            usage_disposition: incoming,
         }));
     }
 }

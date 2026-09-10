@@ -304,8 +304,9 @@ pub use turn_queue::{
 pub(crate) use turn_queue::{SessionCommandSettlement, SessionCommandSettlementHandle};
 pub use usage::{
     LedgerUsageDisposition, ReconciledUsageAttempt, SessionUsageReport, TokenLedgerEntry,
-    UnreportedUsageAttempt, UsageReconciliationReport, UsageReportRow, UsageTotals,
-    diff_token_ledger, diff_usage_reports,
+    UnreportedLedgerAttempt, UnreportedUsageAttempt, UsageDispositionError,
+    UsageReconciliationReport, UsageReportRow, UsageTotals, diff_token_ledger, diff_usage_reports,
+    outstanding_unreported_attempts,
 };
 use usage::{merge_ledger_entry_saturating, normalize_prompt_usage};
 pub use worker_capacity::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};

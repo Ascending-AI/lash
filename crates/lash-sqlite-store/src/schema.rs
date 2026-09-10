@@ -196,6 +196,9 @@ CREATE TABLE IF NOT EXISTS usage_deltas (
     cache_read_input_tokens  INTEGER NOT NULL,
     cache_write_input_tokens INTEGER NOT NULL,
     reasoning_output_tokens     INTEGER NOT NULL,
+    -- The complete typed disposition, hole identities included: a reopened
+    -- runtime rebuilds the attempts it still owes usage for from this column.
+    usage_disposition_json   TEXT NOT NULL,
     UNIQUE (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
 );
 CREATE INDEX IF NOT EXISTS idx_usage_deltas_session_seq
@@ -552,7 +555,11 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// than migrated.
 /// ADR 0078 replaces plugin snapshots with mediated namespace state; older
 /// catalogs are refused before any prior payload can be read.
-pub(crate) const SCHEMA_VERSION: i32 = 52;
+/// Version 53 persists each usage delta's typed disposition
+/// (`usage_deltas.usage_disposition_json`, FIG-2765). Version 52 rows carry no
+/// disposition at all and their unreported holes cannot be reconstructed, so
+/// existing catalogs are rejected rather than migrated with a defaulted column.
+pub(crate) const SCHEMA_VERSION: i32 = 53;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

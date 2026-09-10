@@ -92,25 +92,104 @@ pub struct ReconciledUsageAttempt {
     pub provider_usage: serde_json::Value,
 }
 
+/// One interrupted attempt recorded inside an [`LedgerUsageDisposition::Unreported`]
+/// ledger row: the durable identity of a billed-but-uncounted call.
+///
+/// The row's `(source, model)` pair supplies the attribution the descriptor
+/// deliberately omits, so a row can never disagree with its own holes. Identity
+/// is `(session_id, call_id, attempt_ordinal)`; `generation_id` is lookup
+/// attribution, not identity, and its absence is a fact (the attempt never got
+/// far enough to have one) rather than missing data.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct UnreportedLedgerAttempt {
+    /// The sealed call the attempt belongs to.
+    pub call_id: String,
+    /// The attempt within that call.
+    pub attempt_ordinal: u32,
+    /// Provider generation id, when the attempt got far enough to have one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_id: Option<String>,
+}
+
+impl UnreportedLedgerAttempt {
+    /// The durable key of this hole within its session.
+    pub fn key(&self) -> (&str, u32) {
+        (self.call_id.as_str(), self.attempt_ordinal)
+    }
+}
+
+/// A stored disposition that does not describe a legal ledger row.
+///
+/// Reads are strict: a malformed persisted disposition is a typed refusal, never
+/// silently downgraded to [`LedgerUsageDisposition::Reported`] — that downgrade
+/// is exactly how a billed call becomes a free one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UsageDispositionError {
+    /// An `Unreported` row carried no holes: the hole is the row's content.
+    EmptyUnreportedRow,
+    /// Two holes in one row claimed the same `(call_id, attempt_ordinal)`.
+    DuplicateAttempt {
+        /// The call whose attempt appeared twice.
+        call_id: String,
+        /// The attempt ordinal that appeared twice.
+        attempt_ordinal: u32,
+    },
+    /// One `(call_id, attempt_ordinal)` was attributed to two generations.
+    ConflictingAttribution {
+        /// The call whose attribution disagreed.
+        call_id: String,
+        /// The attempt ordinal whose attribution disagreed.
+        attempt_ordinal: u32,
+    },
+}
+
+impl std::fmt::Display for UsageDispositionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyUnreportedRow => {
+                write!(f, "unreported usage row carries no interrupted attempts")
+            }
+            Self::DuplicateAttempt {
+                call_id,
+                attempt_ordinal,
+            } => write!(
+                f,
+                "unreported usage row repeats attempt `{call_id}`/{attempt_ordinal}"
+            ),
+            Self::ConflictingAttribution {
+                call_id,
+                attempt_ordinal,
+            } => write!(
+                f,
+                "unreported attempt `{call_id}`/{attempt_ordinal} carries conflicting generation attribution"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for UsageDispositionError {}
+
 /// How one ledger row relates to provider-reported usage.
 ///
 /// ADR 0031: absence means unreported and an explicit zero is information. A
 /// turn whose attempt ended before the provider's usage arrived writes an
-/// `Unreported` row — zero counters, a nonzero attempt count — so a host
-/// summing cost sees the hole instead of a silent zero. A later host-invoked
-/// reconciliation appends a `Reconciled` correction row attributed to the
-/// original attempt; rows are never rewritten.
+/// `Unreported` row — zero counters, one descriptor per billed-but-uncounted
+/// call — so a host summing cost sees the hole *and* can reconcile it after a
+/// restart. A later host-invoked reconciliation appends a `Reconciled`
+/// correction row attributed to the original attempt; rows are never rewritten.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LedgerUsageDisposition {
     /// Provider-reported usage, accumulated per `(source, model)`.
     #[default]
     Reported,
-    /// Attempts that ended without provider usage. `usage` is zero; the count
-    /// is the number of billed-but-uncounted calls folded into this row.
+    /// Attempts that ended without provider usage. `usage` is zero; each
+    /// descriptor names one billed-but-uncounted call, so the outstanding work
+    /// survives a store round trip instead of collapsing to a count.
     Unreported {
-        /// Interrupted attempts whose usage never arrived.
-        attempts: u32,
+        /// Interrupted attempts whose usage never arrived, in canonical
+        /// `(call_id, attempt_ordinal)` order.
+        attempts: Vec<UnreportedLedgerAttempt>,
     },
     /// Usage recovered after the fact from the provider's generation record
     /// for one previously unreported attempt. Never merged with other rows.
@@ -123,8 +202,47 @@ pub enum LedgerUsageDisposition {
 }
 
 impl LedgerUsageDisposition {
+    /// An unreported row over `attempts`, canonicalised: sorted by
+    /// `(call_id, attempt_ordinal)` so a row's identity does not depend on the
+    /// order holes happened to be merged in.
+    pub fn unreported(attempts: impl IntoIterator<Item = UnreportedLedgerAttempt>) -> Self {
+        let mut attempts = attempts.into_iter().collect::<Vec<_>>();
+        canonicalize_attempts(&mut attempts);
+        Self::Unreported { attempts }
+    }
+
     pub fn is_reported(&self) -> bool {
         matches!(self, Self::Reported)
+    }
+
+    /// Reject a row that cannot describe real accounting. Store reads call this
+    /// before admitting a persisted disposition.
+    pub fn validate(&self) -> Result<(), UsageDispositionError> {
+        let Self::Unreported { attempts } = self else {
+            return Ok(());
+        };
+        if attempts.is_empty() {
+            return Err(UsageDispositionError::EmptyUnreportedRow);
+        }
+        for (index, attempt) in attempts.iter().enumerate() {
+            if let Some(previous) = attempts[..index]
+                .iter()
+                .find(|previous| previous.key() == attempt.key())
+            {
+                return Err(if previous.generation_id == attempt.generation_id {
+                    UsageDispositionError::DuplicateAttempt {
+                        call_id: attempt.call_id.clone(),
+                        attempt_ordinal: attempt.attempt_ordinal,
+                    }
+                } else {
+                    UsageDispositionError::ConflictingAttribution {
+                        call_id: attempt.call_id.clone(),
+                        attempt_ordinal: attempt.attempt_ordinal,
+                    }
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Whether a row carrying `self` may absorb a row carrying `other`.
@@ -140,8 +258,16 @@ impl LedgerUsageDisposition {
     /// Interrupted attempts this row stands for that still have no usage.
     pub fn unreported_attempts(&self) -> u32 {
         match self {
-            Self::Unreported { attempts } => *attempts,
+            Self::Unreported { attempts } => u32::try_from(attempts.len()).unwrap_or(u32::MAX),
             Self::Reported | Self::Reconciled { .. } => 0,
+        }
+    }
+
+    /// The holes this row carries, empty for every other disposition.
+    pub fn unreported_attempt_descriptors(&self) -> &[UnreportedLedgerAttempt] {
+        match self {
+            Self::Unreported { attempts } => attempts.as_slice(),
+            Self::Reported | Self::Reconciled { .. } => &[],
         }
     }
 
@@ -159,18 +285,81 @@ impl LedgerUsageDisposition {
         usage.is_zero() && self.unreported_attempts() == 0 && self.reconciled_attempts() == 0
     }
 
-    /// Fold `other` into `self` for an accumulating pair; returns whether the
-    /// attempt count clamped.
-    pub(crate) fn absorb_saturating(&mut self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Unreported { attempts }, Self::Unreported { attempts: incoming }) => {
-                let (next, overflowed) = attempts.overflowing_add(*incoming);
-                *attempts = if overflowed { u32::MAX } else { next };
-                overflowed
+    /// Fold `other` into `self` for an accumulating pair. Holes are merged by
+    /// identity: a repeat of a hole already held is idempotent, and a
+    /// disagreeing generation attribution is refused. Returns the conflict for
+    /// the checked path; the saturating path keeps the row it already holds.
+    pub(crate) fn absorb_saturating(&mut self, other: &Self) -> Option<UsageDispositionError> {
+        let (Self::Unreported { attempts }, Self::Unreported { attempts: incoming }) =
+            (self, other)
+        else {
+            return None;
+        };
+        let mut conflict = None;
+        for candidate in incoming {
+            match attempts
+                .iter()
+                .find(|existing| existing.key() == candidate.key())
+            {
+                Some(existing) => {
+                    if existing.generation_id != candidate.generation_id && conflict.is_none() {
+                        conflict = Some(UsageDispositionError::ConflictingAttribution {
+                            call_id: candidate.call_id.clone(),
+                            attempt_ordinal: candidate.attempt_ordinal,
+                        });
+                    }
+                }
+                None => attempts.push(candidate.clone()),
             }
-            _ => false,
+        }
+        canonicalize_attempts(attempts);
+        conflict
+    }
+}
+
+fn canonicalize_attempts(attempts: &mut [UnreportedLedgerAttempt]) {
+    attempts.sort_by(|left, right| left.key().cmp(&right.key()));
+}
+
+/// Rebuild the attempts a session still owes usage for from its ledger rows:
+/// every hole any row carries, minus every hole a `Reconciled` correction has
+/// already filled. Order-independent — corrections may precede their holes in
+/// the durable row order — and the sole way a reopened runtime learns what is
+/// outstanding.
+pub fn outstanding_unreported_attempts(
+    entries: &[TokenLedgerEntry],
+) -> Vec<UnreportedUsageAttempt> {
+    let mut outstanding = Vec::<UnreportedUsageAttempt>::new();
+    let mut reconciled = std::collections::HashSet::<(String, u32)>::new();
+    for entry in entries {
+        if let LedgerUsageDisposition::Reconciled {
+            call_id,
+            attempt_ordinal,
+        } = &entry.usage_disposition
+        {
+            reconciled.insert((call_id.clone(), *attempt_ordinal));
+        }
+        for attempt in entry.usage_disposition.unreported_attempt_descriptors() {
+            let key = (attempt.call_id.clone(), attempt.attempt_ordinal);
+            if outstanding
+                .iter()
+                .any(|held| (held.call_id.clone(), held.attempt_ordinal) == key)
+            {
+                continue;
+            }
+            outstanding.push(UnreportedUsageAttempt {
+                call_id: attempt.call_id.clone(),
+                attempt_ordinal: attempt.attempt_ordinal,
+                source: entry.source.clone(),
+                model: entry.model.clone(),
+                generation_id: attempt.generation_id.clone(),
+            });
         }
     }
+    outstanding.retain(|attempt| {
+        !reconciled.contains(&(attempt.call_id.clone(), attempt.attempt_ordinal))
+    });
+    outstanding
 }
 
 /// Aggregated usage for a report row: the canonical [`TokenUsage`] counters
@@ -462,9 +651,13 @@ pub(super) fn merge_ledger_entry_saturating(
                 .accumulates_with(&entry.usage_disposition)
     }) {
         let saturated = saturating_add_usage(&mut existing.usage, &entry.usage);
+        // A disagreeing hole attribution cannot be resolved on this infallible
+        // path: keep the attribution already held and mark the report inexact.
+        // The checked commit path refuses the same conflict outright.
         existing
             .usage_disposition
             .absorb_saturating(&entry.usage_disposition)
+            .is_some()
             | saturated
     } else {
         ledger.push(entry);

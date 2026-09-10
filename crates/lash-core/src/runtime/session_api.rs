@@ -218,7 +218,11 @@ impl LashRuntime {
             .resolve_session_policy(&session_id, policy)?
             .binding
             .provider;
-        let pending = std::mem::take(&mut self.unreported_usage_attempts);
+        // Cancellation safety (FIG-2765): the registry is NOT drained up front.
+        // Dropping this future mid-lookup must leave every unfinished attempt
+        // registered, so we iterate a snapshot and remove each key only after
+        // its correction is on the shared ledger, with no await in between.
+        let pending = self.unreported_usage_attempts.clone();
         for attempt in pending {
             let Some(generation_id) = attempt.generation_id.as_deref() else {
                 report.unresolved.push(attempt);
@@ -248,6 +252,12 @@ impl LashRuntime {
                         &attempt.call_id,
                         attempt.attempt_ordinal,
                     );
+                    // Synchronous with the append above: no await may separate
+                    // recording the correction from retiring the attempt.
+                    self.unreported_usage_attempts.retain(|registered| {
+                        registered.call_id != attempt.call_id
+                            || registered.attempt_ordinal != attempt.attempt_ordinal
+                    });
                     report.reconciled.push(ReconciledUsageAttempt {
                         attempt,
                         usage,
@@ -268,7 +278,6 @@ impl LashRuntime {
                 }
             }
         }
-        self.unreported_usage_attempts = report.unresolved.clone();
         Ok(report)
     }
 
@@ -364,7 +373,23 @@ impl LashRuntime {
         })?;
         self.resident_graph_head_stale
             .store(false, Ordering::Release);
+        // The adopted head is authoritative for usage too: rebuild the attempts
+        // this session still owes usage for from the durable rows plus the
+        // resident rows that have not been confirmed into them yet.
+        self.rehydrate_unreported_usage_attempts();
         Ok(())
+    }
+
+    /// Rebuild the pending-attempt registry from durable ledger rows and the
+    /// unconfirmed resident rows layered on top. Confirmed resident rows are
+    /// already in `state.token_ledger`, and rebuilding by identity rather than
+    /// by count means seeing a hole twice cannot double-count it.
+    pub(in crate::runtime) fn rehydrate_unreported_usage_attempts(&mut self) {
+        let mut entries = self.state.token_ledger.clone();
+        for pending in self.shared_token_ledger.lock_recover().iter() {
+            entries.push(pending.entry.clone());
+        }
+        self.unreported_usage_attempts = crate::runtime::outstanding_unreported_attempts(&entries);
     }
 
     pub(super) fn runtime_session_services(

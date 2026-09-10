@@ -1619,11 +1619,19 @@ impl LashRuntime {
         // usage still writes nothing.
         let unreported = unreported_usage_attempts(&assembler.llm_calls, &policy.model.id);
         if !unreported.is_empty() {
+            let descriptors = unreported
+                .iter()
+                .map(|attempt| crate::UnreportedLedgerAttempt {
+                    call_id: attempt.call_id.clone(),
+                    attempt_ordinal: attempt.attempt_ordinal,
+                    generation_id: attempt.generation_id.clone(),
+                })
+                .collect::<Vec<_>>();
             session_manager::record_unreported_attempts_shared(
                 &self.shared_token_ledger,
                 "turn",
                 &policy.model.id,
-                unreported.len().try_into().unwrap_or(u32::MAX),
+                &descriptors,
             );
             self.unreported_usage_attempts.extend(unreported);
         }

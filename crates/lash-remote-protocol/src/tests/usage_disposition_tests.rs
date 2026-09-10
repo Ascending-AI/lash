@@ -1,9 +1,9 @@
-//! FIG-2765: window-56 usage dispositions stay additive over window-55 rows.
+//! FIG-2765: window-57 usage dispositions stay additive over window-55 rows.
 
 use super::*;
 
 #[test]
-fn window_56_usage_dispositions_are_additive_over_window_55_rows() {
+fn window_57_usage_dispositions_are_additive_over_window_55_rows() {
     let legacy_row = serde_json::json!({
         "source": "turn",
         "model": "m",
@@ -24,12 +24,42 @@ fn window_56_usage_dispositions_are_additive_over_window_55_rows() {
     assert_eq!(serde_json::to_value(&row).expect("encode"), legacy_row);
 
     let hole = RemoteTokenLedgerEntry {
-        usage_disposition: RemoteLedgerUsageDisposition::Unreported { attempts: 1 },
+        usage_disposition: RemoteLedgerUsageDisposition::Unreported {
+            attempts: vec![
+                RemoteUnreportedLedgerAttempt {
+                    call_id: "call-1".to_string(),
+                    attempt_ordinal: 0,
+                    generation_id: Some("gen-1".to_string()),
+                },
+                RemoteUnreportedLedgerAttempt {
+                    call_id: "call-2".to_string(),
+                    attempt_ordinal: 3,
+                    generation_id: None,
+                },
+            ],
+        },
         ..row.clone()
     };
     assert_eq!(
         serde_json::to_value(&hole).expect("encode hole")["usage_disposition"],
-        serde_json::json!({ "kind": "unreported", "attempts": 1 })
+        serde_json::json!({
+            "kind": "unreported",
+            "attempts": [
+                { "call_id": "call-1", "attempt_ordinal": 0, "generation_id": "gen-1" },
+                { "call_id": "call-2", "attempt_ordinal": 3 }
+            ]
+        })
+    );
+    let decoded_hole: RemoteTokenLedgerEntry =
+        serde_json::from_value(serde_json::to_value(&hole).expect("encode hole"))
+            .expect("decode hole");
+    assert_eq!(decoded_hole, hole);
+    // The core round trip keeps every descriptor field, absent generation ids
+    // included: the wire mirror is what a remote host reconciles from.
+    let core: lash_core::LedgerUsageDisposition = hole.usage_disposition.clone().into();
+    assert_eq!(
+        RemoteLedgerUsageDisposition::from(core),
+        hole.usage_disposition
     );
     let correction = RemoteTokenLedgerEntry {
         usage_disposition: RemoteLedgerUsageDisposition::Reconciled {

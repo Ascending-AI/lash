@@ -38,9 +38,16 @@ impl From<lash_core::LedgerUsageDisposition> for RemoteLedgerUsageDisposition {
     fn from(value: lash_core::LedgerUsageDisposition) -> Self {
         match value {
             lash_core::LedgerUsageDisposition::Reported => Self::Reported,
-            lash_core::LedgerUsageDisposition::Unreported { attempts } => {
-                Self::Unreported { attempts }
-            }
+            lash_core::LedgerUsageDisposition::Unreported { attempts } => Self::Unreported {
+                attempts: attempts
+                    .into_iter()
+                    .map(|attempt| RemoteUnreportedLedgerAttempt {
+                        call_id: attempt.call_id,
+                        attempt_ordinal: attempt.attempt_ordinal,
+                        generation_id: attempt.generation_id,
+                    })
+                    .collect(),
+            },
             lash_core::LedgerUsageDisposition::Reconciled {
                 call_id,
                 attempt_ordinal,
@@ -56,7 +63,15 @@ impl From<RemoteLedgerUsageDisposition> for lash_core::LedgerUsageDisposition {
     fn from(value: RemoteLedgerUsageDisposition) -> Self {
         match value {
             RemoteLedgerUsageDisposition::Reported => Self::Reported,
-            RemoteLedgerUsageDisposition::Unreported { attempts } => Self::Unreported { attempts },
+            RemoteLedgerUsageDisposition::Unreported { attempts } => {
+                Self::unreported(attempts.into_iter().map(|attempt| {
+                    lash_core::UnreportedLedgerAttempt {
+                        call_id: attempt.call_id,
+                        attempt_ordinal: attempt.attempt_ordinal,
+                        generation_id: attempt.generation_id,
+                    }
+                }))
+            }
             RemoteLedgerUsageDisposition::Reconciled {
                 call_id,
                 attempt_ordinal,

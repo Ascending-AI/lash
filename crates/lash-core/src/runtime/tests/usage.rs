@@ -144,6 +144,18 @@ fn usage(input_tokens: i64, output_tokens: i64) -> TokenUsage {
     }
 }
 
+fn attempt(
+    call_id: &str,
+    attempt_ordinal: u32,
+    generation_id: Option<&str>,
+) -> crate::UnreportedLedgerAttempt {
+    crate::UnreportedLedgerAttempt {
+        call_id: call_id.to_string(),
+        attempt_ordinal,
+        generation_id: generation_id.map(str::to_string),
+    }
+}
+
 #[test]
 fn legacy_ledger_rows_decode_as_reported() {
     // Rows written before FIG-2765 carry no `usage_disposition`; they must
@@ -168,13 +180,25 @@ fn legacy_ledger_rows_decode_as_reported() {
         source: "turn".to_string(),
         model: "m".to_string(),
         usage: TokenUsage::default(),
-        usage_disposition: LedgerUsageDisposition::Unreported { attempts: 2 },
+        usage_disposition: LedgerUsageDisposition::unreported([
+            attempt("call-9", 0, Some("gen-9")),
+            attempt("call-7", 1, None),
+        ]),
     };
     let encoded = serde_json::to_value(&hole).expect("encode hole");
     assert_eq!(
         encoded["usage_disposition"],
-        serde_json::json!({ "kind": "unreported", "attempts": 2 })
+        serde_json::json!({
+            "kind": "unreported",
+            "attempts": [
+                { "call_id": "call-7", "attempt_ordinal": 1 },
+                { "call_id": "call-9", "attempt_ordinal": 0, "generation_id": "gen-9" }
+            ]
+        }),
+        "holes serialize in canonical key order, absent generations elided"
     );
+    let decoded_hole: TokenLedgerEntry = serde_json::from_value(encoded).expect("decode hole");
+    assert_eq!(decoded_hole.usage_disposition, hole.usage_disposition);
     let correction = TokenLedgerEntry {
         source: "turn".to_string(),
         model: "m".to_string(),
@@ -201,7 +225,10 @@ fn usage_report_derives_outstanding_holes_from_unreported_and_reconciled_rows() 
             source: "turn".to_string(),
             model: "m".to_string(),
             usage: TokenUsage::default(),
-            usage_disposition: LedgerUsageDisposition::Unreported { attempts: 2 },
+            usage_disposition: LedgerUsageDisposition::unreported([
+                attempt("call-7", 1, Some("gen-7")),
+                attempt("call-8", 0, None),
+            ]),
         },
         TokenLedgerEntry {
             source: "turn".to_string(),
@@ -247,14 +274,17 @@ fn ledger_merge_keeps_dispositions_apart_and_never_drops_a_hole() {
         TokenLedgerEntry::reported("turn", "m", TokenUsage::default())
     ));
     assert!(ledger.is_empty(), "zero reported usage is still dropped");
-    let hole = |attempts| TokenLedgerEntry {
+    let hole = |call_id: &str| TokenLedgerEntry {
         source: "turn".to_string(),
         model: "m".to_string(),
         usage: TokenUsage::default(),
-        usage_disposition: LedgerUsageDisposition::Unreported { attempts },
+        usage_disposition: LedgerUsageDisposition::unreported([attempt(call_id, 0, None)]),
     };
-    merge_ledger_entry_saturating(&mut ledger, hole(1));
-    merge_ledger_entry_saturating(&mut ledger, hole(1));
+    merge_ledger_entry_saturating(&mut ledger, hole("call-a"));
+    merge_ledger_entry_saturating(&mut ledger, hole("call-b"));
+    // Identity, not arithmetic: re-merging a hole already held is idempotent,
+    // which is what lets a resident row and its durable twin both be folded.
+    merge_ledger_entry_saturating(&mut ledger, hole("call-a"));
     merge_ledger_entry_saturating(
         &mut ledger,
         TokenLedgerEntry::reported("turn", "m", usage(5, 1)),
@@ -277,7 +307,10 @@ fn ledger_merge_keeps_dispositions_apart_and_never_drops_a_hole() {
     );
     assert_eq!(
         ledger[0].usage_disposition,
-        LedgerUsageDisposition::Unreported { attempts: 2 }
+        LedgerUsageDisposition::unreported([
+            attempt("call-a", 0, None),
+            attempt("call-b", 0, None),
+        ])
     );
     assert_eq!(ledger[1].usage, usage(5, 1));
     assert!(matches!(
@@ -294,14 +327,24 @@ fn ledger_merge_keeps_dispositions_apart_and_never_drops_a_hole() {
 fn pending_ledger_records_holes_and_corrections_separately_from_live_usage() {
     let ledger = Arc::new(Mutex::new(Vec::new()));
     session_manager::record_token_usage_shared(&ledger, "turn", "m", &usage(4, 4));
-    session_manager::record_unreported_attempts_shared(&ledger, "turn", "m", 0);
+    session_manager::record_unreported_attempts_shared(&ledger, "turn", "m", &[]);
     assert_eq!(
         ledger.lock().expect("ledger").len(),
         1,
         "zero attempts write nothing"
     );
-    session_manager::record_unreported_attempts_shared(&ledger, "turn", "m", 1);
-    session_manager::record_unreported_attempts_shared(&ledger, "turn", "m", 1);
+    session_manager::record_unreported_attempts_shared(
+        &ledger,
+        "turn",
+        "m",
+        &[attempt("call-1", 1, Some("gen-1"))],
+    );
+    session_manager::record_unreported_attempts_shared(
+        &ledger,
+        "turn",
+        "m",
+        &[attempt("call-2", 0, None)],
+    );
     session_manager::record_token_usage_shared(&ledger, "turn", "m", &usage(1, 1));
     session_manager::record_reconciled_usage_shared(
         &ledger,
@@ -320,7 +363,10 @@ fn pending_ledger_records_holes_and_corrections_separately_from_live_usage() {
     );
     assert_eq!(
         pending[1].entry.usage_disposition,
-        LedgerUsageDisposition::Unreported { attempts: 2 }
+        LedgerUsageDisposition::unreported([
+            attempt("call-1", 1, Some("gen-1")),
+            attempt("call-2", 0, None),
+        ])
     );
     assert_eq!(
         pending[2].entry.usage_disposition,

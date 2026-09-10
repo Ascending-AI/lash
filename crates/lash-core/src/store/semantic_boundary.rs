@@ -11,10 +11,12 @@ use super::*;
 const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
 const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
 // Version 2 (FIG-2765): staged usage rows carry their usage disposition through
-// the v3 usage-payload identity, so a retried usage-ledger commit whose rows
-// gained a hole or a correction no longer matches a v1 receipt. The projection
-// and domain are unchanged; the version is the fence.
-const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 2;
+// the usage-payload identity, so a retried usage-ledger commit whose rows gained
+// a hole or a correction no longer matches a v1 receipt. Version 3 (FIG-2765 fix
+// round): the v4 payload identity projects each hole's descriptor instead of a
+// count, moving every unreported row's payload hash again. The projection and
+// domain are unchanged; the version is the fence.
+const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 
 /// Refuse settlement or evidence content on a semantic-boundary commit.
 ///
@@ -192,7 +194,7 @@ mod semantic_boundary_request_identity_tests {
         let rows = [
             ("record-config", "protocol-materialization", 1),
             ("create-session", "child-1", 1),
-            ("usage-ledger", "child-turn", 2),
+            ("usage-ledger", "child-turn", 3),
         ]
         .into_iter()
         .map(|(key, boundary, expected_version)| {

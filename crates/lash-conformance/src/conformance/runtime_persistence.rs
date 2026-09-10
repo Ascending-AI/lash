@@ -550,6 +550,7 @@ pub enum RuntimePersistenceLaw {
     commit_with_every_payload_family_inside_budget_succeeds,
     load_hydrates_checkpoint_and_usage,
     load_retains_reasoning_only_usage,
+    load_retains_usage_dispositions_and_rebuilds_outstanding_attempts,
     checkpoint_restore_rejects_turn_index_without_increment_headroom,
     checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows,
     load_rejects_token_usage_overflow,
@@ -663,6 +664,7 @@ async fn runtime_persistence_suite<F>(
         RuntimePersistenceLaw::commit_with_every_payload_family_inside_budget_succeeds => { commit_with_every_payload_family_inside_budget_succeeds(make("root")).await; },
         RuntimePersistenceLaw::load_hydrates_checkpoint_and_usage => { load_hydrates_checkpoint_and_usage(make("hydrated")).await; },
         RuntimePersistenceLaw::load_retains_reasoning_only_usage => { load_retains_reasoning_only_usage(make("root")).await; },
+        RuntimePersistenceLaw::load_retains_usage_dispositions_and_rebuilds_outstanding_attempts => { load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(make("root")).await; },
         RuntimePersistenceLaw::checkpoint_restore_rejects_turn_index_without_increment_headroom => { checkpoint_restore_rejects_turn_index_without_increment_headroom(make("root")).await; },
         RuntimePersistenceLaw::checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows => { checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows(make("root")).await; },
         RuntimePersistenceLaw::load_rejects_token_usage_overflow => { load_rejects_token_usage_overflow(make("root")).await; },
@@ -1300,6 +1302,117 @@ async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePersistence>) {
     assert_eq!(read.token_ledger.len(), 1);
     assert_eq!(read.token_ledger[0].source, usage.source);
     assert_eq!(read.token_ledger[0].usage, usage.usage);
+}
+
+/// FIG-2765: the durable row, not process memory, is what says which calls were
+/// billed but never counted. Every disposition — reported, hole, correction, and
+/// an explicit zero-valued correction — must survive a store round trip with its
+/// hole identities intact, and the outstanding set must be rebuildable from the
+/// rows alone.
+async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let hole =
+        |call_id: &str, ordinal: u32, generation: Option<&str>| crate::UnreportedLedgerAttempt {
+            call_id: call_id.to_string(),
+            attempt_ordinal: ordinal,
+            generation_id: generation.map(str::to_string),
+        };
+    let rows = [
+        TokenLedgerEntry::reported(
+            "turn",
+            "openrouter/model",
+            TokenUsage {
+                input_tokens: 12,
+                ..TokenUsage::default()
+            },
+        ),
+        TokenLedgerEntry {
+            source: "turn".to_string(),
+            model: "openrouter/model".to_string(),
+            usage: TokenUsage::default(),
+            usage_disposition: crate::LedgerUsageDisposition::unreported([
+                hole("call-a", 0, Some("gen-a")),
+                hole("call-b", 2, None),
+                hole("call-c", 1, Some("gen-c")),
+            ]),
+        },
+        TokenLedgerEntry {
+            source: "turn".to_string(),
+            model: "openrouter/model".to_string(),
+            usage: TokenUsage {
+                input_tokens: 334,
+                ..TokenUsage::default()
+            },
+            usage_disposition: crate::LedgerUsageDisposition::Reconciled {
+                call_id: "call-a".to_string(),
+                attempt_ordinal: 0,
+            },
+        },
+        // An explicit zero correction is information: the provider answered and
+        // the charge really was nothing. It must not be mistaken for an empty
+        // row and dropped.
+        TokenLedgerEntry {
+            source: "turn".to_string(),
+            model: "openrouter/model".to_string(),
+            usage: TokenUsage::default(),
+            usage_disposition: crate::LedgerUsageDisposition::Reconciled {
+                call_id: "call-c".to_string(),
+                attempt_ordinal: 1,
+            },
+        },
+    ];
+    commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, &rows),
+        "usage disposition seed",
+    )
+    .await
+    .expect("seed durable usage dispositions");
+
+    let read = store
+        .load_session()
+        .await
+        .expect("load usage dispositions")
+        .expect("usage disposition session exists");
+    assert_eq!(read.token_ledger.len(), 4, "one row per disposition");
+    let dispositions = read
+        .token_ledger
+        .iter()
+        .map(|entry| entry.usage_disposition.clone())
+        .collect::<Vec<_>>();
+    for expected in rows.iter().map(|row| &row.usage_disposition) {
+        assert!(
+            dispositions.contains(expected),
+            "durable read lost a usage disposition: {expected:?} not in {dispositions:?}"
+        );
+    }
+
+    let outstanding = crate::runtime::outstanding_unreported_attempts(&read.token_ledger);
+    let keys = outstanding
+        .iter()
+        .map(|attempt| (attempt.call_id.as_str(), attempt.attempt_ordinal))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        keys,
+        vec![("call-b", 2)],
+        "corrected attempts are filled; the uncorrected hole survives the reload"
+    );
+    assert_eq!(
+        outstanding[0].generation_id, None,
+        "a hole with no generation id survives as a hole, not as missing data"
+    );
+    assert_eq!(outstanding[0].source, "turn");
+    assert_eq!(outstanding[0].model, "openrouter/model");
+
+    let report = crate::SessionUsageReport::from_entries(&read.token_ledger);
+    assert_eq!(report.usage.usage.input_tokens, 346);
+    assert_eq!(report.usage.unreported_attempts, 1);
+    assert_eq!(report.usage.reconciled_attempts, 2);
 }
 
 async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimePersistence>) {

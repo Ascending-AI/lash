@@ -133,7 +133,7 @@ pub use usage_activity::*;
 // Window 56: FIG-2765 carries the typed usage disposition on attempt records
 // and token-ledger rows (unreported holes, reconciled corrections) plus the
 // report's unreported/reconciled attempt counts. Peers must adopt 56.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 56;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 57;
 
 /// One versioned remote-protocol message.
 ///

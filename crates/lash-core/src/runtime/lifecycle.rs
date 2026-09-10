@@ -2,16 +2,20 @@ use super::*;
 
 fn initial_park_preview(
     state: &crate::RuntimeSessionState,
+    pending_usage: &[crate::TokenLedgerEntry],
     commit_budget: crate::CommitBudget,
 ) -> Result<crate::store::RuntimeCommit, crate::StoreError> {
     let operation =
         super::state::boundary_operation(&state.session_id, "initial-park-preview", "preview");
     let mut graph = state.pending_graph_commit();
     graph.derive_node_ids(&state.session_id, &operation)?;
+    // The park operation is content-derived, so the usage this park will
+    // actually carry must be part of the previewed content: two parks differing
+    // only in a pending correction are two different requests.
     crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
         state,
         graph,
-        &[],
+        pending_usage,
         operation,
         commit_budget,
     )
@@ -289,6 +293,10 @@ impl LashRuntime {
             ))
             .await
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
+        // FIG-2765: a reopened runtime learns the attempts it still owes usage
+        // for from the durable ledger, never from process memory.
+        let outstanding_unreported_attempts =
+            crate::runtime::outstanding_unreported_attempts(&state.token_ledger);
         Ok(Self {
             session: Some(session),
             host,
@@ -299,7 +307,7 @@ impl LashRuntime {
             managed_sessions: Arc::new(Mutex::new(HashMap::new())),
             managed_turns: Arc::new(StdMutex::new(HashMap::new())),
             shared_token_ledger: Arc::new(std::sync::Mutex::new(Vec::new())),
-            unreported_usage_attempts: Vec::new(),
+            unreported_usage_attempts: outstanding_unreported_attempts,
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             resident_graph_head_stale: Arc::new(AtomicBool::new(false)),
             turn_phase_probe: None,
@@ -655,19 +663,46 @@ impl LashRuntime {
         // persisted, has accepted plugin writes, or has pending graph nodes; an unconditional commit
         // here would bump the head revision on every park/close, disturbing
         // host-side head-CAS expectations for what is durably a no-op.
+        // FIG-2765: pending usage rows are durable content too. A reconciliation
+        // correction that never reaches the store turns a recovered charge back
+        // into a hole, so a nonempty shared ledger is a fourth flush condition.
+        // Merely opening a session with durable unresolved holes is not — those
+        // rows are already committed and the registry is rebuilt from them.
+        let pending_usage = self
+            .shared_token_ledger
+            .lock_recover()
+            .iter()
+            .map(|pending| pending.entry.clone())
+            .collect::<Vec<_>>();
         if self.state.checkpoint_ref.is_none()
             || self.state.plugin_state_is_dirty()
             || !self.state.pending_graph_commit().nodes.is_empty()
+            || !pending_usage.is_empty()
         {
-            let proposed =
-                initial_park_preview(&self.state, self.host.core.durability.commit_budget)
-                    .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            let proposed = initial_park_preview(
+                &self.state,
+                &pending_usage,
+                self.host.core.durability.commit_budget,
+            )
+            .map_err(|err| SessionError::Protocol(err.to_string()))?;
             let operation = initial_park_operation(&proposed)
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            // Stage against the final operation so a retried park after an
+            // unknown outcome reuses byte-identical row identities.
+            let staged =
+                session_manager::stage_token_ledger_shared(&self.shared_token_ledger, &operation)
+                    .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            for delta in staged.deltas() {
+                crate::store::merge_token_ledger_entry_checked(
+                    &mut self.state.token_ledger,
+                    delta.entry.clone(),
+                )
+                .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            }
             let (commit, persisted_node_ids) =
-                crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
+                crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
                     &mut self.state,
-                    &[],
+                    staged.deltas(),
                     operation,
                     self.host.core.durability.commit_budget,
                 )
@@ -684,6 +719,12 @@ impl LashRuntime {
             )
             .await
             .map_err(|source| session_commit_error("failed to persist runtime state", source))?;
+            // Retire staged rows only against receipt-confirmed identities: an
+            // unknown outcome leaves them staged with their identities intact.
+            let confirmed_usage = result.committed_usage_delta_identities.clone();
+            staged
+                .confirm_identities(&confirmed_usage)
+                .map_err(|err| SessionError::Protocol(err.to_string()))?;
             self.state.apply_persisted_commit_result(result);
             self.state.mark_node_ids_persisted(persisted_node_ids);
         }
@@ -774,19 +815,47 @@ mod tests {
             "persist me before parking",
         )]);
         let budget = crate::CommitBudget::bounded(1024 * 1024, 512);
-        let first = initial_park_preview(&state, budget).expect("first park preview");
+        let first = initial_park_preview(&state, &[], budget).expect("first park preview");
 
         let mut retry_state = state.clone();
         retry_state.head_revision = 41;
-        let retry = initial_park_preview(&retry_state, budget).expect("retry park preview");
+        let retry = initial_park_preview(&retry_state, &[], budget).expect("retry park preview");
 
-        let mut changed_state = retry_state;
+        let mut changed_state = retry_state.clone();
         changed_state.turn_index = 1;
-        let changed = initial_park_preview(&changed_state, budget).expect("changed park preview");
+        let changed =
+            initial_park_preview(&changed_state, &[], budget).expect("changed park preview");
+
+        // A park whose only content is a pending correction still has to be a
+        // distinct request per correction: two different recovered charges must
+        // never share one park receipt, and re-previewing one must be stable.
+        let correction = |call_id: &str, tokens: i64| crate::TokenLedgerEntry {
+            source: "turn".to_string(),
+            model: "openrouter/model".to_string(),
+            usage: crate::TokenUsage {
+                input_tokens: tokens,
+                ..crate::TokenUsage::default()
+            },
+            usage_disposition: crate::LedgerUsageDisposition::Reconciled {
+                call_id: call_id.to_string(),
+                attempt_ordinal: 0,
+            },
+        };
+        let corrected = initial_park_preview(&state, &[correction("call-a", 334)], budget)
+            .expect("correction park preview");
+        let corrected_again = initial_park_preview(&state, &[correction("call-a", 334)], budget)
+            .expect("correction park preview retry");
+        let other_correction = initial_park_preview(&state, &[correction("call-b", 334)], budget)
+            .expect("other correction park preview");
 
         let first = initial_park_operation(&first).expect("first park identity");
         let retry = initial_park_operation(&retry).expect("retry park identity");
         let changed = initial_park_operation(&changed).expect("changed park identity");
+        let corrected = initial_park_operation(&corrected).expect("correction park identity");
+        let corrected_again =
+            initial_park_operation(&corrected_again).expect("correction park identity retry");
+        let other_correction =
+            initial_park_operation(&other_correction).expect("other correction park identity");
 
         assert_eq!(
             first, retry,
@@ -795,6 +864,18 @@ mod tests {
         assert_ne!(
             first, changed,
             "different persisted content must not reuse one park receipt"
+        );
+        assert_eq!(
+            corrected, corrected_again,
+            "an unchanged pending correction must keep its park replay identity"
+        );
+        assert_ne!(
+            first, corrected,
+            "a park carrying a pending correction is not the empty park"
+        );
+        assert_ne!(
+            corrected, other_correction,
+            "corrections for different attempts must not share one park receipt"
         );
     }
 
