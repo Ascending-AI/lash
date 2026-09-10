@@ -11,14 +11,29 @@
 # can change independently of this script.
 set -euo pipefail
 
-# The removals run detached: they free ~25GB well before the compile needs
-# it, and GitHub-hosted runners keep background processes alive across the
-# job's remaining steps, so blocking the job for 60-90s of rm/prune bought
-# nothing. Nothing later in any job reads the reclaimed paths.
+timestamp() {
+  date -u '+%Y-%m-%dT%H:%M:%SZ'
+}
+
+# Keep the image prune in the caller's foreground process: every caller may
+# pull or start a container immediately after this script returns.
+echo "runner disk reclaim started at $(timestamp)"
 echo "before:"; df -h / | tail -1
-sudo bash -c 'nohup sh -c "
-  rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-    /opt/hostedtoolcache/CodeQL /usr/local/share/boost 2>/dev/null
-  docker image prune --all --force >/dev/null 2>&1
-" >/dev/null 2>&1 &'
-echo "reclaim running in background"
+sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+  /opt/hostedtoolcache/CodeQL /usr/local/share/boost 2>/dev/null || true
+
+echo "docker image prune started at $(timestamp)"
+prune_status=0
+if sudo docker image prune --all --force; then
+  prune_status=0
+else
+  prune_status=$?
+fi
+echo "docker image prune finished at $(timestamp)"
+echo "docker image prune exit status ${prune_status}"
+if ((prune_status != 0)); then
+  echo "docker image prune failed; continuing with best-effort runner cleanup" >&2
+fi
+
+echo "after:"; df -h / | tail -1
+echo "runner disk reclaim finished at $(timestamp)"
