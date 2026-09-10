@@ -153,27 +153,29 @@ writer or owner differs, or the observed terminal disagrees with the registry re
 
 ## Phase 4 — Judge the host procedure from observed behavior
 
-Reconstruct the sequence from `03-observed.jsonl`; do not accept the companion's pass line
-as the judgment. Check each claim against fields emitted at different checkpoints, and check
-the final process array against both its seeded state and the drain report.
+Correlate the seeded and final observations in `03-observed.jsonl`; do not accept the
+companion's pass line as the judgment. Check the final process array against both its seeded
+state and the drain report.
 
 | Required operator conclusion | Independent behavior evidence |
 |---|---|
-| Admission closed while one admitted effect still existed | seed has one active replay key; final ingress rejects a new turn |
-| Already-admitted work settled before the journal emptied | the same replay key moves from active to completed and returns `drained` |
-| The correct session parked after its effect committed | seeded session id equals the parked id after the completed-key transition |
+| The seed captured work before drain began | ingress is accepting, one provider call is parked, and the journal has an active replay key |
+| The final state rejects admission and has settled the seeded work | ingress and new-turn fields are false; the seeded replay key is completed, no key is active, and the turn returns `drained` |
+| The final state parks the seeded session | seeded session id equals the final parked session id |
 | Owner drain selected no ineligible or still-held row | drain report has the one eligible id, no deferred id, and the final array leaves every opposite case live |
 | Owner drain abandoned exactly its eligible row | seeded five-row ownership/disposition split matches the final array and single report id |
 | Provider close and trace flush both completed | final checkpoint carries the terminal result and both completion flags |
-| The observed order is fixture policy, not a universal Lash total order | evidence proves this run's order only; no scorecard claim generalizes it to other hosts |
 
 Missing fields, inconsistent identities, or a conclusion that requires facts outside the
 artifact bundle are failures. Preserve the bundle and report the unsupported claim.
 
-The bundle exposes final shutdown facts, not timestamps for every teardown call. It therefore
-does not independently prove the fixture source's release-before-owner-drain or
-settlement-before-close ordering. Record that limitation; do not promote final true flags
-into ordering evidence. The scenario still proves the observable consequence of the required
+The bundle exposes a seed and a final shutdown checkpoint, not intermediate timestamps. It
+therefore does not independently prove when admission closed relative to the active effect,
+when settlement occurred relative to the journal becoming empty, when the session parked,
+when process run leases were released, or when provider close and trace flush occurred.
+Record that limitation; do not promote endpoint correlations or final true flags into
+ordering evidence. The host sequence described above remains this fixture's source-selected
+policy. The artifacts prove its endpoint outcomes and the observable consequence of the
 lease prerequisite: exactly the eligible owned row was abandoned and no row was deferred.
 
 ## Phase 5 — Teardown and score
