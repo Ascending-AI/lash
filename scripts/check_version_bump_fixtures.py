@@ -43,7 +43,7 @@ REFUSAL_MARKERS = (
 
 VERSION_CONSTANT = re.compile(r"^const SCHEMA_VERSION: i32 = (\d+);$", re.MULTILINE)
 MIGRATIONS_BLOCK = re.compile(
-    r"^pub\(super\) const SCHEMA_MIGRATIONS: &\[SchemaMigration\] = &\[$(.*?)^\];$",
+    r"^(?:pub\(super\) )?const SCHEMA_MIGRATIONS: &\[SchemaMigration\] = &\[$(.*?)^\];$",
     re.MULTILINE | re.DOTALL,
 )
 MIGRATION_ENTRY = re.compile(r"^\s{4}SchemaMigration \{$", re.MULTILINE)
