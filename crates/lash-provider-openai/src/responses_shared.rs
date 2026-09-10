@@ -905,41 +905,11 @@ pub struct ResponsesStreamingToolCall {
     pub item_id: String,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum ResponsesPartSlotIdentity {
-    OutputIndex(usize),
-    ItemId(String),
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum ResponsesPartKind {
-    Message,
-    Reasoning,
-    ToolCall,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct ResponsesPartSlotKey {
-    kind: ResponsesPartKind,
-    identity: ResponsesPartSlotIdentity,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) enum ResponsesPartSlot {
-    Message(usize),
-    Reasoning(usize),
-    ToolCall(ResponsesStreamingToolCall),
-}
-
-impl ResponsesPartSlot {
-    fn kind(&self) -> ResponsesPartKind {
-        match self {
-            Self::Message(_) => ResponsesPartKind::Message,
-            Self::Reasoning(_) => ResponsesPartKind::Reasoning,
-            Self::ToolCall(_) => ResponsesPartKind::ToolCall,
-        }
-    }
-}
+mod slots;
+use slots::{
+    ResponsesPartKind, ResponsesPartSlot, ResponsesPartSlotAllocation, ResponsesPartSlotIdentity,
+    ResponsesPartSlotKey,
+};
 
 #[derive(Clone, Debug, Default)]
 pub struct ResponsesStreamState {
@@ -1033,7 +1003,7 @@ impl ResponsesStreamState {
         item_id: Option<&str>,
         kind: ResponsesPartKind,
         current: Option<usize>,
-        use_current_for_new_key: bool,
+        allocation: ResponsesPartSlotAllocation,
     ) -> Option<usize> {
         let output_key = output_index.map(|output_index| ResponsesPartSlotKey {
             kind,
@@ -1045,21 +1015,30 @@ impl ResponsesStreamState {
                 kind,
                 identity: ResponsesPartSlotIdentity::ItemId(id.to_string()),
             });
-        let output_owner = output_key
-            .as_ref()
-            .and_then(|key| self.part_slots.get(key).copied())
+        let output_owner = (allocation != ResponsesPartSlotAllocation::Fresh)
+            .then(|| {
+                output_key
+                    .as_ref()
+                    .and_then(|key| self.part_slots.get(key).copied())
+            })
+            .flatten()
             .filter(|owner| self.slot_has_kind(*owner, kind));
-        let item_owner = item_key
-            .as_ref()
-            .and_then(|key| self.part_slots.get(key).copied())
+        let item_owner = (allocation != ResponsesPartSlotAllocation::Fresh)
+            .then(|| {
+                item_key
+                    .as_ref()
+                    .and_then(|key| self.part_slots.get(key).copied())
+            })
+            .flatten()
             .filter(|owner| self.slot_has_kind(*owner, kind));
         let has_key = output_key.is_some() || item_key.is_some();
         let owner = output_owner
             .or(item_owner)
             .or_else(|| {
-                (!has_key || use_current_for_new_key)
+                (!has_key || allocation == ResponsesPartSlotAllocation::ReuseCurrent)
                     .then_some(current)
                     .flatten()
+                    .filter(|_| allocation != ResponsesPartSlotAllocation::Fresh)
                     .filter(|owner| self.slot_has_kind(*owner, kind))
             })
             .or_else(|| {
@@ -1309,7 +1288,7 @@ impl ResponsesStreamState {
                 item_id,
                 ResponsesPartKind::Message,
                 self.current_text_slot,
-                false,
+                ResponsesPartSlotAllocation::ReuseCurrent,
             )
             .expect("message slots can be allocated without a provider key");
         self.current_text_slot = Some(owner);
@@ -1329,7 +1308,7 @@ impl ResponsesStreamState {
                 item_id,
                 ResponsesPartKind::Message,
                 self.current_text_slot,
-                false,
+                ResponsesPartSlotAllocation::Resolve,
             )
             .expect("message slots can be allocated without a provider key");
         let index = self
@@ -1368,13 +1347,23 @@ impl ResponsesStreamState {
         lash_core::facade_support::visible_response_text_from_parts(&self.parts)
     }
 
+    pub fn begin_reasoning_item(&mut self, output_index: Option<usize>, item_id: Option<&str>) {
+        self.current_reasoning_slot = self.allocate_or_find_part_slot(
+            output_index,
+            item_id,
+            ResponsesPartKind::Reasoning,
+            None,
+            ResponsesPartSlotAllocation::Resolve,
+        );
+    }
+
     pub fn begin_reasoning_part(&mut self, output_index: Option<usize>, item_id: Option<&str>) {
         self.current_reasoning_slot = self.allocate_or_find_part_slot(
             output_index,
             item_id,
             ResponsesPartKind::Reasoning,
             None,
-            false,
+            ResponsesPartSlotAllocation::Fresh,
         );
     }
 
@@ -1393,7 +1382,7 @@ impl ResponsesStreamState {
                 item_id,
                 ResponsesPartKind::Reasoning,
                 self.current_reasoning_slot,
-                false,
+                ResponsesPartSlotAllocation::Resolve,
             )
             .expect("reasoning slots can be allocated without a provider key");
         self.current_reasoning_slot = Some(owner);
@@ -1418,7 +1407,7 @@ impl ResponsesStreamState {
             item_id,
             ResponsesPartKind::Reasoning,
             self.current_reasoning_slot,
-            false,
+            ResponsesPartSlotAllocation::Resolve,
         ) else {
             return;
         };
@@ -1472,7 +1461,7 @@ impl ResponsesStreamState {
             item_id,
             ResponsesPartKind::Reasoning,
             self.current_reasoning_slot.or(self.last_reasoning_slot),
-            true,
+            ResponsesPartSlotAllocation::ReuseCurrent,
         )?;
         self.current_reasoning_slot = Some(owner);
         let index = self.part_slot_index(owner, ResponsesPartKind::Reasoning)?;
@@ -1517,7 +1506,7 @@ impl ResponsesStreamState {
             item_id,
             ResponsesPartKind::ToolCall,
             None,
-            false,
+            ResponsesPartSlotAllocation::Resolve,
         )
     }
 

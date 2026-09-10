@@ -81,7 +81,7 @@ pub fn process_sse_event(
                             Some("function_call") => {
                                 let _ = state.update_tool_call_from_item(item, output_index);
                             }
-                            Some("reasoning") => state.begin_reasoning_part(
+                            Some("reasoning") => state.begin_reasoning_item(
                                 output_index,
                                 item.get("id").and_then(Value::as_str),
                             ),

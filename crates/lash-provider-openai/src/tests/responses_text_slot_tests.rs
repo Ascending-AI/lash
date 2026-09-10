@@ -244,3 +244,68 @@ fn responses_same_identity_value_keeps_part_kinds_distinct() {
         "parts: {parts:?}"
     );
 }
+
+#[test]
+fn responses_text_new_aliases_reuse_the_active_fallback_owner() {
+    let cases = [
+        [
+            r#"{"type":"response.output_text.delta","output_index":0,"delta":"Hello"}"#,
+            r#"{"type":"response.output_text.delta","item_id":"msg_1","delta":" world"}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_1","content":[{"type":"output_text","text":"Hello world"}]}}"#,
+        ],
+        [
+            r#"{"type":"response.output_text.delta","item_id":"msg_1","delta":"Hello"}"#,
+            r#"{"type":"response.output_text.delta","output_index":0,"delta":"Hello"}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_1","content":[{"type":"output_text","text":"Hello"}]}}"#,
+        ],
+        [
+            r#"{"type":"response.output_text.delta","delta":"Hello"}"#,
+            r#"{"type":"response.output_text.delta","output_index":0,"delta":" world"}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_1","content":[{"type":"output_text","text":"Hello world"}]}}"#,
+        ],
+    ];
+
+    for (events, expected) in cases
+        .into_iter()
+        .zip(["Hello world", "Hello", "Hello world"])
+    {
+        let mut state = ResponsesStreamState::default();
+        for event in events {
+            OpenAiCompatibleProvider::process_sse_event(event, &mut state, None).unwrap();
+        }
+        let texts = state
+            .response_parts()
+            .into_iter()
+            .filter_map(|part| match part {
+                LlmOutputPart::Text { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(texts, vec![expected], "events: {events:?}");
+    }
+}
+
+#[test]
+fn responses_reasoning_summary_parts_with_one_item_id_stay_distinct() {
+    let mut state = ResponsesStreamState::default();
+    for event in [
+        r#"{"type":"response.reasoning_summary_part.added","item_id":"rs_1","summary_index":0}"#,
+        r#"{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":0,"delta":"First"}"#,
+        r#"{"type":"response.reasoning_summary_part.done","item_id":"rs_1","summary_index":0}"#,
+        r#"{"type":"response.reasoning_summary_part.added","item_id":"rs_1","summary_index":1}"#,
+        r#"{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":1,"delta":"Second"}"#,
+        r#"{"type":"response.reasoning_summary_part.done","item_id":"rs_1","summary_index":1}"#,
+    ] {
+        OpenAiCompatibleProvider::process_sse_event(event, &mut state, None).unwrap();
+    }
+
+    let reasoning = state
+        .response_parts()
+        .into_iter()
+        .filter_map(|part| match part {
+            LlmOutputPart::Reasoning { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(reasoning, vec!["First", "Second"]);
+}
