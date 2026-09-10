@@ -1219,7 +1219,6 @@ fn remote_trigger_dtos_json_round_trip() {
         incarnation: "incarnation-1".to_string(),
         revision: 7,
         registrant: RemoteProcessOriginator::Host { scope: None },
-        manifest_membership: RemoteTriggerManifestMembership::PresentInCurrentArtifact,
         source_key: "source-key".to_string(),
         name: Some("button watcher".to_string()),
         source_type: "ui.button.pressed".to_string(),
@@ -1246,6 +1245,22 @@ fn remote_trigger_dtos_json_round_trip() {
     )
     .expect("deserialize registration");
     assert_eq!(decoded.target.label.as_deref(), Some("on_button"));
+
+    let mut version_57 =
+        serde_json::to_value(&registration).expect("serialize version-57 registration body");
+    version_57["protocol_version"] = serde_json::json!(57);
+    version_57["manifest_membership"] = serde_json::json!("present_in_current_artifact");
+    let error = Envelope::<RemoteTriggerRegistration>::decode_json(
+        &serde_json::to_vec(&version_57).expect("serialize version-57 registration envelope"),
+    )
+    .expect_err("version-57 trigger registration must be refused before body decoding");
+    assert!(matches!(
+        error,
+        RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: 57,
+            expected: 58,
+        }
+    ));
 
     let cause = RemoteCausalRef::TriggerOccurrence {
         occurrence_id: "occurrence:1".to_string(),
@@ -1494,7 +1509,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 51,
-            expected: 57,
+            expected: 58,
         }
     ));
 
@@ -1511,7 +1526,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 57, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 58, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         id: ProcessId::from("process:1"),
         input: RemoteProcessInput::External {
@@ -1844,7 +1859,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 57,
+            expected: 58,
         })
     ));
 }
@@ -1884,7 +1899,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 57,
+                expected: 58,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1920,7 +1935,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 57,
+                expected: 58,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1976,7 +1991,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 57,
+                expected: 58,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -2008,7 +2023,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 57,
+                expected: 58,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
@@ -2498,19 +2513,6 @@ fn remote_process_event() -> RemoteProcessEvent {
         },
         occurred_at_ms: 3,
     }
-}
-
-#[test]
-fn protocol_55_is_refused_before_window_57_payload_decode() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 57, "window 57 adjacency pin");
-    let old = br#"{"protocol_version":55,"outcome":{"type":"unknown_to_57"}}"#;
-    assert!(matches!(
-        RemoteTurnReport::decode_json(old),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 55,
-            expected: 57
-        })
-    ));
 }
 
 #[test]

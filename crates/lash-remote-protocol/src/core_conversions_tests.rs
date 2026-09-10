@@ -547,8 +547,6 @@ fn trigger_dtos_round_trip_core_values() {
         incarnation: "incarnation-1".to_string(),
         revision: 7,
         registrant: lash_core::ProcessOriginator::host(),
-        manifest_membership:
-            lash_core::facade_support::TriggerManifestMembership::PresentInCurrentArtifact,
         source_key: "source-key".to_string(),
         name: Some("button watcher".to_string()),
         source_type: lash_core::facade_support::TriggerEventType::new("ui.button.pressed"),

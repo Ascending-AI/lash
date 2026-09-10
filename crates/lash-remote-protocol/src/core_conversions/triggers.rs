@@ -291,7 +291,6 @@ impl From<lash_core::facade_support::TriggerRegistration> for RemoteTriggerRegis
             incarnation,
             revision,
             registrant,
-            manifest_membership,
             source_key,
             name,
             source_type,
@@ -310,17 +309,6 @@ impl From<lash_core::facade_support::TriggerRegistration> for RemoteTriggerRegis
             incarnation,
             revision,
             registrant: registrant.into(),
-            manifest_membership: match manifest_membership {
-                lash_core::facade_support::TriggerManifestMembership::PresentInCurrentArtifact => {
-                    RemoteTriggerManifestMembership::PresentInCurrentArtifact
-                }
-                lash_core::facade_support::TriggerManifestMembership::Orphaned => {
-                    RemoteTriggerManifestMembership::Orphaned
-                }
-                lash_core::facade_support::TriggerManifestMembership::Unknown => {
-                    RemoteTriggerManifestMembership::Unknown
-                }
-            },
             source_key,
             name,
             source_type: source_type.to_string(),
@@ -347,7 +335,6 @@ impl TryFrom<RemoteTriggerRegistration> for lash_core::facade_support::TriggerRe
             incarnation,
             revision,
             registrant,
-            manifest_membership,
             source_key,
             name,
             source_type,
@@ -366,17 +353,6 @@ impl TryFrom<RemoteTriggerRegistration> for lash_core::facade_support::TriggerRe
             incarnation,
             revision,
             registrant: registrant.into(),
-            manifest_membership: match manifest_membership {
-                RemoteTriggerManifestMembership::PresentInCurrentArtifact => {
-                    lash_core::facade_support::TriggerManifestMembership::PresentInCurrentArtifact
-                }
-                RemoteTriggerManifestMembership::Orphaned => {
-                    lash_core::facade_support::TriggerManifestMembership::Orphaned
-                }
-                RemoteTriggerManifestMembership::Unknown => {
-                    lash_core::facade_support::TriggerManifestMembership::Unknown
-                }
-            },
             source_key,
             name,
             source_type: lash_core::facade_support::TriggerEventType::new(source_type),

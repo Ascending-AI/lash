@@ -218,7 +218,6 @@ pub(super) struct RawDurableState {
     pub(super) session_execution_leases: Vec<SessionExecutionLeaseObservation>,
     pub(super) pending_turn_inputs: Vec<PendingTurnInputObservation>,
     pub(super) queued_work: Vec<QueuedWorkObservation>,
-    pub(super) session_owned_artifact_refs: Vec<SessionOwnedArtifactRefObservation>,
     // `process_*` and `trigger_*` are deliberately excluded: they are separate
     // subsystems with dedicated conformance suites, while this harness and its
     // operation vocabulary are scoped to one runtime session. Effect/await
@@ -268,28 +267,6 @@ pub(super) struct QueuedWorkObservation {
     claim_token_present: bool,
     claim_fencing_token: u64,
     claim_session_lease_generation: Option<u64>,
-}
-
-// SQLite stores a content-addressed blob pointer while PostgreSQL stores the
-// manifest bytes inline. Only namespace plus owner ref form the shared logical
-// identity; pointer/body representation is deliberately normalized away.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct SessionOwnedArtifactRefObservation {
-    namespace: String,
-    artifact_ref: String,
-}
-
-pub(super) fn session_owned_artifact_ref_observations(
-    rows: Vec<(String, String)>,
-) -> Vec<SessionOwnedArtifactRefObservation> {
-    rows.into_iter()
-        .map(
-            |(namespace, artifact_ref)| SessionOwnedArtifactRefObservation {
-                namespace,
-                artifact_ref,
-            },
-        )
-        .collect()
 }
 
 pub(super) fn queued_work_observation(

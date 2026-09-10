@@ -14,9 +14,7 @@
 
 use std::sync::Arc;
 
-use crate::{
-    DurabilityTier, Expr, LashlangArtifactStore, ModuleArtifact, Program, ResourceRefExpr, parse,
-};
+use crate::{DurabilityTier, LashlangArtifactStore, ModuleArtifact, parse};
 
 /// A writer plus a factory that constructs a post-write
 /// [`LashlangArtifactStore`] handle over the same durable backing store.
@@ -56,7 +54,6 @@ where
     raw_artifact_round_trips(make()).await;
     raw_artifact_overwrite(make()).await;
     module_and_raw_namespaces_isolate(make()).await;
-    current_trigger_manifest_replacement_diffs_keys(make()).await;
 }
 
 /// Run the full contract plus a durable reopen check across both keyspaces:
@@ -129,70 +126,6 @@ async fn raw_artifact_round_trips(store: Arc<dyn LashlangArtifactStore>) {
     );
 }
 
-fn trigger_artifact(subscription_key: &str) -> ModuleArtifact {
-    let registration = Expr::ReceiverCall {
-        receiver: Box::new(Expr::ResourceRef(ResourceRefExpr::resolved(
-            vec!["triggers".into()],
-            "Triggers",
-            "triggers",
-        ))),
-        operation: "register".into(),
-        args: vec![Expr::Record(vec![
-            ("source".into(), Expr::Record(Vec::new())),
-            ("target".into(), Expr::Null),
-            ("inputs".into(), Expr::Record(Vec::new())),
-            (
-                "subscription_key".into(),
-                Expr::String(subscription_key.into()),
-            ),
-        ])],
-    };
-    ModuleArtifact::from_program(Program::block(vec![registration]))
-        .expect("build trigger manifest artifact")
-}
-
-async fn current_trigger_manifest_replacement_diffs_keys(store: Arc<dyn LashlangArtifactStore>) {
-    let first = trigger_artifact("old-key");
-    let second = trigger_artifact("new-key");
-    let owner = "session:manifest-owner";
-    let initial = store
-        .replace_current_trigger_manifest(owner, &first)
-        .await
-        .expect("install initial trigger manifest");
-    assert!(initial.previous_module_ref.is_none());
-    assert!(initial.diff.added.is_empty());
-    assert!(initial.diff.removed.is_empty());
-
-    let replacement = store
-        .replace_current_trigger_manifest(owner, &second)
-        .await
-        .expect("replace current trigger manifest");
-    assert_eq!(replacement.previous_module_ref, Some(first.module_ref));
-    assert_eq!(
-        replacement.diff.added,
-        ["new-key".to_string()].into_iter().collect()
-    );
-    assert_eq!(
-        replacement.diff.removed,
-        ["old-key".to_string()].into_iter().collect()
-    );
-    let current = store
-        .get_current_trigger_manifest(owner)
-        .await
-        .expect("load current trigger manifest")
-        .expect("current trigger manifest exists");
-    assert_eq!(current.module_ref, second.module_ref);
-    assert!(current.manifest.contains("new-key"));
-    assert!(!current.manifest.contains("old-key"));
-    assert!(
-        store
-            .get_current_trigger_manifest("session:other-owner")
-            .await
-            .expect("load unrelated trigger manifest")
-            .is_none()
-    );
-}
-
 async fn raw_artifact_overwrite(store: Arc<dyn LashlangArtifactStore>) {
     store
         .put_artifact_bytes("raw:overwrite", "generic", b"first")
@@ -254,10 +187,6 @@ async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
     open.put_artifact_bytes("raw:reopen", "generic", b"raw-reopen")
         .await
         .expect("put raw bytes");
-    let trigger_artifact = trigger_artifact("reopen-key");
-    open.replace_current_trigger_manifest("session:reopen", &trigger_artifact)
-        .await
-        .expect("put current trigger manifest");
     drop(open);
 
     let reopen = reopen();
@@ -279,13 +208,6 @@ async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
             .expect("get raw bytes after reopen"),
         Some(b"raw-reopen".to_vec()),
     );
-    let current = reopen
-        .get_current_trigger_manifest("session:reopen")
-        .await
-        .expect("get current trigger manifest after reopen")
-        .expect("current trigger manifest survives reopen");
-    assert_eq!(current.module_ref, trigger_artifact.module_ref);
-    assert!(current.manifest.contains("reopen-key"));
 }
 
 async fn hostile_artifact_namespaces(store: Arc<dyn LashlangArtifactStore>) {
@@ -295,7 +217,7 @@ async fn hostile_artifact_namespaces(store: Arc<dyn LashlangArtifactStore>) {
             store.get_module_artifact(&module_ref).await.is_err(),
             "malformed module reference must not reach lookup"
         );
-        let mut artifact = trigger_artifact("hostile");
+        let mut artifact = sample_module_artifact("finish true");
         artifact.module_ref = module_ref;
         assert!(
             store.put_module_artifact(&artifact).await.is_err(),
@@ -311,17 +233,6 @@ async fn hostile_artifact_namespaces(store: Arc<dyn LashlangArtifactStore>) {
         assert!(
             store.get_artifact_bytes(raw).await.is_err(),
             "malformed artifact reference must not reach blob lookup"
-        );
-        assert!(
-            store.get_current_trigger_manifest(raw).await.is_err(),
-            "malformed owner namespace must not reach manifest lookup"
-        );
-        assert!(
-            store
-                .replace_current_trigger_manifest(raw, &trigger_artifact("hostile"))
-                .await
-                .is_err(),
-            "malformed owner namespace must not reach manifest mutation"
         );
     }
     for raw in [

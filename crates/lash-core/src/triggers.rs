@@ -380,7 +380,6 @@ pub struct TriggerRegistration {
     pub incarnation: String,
     pub revision: u64,
     pub registrant: crate::ProcessOriginator,
-    pub manifest_membership: TriggerManifestMembership,
     pub source_key: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -389,15 +388,6 @@ pub struct TriggerRegistration {
     pub target: TriggerTarget,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TriggerManifestMembership {
-    PresentInCurrentArtifact,
-    Orphaned,
-    #[default]
-    Unknown,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -675,27 +665,11 @@ fn validate_trigger_subscription_target_label(
 
 impl From<&TriggerSubscriptionRecord> for TriggerRegistration {
     fn from(route: &TriggerSubscriptionRecord) -> Self {
-        Self::from_record_with_manifest(route, None)
-    }
-}
-
-impl TriggerRegistration {
-    pub fn from_record_with_manifest(
-        route: &TriggerSubscriptionRecord,
-        manifest_keys: Option<&std::collections::BTreeSet<String>>,
-    ) -> Self {
         Self {
             subscription_key: route.subscription_key.clone(),
             incarnation: route.incarnation.clone(),
             revision: route.revision,
             registrant: route.registrant.clone(),
-            manifest_membership: manifest_keys.map_or(TriggerManifestMembership::Unknown, |keys| {
-                if keys.contains(&route.subscription_key) {
-                    TriggerManifestMembership::PresentInCurrentArtifact
-                } else {
-                    TriggerManifestMembership::Orphaned
-                }
-            }),
             source_key: route.source_key.clone(),
             name: route.name.clone(),
             source_type: TriggerEventType::new(route.source_type.clone()),

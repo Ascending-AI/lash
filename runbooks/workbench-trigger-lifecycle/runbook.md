@@ -46,6 +46,10 @@ and work registry are.
 5. **UI and API lifecycle state must agree.** The registration rail's action and enabled
    styling must match `GET /api/triggers`. After deletion, the subscription key must be
    absent from both surfaces.
+6. **Source text is not desired state.** After registration, an unrelated chat/code turn
+   and a later source version without the registration declaration must leave the captured
+   subscription unchanged. Only the explicit disable, re-enable, and delete operations in
+   this scenario may change it.
 
 ## Working material
 
@@ -87,6 +91,12 @@ Poll `GET /api/triggers` until it returns exactly one enabled registration named
 `subscription_id`, source type, and source configuration, and require the registrations
 rail to show the target and source (e.g. `lifecycle_forwarder ← mail.received`) with the
 registration alias in its details/title and a **disable** action. Screenshot `02-registered.png`.
+
+Send one unrelated calculation turn that declares no trigger and wait for it to settle.
+Poll `GET /api/triggers` again and require the captured registration to be byte-for-byte
+unchanged. Save `02-unrelated-turn-registration.json`. A missing trigger namespace or a
+reconciliation warning is a failure: ordinary execution neither publishes nor replaces a
+global declaration set.
 
 ## Phase 2 — Fire repeatedly and gate the loop-breaker
 

@@ -592,27 +592,6 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         ))
         .await
         .expect("seed queued work on the handle that will go stale");
-    let has_session_artifact_refs = stale
-        .seed_session_trigger_manifest_ref_for_testing(&request.session_id)
-        .await
-        .expect("seed the session trigger-manifest ref through the stale handle");
-    if has_session_artifact_refs {
-        let refs = stale
-            .raw_session_owned_artifact_refs_for_testing(&request.session_id)
-            .await
-            .expect("read seeded session artifact refs through the stale handle");
-        assert_eq!(
-            refs.len(),
-            1,
-            "the deletion fixture must exercise the exact session-owned artifact-ref namespace"
-        );
-        assert_eq!(
-            refs[0].1,
-            crate::TriggerOwnerScope::session(&request.session_id).namespace(),
-            "the deletion fixture must exercise the exact session owner ref"
-        );
-    }
-
     factory
         .delete_session(&request.session_id)
         .await
@@ -650,15 +629,6 @@ pub async fn session_store_factory_delete_fences_stale_handles(
             .is_empty(),
         "a stale handle must observe deleted queued work as absent"
     );
-    assert!(
-        stale
-            .raw_session_owned_artifact_refs_for_testing(&request.session_id)
-            .await
-            .expect("read artifact refs through the stale handle")
-            .is_empty(),
-        "a stale handle must observe deleted session-owned artifact refs as absent"
-    );
-
     let ensure_error = stale
         .admit_and_bind_session(&crate::SessionBinding::from_create_request(&request))
         .await

@@ -51,6 +51,12 @@ trace buffers) lives inside lash. The capability set:
 - **Failover parity**: process leases carry `LeaseOwnerIdentity` and support
   the same fenced, TTL-gated acquisition as session execution leases. Neither
   lane infers holder liveness from the local process table.
+- **Trigger reconciliation**: registered subscriptions are durable runtime
+  state. Compiling or executing a module does not publish a current declaration
+  set, and removing a registration call from source does not unregister its
+  subscription. Products that want whole-workflow reconciliation compare
+  registered state themselves and invoke the existing explicit update, delete,
+  or prune operations; Lash does not infer that policy from the latest module.
 
 ## Why
 
@@ -89,6 +95,28 @@ same boundary discipline keeps drain policy inside the host.
 - Anything lash cannot expose as a lever without becoming an orchestrator
   (signal handling, drain deadlines, readiness endpoints) is documented as host
   territory in the production guide instead of API surface.
+- Trigger list operations expose registered subscription truth without
+  current-artifact membership labels. Stable explicit or compiler-generated
+  subscription keys retain idempotent registration behavior; only explicit
+  mutation and existing owner-lifecycle rules remove registrations.
+
+## Current-trigger manifest cutover
+
+This is a pre-1.0 format break with no compatibility decoder. Module artifacts
+carrying the removed `trigger_key_manifest` field are refused and must be
+recompiled under the current semantic-hash generation. Remote peers negotiate
+the matching protocol version before exchanging the registration shape that no
+longer contains membership. Existing persisted subscription records remain the
+runtime truth and need no rewrite; obsolete manifest rows in generic artifact
+tables are ignored and receive no dual-read or migration path.
+
+Before deploying across an existing durable environment, drain or finish work
+whose captured process environment references an old module artifact, deploy
+one protocol generation together, and recompile/re-register source against the
+new artifacts. If that work cannot be drained or recreated, keep the old binary
+and store snapshot together; the clean-cutover alternative is a fresh store and
+explicit recreation of the desired subscriptions. No Lash startup or
+maintenance command resets a store automatically.
 
 ## Considered Alternatives
 

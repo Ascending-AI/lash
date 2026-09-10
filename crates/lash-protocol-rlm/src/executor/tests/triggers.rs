@@ -428,7 +428,7 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
 }
 
 #[test]
-pub(super) fn regenerated_trigger_manifest_warns_and_list_marks_the_orphan() {
+pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregister() {
     block_on(async {
         let trigger_store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
         let artifact_store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
@@ -455,7 +455,7 @@ pub(super) fn regenerated_trigger_manifest_warns_and_list_marks_the_orphan() {
                           inputs: { tick: trigger.event },
                           subscription_key: "old-schedule"
                         })?
-                        finish true
+                        finish await triggers.list({})?
                     "#
                 .to_string(),
             },
@@ -468,23 +468,28 @@ pub(super) fn regenerated_trigger_manifest_warns_and_list_marks_the_orphan() {
         )
         .await;
         assert!(first.error.is_none(), "{:?}", first.error);
+        let listed = first.terminal_finish.expect("registration list");
+        let listed = listed.as_array().expect("list result");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["subscription_key"], "old-schedule");
+        assert!(listed[0].get("manifest_membership").is_none());
+        assert!(listed[0]["registrant"].is_object());
 
-        let replacement = execute_code_unbounded_for_tests(
+        let before = lash_core::TriggerStore::list_subscriptions(
+            trigger_store.as_ref(),
+            lash_core::TriggerSubscriptionFilter::for_session("test-session"),
+        )
+        .await
+        .expect("list registration before unrelated execution");
+
+        let unrelated = execute_code_unbounded_for_tests(
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store(trigger_store.clone()),
             ExecRequest {
                 language: "lashlang".to_string(),
                 code: r#"
-                        process remember(tick: timer.Tick) { finish tick.fired_at }
-                        source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
-                        await triggers.register({
-                          source: source,
-                          target: remember,
-                          inputs: { tick: trigger.event },
-                          subscription_key: "new-schedule"
-                        })?
-                        print "post-reconcile observation"
-                        finish await triggers.list({})?
+                        print "unrelated observation"
+                        finish 42
                     "#
                 .to_string(),
             },
@@ -497,33 +502,16 @@ pub(super) fn regenerated_trigger_manifest_warns_and_list_marks_the_orphan() {
         )
         .await;
 
-        assert!(replacement.error.is_none(), "{:?}", replacement.error);
-        assert_eq!(replacement.observations.len(), 2);
-        let reconcile_warning = replacement
-            .observations
-            .iter()
-            .find(|observation| {
-                observation.text.contains("RECONCILE WARNING")
-                    && observation.text.contains("old-schedule")
-                    && observation.text.contains("triggers.prune")
-            })
-            .unwrap_or_else(|| panic!("{:?}", replacement.observations));
-        assert!(!reconcile_warning.projection.truncated);
-        assert_eq!(
-            reconcile_warning.projection.projected_chars,
-            reconcile_warning.projection.original_chars
-        );
-        assert_eq!(
-            reconcile_warning.projection.projected_lines,
-            reconcile_warning.projection.original_lines
-        );
+        assert!(unrelated.error.is_none(), "{:?}", unrelated.error);
+        assert_eq!(unrelated.terminal_finish, Some(serde_json::json!(42)));
+        assert_eq!(unrelated.observations.len(), 1);
         assert!(
-            replacement
+            unrelated
                 .observations
                 .iter()
-                .any(|observation| { observation.text.contains("post-reconcile observation") })
+                .any(|observation| { observation.text.contains("unrelated observation") })
         );
-        for observation in &replacement.observations {
+        for observation in &unrelated.observations {
             assert_eq!(
                 observation.projection.original_chars,
                 observation.text.chars().count(),
@@ -535,22 +523,46 @@ pub(super) fn regenerated_trigger_manifest_warns_and_list_marks_the_orphan() {
                 "projection metadata must belong to its observation"
             );
         }
-        let registrations = replacement
-            .terminal_finish
-            .expect("replacement returns reconciled list");
-        let registrations = registrations.as_array().expect("list result");
-        let old = registrations
-            .iter()
-            .find(|record| record["subscription_key"] == "old-schedule")
-            .expect("old subscription remains visible");
-        let new = registrations
-            .iter()
-            .find(|record| record["subscription_key"] == "new-schedule")
-            .expect("new subscription is visible");
-        assert_eq!(old["manifest_membership"], "orphaned");
-        assert_eq!(new["manifest_membership"], "present_in_current_artifact");
-        assert!(old["registrant"].is_object());
-        assert!(new["registrant"].is_object());
+
+        let after = lash_core::TriggerStore::list_subscriptions(
+            trigger_store.as_ref(),
+            lash_core::TriggerSubscriptionFilter::for_session("test-session"),
+        )
+        .await
+        .expect("list registration after unrelated execution");
+        assert_eq!(
+            after, before,
+            "unrelated execution must not mutate registration"
+        );
+    });
+}
+
+#[test]
+pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
+    block_on(async {
+        let mut state = RlmExecutionState::new();
+        let response = execute_code_unbounded_for_tests(
+            &mut state,
+            lash_core::testing::code_execution_context(),
+            ExecRequest {
+                language: "lashlang".to_string(),
+                code: "finish 42".to_string(),
+            },
+            Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
+            LashlangSurface::new(
+                lashlang::LashlangAbilities::default(),
+                lashlang::LashlangLanguageFeatures::default(),
+                lashlang::LashlangHostCatalog::new(),
+            ),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+        )
+        .await;
+
+        assert!(response.error.is_none(), "{:?}", response.error);
+        assert_eq!(response.terminal_finish, Some(serde_json::json!(42)));
     });
 }
 
