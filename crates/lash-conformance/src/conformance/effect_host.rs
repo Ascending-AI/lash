@@ -175,6 +175,26 @@ pub async fn effect_host_await_events<F>(make: F)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
+    effect_host_await_events_with_active_wait_witness(
+        make,
+        effect_host_await_event_when_quiescent_waits_for_live_waits,
+    )
+    .await;
+}
+
+/// Run the generic AwaitEvent conformance suite with an implementation-owned
+/// witness for the active-wait quiescence law.
+///
+/// Durable engine hosts use this form when starting an ingress task does not
+/// itself prove that the remote wait registration committed. The witness must
+/// establish that registration through the implementation's real await path
+/// before asserting the shared retirement behavior.
+pub async fn effect_host_await_events_with_active_wait_witness<F, W, WFut>(make: F, witness: W)
+where
+    F: Fn() -> Arc<dyn EffectHost>,
+    W: FnOnce(Arc<dyn EffectHost>) -> WFut,
+    WFut: std::future::Future<Output = ()>,
+{
     let first = make();
     let second = make();
     assert_fresh_instances(&first, &second, "effect_host_await_events");
@@ -187,7 +207,7 @@ where
     effect_host_await_event_revokes_session_scope(make()).await;
     effect_host_await_event_retires_non_session_scopes(make()).await;
     effect_host_await_event_reinstate_lifts_process_scope_fence(make()).await;
-    effect_host_await_event_when_quiescent_waits_for_live_waits(make()).await;
+    witness(make()).await;
     effect_host_when_quiescent_waits_for_executing_effects(make()).await;
     effect_host_await_event_session_cancel_resolves_outstanding_waits(make()).await;
     effect_host_await_event_rejects_tampered_keys(make()).await;
@@ -1219,6 +1239,21 @@ pub(crate) async fn effect_host_await_event_when_quiescent_waits_for_live_waits(
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert!(!waiter.is_finished(), "the wait is still open");
 
+    effect_host_registered_wait_rejects_quiescent_retirement(host, scope, key, waiter).await;
+}
+
+/// Assert the active-wait retirement law after the caller has witnessed the
+/// implementation's genuine wait registration.
+///
+/// This split lets engine-backed conformance observe its durable registration
+/// boundary without replacing the shared refusal, unfenced-state, settlement,
+/// and eventual-retirement assertions.
+pub async fn effect_host_registered_wait_rejects_quiescent_retirement(
+    host: Arc<dyn EffectHost>,
+    scope: ExecutionScope,
+    key: crate::AwaitEventKey,
+    waiter: tokio::task::JoinHandle<Result<Resolution, crate::RuntimeError>>,
+) {
     let refused = host
         .retire_effect_journal(
             crate::EffectJournalRetirement::for_scope(&scope)
