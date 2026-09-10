@@ -299,8 +299,11 @@ The obligation is exact: **complete or release each adopted condemnation before
 starting new work.** Adoption comes first, and it verifies blob state through
 the same witness the sweep uses everywhere else — "the backend says the blob is
 gone" and "the backend errored" are different answers, and only the first
-completes the delete. FIG-1510's stuck-forever state becomes unreachable, with
-no timer anywhere.
+completes the delete. Release is limited to abandoned `Condemned` or `Deleting`
+work. A completed delete's `Reclaimed` row is the durable fact that its bytes are
+absent; release leaves it in place, and only a fresh put clears it while recording
+the new write intent. FIG-1510's stuck-forever state becomes unreachable, with no
+timer anywhere.
 
 The generation pin is the **sweep pass's own generation**, not a session-lease
 token: a factory sweeper holds no session-execution lease, so it cannot pin the
@@ -320,7 +323,8 @@ clearing a condemnation left by a sweeper that died mid-delete *host policy*,
 with the host calling `release_attachment_condemnation` after deciding the
 sweeper is gone. Here that recovery becomes automatic and structural: the next
 sweep adopts it, under a generation that proves the predecessor dead. The host
-lever remains, and lash still expires nothing on a clock.
+lever remains scoped to `Condemned` and `Deleting`; it cannot erase a `Reclaimed`
+byte-absence fact, and lash still expires nothing on a clock.
 
 Effect-group VO state severs the same way. The effect-group row owns the group
 VO's state. Group retirement issues the idempotent VO purge inline — the owner

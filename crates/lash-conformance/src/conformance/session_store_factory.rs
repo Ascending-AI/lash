@@ -2167,6 +2167,14 @@ async fn session_store_factory_attachment_gc_fence_state_machine(
         crate::AttachmentCondemnation::AlreadyCondemned,
         "a peer sweeper's condemnation is skipped, never waited on"
     );
+    crate::AttachmentRootSet::release_attachment_condemnation(&*factory, &attachment_id)
+        .await
+        .expect("release condemned digest");
+    assert_eq!(
+        condemn().await.expect("condemn after release"),
+        crate::AttachmentCondemnation::Condemned,
+        "release must recover a digest abandoned before physical delete"
+    );
 
     // `Condemned -> Free` by writer revoke: the delete can no longer be armed.
     assert!(
@@ -2243,6 +2251,9 @@ async fn session_store_factory_attachment_gc_fence_state_machine(
     crate::AttachmentRootSet::reclaim_attachment_condemnation(&*factory, &attachment_id)
         .await
         .expect("record successful delete");
+    crate::AttachmentRootSet::release_attachment_condemnation(&*factory, &attachment_id)
+        .await
+        .expect("release reclaimed digest is idempotent");
     let adoption_error = crate::AttachmentManifest::commit_refs(
         &*store,
         &request.session_id,

@@ -546,7 +546,7 @@ impl Store {
         })
     }
 
-    /// Return a digest to `Free`.
+    /// Return an abandoned `Condemned` or `Deleting` digest to `Free`.
     pub(crate) async fn release_attachment_condemnation(
         &self,
         attachment_id: &AttachmentId,
@@ -555,7 +555,8 @@ impl Store {
         self.conn
             .write(move |tx| {
                 tx.execute(
-                    "DELETE FROM attachment_condemnations WHERE attachment_id = ?1",
+                    "DELETE FROM attachment_condemnations
+                     WHERE attachment_id = ?1 AND phase IN ('condemned', 'deleting')",
                     params![attachment_id],
                 )
             })

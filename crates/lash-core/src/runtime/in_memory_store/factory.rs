@@ -810,7 +810,17 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         &self,
         id: &crate::AttachmentId,
     ) -> Result<(), crate::store::StoreError> {
-        self.attachment_condemnations.lock_recover().remove(id);
+        let _transaction = self.write_transaction.lock_recover();
+        let mut condemnations = self.attachment_condemnations.lock_recover();
+        if matches!(
+            condemnations.get(id),
+            Some(
+                super::AttachmentCondemnationPhase::Condemned
+                    | super::AttachmentCondemnationPhase::Deleting
+            )
+        ) {
+            condemnations.remove(id);
+        }
         Ok(())
     }
 
