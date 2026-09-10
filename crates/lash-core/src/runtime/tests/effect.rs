@@ -2375,9 +2375,18 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
 }
 
 fn effect_module_sources(manifest_dir: &std::path::Path) -> Vec<PathBuf> {
-    let dir = manifest_dir.join("src/runtime/effect");
+    rust_sources_in(manifest_dir.join("src/runtime/effect"))
+}
+
+/// The turn loop's phase modules, so the cutover lint keeps inspecting the
+/// implementation after FIG-1028 moved it out of the single `turn_loop.rs`.
+fn turn_loop_module_sources(manifest_dir: &std::path::Path) -> Vec<PathBuf> {
+    rust_sources_in(manifest_dir.join("src/runtime/turn_loop"))
+}
+
+fn rust_sources_in(dir: PathBuf) -> Vec<PathBuf> {
     let mut paths = std::fs::read_dir(&dir)
-        .expect("read effect module directory")
+        .expect("read module directory")
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("rs"))
         .collect::<Vec<_>>();
@@ -2417,6 +2426,7 @@ fn lint_runtime_effect_controller_cutover_has_no_legacy_host_request_or_fallback
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source_files = effect_module_sources(&manifest_dir)
         .into_iter()
+        .chain(turn_loop_module_sources(&manifest_dir))
         .chain([
             manifest_dir.join("src/runtime/turn_driver.rs"),
             manifest_dir.join("src/runtime/session_manager/direct.rs"),
