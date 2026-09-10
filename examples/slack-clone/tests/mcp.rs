@@ -2,7 +2,7 @@ use lash::SessionId;
 use lash::sync::MutexExt;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -28,6 +28,8 @@ use slack_clone::{mcp_http_server, mcp_server};
 use tokio::sync::Notify;
 
 const TEST_TOKEN: &str = "mcp-integration-test-token";
+static WORKSPACE_INLINE_BADGE_TOOL: LazyLock<String> =
+    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name("workspace_inline", "workspace_badge"));
 
 #[derive(Clone)]
 struct FakeApiState {
@@ -224,13 +226,13 @@ async fn bundled_server_exercises_sampling_both_elicitation_modes_and_roots_thro
     let (api_base_url, _server) = fake_api(state).await;
     let script = Script::new([
         Step::ToolWithInput(
-            SAMPLE_SUMMARY_TOOL,
+            SAMPLE_SUMMARY_TOOL.as_str(),
             r#"{"text":"Lash keeps MCP policy with the embedding host."}"#,
         ),
         Step::Text("Host-generated summary."),
-        Step::Tool(ELICIT_CONFIRMATION_TOOL),
-        Step::Tool(URL_ELICITATION_TOOL),
-        Step::Tool(LIST_HOST_ROOTS_TOOL),
+        Step::Tool(ELICIT_CONFIRMATION_TOOL.as_str()),
+        Step::Tool(URL_ELICITATION_TOOL.as_str()),
+        Step::Tool(LIST_HOST_ROOTS_TOOL.as_str()),
         Step::Text("All MCP client features completed."),
     ]);
     let core = build_core(
@@ -259,10 +261,10 @@ async fn bundled_server_exercises_sampling_both_elicitation_modes_and_roots_thro
             .map(|call| call.tool.as_str())
             .collect::<Vec<_>>(),
         vec![
-            SAMPLE_SUMMARY_TOOL,
-            ELICIT_CONFIRMATION_TOOL,
-            URL_ELICITATION_TOOL,
-            LIST_HOST_ROOTS_TOOL
+            SAMPLE_SUMMARY_TOOL.as_str(),
+            ELICIT_CONFIRMATION_TOOL.as_str(),
+            URL_ELICITATION_TOOL.as_str(),
+            LIST_HOST_ROOTS_TOOL.as_str()
         ]
     );
 
@@ -404,7 +406,7 @@ async fn bundled_mcp_tools_join_the_catalog_and_feed_the_standard_tool_loop() {
     let state = FakeApiState::normal();
     let (api_base_url, _server) = fake_api(state).await;
     let script = Script::new([
-        Step::Tool(LIST_CHANNELS_SUMMARY_TOOL),
+        Step::Tool(LIST_CHANNELS_SUMMARY_TOOL.as_str()),
         Step::Text("The workspace has an engineering channel."),
     ]);
     let core = build_core(
@@ -430,8 +432,16 @@ async fn bundled_mcp_tools_join_the_catalog_and_feed_the_standard_tool_loop() {
         .map(|manifest| manifest.name)
         .collect::<Vec<_>>();
     assert!(names.iter().any(|name| name == "list_channels"));
-    assert!(names.iter().any(|name| name == LIST_CHANNELS_SUMMARY_TOOL));
-    assert!(names.iter().any(|name| name == WORKSPACE_STATS_TOOL));
+    assert!(
+        names
+            .iter()
+            .any(|name| name == LIST_CHANNELS_SUMMARY_TOOL.as_str())
+    );
+    assert!(
+        names
+            .iter()
+            .any(|name| name == WORKSPACE_STATS_TOOL.as_str())
+    );
 
     session
         .turn(TurnInput::text("@lashbot summarize the workspace"))
@@ -491,9 +501,9 @@ async fn server_death_is_a_typed_failure_and_the_next_turn_uses_a_respawned_serv
     let (api_base_url, _server) = fake_api(state).await;
     let pid_file = scratch.path().join("mcp.pid");
     let script = Script::new([
-        Step::Tool(WORKSPACE_STATS_TOOL),
+        Step::Tool(WORKSPACE_STATS_TOOL.as_str()),
         Step::Text("The MCP call failed cleanly."),
-        Step::Tool(WORKSPACE_STATS_TOOL),
+        Step::Tool(WORKSPACE_STATS_TOOL.as_str()),
         Step::Text("The recovered MCP server reports two members."),
     ]);
     let core = build_core(
@@ -620,7 +630,7 @@ impl ToolProvider for CollidingTool {
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        (name == WORKSPACE_STATS_TOOL).then(|| Arc::new(collision_definition().contract()))
+        (name == WORKSPACE_STATS_TOOL.as_str()).then(|| Arc::new(collision_definition().contract()))
     }
 
     async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
@@ -631,7 +641,7 @@ impl ToolProvider for CollidingTool {
 fn collision_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:native_collision",
-        WORKSPACE_STATS_TOOL,
+        WORKSPACE_STATS_TOOL.to_string(),
         "A deliberately colliding native tool",
         json!({ "type": "object", "properties": {} }),
         json!({}),
@@ -664,7 +674,7 @@ async fn an_exact_native_name_collision_is_rejected_instead_of_shadowing_mcp() {
         .expect_err("ordinary live-source collisions must be rejected");
     let message = error.to_string();
     assert!(
-        message.contains("duplicate tool name") && message.contains(WORKSPACE_STATS_TOOL),
+        message.contains("duplicate tool name") && message.contains(WORKSPACE_STATS_TOOL.as_str()),
         "collision error must name the policy and tool: {message}"
     );
     let names = session
@@ -676,7 +686,7 @@ async fn an_exact_native_name_collision_is_rejected_instead_of_shadowing_mcp() {
     assert_eq!(
         names
             .iter()
-            .filter(|manifest| manifest.name == WORKSPACE_STATS_TOOL)
+            .filter(|manifest| manifest.name == WORKSPACE_STATS_TOOL.as_str())
             .count(),
         1,
         "the original MCP tool remains authoritative"
@@ -781,7 +791,7 @@ async fn attaching_and_detaching_an_http_server_moves_its_tools_through_the_cata
     let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
     let (url, _server) = http_mcp_server("integration-token").await;
     let script = Script::new([
-        Step::Tool(mcp_http_server::ROOTS_CHANGE_REPORT_TOOL),
+        Step::Tool(mcp_http_server::ROOTS_CHANGE_REPORT_TOOL.as_str()),
         Step::Text("The HTTP integration answered."),
     ]);
     let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
@@ -805,10 +815,10 @@ async fn attaching_and_detaching_an_http_server_moves_its_tools_through_the_cata
 
     let attached = catalog_names(&runtime.core, &SessionId::from("mcp-http-attached")).await;
     for tool in [
-        mcp_http_server::WORKSPACE_BADGE_TOOL,
-        mcp_http_server::ROOTS_CHANGE_REPORT_TOOL,
-        mcp_http_server::ELICIT_PICK_COUNT_TOOL,
-        mcp_http_server::STALL_TOOL,
+        mcp_http_server::WORKSPACE_BADGE_TOOL.as_str(),
+        mcp_http_server::ROOTS_CHANGE_REPORT_TOOL.as_str(),
+        mcp_http_server::ELICIT_PICK_COUNT_TOOL.as_str(),
+        mcp_http_server::STALL_TOOL.as_str(),
     ] {
         assert!(attached.iter().any(|name| name == tool), "missing {tool}");
     }
@@ -885,9 +895,9 @@ async fn binary_mcp_content_becomes_an_attachment_only_where_the_host_opted_in()
     let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
     let (url, _server) = http_mcp_server("integration-token").await;
     let script = Script::new([
-        Step::Tool(mcp_http_server::WORKSPACE_BADGE_TOOL),
+        Step::Tool(mcp_http_server::WORKSPACE_BADGE_TOOL.as_str()),
         Step::Text("Badge stored."),
-        Step::Tool("mcp__workspace_inline__workspace_badge"),
+        Step::Tool(WORKSPACE_INLINE_BADGE_TOOL.as_str()),
         Step::Text("Badge inline."),
     ]);
     let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
@@ -989,9 +999,9 @@ async fn a_stalled_call_times_out_as_a_tool_failure_and_keeps_the_connection() {
     let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
     let (url, _server) = http_mcp_server("integration-token").await;
     let script = Script::new([
-        Step::Tool(mcp_http_server::STALL_TOOL),
+        Step::Tool(mcp_http_server::STALL_TOOL.as_str()),
         Step::Text("The stalled call failed cleanly."),
-        Step::Tool(mcp_http_server::ROOTS_CHANGE_REPORT_TOOL),
+        Step::Tool(mcp_http_server::ROOTS_CHANGE_REPORT_TOOL.as_str()),
         Step::Text("The connection survived."),
     ]);
     let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
@@ -1056,7 +1066,7 @@ async fn a_host_can_opt_out_of_timeout_disconnects_entirely() {
     let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
     let (url, _server) = http_mcp_server("integration-token").await;
     let script = Script::new([
-        Step::Tool(mcp_http_server::STALL_TOOL),
+        Step::Tool(mcp_http_server::STALL_TOOL.as_str()),
         Step::Text("The stalled call failed cleanly."),
     ]);
     let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
@@ -1109,7 +1119,7 @@ async fn a_form_the_answer_book_cannot_satisfy_is_declined_rather_than_answered(
     let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
     let (url, _server) = http_mcp_server("integration-token").await;
     let script = Script::new([
-        Step::Tool(mcp_http_server::ELICIT_PICK_COUNT_TOOL),
+        Step::Tool(mcp_http_server::ELICIT_PICK_COUNT_TOOL.as_str()),
         Step::Text("The host declined."),
     ]);
     let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
@@ -1152,7 +1162,7 @@ async fn a_question_the_host_has_not_read_is_declined_even_with_a_familiar_field
     let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
     let (url, _server) = http_mcp_server("integration-token").await;
     let script = Script::new([
-        Step::Tool(mcp_http_server::ELICIT_UNKNOWN_PROMPT_TOOL),
+        Step::Tool(mcp_http_server::ELICIT_UNKNOWN_PROMPT_TOOL.as_str()),
         Step::Text("The host declined."),
     ]);
     let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
@@ -1210,7 +1220,7 @@ async fn publishing_a_root_notifies_the_connected_server_which_re_reads_the_list
     let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
     let (url, _server) = http_mcp_server("integration-token").await;
     let script = Script::new([
-        Step::Tool(mcp_http_server::ROOTS_CHANGE_REPORT_TOOL),
+        Step::Tool(mcp_http_server::ROOTS_CHANGE_REPORT_TOOL.as_str()),
         Step::Text("Roots reported."),
     ]);
     let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
@@ -1343,7 +1353,7 @@ async fn the_operator_api_attaches_lists_and_detaches_an_integration() {
     assert!(
         tools
             .iter()
-            .any(|tool| tool == mcp_http_server::WORKSPACE_BADGE_TOOL),
+            .any(|tool| tool == mcp_http_server::WORKSPACE_BADGE_TOOL.as_str()),
         "an operator view has to name the tools the integration advertises: {listed}"
     );
 
@@ -1464,7 +1474,7 @@ async fn publishing_a_root_through_the_operator_api_reaches_the_connected_server
     let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
     let (url, _server) = http_mcp_server("integration-token").await;
     let script = Script::new([
-        Step::Tool(mcp_http_server::ROOTS_CHANGE_REPORT_TOOL),
+        Step::Tool(mcp_http_server::ROOTS_CHANGE_REPORT_TOOL.as_str()),
         Step::Text("Roots reported."),
     ]);
     let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;

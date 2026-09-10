@@ -242,7 +242,7 @@ the model the bot configured**, and that the reply reflects the sampled input.
 As **B**, post one message that mentions the bot and asks for all four features,
 naming them:
 
-> `<@U…> call mcp__slack_clone__sample_summary with "Host policy stays with the embedding application", then call mcp__slack_clone__elicit_confirmation, mcp__slack_clone__elicit_via_url, and mcp__slack_clone__list_host_roots. Report the summary, form action and answer, URL action and completion status, and root name.`
+> `<@U…> call mcp__slack_clone__sample_summary_jsravcec3hbi6h74ol3czagt3i with "Host policy stays with the embedding application", then call mcp__slack_clone__elicit_confirmation_43iv5ippbzi6gmt6qpg5o4qley, mcp__slack_clone__elicit_via_url_ejcpavacnltc6fxpb3qci66emq, and mcp__slack_clone__list_host_roots_pxgy6luaf6ydj2bcftrvqdcnwm. Report the summary, form action and answer, URL action and completion status, and root name.`
 
 Poll until exactly one new bot reply renders, then require:
 
@@ -286,11 +286,11 @@ curl -sS -X POST "http://127.0.0.1:$((p + 1))/admin/mcp/servers" \
   -d "{\"name\":\"workspace_http\",\"url\":\"http://127.0.0.1:$((p + 2))/mcp\",\"token\":\"${SLACK_CLONE_MCP_HTTP_TOKEN:-slack-clone-mcp-http-dev-token}\"}"
 ```
 
-The response must report `"connected": true` with the five
-`mcp__workspace_http__*` tools. As **B**, post one message mentioning the bot and
+The response must report `"connected": true` with five names beginning
+`mcp__workspace_http__` and ending in a 26-character identity digest. As **B**, post one message mentioning the bot and
 asking it for the workspace badge — **without naming the tool**. Then require:
 
-- **Layer 3:** the committed tool result for `mcp__workspace_http__workspace_badge`
+- **Layer 3:** the committed tool result for `mcp__workspace_http__workspace_badge_kczjjxpbmhykdl67ll7vfkvwre`
   carries an attachment whose `source.source` is `stored`, and the host's
   attachment store under `<bot data dir>/lash/attachments` holds a file of
   exactly that `byte_len`. The bytes are the server's, persisted by the host
@@ -308,7 +308,8 @@ curl -sS -X DELETE "http://127.0.0.1:$((p + 1))/admin/mcp/servers/workspace_http
   -H "authorization: Bearer ${SLACK_CLONE_ADMIN_TOKEN:-slack-clone-dev-admin}"
 ```
 
-- **Layer 3/4:** the new turn contains **no** `mcp__workspace_http__*` tool
+- **Layer 3/4:** the new turn contains **no** tool whose name begins
+  `mcp__workspace_http__`
   record, and `GET /admin/mcp/servers` lists no `workspace_http` row.
 - **Judged:** the reply says the capability is gone rather than inventing a
   badge. A model that fabricates the badge after detach fails this phase.
@@ -558,9 +559,9 @@ gone — platform, bot, and HTTP MCP server.
 | Tool loop ran | `tool_call_started`/`completed` pair; exactly one `turn_completed` | | layer-4 extract |
 | MCP client depth | four host-owned results committed; four exact tool names, `batch` envelope unwrapped; one `turn_completed` | | `03M-session-tool-results.json`, `03M-url-completion.txt` |
 | MCP sampling is the host's | sampled model id equals the bot's configured provider model | | `03M-session-tool-results.json` |
-| Integration attached at runtime | attach reports `connected` with five `mcp__workspace_http__*` tools; the model calls one it was not booted with | | `03MA-attach-status.json`, `03MA-attached-both-tabs.png` |
+| Integration attached at runtime | attach reports `connected` with five `mcp__workspace_http__` tools carrying identity suffixes; the model calls one it was not booted with | | `03MA-attach-status.json`, `03MA-attached-both-tabs.png` |
 | Binary MCP content is stored | the committed result carries a `stored` attachment and the host attachment store holds the bytes | | `03MA-session-tool-results.json` |
-| Detach removes the capability | no `mcp__workspace_http__*` record in the later turn; the operator view is empty; the reply admits the loss | | `03MA-after-detach-servers.json`, `03MA-detached-both-tabs.png` |
+| Detach removes the capability | no tool whose name begins `mcp__workspace_http__` in the later turn; the operator view is empty; the reply admits the loss | | `03MA-after-detach-servers.json`, `03MA-detached-both-tabs.png` |
 | Thread fork | deterministic child session with retained channel ancestry | | `03T-thread-both-tabs.png`, layer-3 extract |
 | Thread inheritance | reply uses the pre-fork ambient fact; post-fork marker absent from the ancestor chain named by `fork_lineage` and from the committed thread transcript | | phase-3T transcript extract |
 | Thread root recall | the child names the thread root, not the later room mention; the seeded root line appears exactly once in the child's committed transcript, starting its own line | | `03T-thread-both-tabs.png`, phase-3T transcript extract |

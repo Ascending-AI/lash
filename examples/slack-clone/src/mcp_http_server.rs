@@ -48,6 +48,7 @@ use rmcp::transport::streamable_http_server::{
 };
 use rmcp::{Json, Peer, ServerHandler, schemars::JsonSchema, tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 use tokio::sync::RwLock;
 
 /// Environment variable naming the address the HTTP MCP server binds.
@@ -62,15 +63,20 @@ pub const MCP_PATH: &str = "/mcp";
 pub const SERVER_NAME: &str = "workspace_http";
 
 /// MCP name of the binary-content tool once the bot has attached the server.
-pub const WORKSPACE_BADGE_TOOL: &str = "mcp__workspace_http__workspace_badge";
+pub static WORKSPACE_BADGE_TOOL: LazyLock<String> =
+    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "workspace_badge"));
 /// MCP name of the roots-notification report tool.
-pub const ROOTS_CHANGE_REPORT_TOOL: &str = "mcp__workspace_http__roots_change_report";
+pub static ROOTS_CHANGE_REPORT_TOOL: LazyLock<String> =
+    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "roots_change_report"));
 /// MCP name of the unsatisfiable-form elicitation tool.
-pub const ELICIT_PICK_COUNT_TOOL: &str = "mcp__workspace_http__elicit_pick_count";
+pub static ELICIT_PICK_COUNT_TOOL: LazyLock<String> =
+    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "elicit_pick_count"));
 /// MCP name of the tool that asks a question the host's answer book has not read.
-pub const ELICIT_UNKNOWN_PROMPT_TOOL: &str = "mcp__workspace_http__elicit_unknown_prompt";
+pub static ELICIT_UNKNOWN_PROMPT_TOOL: LazyLock<String> =
+    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "elicit_unknown_prompt"));
 /// MCP name of the tool that never answers.
-pub const STALL_TOOL: &str = "mcp__workspace_http__stall";
+pub static STALL_TOOL: LazyLock<String> =
+    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "stall"));
 
 /// Exact bytes `workspace_badge` returns, before base64 encoding.
 pub const BADGE_BYTES: &[u8] = b"slack-clone workspace badge v1\x00\x01\x02\x03";

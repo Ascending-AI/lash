@@ -98,4 +98,5 @@ rlm-smoke-config-contract-edit = { dialects = ["lashlang", "typescript"], tier =
 [deterministic_only]
 agent-service-effect-group-retirement = { tier = "deterministic", model = "scripted-provider" }
 agent-service-effect-groups = { tier = "deterministic", model = "scripted-provider" }
+mcp-naming-refresh = { tier = "deterministic", model = "scripted-provider" }
 slack-clone-deterministic = { tier = "deterministic", model = "scripted-provider" }

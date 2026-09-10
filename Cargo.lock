@@ -2222,6 +2222,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "base64",
+ "blake3",
  "fastrand",
  "futures-util",
  "http",
