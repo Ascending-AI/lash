@@ -2,6 +2,7 @@
 //! subscriptions and atomic occurrence reservation.
 
 use super::*;
+use pretty_assertions::assert_eq;
 
 pub async fn trigger_store<F>(make: F)
 where

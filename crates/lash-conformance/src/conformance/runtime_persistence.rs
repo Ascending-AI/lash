@@ -10,6 +10,7 @@ use super::*;
 use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
 use lash_core::testing::conformance_support::SessionGraphConformanceAccess;
 use lash_core::testing::conformance_support::ToolStateConformanceAccess;
+use pretty_assertions::assert_eq;
 
 const CONTROLLED_LEASE_TTL_MS: u64 = 50;
 const REALTIME_SCAFFOLDING_LEASE_TTL_MS: u64 = 500;

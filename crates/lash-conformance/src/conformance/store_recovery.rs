@@ -1,6 +1,7 @@
 //! Durable store-recovery laws over fresh persistence handles.
 
 use super::*;
+use pretty_assertions::assert_eq;
 use std::time::Duration;
 
 const RECOVERY_TTL: Duration = Duration::from_millis(300);

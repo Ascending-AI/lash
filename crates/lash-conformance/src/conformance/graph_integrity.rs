@@ -1,5 +1,6 @@
 //! Shared corrupt-durable-graph read conformance.
 
+use pretty_assertions::assert_eq;
 use std::future::Future;
 use std::sync::Arc;
 

@@ -86,6 +86,7 @@ pub use cold_process::{
     cold_process_durable_recovery_expectation, cold_process_real_turn_driver,
     cold_process_turn_expectations, cold_process_turn_scope,
 };
+use pretty_assertions::assert_eq;
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
 const OUTCOME_TABLE: &str = include_str!("turn_crash_outcomes.json");

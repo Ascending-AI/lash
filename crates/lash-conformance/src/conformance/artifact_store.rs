@@ -10,6 +10,7 @@
 //! isolation assertion so all three keyspaces are held to one contract.
 
 use super::*;
+use pretty_assertions::assert_eq;
 
 /// A writer plus a factory that constructs a post-write
 /// [`crate::ProcessExecutionEnvStore`] handle over the same backing store.

@@ -3,6 +3,7 @@
 use super::*;
 use crate::facade_support::ScopedEffectControllerFacadeOps;
 use lash_sansio::sync::MutexExt;
+use pretty_assertions::assert_eq;
 
 /// One scope selected by an [`EffectHost`] and one effect envelope executed
 /// through the scoped controller.

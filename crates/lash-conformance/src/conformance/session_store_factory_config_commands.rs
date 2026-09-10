@@ -3,6 +3,7 @@
 use super::*;
 #[cfg(test)]
 use crate::{Clock, SessionStoreFactory};
+use pretty_assertions::assert_eq;
 
 pub(super) async fn session_store_factory_coalesces_config_command_claims(
     factory: Arc<dyn crate::SessionStoreFactory>,

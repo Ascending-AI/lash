@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::session_store_request;
+use pretty_assertions::assert_eq;
 
 /// Every persisted disposition survives the owner crash that separates cancel
 /// observation from repair. The reopened repair applies the requested policy

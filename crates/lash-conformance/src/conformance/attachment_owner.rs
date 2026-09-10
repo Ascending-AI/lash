@@ -2,6 +2,7 @@
 
 use super::*;
 use lash_sansio::sync::MutexExt;
+use pretty_assertions::assert_eq;
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

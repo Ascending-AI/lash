@@ -9,6 +9,7 @@ use super::session_store_factory_vacuum::{
     session_store_factory_vacuums_organic_retained_tombstone,
 };
 use super::*;
+use pretty_assertions::assert_eq;
 
 #[path = "session_store_factory_config_commands.rs"]
 mod config_commands;

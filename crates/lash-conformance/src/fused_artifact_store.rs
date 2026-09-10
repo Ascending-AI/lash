@@ -18,6 +18,7 @@ use lashlang::testing::conformance::{
     ReopenableLashlangArtifactStore, lashlang_artifact_store_reopenable,
 };
 use lashlang::{LashlangArtifactStore, ModuleArtifact, parse};
+use pretty_assertions::assert_eq;
 
 /// A durable store accessed through both artifact-store traits over the same
 /// backing storage.

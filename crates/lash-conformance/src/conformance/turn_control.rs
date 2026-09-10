@@ -11,6 +11,7 @@ use crate::{
     TurnStop, TurnTerminal, TurnWorkDriver,
 };
 use lash_core::testing::conformance_support::{ActiveTurnControl, TurnCancelPeekIdentity};
+use pretty_assertions::assert_eq;
 
 fn address(label: &str) -> TurnAddress {
     durable_turn_address(
