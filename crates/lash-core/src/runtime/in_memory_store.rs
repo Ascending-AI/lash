@@ -138,13 +138,15 @@ pub type RawQueuedWorkForTesting = (
 pub(crate) type SharedAttachmentCondemnations =
     Arc<Mutex<HashMap<crate::AttachmentId, AttachmentCondemnationPhase>>>;
 
-/// The two condemned phases. Absence from the map is the `Free` state.
+/// The three condemnation phases. Absence from the map is the `Free` state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AttachmentCondemnationPhase {
     /// Claimed by a sweeper, no physical delete issued yet: a writer revokes it.
     Condemned,
-    /// The physical delete is in flight: a writer must wait for the release.
+    /// The physical delete is in flight: a writer must wait for its outcome.
     Deleting,
+    /// The physical delete succeeded: adoption refuses until a fresh put.
+    Reclaimed,
 }
 
 pub struct InMemorySessionStore {

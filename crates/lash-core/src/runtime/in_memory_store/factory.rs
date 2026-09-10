@@ -794,7 +794,9 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             // blob: the delete is never issued. A digest already in `Deleting`
             // answers the same way — arming is `Condemned -> Deleting` only,
             // matching the SQL backends' `WHERE phase = 'condemned'`.
-            None | Some(super::AttachmentCondemnationPhase::Deleting) => {
+            None
+            | Some(super::AttachmentCondemnationPhase::Deleting)
+            | Some(super::AttachmentCondemnationPhase::Reclaimed) => {
                 Ok(crate::AttachmentDeleteArming::Revoked)
             }
             Some(super::AttachmentCondemnationPhase::Condemned) => {
@@ -809,6 +811,21 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         id: &crate::AttachmentId,
     ) -> Result<(), crate::store::StoreError> {
         self.attachment_condemnations.lock_recover().remove(id);
+        Ok(())
+    }
+
+    async fn reclaim_attachment_condemnation(
+        &self,
+        id: &crate::AttachmentId,
+    ) -> Result<(), crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        let mut condemnations = self.attachment_condemnations.lock_recover();
+        if matches!(
+            condemnations.get(id),
+            Some(super::AttachmentCondemnationPhase::Deleting)
+        ) {
+            condemnations.insert(id.clone(), super::AttachmentCondemnationPhase::Reclaimed);
+        }
         Ok(())
     }
 

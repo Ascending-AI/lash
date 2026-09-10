@@ -14,6 +14,9 @@ enum RetentionClass {
     LifecycleOwned {
         scope: &'static str,
     },
+    ClearedOnReput {
+        bound: &'static str,
+    },
     PermanentlyExempt {
         reason: &'static str,
     },
@@ -22,7 +25,7 @@ enum RetentionClass {
         issue: &'static str,
     },
 }
-use RetentionClass::{Bounded, KnownGap, LifecycleOwned, PermanentlyExempt};
+use RetentionClass::{Bounded, ClearedOnReput, KnownGap, LifecycleOwned, PermanentlyExempt};
 
 // Names are SQLite logical names. PostgreSQL aliases are explicit below.
 // A class describes eligibility, never an automatic background schedule.
@@ -143,8 +146,8 @@ const CENSUS: &[(&str, RetentionClass)] = &[
     ),
     (
         "attachment_condemnations",
-        LifecycleOwned {
-            scope: "digest writer/GC fence; explicit host release of abandoned fences",
+        ClearedOnReput {
+            bound: "reclaimed is one row per distinct digest and cleared by a fresh put; condemned/deleting release on abandonment",
         },
     ),
     (
@@ -329,6 +332,7 @@ fn assert_classified(source: &str, postgres: bool) {
         let detail = match class {
             Bounded { lever } => lever,
             LifecycleOwned { scope } => scope,
+            ClearedOnReput { bound } => bound,
             PermanentlyExempt { reason } => reason,
             KnownGap { issue } => {
                 assert!(

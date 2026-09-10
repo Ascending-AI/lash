@@ -312,7 +312,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // refused before an unreported usage row can be read as a reported one.
 // Component-81 stores must be recreated; there is no migration into this
 // generation.
-const SCHEMA_VERSION: i32 = 82;
+// Version 83 adds the terminal attachment-condemnation `reclaimed` phase
+// (FIG-2512); component-82 stores must be recreated so successful physical
+// deletion remains durable byte-absence evidence. There is no migration into this
+// generation.
+const SCHEMA_VERSION: i32 = 83;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

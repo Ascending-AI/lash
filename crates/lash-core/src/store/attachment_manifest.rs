@@ -123,16 +123,21 @@ pub enum AttachmentWriteFence {
 ///
 /// ```text
 ///                 writer: begin_attachment_write (revoke + record intent)
-///                 ┌──────────────────────────────────────┐
-///                 v                                      │
-///   ┌────────┐  condemn (no root, no row)          ┌───────────┐
-///   │  Free  │ ──────────────────────────────────> │ Condemned │
-///   └────────┘ <────────── release (sweep abandons)└───────────┘
-///       ^                                                │ arm
-///       │                                                v
-///       │                                          ┌───────────┐
-///       └────────────── release (after delete) ────│ Deleting  │
-///                                                  └───────────┘
+///                 ┌──────────────────────────────────────────────┐
+///                 v                                              │
+///   ┌────────┐  condemn (no root, no row)                  ┌───────────┐
+///   │  Free  │ ──────────────────────────────────────────> │ Condemned │
+///   └────────┘ <──────────── release (sweep abandons)──────└───────────┘
+///       ^                                                        │ arm
+///       │                                                        v
+///       │                                                  ┌───────────┐
+///       └──────── release (delete fails/abandoned)─────────│ Deleting  │
+///                                                          └───────────┘
+///                                                                │ delete succeeds
+///                                                                v
+///                                                          ┌───────────┐
+///                 fresh put: clear + record intent         │ Reclaimed │
+///                 <────────────────────────────────────────└───────────┘
 /// ```
 ///
 /// * `Free` — the ordinary state. A writer records its intent and the digest is
@@ -142,8 +147,10 @@ pub enum AttachmentWriteFence {
 ///   records its intent in one mutation, so the sweeper's later arm CAS fails
 ///   and the delete is never issued.
 /// * `Deleting` — the physical delete is in flight. A writer arriving here
-///   cannot un-issue it, so it records nothing and retries until the sweeper
-///   releases; the retry then re-puts the bytes.
+///   cannot un-issue it, so it records nothing and retries.
+/// * `Reclaimed` — the physical delete succeeded and the bytes are known absent.
+///   Adoption refuses this digest. A fresh put clears the fact while recording
+///   its write-ahead intent, then restores the bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttachmentCondemnation {
     /// The digest moved `Free -> Condemned` under this sweeper's CAS.
@@ -211,7 +218,10 @@ pub trait AttachmentManifest: Send + Sync {
     ///   sweeper's arm CAS fails) and insert/refresh the intent in the *same*
     ///   transaction, return [`AttachmentWriteFence::Granted`];
     /// * `Deleting` — record nothing and return
-    ///   [`AttachmentWriteFence::ReclamationInFlight`].
+    ///   [`AttachmentWriteFence::ReclamationInFlight`];
+    /// * `Reclaimed` — delete the byte-absence fact and insert/refresh the
+    ///   intent in the *same* transaction, return
+    ///   [`AttachmentWriteFence::Granted`].
     ///
     /// Splitting the condemnation read from the intent insert reopens exactly
     /// the window the fence closes, so a backend that cannot express both in one
@@ -243,10 +253,12 @@ pub trait AttachmentManifest: Send + Sync {
     /// cannot release the receiver's root.
     ///
     /// Acquisition shares the attachment GC fence: it revokes an unarmed
-    /// condemnation and refuses an already armed physical delete. Normal runtime
+    /// condemnation, refuses an already armed physical delete, and returns
+    /// [`StoreError::AttachmentBytesReclaimed`] when a completed delete proves
+    /// the host's separate blob store no longer holds the digest. Normal runtime
     /// adoption and graph publication succeed or roll back in one transaction.
-    /// This records reachability of supplied stored references; it does not put
-    /// bytes or validate their existence in the host's separate blob store.
+    /// The manifest never calls host blob code; its byte-existence knowledge is
+    /// the durable `Reclaimed` transition recorded after a successful delete.
     fn commit_refs(
         &self,
         session_id: &str,

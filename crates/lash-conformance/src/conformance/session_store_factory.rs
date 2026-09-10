@@ -60,7 +60,7 @@ pub async fn session_store_factory<F>(
     attachment_reference_lifecycle(make()).await;
     session_store_factory_attachment_large_cutoff_conformance(make()).await;
     session_store_factory_attachment_gc_fence_state_machine(make()).await;
-    session_store_factory_fenced_sweep_collects_and_releases(make()).await;
+    session_store_factory_fenced_sweep_collects_and_records_reclaimed(make()).await;
     session_store_factory_rejects_cross_session_graph_parents(make()).await;
     session_store_factory_fork_semantics(make()).await;
     session_store_factory_vacuums_organic_retained_tombstone(make()).await;
@@ -2099,8 +2099,9 @@ fn assert_session_id_was_used_and_deleted(error: crate::StoreError, session_id: 
 }
 
 /// The attachment GC fence is a durable, clockless CAS state machine over one
-/// digest: `Free -> Condemned -> Deleting -> Free`, with `Condemned -> Free`
-/// whenever a writer takes the digest back.
+/// digest: `Free -> Condemned -> Deleting -> Reclaimed`, with
+/// `Condemned -> Free` whenever a writer takes the digest back and
+/// `Deleting -> Free` only when a host abandons or recovers a failed delete.
 ///
 /// Every transition is exercised here rather than in per-backend tests, so a
 /// divergence between the in-memory, SQLite, and PostgreSQL implementations of
@@ -2214,7 +2215,7 @@ async fn session_store_factory_attachment_gc_fence_state_machine(
         "a parked writer must record no intent"
     );
 
-    // `Deleting -> Free`.
+    // `Deleting -> Free` is the explicit abandon/recovery path.
     crate::AttachmentRootSet::release_attachment_condemnation(&*factory, &attachment_id)
         .await
         .expect("release");
@@ -2226,12 +2227,44 @@ async fn session_store_factory_attachment_gc_fence_state_machine(
         ),
         "a released digest must grant the next writer immediately"
     );
+
+    // A successful-delete outcome instead preserves `Reclaimed`. Adoption is
+    // refused until a fresh write atomically clears the byte-absence fact.
+    crate::AttachmentManifest::forget(&*store, &request.session_id, &attachment_id)
+        .expect("forget the ref before the successful-delete path");
+    assert_eq!(
+        condemn().await.expect("condemn before successful delete"),
+        crate::AttachmentCondemnation::Condemned
+    );
+    assert_eq!(
+        arm().await.expect("arm before successful delete"),
+        crate::AttachmentDeleteArming::Armed
+    );
+    crate::AttachmentRootSet::reclaim_attachment_condemnation(&*factory, &attachment_id)
+        .await
+        .expect("record successful delete");
+    let adoption_error = crate::AttachmentManifest::commit_refs(
+        &*store,
+        &request.session_id,
+        std::slice::from_ref(&attachment_id),
+    )
+    .expect_err("adoption must refuse a reclaimed digest");
+    assert!(matches!(
+        adoption_error,
+        crate::StoreError::AttachmentBytesReclaimed { ref digest }
+            if digest == &attachment_id
+    ));
+    assert!(matches!(
+        crate::AttachmentManifest::begin_attachment_write(&*store, intent())
+            .expect("fresh write clears a reclaimed digest"),
+        crate::AttachmentWriteFence::Granted
+    ));
 }
 
-/// A fenced sweep still collects real garbage, reports itself fenced, leaves no
-/// condemnation behind, and — the fence's whole claim — deletes nothing that a
-/// root existed for.
-async fn session_store_factory_fenced_sweep_collects_and_releases(
+/// A fenced sweep still collects real garbage, reports itself fenced, records
+/// the terminal reclaimed fact, and — the fence's whole claim — deletes nothing
+/// that a root existed for.
+async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
@@ -2290,7 +2323,8 @@ async fn session_store_factory_fenced_sweep_collects_and_releases(
         return;
     }
     assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
-    // The digest is `Free` again: the next writer is granted immediately.
+    // The digest is `Reclaimed`: the next writer clears that fact and is
+    // granted immediately.
     assert!(matches!(
         crate::AttachmentManifest::begin_attachment_write(
             &*store,

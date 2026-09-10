@@ -682,6 +682,27 @@ fn schema_congruence_expected_constraints_match_both_backends() {
 }
 
 #[test]
+fn attachment_condemnation_phases_match_the_persisted_vocabulary() {
+    for (dialect, source, declaration) in [
+        (
+            "SQLite",
+            SQLITE_SCHEMA_SOURCE,
+            "phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed'))",
+        ),
+        (
+            "Postgres",
+            POSTGRES_SCHEMA_SOURCE,
+            "phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed'))",
+        ),
+    ] {
+        assert!(
+            normalize_sql(source).contains(&normalize_sql(declaration)),
+            "{dialect} attachment condemnation phases drifted from the persisted vocabulary"
+        );
+    }
+}
+
+#[test]
 fn schema_congruence_rejects_a_dropped_registered_constraint() {
     for (dialect, source, registry, declaration) in [
         (

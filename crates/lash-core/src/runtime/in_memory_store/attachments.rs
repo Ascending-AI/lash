@@ -19,13 +19,16 @@ impl InMemorySessionStore {
     ) -> Result<(), crate::StoreError> {
         let mut condemnations = self.attachment_condemnations.lock_recover();
         for id in attachment_ids {
-            if matches!(
-                condemnations.get(id),
-                Some(super::AttachmentCondemnationPhase::Deleting)
-            ) {
-                return Err(crate::StoreError::Backend(format!(
-                    "cannot adopt attachment `{id}` while physical deletion is in flight"
-                )));
+            match condemnations.get(id) {
+                Some(super::AttachmentCondemnationPhase::Deleting) => {
+                    return Err(crate::StoreError::Backend(format!(
+                        "cannot adopt attachment `{id}` while physical deletion is in flight"
+                    )));
+                }
+                Some(super::AttachmentCondemnationPhase::Reclaimed) => {
+                    return Err(crate::StoreError::AttachmentBytesReclaimed { digest: id.clone() });
+                }
+                None | Some(super::AttachmentCondemnationPhase::Condemned) => {}
             }
         }
         let mut manifest = self.attachment_manifest.lock_recover();
@@ -118,6 +121,24 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         intent: crate::AttachmentIntent,
     ) -> Result<(), crate::store::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
+        {
+            let mut condemnations = self.attachment_condemnations.lock_recover();
+            match condemnations.get(&intent.attachment_id) {
+                Some(super::AttachmentCondemnationPhase::Deleting) => {
+                    return Err(crate::StoreError::Backend(format!(
+                        "cannot record attachment `{}` while physical deletion is in flight",
+                        intent.attachment_id
+                    )));
+                }
+                Some(
+                    super::AttachmentCondemnationPhase::Condemned
+                    | super::AttachmentCondemnationPhase::Reclaimed,
+                ) => {
+                    condemnations.remove(&intent.attachment_id);
+                }
+                None => {}
+            }
+        }
         self.record_intent_in_transaction(intent)
     }
 
@@ -139,7 +160,10 @@ impl crate::AttachmentManifest for InMemorySessionStore {
                     return Ok(crate::AttachmentWriteFence::ReclamationInFlight);
                 }
                 // Take the digest back before the sweeper can arm its delete.
-                Some(super::AttachmentCondemnationPhase::Condemned) => {
+                Some(
+                    super::AttachmentCondemnationPhase::Condemned
+                    | super::AttachmentCondemnationPhase::Reclaimed,
+                ) => {
                     condemnations.remove(&intent.attachment_id);
                 }
                 None => {}

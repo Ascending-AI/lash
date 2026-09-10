@@ -70,7 +70,7 @@ pub enum AttachmentStoreError {
     #[error("attachment store backend failed: {0}")]
     Backend(String),
     #[error(
-        "attachment `{attachment_id}` is being reclaimed: a sweep armed its physical delete before this write recorded an intent, and the condemnation was still held after {attempts} fence attempts. The sweep may simply be slow — a large or remote delete can outlast the retry window — so retrying the put is the normal response; the fence clears when the sweep releases the digest. If it never clears and no sweep is running, the condemnation was abandoned by a sweeper that died mid-delete, and the host clears it with `AttachmentRootSet::release_attachment_condemnation`."
+        "attachment `{attachment_id}` is being reclaimed: a sweep armed its physical delete before this write recorded an intent, and the condemnation was still held after {attempts} fence attempts. The sweep may simply be slow — a large or remote delete can outlast the retry window — so retrying the put is the normal response; a successful delete leaves a reclaimed fact that the retry clears before re-putting the bytes. If it never clears and no sweep is running, the condemnation was abandoned by a sweeper that died mid-delete, and the host clears it with `AttachmentRootSet::release_attachment_condemnation`."
     )]
     ReclamationInFlight {
         attachment_id: AttachmentId,
@@ -253,7 +253,7 @@ pub trait AttachmentRootSet: Send + Sync {
     /// sweep's unfenced path, which cannot exclude a concurrent writer from the
     /// query/delete window. See [`reclaim_unreferenced_attachments`].
     ///
-    /// # Answering `Fenced` is a five-method claim, across two traits
+    /// # Answering `Fenced` is a six-method claim, across two traits
     ///
     /// The fence is only real when *all* of the following are implemented
     /// against the same durable store, with each one a single conditional
@@ -269,8 +269,11 @@ pub trait AttachmentRootSet: Send + Sync {
     ///    root predicate.
     /// 3. [`Self::arm_attachment_delete`] — `Condemned -> Deleting`, conditional
     ///    on the condemnation still being held.
-    /// 4. [`Self::release_attachment_condemnation`] — back to `Free`.
-    /// 5. This method, answering [`AttachmentGcFence::Fenced`].
+    /// 4. [`Self::reclaim_attachment_condemnation`] — `Deleting -> Reclaimed`
+    ///    after the physical delete succeeds.
+    /// 5. [`Self::release_attachment_condemnation`] — an abandoned transition
+    ///    back to `Free`.
+    /// 6. This method, answering [`AttachmentGcFence::Fenced`].
     ///
     /// A partial implementation is worse than none: it silences the sweep's
     /// best-effort warning while keeping the loss. As a backstop the sweep
@@ -340,13 +343,27 @@ pub trait AttachmentRootSet: Send + Sync {
 
     /// Drop the digest's condemnation, returning it to `Free`.
     ///
-    /// The sweep calls this after the physical delete lands, and on every path
-    /// where it abandons a digest it had condemned. It is also the host-owned
+    /// The sweep calls this on every path where it abandons a digest it had
+    /// condemned, including a failed physical delete. It is also the host-owned
     /// recovery lever (ADR 0014) for a condemnation left behind by a sweeper
     /// that died between arming and releasing: the host asserts that no sweep is
     /// running and clears the digest, unblocking writers. lash never expires a
     /// condemnation on its own — there is no clock in this protocol.
     async fn release_attachment_condemnation(&self, id: &AttachmentId) -> Result<(), StoreError> {
+        let _ = id;
+        Ok(())
+    }
+
+    /// Record that an armed physical delete succeeded: `Deleting -> Reclaimed`.
+    ///
+    /// Unlike [`Self::release_attachment_condemnation`], this preserves the
+    /// byte-absence fact so stored-reference adoption cannot create a root for
+    /// bytes that are gone. A later
+    /// [`AttachmentManifest::begin_attachment_write`] clears `Reclaimed` in the
+    /// same mutation that records the fresh write intent, before re-putting the
+    /// bytes. Unfenced authorities never create a condemnation, so the default
+    /// is a no-op.
+    async fn reclaim_attachment_condemnation(&self, id: &AttachmentId) -> Result<(), StoreError> {
         let _ = id;
         Ok(())
     }
@@ -526,9 +543,10 @@ pub struct AttachmentReclamationPolicy {
 ///    Whoever loses the CAS yields; nobody waits.
 /// 3. **Only an armed digest is deleted.** The physical backend delete is issued
 ///    exclusively for a digest [`AttachmentRootSet::arm_attachment_delete`]
-///    moved to `Deleting`, and the condemnation is released afterwards. A writer
-///    that arrives while the delete is in flight records nothing and retries; it
-///    is granted once the sweep releases the digest, and re-puts the content.
+///    moved to `Deleting`. A successful delete transitions to `Reclaimed`; an
+///    abandoned or failed delete releases back to `Free`. A writer that arrives
+///    while the delete is in flight records nothing and retries; after success it
+///    clears `Reclaimed` with its fresh intent and re-puts the content.
 ///    That is why no SQL/blob-store atomicity is needed: the authority's state
 ///    machine, not the backend, decides whether bytes may die.
 /// 4. **Skip on contention.** A digest another sweeper has already condemned is
@@ -689,7 +707,7 @@ where
                         attachment_id = %blob.id,
                         "attachment root authority reported `Fenced` but answered \
                          `Unsupported` to condemn_attachment; this sweep's deletes are \
-                         NOT fenced and are reported best-effort. Implement all five \
+                         NOT fenced and are reported best-effort. Implement all six \
                          fence methods (including AttachmentManifest::begin_attachment_write) \
                          or report AttachmentGcFence::BestEffort"
                     );
@@ -828,12 +846,19 @@ where
                     );
                     report.deleted_while_referenced.push(blob.id.clone());
                 }
+                // (f) Preserve the byte-absence fact. Adoption can now
+                // distinguish an absent blob from a digest that was merely
+                // condemned and later abandoned. A fresh put clears this row
+                // with its write-ahead intent before restoring the bytes.
+                if condemned {
+                    let _ = root_set.reclaim_attachment_condemnation(&blob.id).await;
+                }
             }
-            Err(_) => report.failed_ids.push(blob.id.clone()),
+            Err(_) => {
+                report.failed_ids.push(blob.id.clone());
+                release_condemnation(root_set, condemned, &blob.id).await;
+            }
         }
-        // (f) Hand the digest back so a writer that arrived during the delete can
-        // record its intent and re-put the content.
-        release_condemnation(root_set, condemned, &blob.id).await;
     }
     Ok(report)
 }
