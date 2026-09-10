@@ -111,7 +111,7 @@ pub async fn cross_owner_attachment_adoption_conformance(f: Arc<dyn SessionStore
         "last receiver deletion releases the root"
     );
     adoption_fence_and_rollback(f.clone()).await;
-    adoption_after_full_gc_is_refused(f.clone()).await;
+    adoption_after_full_gc_and_release_is_refused(f.clone()).await;
     reput_after_full_gc_allows_adoption(f.clone()).await;
     sweep_adoption_race(f.clone()).await;
     sweep_reput_race(f).await;
@@ -219,7 +219,7 @@ async fn adoption_fence_and_rollback(f: Arc<dyn SessionStoreFactory>) {
     assert_eq!(sweep(&f, &bytes).await, 2);
 }
 
-async fn adoption_after_full_gc_is_refused(f: Arc<dyn SessionStoreFactory>) {
+async fn adoption_after_full_gc_and_release_is_refused(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let owner_id = format!("reclaimed-adoption-owner-{namespace}");
     let receiver_id = format!("reclaimed-adoption-receiver-{namespace}");
@@ -253,6 +253,13 @@ async fn adoption_after_full_gc_is_refused(f: Arc<dyn SessionStoreFactory>) {
         reader.get(&reference.id).await,
         Err(AttachmentStoreError::NotFound(_))
     ));
+    f.release_attachment_condemnation(&reference.id)
+        .await
+        .expect("release after successful delete");
+    assert!(matches!(
+        reader.get(&reference.id).await,
+        Err(AttachmentStoreError::NotFound(_))
+    ));
 
     let snapshot = |loaded: Option<lash_core::store::PersistedSessionRead>| {
         loaded.map(|session| {
@@ -271,7 +278,7 @@ async fn adoption_after_full_gc_is_refused(f: Arc<dyn SessionStoreFactory>) {
     let error = receiver
         .commit_runtime_state(receiver_commit)
         .await
-        .expect_err("reclaimed bytes must refuse adoption");
+        .expect_err("reclaimed bytes must refuse adoption after release");
     assert!(matches!(
         error,
         StoreError::AttachmentBytesReclaimed { ref digest } if digest == &reference.id

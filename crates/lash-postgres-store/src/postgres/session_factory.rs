@@ -737,11 +737,11 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         // open condemnation read.
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
-        sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1")
-            .bind(id.as_str())
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1 AND phase IN ('condemned', 'deleting')")
+        .bind(id.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(())
     }

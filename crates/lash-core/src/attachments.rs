@@ -272,8 +272,8 @@ pub trait AttachmentRootSet: Send + Sync {
     ///    on the condemnation still being held.
     /// 4. [`Self::reclaim_attachment_condemnation`] — `Deleting -> Reclaimed`
     ///    after the physical delete succeeds.
-    /// 5. [`Self::release_attachment_condemnation`] — an abandoned transition
-    ///    back to `Free`.
+    /// 5. [`Self::release_attachment_condemnation`] — an abandoned `Condemned`
+    ///    or `Deleting` transition back to `Free`; `Reclaimed` stays fenced.
     /// 6. This method, answering [`AttachmentGcFence::Fenced`].
     ///
     /// A partial implementation is worse than none: it silences the sweep's
@@ -342,14 +342,17 @@ pub trait AttachmentRootSet: Send + Sync {
         })
     }
 
-    /// Drop the digest's condemnation, returning it to `Free`.
+    /// Release an abandoned `Condemned` or `Deleting` digest back to `Free`.
     ///
     /// The sweep calls this on every path where it abandons a digest it had
     /// condemned, including a failed physical delete. It is also the host-owned
     /// recovery lever (ADR 0014) for a condemnation left behind by a sweeper
-    /// that died between arming and releasing: the host asserts that no sweep is
-    /// running and clears the digest, unblocking writers. lash never expires a
-    /// condemnation on its own — there is no clock in this protocol.
+    /// that died before completing the physical delete: the host asserts that
+    /// no sweep is running and clears the digest, unblocking writers. A
+    /// `Reclaimed` row records that the bytes are absent and is never released;
+    /// a fresh [`AttachmentManifest::begin_attachment_write`] clears it while
+    /// recording the new write intent. lash never expires a condemnation on its
+    /// own — there is no clock in this protocol.
     async fn release_attachment_condemnation(&self, id: &AttachmentId) -> Result<(), StoreError> {
         let _ = id;
         Ok(())
