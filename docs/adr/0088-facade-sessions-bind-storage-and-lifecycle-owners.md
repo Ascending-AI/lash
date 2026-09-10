@@ -32,6 +32,18 @@ records that broader session-model invariant. An explicitly chosen in-memory
 factory is the ephemeral facade configuration; there is no hidden storeless
 facade mode.
 
+Facade turn input contains only data that can cross its mandatory acceptance
+boundary. Replayable `ProtocolTurnOptions` remain available. The old
+`TurnBuilder::with_plugin_input`, `PluginBinding::Input`,
+`PluginBinding::requires_turn_input`, `RlmTurnInputExt::rlm_project`, and
+`rlm_project_tool_results` surfaces carried process-local handles that the
+durable boundary rejected, so they are removed rather than left as public APIs
+that no facade session can execute. Typed plugin configuration remains a
+session-open capability. RLM's session projection extension remains
+process-local configuration for one active runtime, while `RlmSeed` events are
+the replayable way to seed a newly created session. Those two timing and
+durability contracts are deliberately not presented as equivalents.
+
 Exact-session work drivers accept one session id and one store handle.
 Arbitrary-session drivers accept a catalog and resolve the addressed store once
 after the cancellation gate is known to exist, retaining that handle through
@@ -66,6 +78,9 @@ contract requires it.
 ## Consequences
 
 - A facade session cannot execute without a real store, including in memory.
+- Facade turns cannot attach process-local plugin inputs or RLM projection
+  closures; hosts use typed session configuration, replayable protocol options,
+  or durable session seeds according to the lifetime they need.
 - Session relation may influence catalog selection, but every facade session
   passes through the same admission and binding contract.
 - Parked sessions retain attachment, process-environment, trigger, process,

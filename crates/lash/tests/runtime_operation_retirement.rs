@@ -44,7 +44,6 @@ struct JournalPlugin;
 impl PluginBinding for JournalPlugin {
     const ID: &'static str = "journal_task";
     type SessionConfig = JournalConfig;
-    type Input = ();
 
     fn factory(config: &Self::SessionConfig) -> Arc<dyn PluginFactory> {
         Arc::new(JournalFactory {
@@ -317,7 +316,12 @@ fn executor() -> RuntimeEffectLocalExecutor<'static> {
 }
 
 fn core_with_host(effect_host: Arc<dyn EffectHost>) -> LashCore {
-    core_with_host_and_store(effect_host, None)
+    core_with_host_and_store(
+        effect_host,
+        Some(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        )),
+    )
 }
 
 /// A core over `effect_host`; with a store factory the session's receipts

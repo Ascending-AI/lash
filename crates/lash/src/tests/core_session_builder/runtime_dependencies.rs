@@ -103,7 +103,7 @@ fn queued_work_composition_is_required() {
 #[test]
 fn native_queued_work_requires_a_store_factory() {
     let error = expect_build_error(
-        explicit_ephemeral_facets(peer_coherence_builder())
+        explicit_ephemeral_facets_without_session_store(peer_coherence_builder())
             .with_native_queued_work()
             .build(crate::testing::runtime_lease_owner()),
         "builder must reject native queued work without a store factory",
@@ -1657,7 +1657,7 @@ async fn registry_without_store_factory_fails_loudly() {
     // session runtime per process and cannot do so without a store factory, so
     // build must fail loudly rather than silently leave processes unexecuted
     // (a process started in such a host would otherwise hang forever).
-    let result = explicit_ephemeral_facets(peer_coherence_builder())
+    let result = explicit_ephemeral_facets_without_session_store(peer_coherence_builder())
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build(crate::testing::runtime_lease_owner());
     let err = expect_build_error(

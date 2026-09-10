@@ -30,7 +30,6 @@ use crate::projection::{flow_to_json_value, format_output_value};
 pub(super) struct HostBridge<'run> {
     ctx: RuntimeExecutionContext<'run>,
     print_projector: std::sync::Arc<dyn ValueProjector>,
-    tool_result_projectors: Vec<crate::RlmToolResultProjector>,
     observations: Mutex<Vec<Observation>>,
     printed_images: Mutex<Vec<AttachmentRef>>,
     calls: Mutex<Vec<(usize, lash_core::ExecutedCall)>>,
@@ -46,7 +45,6 @@ pub(super) struct HostBridge<'run> {
 pub(super) struct HostBridgeConfig<'run> {
     pub ctx: RuntimeExecutionContext<'run>,
     pub print_projector: std::sync::Arc<dyn ValueProjector>,
-    pub tool_result_projectors: Vec<crate::RlmToolResultProjector>,
     pub lashlang_execution_trace: Option<LashlangExecutionTrace>,
     pub host_environment: lashlang::LashlangHostEnvironment,
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
@@ -63,7 +61,6 @@ impl<'run> HostBridge<'run> {
         Self {
             ctx: config.ctx,
             print_projector: config.print_projector,
-            tool_result_projectors: config.tool_result_projectors,
             observations: Mutex::new(config.initial_observations),
             printed_images: Mutex::new(Vec::new()),
             calls: Mutex::new(Vec::new()),
@@ -86,29 +83,12 @@ impl<'run> HostBridge<'run> {
 
     fn consume_reply(
         &self,
-        tool_name: &str,
         reply: ToolInvocationReply,
     ) -> (
         Result<FlowValue, ExecutionHostError>,
         Option<lash_core::ToolCallRecord>,
     ) {
-        let projected_tool_name = reply
-            .record
-            .as_ref()
-            .map(|record| record.tool.as_str())
-            .unwrap_or(tool_name)
-            .to_string();
-        let result = if reply.output.is_success() {
-            let value = reply.output.value_for_projection();
-            for projector in &self.tool_result_projectors {
-                if let Some(value) = projector(&projected_tool_name, &value) {
-                    return (Ok(value), reply.record);
-                }
-            }
-            protocol_tool_output_to_lashlang_value(&reply.output)
-        } else {
-            protocol_tool_output_to_lashlang_value(&reply.output)
-        };
+        let result = protocol_tool_output_to_lashlang_value(&reply.output);
         (result, reply.record)
     }
 
@@ -144,7 +124,7 @@ impl<'run> HostBridge<'run> {
         } else {
             lash_core::ExecutedCallOutcome::Err
         };
-        let (result, host_record) = self.consume_reply(operation, reply);
+        let (result, host_record) = self.consume_reply(reply);
         if let Some(host_record) = host_record {
             self.record_executed_call(index, operation.to_string(), outcome, Some(host_record))?;
         }
@@ -408,7 +388,7 @@ impl HostBridge<'_> {
                 lash_core::ExecutedCallOutcome::Err
             }
         };
-        let (result, host_record) = self.consume_reply(&host_operation, reply);
+        let (result, host_record) = self.consume_reply(reply);
         self.record_executed_call(index, source_operation, outcome, host_record)?;
         result
     }
@@ -419,7 +399,6 @@ impl HostBridge<'_> {
     ) -> lashlang::ResourceOperationBatchResult {
         let mut results = vec![None; batch.operations.len()];
         let mut positions = Vec::new();
-        let mut host_operations = Vec::new();
         let mut source_operations = Vec::new();
         let mut execution_indices = Vec::new();
         let mut invocations = Vec::new();
@@ -535,21 +514,18 @@ impl HostBridge<'_> {
                 invocation = invocation.with_child_execution_trace_hook(call_site);
             }
             positions.push(source_index);
-            host_operations.push(host_operation);
             source_operations.push(source_operation);
             execution_indices.push(execution_index);
             invocations.push(invocation);
         }
 
         let batch = self.ctx.call_tool_batch(invocations).await;
-        for ((((source_index, host_operation), source_operation), execution_index), reply) in
-            positions
-                .iter()
-                .copied()
-                .zip(host_operations)
-                .zip(source_operations)
-                .zip(execution_indices)
-                .zip(batch.replies)
+        for (((source_index, source_operation), execution_index), reply) in positions
+            .iter()
+            .copied()
+            .zip(source_operations)
+            .zip(execution_indices)
+            .zip(batch.replies)
         {
             // Batch replies are terminal for the same reason as scalar replies.
             let outcome = match &reply.output.outcome {
@@ -557,7 +533,7 @@ impl HostBridge<'_> {
                 lash_core::ToolCallOutcome::Failure(_)
                 | lash_core::ToolCallOutcome::Cancelled(_) => lash_core::ExecutedCallOutcome::Err,
             };
-            let (result, host_record) = self.consume_reply(&host_operation, reply);
+            let (result, host_record) = self.consume_reply(reply);
             let result = self
                 .record_executed_call(execution_index, source_operation, outcome, host_record)
                 .and(result);
@@ -920,7 +896,7 @@ impl HostBridge<'_> {
                 .start_child_process(prepared.registration, LASHLANG_ENGINE_KIND, prepared.label)
                 .await
         };
-        let (result, host_record) = self.consume_reply("start_process", reply);
+        let (result, host_record) = self.consume_reply(reply);
         debug_assert!(
             host_record.is_none(),
             "start_process must remain record-free"

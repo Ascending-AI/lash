@@ -177,12 +177,6 @@ pub enum EmbedError {
         /// Process-state deletion failure detail suitable for diagnostics.
         message: String,
     },
-    #[error("missing required turn input for plugin `{plugin_id}`")]
-    /// A plugin did not receive its required turn input.
-    MissingPluginTurnInput {
-        /// Identifier of the plugin whose required turn input is absent.
-        plugin_id: &'static str,
-    },
     #[error(
         "session is still in use: park()/close() consume the session and require exclusive ownership; drop any cloned handles and finish or cancel in-flight turns first"
     )]
@@ -306,7 +300,6 @@ impl EmbedError {
             | Self::QueuedWorkExecutionConcurrency(_)
             | Self::MissingSessionStore
             | Self::SessionCatalogUnavailable { .. }
-            | Self::MissingPluginTurnInput { .. }
             | Self::StaticTurnStreamRequiresStaticEffectHost => true,
             Self::Store(
                 lash_core::StoreError::SessionDeleted { .. }

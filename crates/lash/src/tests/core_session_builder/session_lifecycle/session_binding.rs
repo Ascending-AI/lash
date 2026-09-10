@@ -55,7 +55,7 @@ impl lash_core::EffectHost for FailOnceRetirementHost {
 
 #[tokio::test]
 async fn facade_refuses_to_open_without_an_explicit_session_store() {
-    let core = standard_core();
+    let core = core_without_session_store();
     let error = match core.session("store-less-single-use").open().await {
         Ok(_) => panic!("facade session open requires an explicit store"),
         Err(error) => error,
@@ -65,7 +65,7 @@ async fn facade_refuses_to_open_without_an_explicit_session_store() {
 
 #[tokio::test]
 async fn catalog_and_administration_are_typed_unavailable_without_a_root_catalog() {
-    let core = standard_core();
+    let core = core_without_session_store();
     assert!(matches!(
         core.turn_work_driver(),
         Err(EmbedError::SessionCatalogUnavailable {
@@ -82,7 +82,7 @@ async fn catalog_and_administration_are_typed_unavailable_without_a_root_catalog
 
 #[tokio::test]
 async fn every_created_session_requires_a_store_regardless_of_relation() -> Result<()> {
-    let core = standard_core();
+    let core = core_without_session_store();
     let parent = core
         .session("explicit-parent-store")
         .store(Arc::new(

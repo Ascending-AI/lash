@@ -5,8 +5,8 @@ use std::task::{Context, Poll};
 
 use crate::session_binding::BoundSession;
 use crate::support::{
-    ActivePluginBinding, Arc, CancellationToken, EffectHost, EmbedError, LashCore, LashRuntime,
-    PluginBinding, PluginFactory, PluginOperations, PluginOptions, ProcessHandleView, PromptLayer,
+    Arc, CancellationToken, EffectHost, EmbedError, LashCore, LashRuntime, PluginBinding,
+    PluginFactory, PluginOperations, PluginOptions, ProcessHandleView, PromptLayer,
     PromptLayerSink, ProviderHandle, QueuedTurnBuilder, Result, RuntimeErrorCode, RuntimeHandle,
     RuntimeObservation, RuntimePersistence, RuntimeSessionState, SessionAdmin, SessionCursor,
     SessionError, SessionObservation, SessionObservationSubscription, SessionPolicy,
@@ -41,7 +41,6 @@ pub struct SessionBuilder {
     pub(crate) parent_session_id: Option<SessionId>,
     pub(crate) store: Option<Arc<dyn RuntimePersistence>>,
     pub(crate) provider: Option<ProviderHandle>,
-    pub(crate) active_plugins: Vec<ActivePluginBinding>,
     pub(crate) plugin_factories: Vec<Arc<dyn PluginFactory>>,
     /// Plugin-keyed, serializable open-time options. They ride the protocol
     /// materialization seam (the same `PluginOptions` bag a child
@@ -117,10 +116,6 @@ impl SessionBuilder {
 
     /// Configures the plugin and returns the updated builder.
     pub fn plugin<P: PluginBinding>(mut self, config: P::SessionConfig) -> Self {
-        self.active_plugins.push(ActivePluginBinding {
-            id: P::ID,
-            requires_turn_input: P::requires_turn_input(&config),
-        });
         self.plugin_factories.push(P::factory(&config));
         self
     }
@@ -322,7 +317,6 @@ impl SessionBuilder {
             runtime: handle,
             binding,
             parent_session_id: self.parent_session_id,
-            active_plugins: self.active_plugins,
             process_phase_probe_slot: self.core.substrate_slot.phase_probe_slot(),
             turn_cancels: crate::turn::TurnCancelRegistry::default(),
         })
@@ -505,7 +499,6 @@ pub struct LashSession {
     pub(crate) runtime: RuntimeHandle,
     pub(crate) binding: Arc<BoundSession>,
     pub(crate) parent_session_id: Option<SessionId>,
-    pub(crate) active_plugins: Vec<ActivePluginBinding>,
     pub(crate) process_phase_probe_slot: Option<lash_core::runtime::RuntimeTurnPhaseProbeSlot>,
     pub(crate) turn_cancels: crate::turn::TurnCancelRegistry,
 }
@@ -676,7 +669,6 @@ impl LashSession {
         TurnBuilder {
             runtime: self.runtime.clone(),
             effect_host: self.binding.effect_host(),
-            active_plugins: self.active_plugins.clone(),
             input,
             cancel: CancellationToken::new(),
             cancel_origin_hint: lash_core::TurnCancelOriginHint::default(),

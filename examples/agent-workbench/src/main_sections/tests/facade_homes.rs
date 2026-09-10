@@ -165,26 +165,13 @@ fn host_model_capability_validates_reasoning_effort_selections() {
 }
 
 #[test]
-fn durable_effect_boundary_rejects_live_protocol_turn_input() {
-    use lash::rlm::RlmTurnInputExt as _;
-
-    let plain = lash::TurnInput::text("durable plain input");
-    lash::durability::ensure_durable_effect_input(&plain).expect("plain turn input is replayable");
-
-    let live = lash::TurnInput::text("durable projected input")
-        .rlm_project(
-            lash::rlm::RlmProjectedBindings::new()
-                .bind_json("live_value", json!({"answer": 42}))
-                .expect("bind live projected input"),
-        )
-        .expect("attach live RLM projection");
-    let rejection = lash::durability::ensure_durable_effect_input(&live)
-        .expect_err("live protocol extensions cannot cross a durable effect boundary");
-    assert_eq!(
-        rejection.code,
-        lash::runtime::RuntimeErrorCode::DurableEffectLiveProtocolExtension
-    );
-    assert!(rejection.message.contains("live protocol_extension inputs"));
+fn durable_effect_boundary_accepts_replayable_protocol_turn_options() {
+    let mut input = lash::TurnInput::text("durable protocol input");
+    input.protocol_turn_options = Some(lash::runtime::ProtocolTurnOptions::from_payload(json!({
+        "termination": { "kind": "finish_required" }
+    })));
+    lash::durability::ensure_durable_effect_input(&input)
+        .expect("serialized protocol turn options are replayable");
 }
 
 #[test]

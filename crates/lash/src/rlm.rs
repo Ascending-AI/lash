@@ -205,11 +205,11 @@ pub use lash_protocol_rlm::{
     rlm_plugin_session_dialect, rlm_session_dialect,
 };
 /// Projection vocabulary: register lazy host projections on a
-/// [`ProjectionRegistry`], bind projected values session-wide via
-/// [`rlm_session_projection_extension`], or per turn via
-/// [`RlmTurnInputExt::rlm_project`].
+/// [`ProjectionRegistry`] or bind projected values to the active session via
+/// [`rlm_session_projection_extension`]. Session extensions are process-local
+/// runtime configuration; durable session seeds use [`RlmSeed`].
 pub use lash_protocol_rlm::{
-    ProjectionRegistry, RlmProjectedBindings, RlmTurnInputExt, rlm_session_projection_extension,
+    ProjectionRegistry, RlmProjectedBindings, RlmSeed, rlm_session_projection_extension,
 };
 pub use lash_rlm_types::{
     RlmCreateExtras, RlmDialect, RlmFinalAnswerFormat, RlmSessionConfig, RlmSessionConfigConflict,

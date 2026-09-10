@@ -13,9 +13,7 @@ use lashlang::{
     ProjectedReadResponse, ProjectedValue, State as FlowState, Value as FlowValue,
 };
 
-use super::bindings::{
-    ProjectionResolver, RLM_TURN_INPUT_PLUGIN_ID, RlmProjectedBindings, RlmProjectionExtension,
-};
+use super::bindings::{ProjectionResolver, RlmProjectedBindings};
 use super::transport::json_to_flow_value;
 
 pub fn rlm_protocol_event(event: RlmProtocolEvent) -> lash_core::ProtocolEvent {
@@ -207,17 +205,6 @@ pub(crate) async fn projected_bindings(
         Arc::clone(&projection_resolver),
     )
     .await?;
-    if let Some(extension) = ctx
-        .turn_context()
-        .plugin_input::<RlmProjectionExtension>(RLM_TURN_INPUT_PLUGIN_ID)
-    {
-        insert_projected_bindings(
-            &mut bindings,
-            extension.bindings.clone(),
-            projection_resolver,
-        )
-        .await?;
-    }
     Ok(bindings)
 }
 

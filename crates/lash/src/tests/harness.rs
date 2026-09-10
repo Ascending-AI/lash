@@ -1,3 +1,4 @@
+use super::*;
 use std::future::Future;
 
 pub(super) const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
@@ -22,6 +23,58 @@ pub(super) fn model_spec(
 
 pub(super) fn mock_model_spec() -> lash_core::ModelSpec {
     model_spec("mock-model", None, 200_000)
+}
+
+pub(super) fn explicit_ephemeral_facets(
+    builder: crate::core::LashCoreBuilder,
+) -> crate::core::LashCoreBuilder {
+    explicit_ephemeral_facets_with_budget(builder, crate::CommitBudget::bounded(1024 * 1024, 512))
+}
+
+pub(super) fn explicit_ephemeral_facets_without_session_store(
+    builder: crate::core::LashCoreBuilder,
+) -> crate::core::LashCoreBuilder {
+    builder
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .effect_host(Arc::new(
+            crate::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
+        ))
+        .attachment_store(Arc::new(crate::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            crate::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        .without_queued_work()
+}
+
+pub(super) fn core_without_session_store() -> LashCore {
+    explicit_ephemeral_facets_without_session_store(LashCore::standard_builder(
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())
+    .expect("complete non-storage fixture")
+}
+
+pub(super) fn explicit_ephemeral_facets_with_budget(
+    builder: crate::core::LashCoreBuilder,
+    commit_budget: crate::CommitBudget,
+) -> crate::core::LashCoreBuilder {
+    builder
+        .commit_budget(commit_budget)
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .effect_host(Arc::new(
+            crate::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
+        ))
+        .attachment_store(Arc::new(crate::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            crate::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        .store_factory(Arc::new(
+            crate::persistence::InMemorySessionStoreFactory::new(),
+        ))
+        .without_queued_work()
 }
 
 fn capability_for_variant(variant: Option<&str>) -> lash_core::ModelCapability {

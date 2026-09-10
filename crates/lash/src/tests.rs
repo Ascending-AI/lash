@@ -2357,29 +2357,6 @@ async fn delete_bound_session(
     LashCore::delete_session(context).await
 }
 
-fn explicit_ephemeral_facets(
-    builder: crate::core::LashCoreBuilder,
-) -> crate::core::LashCoreBuilder {
-    explicit_ephemeral_facets_with_budget(builder, crate::CommitBudget::bounded(1024 * 1024, 512))
-}
-
-fn explicit_ephemeral_facets_with_budget(
-    builder: crate::core::LashCoreBuilder,
-    commit_budget: crate::CommitBudget,
-) -> crate::core::LashCoreBuilder {
-    builder
-        .commit_budget(commit_budget)
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .effect_host(Arc::new(
-            crate::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
-        .attachment_store(Arc::new(crate::persistence::InMemoryAttachmentStore::new()))
-        .process_env_store(Arc::new(
-            crate::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .without_queued_work()
-}
-
 fn text_message(role: lash_core::MessageRole, text: &str) -> lash_core::Message {
     let id = "stored-message".to_string();
     lash_core::Message {
@@ -2398,7 +2375,9 @@ mod control_admin;
 mod core_session_builder;
 mod harness;
 use harness::{
-    mock_model_spec, model_spec, run_async_test_on_stack_budget, run_async_test_on_stack_size,
+    core_without_session_store, explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget,
+    explicit_ephemeral_facets_without_session_store, mock_model_spec, model_spec,
+    run_async_test_on_stack_budget, run_async_test_on_stack_size,
 };
 mod agent_scenarios;
 #[cfg(feature = "rlm")]

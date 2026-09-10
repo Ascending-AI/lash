@@ -4,15 +4,14 @@ mod transport;
 
 pub use bindings::{
     ProjectionRef, ProjectionRegistry, ProjectionResolveError, ProjectionResolver,
-    RlmProjectedBindings, RlmToolResultProjector, RlmTurnInputExt,
-    rlm_session_projection_extension,
+    RlmProjectedBindings, rlm_session_projection_extension,
 };
 pub use context::{
     RlmHistoryProjection, decode_rlm_protocol_event, rlm_history_projection, rlm_protocol_event,
 };
 pub use transport::{RlmSeed, rlm_seed_initial_nodes};
 
-pub(crate) use bindings::{RLM_TURN_INPUT_PLUGIN_ID, RlmProjectionExtension};
+pub(crate) use bindings::RlmProjectionExtension;
 #[cfg(test)]
 pub(crate) use context::projected_index;
 pub(crate) use context::{

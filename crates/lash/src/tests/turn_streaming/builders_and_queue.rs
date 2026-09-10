@@ -682,16 +682,7 @@ pub(super) async fn an_exhausted_queue_reports_an_empty_claim_refusal() -> Resul
 /// a queue or turn can be addressed.
 #[tokio::test]
 pub(super) async fn a_session_without_a_store_never_exposes_a_queue() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(
-            crate::testing::TestProvider::builder()
-                .kind("storeless-drain-reason")
-                .complete(|_| async { Ok(text_response("echo")) })
-                .build()
-                .into_handle(),
-        )
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = core_without_session_store();
     let error = match core.session("missing-store-drain-reason").open().await {
         Ok(_) => panic!("facade session admission requires a store"),
         Err(error) => error,

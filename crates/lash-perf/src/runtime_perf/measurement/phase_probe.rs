@@ -521,8 +521,6 @@ async fn run_once_inner(
                 },
             );
         }
-        prepare_turn(&mut runtime, scenario, turn_index).await?;
-
         let catalog_variant = match scenario {
             RuntimePerfScenario::RlmToolCatalogCold => Some("cold"),
             RuntimePerfScenario::RlmToolCatalogWarm => Some("warm"),

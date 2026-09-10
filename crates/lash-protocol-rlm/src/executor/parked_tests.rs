@@ -129,7 +129,6 @@ pub(crate) async fn execute_parked_cell_for_tests(
     let bridge = HostBridge::new(HostBridgeConfig {
         ctx,
         print_projector: Arc::new(crate::rlm_support::print_history_projector()),
-        tool_result_projectors: Vec::new(),
         lashlang_execution_trace: None,
         host_environment,
         deferred_execution_grants: BTreeMap::new(),

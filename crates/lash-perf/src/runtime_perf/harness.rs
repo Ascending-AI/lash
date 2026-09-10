@@ -1531,13 +1531,13 @@ pub(crate) async fn seed_runtime_state(
         .map_err(|err| anyhow::anyhow!("seed historical messages: {err}"))?;
 
     if matches!(scenario, RuntimePerfScenario::RlmGlobals) {
-        seed_rlm_live_globals(runtime).await?;
+        install_rlm_session_projection(runtime).await?;
     }
 
     Ok(())
 }
 
-async fn seed_rlm_live_globals(runtime: &mut BenchmarkRuntime) -> anyhow::Result<()> {
+async fn install_rlm_session_projection(runtime: &mut BenchmarkRuntime) -> anyhow::Result<()> {
     runtime
         .session
         .as_ref()
@@ -1555,20 +1555,6 @@ async fn seed_rlm_live_globals(runtime: &mut BenchmarkRuntime) -> anyhow::Result
         .await?;
     validate_runtime_perf_turn(RuntimePerfScenario::RlmGlobals, 0, &turn)?;
     runtime.await_background_work().await?;
-    Ok(())
-}
-
-pub(crate) async fn prepare_turn(
-    runtime: &mut BenchmarkRuntime,
-    scenario: RuntimePerfScenario,
-    turn_index: usize,
-) -> anyhow::Result<()> {
-    if !matches!(scenario, RuntimePerfScenario::RlmGlobals) {
-        return Ok(());
-    }
-
-    let _ = runtime;
-    let _ = turn_index;
     Ok(())
 }
 

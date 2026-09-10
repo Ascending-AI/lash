@@ -3,13 +3,9 @@ use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_core::{
-    PromptContribution, ProtocolSessionExtension, ProtocolTurnExtension,
-    ProtocolTurnExtensionHandle, TurnInput,
-};
+use lash_core::{PromptContribution, ProtocolSessionExtension};
 pub use lash_rlm_types::ProjectionRef;
 
-pub(crate) const RLM_TURN_INPUT_PLUGIN_ID: &str = "rlm";
 use lashlang::{
     ProjectedBindingError, ProjectedBindings, ProjectedHostDescriptor, ProjectedValue,
     Value as FlowValue,
@@ -104,9 +100,6 @@ enum RlmProjectedBinding {
 pub struct RlmProjectedBindings {
     bindings: BTreeMap<String, RlmProjectedBinding>,
 }
-
-pub type RlmToolResultProjector =
-    Arc<dyn Fn(&str, &serde_json::Value) -> Option<FlowValue> + Send + Sync + 'static>;
 
 impl RlmProjectedBindings {
     pub fn new() -> Self {
@@ -232,29 +225,11 @@ impl RlmProjectedBindings {
 #[derive(Clone, Default)]
 pub(crate) struct RlmProjectionExtension {
     pub(crate) bindings: RlmProjectedBindings,
-    pub(crate) tool_result_projectors: Vec<RlmToolResultProjector>,
 }
 
 impl RlmProjectionExtension {
     pub(crate) fn new(bindings: RlmProjectedBindings) -> Self {
-        Self {
-            bindings,
-            tool_result_projectors: Vec::new(),
-        }
-    }
-
-    pub(crate) fn with_projector(projector: RlmToolResultProjector) -> Self {
-        Self {
-            bindings: RlmProjectedBindings::new(),
-            tool_result_projectors: vec![projector],
-        }
-    }
-
-    fn merge(mut self, other: Self) -> Result<Self, ProjectedBindingError> {
-        self.bindings = self.bindings.merge(other.bindings)?;
-        self.tool_result_projectors
-            .extend(other.tool_result_projectors);
-        Ok(self)
+        Self { bindings }
     }
 
     pub(crate) fn prompt_contributions_for(
@@ -272,39 +247,6 @@ impl RlmProjectionExtension {
     }
 }
 
-impl ProtocolTurnExtension for RlmProjectionExtension {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    /// Nothing. The read-only-variables block is assembled by the RLM prompt
-    /// hook, which is the only place that knows the session's dialect.
-    ///
-    /// This handle is built by a host — `TurnInput::rlm_project` — before any
-    /// session has resolved a dialect, so it cannot render dialect-specific
-    /// copy. It used to try: it stored a vocabulary field seeded with
-    /// Lashlang's, and `lash-core` rendered it into the prompt directly
-    /// (`turn_driver/tool_catalog.rs`), beside the copy the protocol hook was
-    /// already contributing from the *same* bindings.
-    ///
-    /// That duplication was invisible for exactly as long as one dialect
-    /// existed: `merge_prompt_contributions` drops contributions that are
-    /// byte-identical, and two Lashlang renderings of one binding set are. The
-    /// second dialect made the two copies *differ*, so the dedup stopped
-    /// applying and a TypeScript session received both — its own block, and
-    /// underneath it "Access them directly in `<lashlang>` blocks", the
-    /// sentence ADR 0063 exists to eliminate.
-    ///
-    /// The handle keeps its real job, which is validation:
-    /// `validate_turn_extension` rejects reserved binding names and refuses
-    /// bindings that cannot merge with the session's. Assembly belongs to the
-    /// one route that can spell it correctly, and the walker now renders both
-    /// routes so a third cannot appear unseen.
-    fn prompt_contributions(&self) -> Vec<PromptContribution> {
-        Vec::new()
-    }
-}
-
 impl ProtocolSessionExtension for RlmProjectionExtension {
     fn as_any(&self) -> &dyn Any {
         self
@@ -317,83 +259,9 @@ pub fn rlm_session_projection_extension(
     lash_core::ProtocolSessionExtensionHandle::new(RlmProjectionExtension::new(bindings))
 }
 
-pub trait RlmTurnInputExt {
-    fn rlm_project(self, bindings: RlmProjectedBindings) -> Result<Self, ProjectedBindingError>
-    where
-        Self: Sized;
-
-    fn rlm_project_tool_results(
-        self,
-        projector: RlmToolResultProjector,
-    ) -> Result<Self, ProjectedBindingError>
-    where
-        Self: Sized;
-}
-
-impl RlmTurnInputExt for TurnInput {
-    fn rlm_project(
-        mut self,
-        bindings: RlmProjectedBindings,
-    ) -> Result<Self, ProjectedBindingError> {
-        let extension = if let Some(existing) = self
-            .turn_context
-            .plugin_input::<RlmProjectionExtension>(RLM_TURN_INPUT_PLUGIN_ID)
-            .cloned()
-        {
-            existing
-                .clone()
-                .merge(RlmProjectionExtension::new(bindings))?
-        } else {
-            RlmProjectionExtension::new(bindings)
-        };
-        self.turn_context
-            .insert_plugin_input(RLM_TURN_INPUT_PLUGIN_ID, extension);
-        self.protocol_extension = Some(ProtocolTurnExtensionHandle::new(
-            RlmProjectionExtension::new(
-                self.turn_context
-                    .plugin_input::<RlmProjectionExtension>(RLM_TURN_INPUT_PLUGIN_ID)
-                    .expect("RLM projection was just inserted")
-                    .bindings
-                    .clone(),
-            ),
-        ));
-        Ok(self)
-    }
-
-    fn rlm_project_tool_results(
-        mut self,
-        projector: RlmToolResultProjector,
-    ) -> Result<Self, ProjectedBindingError> {
-        let extension = if let Some(existing) = self
-            .turn_context
-            .plugin_input::<RlmProjectionExtension>(RLM_TURN_INPUT_PLUGIN_ID)
-            .cloned()
-        {
-            existing
-                .clone()
-                .merge(RlmProjectionExtension::with_projector(projector))?
-        } else {
-            RlmProjectionExtension::with_projector(projector)
-        };
-        self.turn_context
-            .insert_plugin_input(RLM_TURN_INPUT_PLUGIN_ID, extension);
-        self.protocol_extension = Some(ProtocolTurnExtensionHandle::new(
-            RlmProjectionExtension::new(
-                self.turn_context
-                    .plugin_input::<RlmProjectionExtension>(RLM_TURN_INPUT_PLUGIN_ID)
-                    .expect("RLM projection was just inserted")
-                    .bindings
-                    .clone(),
-            ),
-        ));
-        Ok(self)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_sansio::TurnId;
     use lashlang::{ProjectedFuture, ProjectedReadRequest, ProjectedReadResponse};
 
     struct TestProjectedValue;
@@ -519,73 +387,6 @@ mod tests {
         );
     }
 
-    /// `rlm_project` attaches the bindings on both seams, and exactly one of
-    /// them writes prompt copy.
-    ///
-    /// The turn-extension handle carries the bindings for validation and
-    /// contributes **no** prompt: it is built before a session has resolved a
-    /// dialect, so it cannot spell dialect-specific copy, and `lash-core`
-    /// renders whatever it returns straight into the prompt with no dedup. The
-    /// protocol's own hook assembles the block from the plugin-input copy with
-    /// the session's vocabulary. This test used to assert the opposite, which
-    /// is how a duplicated, always-Lashlang block reached every
-    /// projected-binding turn.
-    #[test]
-    fn turn_input_projection_contributes_prompt_on_one_route_only() {
-        let input = TurnInput {
-            items: Vec::new(),
-            protocol_turn_options: None,
-            trace_turn_id: None,
-            protocol_extension: None,
-            turn_context: lash_core::TurnContext::default(),
-        }
-        .rlm_project(
-            RlmProjectedBindings::new()
-                .bind_json("current_file", serde_json::json!("src/lib.rs"))
-                .expect("bind"),
-        )
-        .expect("attach");
-
-        assert!(
-            input
-                .protocol_extension
-                .as_ref()
-                .expect("extension")
-                .prompt_contributions()
-                .is_empty(),
-            "the generic seam cannot know the dialect, so it must contribute nothing"
-        );
-
-        // The bindings are still on the handle, which is what validation reads.
-        let extension = input
-            .protocol_extension
-            .as_ref()
-            .expect("extension")
-            .as_any()
-            .downcast_ref::<RlmProjectionExtension>()
-            .expect("RLM projection extension");
-        assert!(!extension.bindings.prompt_docs().is_empty());
-
-        // And the route that does assemble copy renders it in the dialect it
-        // is handed, which is what the protocol hook passes.
-        let contribution = RlmProjectionExtension::prompt_contributions_for(
-            &extension.bindings,
-            crate::dialect::typescript_prompt_vocabulary(),
-        )
-        .pop()
-        .expect("prompt contribution");
-        assert!(
-            contribution
-                .content
-                .contains("`current_file`: `str`, read-only")
-        );
-        assert!(
-            contribution.content.contains("<typescript>"),
-            "{contribution:?}"
-        );
-        assert!(!contribution.content.contains("<lashlang>"));
-    }
-
     #[test]
     fn projected_task_payload_advertises_shape_without_discovery_prints() {
         let bindings = RlmProjectedBindings::new()
@@ -620,78 +421,5 @@ mod tests {
         );
         assert!(!contribution.content.contains("print input"));
         assert!(!contribution.content.contains("discover"));
-    }
-
-    #[test]
-    fn turn_input_extension_is_skipped_by_serde() {
-        let input = TurnInput {
-            items: Vec::new(),
-            protocol_turn_options: None,
-            trace_turn_id: Some(TurnId::from("stable")),
-            protocol_extension: None,
-            turn_context: lash_core::TurnContext::default(),
-        }
-        .rlm_project(
-            RlmProjectedBindings::new()
-                .bind_json("current_file", serde_json::json!("src/lib.rs"))
-                .expect("bind"),
-        )
-        .expect("attach");
-
-        let encoded = serde_json::to_string(&input).expect("serialize");
-        assert!(!encoded.contains("protocol_extension"));
-        assert!(!encoded.contains("current_file"));
-        let decoded: TurnInput = serde_json::from_str(&encoded).expect("deserialize");
-        assert!(decoded.protocol_extension.is_none());
-        assert_eq!(decoded.trace_turn_id.as_deref(), Some("stable"));
-    }
-
-    #[test]
-    fn matching_trace_turn_ids_do_not_share_projection_extensions() {
-        let first = TurnInput {
-            items: Vec::new(),
-            protocol_turn_options: None,
-            trace_turn_id: Some(TurnId::from("same-trace")),
-            protocol_extension: None,
-            turn_context: lash_core::TurnContext::default(),
-        }
-        .rlm_project(
-            RlmProjectedBindings::new()
-                .bind_json("first_name", serde_json::json!("first"))
-                .expect("bind"),
-        )
-        .expect("attach first");
-        let second = TurnInput {
-            items: Vec::new(),
-            protocol_turn_options: None,
-            trace_turn_id: Some(TurnId::from("same-trace")),
-            protocol_extension: None,
-            turn_context: lash_core::TurnContext::default(),
-        }
-        .rlm_project(
-            RlmProjectedBindings::new()
-                .bind_json("second_name", serde_json::json!("second"))
-                .expect("bind"),
-        )
-        .expect("attach second");
-
-        let first_extension = first
-            .protocol_extension
-            .as_ref()
-            .and_then(|extension| extension.as_any().downcast_ref::<RlmProjectionExtension>())
-            .expect("first extension");
-        let second_extension = second
-            .protocol_extension
-            .as_ref()
-            .and_then(|extension| extension.as_any().downcast_ref::<RlmProjectionExtension>())
-            .expect("second extension");
-        assert_eq!(
-            first_extension.bindings.names().collect::<Vec<_>>(),
-            vec!["first_name".to_string()]
-        );
-        assert_eq!(
-            second_extension.bindings.names().collect::<Vec<_>>(),
-            vec!["second_name".to_string()]
-        );
     }
 }

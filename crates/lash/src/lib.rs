@@ -789,9 +789,9 @@ pub mod runtime {
         RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation, RuntimePromptConfig,
         RuntimeProviderConfig, RuntimeScope, RuntimeTracingConfig, RuntimeTurnPhase,
         RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
-        SessionAdministration, SessionDeleteContext, SessionDeleteExecution, SessionWorkTarget,
-        ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnContext,
-        TurnControlBinding, TurnControlParticipation, WorkCadencePolicy, WorkerSweepPolicy,
+        SessionWorkTarget, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+        TurnContext, TurnControlBinding, TurnControlParticipation, WorkCadencePolicy,
+        WorkerSweepPolicy,
     };
     /// The host clock accepted by
     /// [`LashCoreBuilder::clock`](crate::LashCoreBuilder::clock), used for

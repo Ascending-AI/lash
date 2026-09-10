@@ -9,7 +9,6 @@ use super::runtime_state::{RlmCodeExecutor, RlmRuntimeState};
 use super::tool_args::normalize_projected_tool_args;
 use crate::dialect::{RlmDialect, RlmDialectRegistry};
 use crate::driver::SharedPromptUsage;
-use crate::projection::{RLM_TURN_INPUT_PLUGIN_ID, RlmProjectionExtension};
 use crate::stream_mask;
 use lash_core::plugin::{PluginError, PluginRegistrar};
 
@@ -90,23 +89,8 @@ fn register_projected_bindings_prompt_contributor(
     reg: &mut PluginRegistrar,
     protocol_session: Arc<RlmProtocolSession>,
 ) {
-    reg.prompt().contribute(Arc::new(move |ctx| {
+    reg.prompt().contribute(Arc::new(move |_ctx| {
         let session = protocol_session.clone();
-        Box::pin(async move {
-            let mut contributions = session.projected_binding_prompt_contributions().await;
-            if let Some(extension) = ctx
-                .turn_context
-                .plugin_input::<RlmProjectionExtension>(RLM_TURN_INPUT_PLUGIN_ID)
-            {
-                contributions.extend(RlmProjectionExtension::prompt_contributions_for(
-                    &extension.bindings,
-                    // The session owns the dialect; a turn-scoped extension
-                    // built by a host before the dialect resolved must not
-                    // fall back to Lashlang copy here.
-                    session.dialect_prompt_vocabulary(),
-                ));
-            }
-            Ok(contributions)
-        })
+        Box::pin(async move { Ok(session.projected_binding_prompt_contributions().await) })
     }));
 }

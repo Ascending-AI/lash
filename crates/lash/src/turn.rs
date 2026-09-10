@@ -4,13 +4,12 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use crate::support::{
-    ActivePluginBinding, Arc, AssembledTurn, BTreeMap, CancellationToken, EffectHost, EmbedError,
-    EventSink, JoinHandle, LlmCallRecord, Message, MessageRole, PluginBinding, PromptContribution,
-    PromptLayer, PromptSlot, PromptTemplate, ProtocolTurnOptions, ProviderHandle, Result,
-    RuntimeEffectController, RuntimeErrorCode, RuntimeHandle, ScopedEffectController,
-    SessionSnapshot, StdMutex, TokenLedgerEntry, TokenUsage, ToolCallRecord, TurnActivity,
-    TurnActivitySink, TurnCancelOriginHint, TurnExecutionMetrics, TurnInput, TurnOutcome,
-    async_trait, mpsc,
+    Arc, AssembledTurn, BTreeMap, CancellationToken, EffectHost, EmbedError, EventSink, JoinHandle,
+    LlmCallRecord, Message, MessageRole, PromptContribution, PromptLayer, PromptSlot,
+    PromptTemplate, ProtocolTurnOptions, ProviderHandle, Result, RuntimeEffectController,
+    RuntimeErrorCode, RuntimeHandle, ScopedEffectController, SessionSnapshot, StdMutex,
+    TokenLedgerEntry, TokenUsage, ToolCallRecord, TurnActivity, TurnActivitySink,
+    TurnCancelOriginHint, TurnExecutionMetrics, TurnInput, TurnOutcome, async_trait, mpsc,
 };
 use futures_util::Stream;
 use lash_core::facade_support::{
@@ -219,7 +218,6 @@ impl<'run> EffectBinding<'run> {
 pub struct TurnBuilder {
     pub(crate) runtime: RuntimeHandle,
     pub(crate) effect_host: Arc<dyn EffectHost>,
-    pub(crate) active_plugins: Vec<ActivePluginBinding>,
     pub(crate) input: TurnInput,
     pub(crate) cancel: CancellationToken,
     pub(crate) cancels: TurnCancelRegistry,
@@ -315,16 +313,6 @@ impl TurnBuilder {
         self
     }
 
-    /// Attach typed per-turn input for an activated plugin binding.
-    ///
-    /// This is the generic primitive. Plugin crates should usually wrap it in a
-    /// domain extension trait such as `.with_tone(tone)` or `.with_board(board)`
-    /// so application code stays typed in its own vocabulary.
-    pub fn with_plugin_input<P: PluginBinding>(mut self, input: P::Input) -> Self {
-        self.input.turn_context.insert_plugin_input(P::ID, input);
-        self
-    }
-
     /// Accept this turn's input durably, drive it, and collect its activity.
     ///
     /// Convenience over [`stream_to`](Self::stream_to), which documents what one
@@ -415,7 +403,6 @@ impl TurnBuilder {
         if let Some(turn_id) = turn_id {
             self.input.trace_turn_id = Some(turn_id);
         }
-        validate_required_plugin_inputs(&self.active_plugins, &self.input)?;
         self.input
             .turn_context
             .set_local_cancel_origin_hint(self.cancel_origin_hint.clone());
@@ -1280,20 +1267,6 @@ impl TurnActivitySink for ChannelTurnActivitySink {
         let _ = self.tx.send(Ok(activity)).await;
     }
 }
-fn validate_required_plugin_inputs(
-    active_plugins: &[ActivePluginBinding],
-    input: &TurnInput,
-) -> Result<()> {
-    for plugin in active_plugins {
-        if plugin.requires_turn_input && !input.turn_context.has_plugin_input(plugin.id) {
-            return Err(EmbedError::MissingPluginTurnInput {
-                plugin_id: plugin.id,
-            });
-        }
-    }
-    Ok(())
-}
-
 pub(crate) async fn stream_prepared_turn(
     runtime: &RuntimeHandle,
     input: TurnInput,

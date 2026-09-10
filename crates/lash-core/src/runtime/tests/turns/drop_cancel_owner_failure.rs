@@ -1,12 +1,51 @@
 use super::*;
-use crate::store::TurnInputStore as _;
+use crate::store::{RuntimePersistenceDecorator, TurnInputStore as _};
+
+struct FailSecondCancelRecordStore {
+    inner: Arc<RecordingStore>,
+    calls: AtomicUsize,
+}
+
+impl FailSecondCancelRecordStore {
+    fn new(inner: Arc<RecordingStore>) -> Self {
+        Self {
+            inner,
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl RuntimePersistenceDecorator for FailSecondCancelRecordStore {
+    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn record_turn_cancel_request(
+        &self,
+        request: crate::TurnCancelRequest,
+    ) -> Result<crate::TurnCancelRequestRecord, crate::StoreError> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        if call == 2 {
+            return Err(crate::StoreError::Backend(
+                "injected finish-time cancellation record failure".to_string(),
+            ));
+        }
+        self.inner.record_turn_cancel_request(request).await
+    }
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelivery() {
     const SESSION_ID: &str = "drop-cancel-owner-failure";
     const TURN_ID: &str = "turn-that-cannot-finish";
 
-    let store = Arc::new(RecordingStore::default());
+    let inner_store = Arc::new(RecordingStore::default());
+    let store = Arc::new(FailSecondCancelRecordStore::new(Arc::clone(&inner_store)));
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
     let (provider_started_tx, provider_started_rx) = tokio::sync::oneshot::channel::<()>();
     let provider_started_tx = Arc::new(Mutex::new(Some(provider_started_tx)));
@@ -59,7 +98,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
         .await
         .expect("provider should start after lease acquisition");
     let undelivered = crate::store::TurnInputStore::enqueue_pending_turn_input(
-        store.as_ref(),
+        inner_store.as_ref(),
         crate::PendingTurnInputDraft::new(
             SESSION_ID,
             crate::TurnInputIngress::active_turn(
@@ -96,9 +135,6 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     })
     .await
     .expect("turn should seal cancellation before finish-time recording");
-    store.fail_next_runtime_commit(crate::StoreError::SessionExecutionLeaseExpired {
-        session_id: SESSION_ID.to_string(),
-    });
     release_effect_loop.store(true, Ordering::SeqCst);
 
     let error = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
@@ -106,12 +142,14 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
         .expect("failed owner turn should return")
         .expect("turn task")
         .expect_err("injected owner failure must reject finish-time recording");
+    assert_eq!(error.code, crate::RuntimeErrorCode::RuntimeStore);
     assert_eq!(
-        error.code,
-        crate::RuntimeErrorCode::SessionExecutionLeaseLost
+        store.calls(),
+        2,
+        "the injected failure must follow the ingress record and precede the turn commit"
     );
 
-    let raw = store.raw_pending_turn_inputs_for_testing();
+    let raw = inner_store.raw_pending_turn_inputs_for_testing();
     let dropped = raw
         .iter()
         .find(|(input_id, ..)| input_id == &undelivered.input_id)
@@ -119,7 +157,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     assert_eq!(dropped.2, crate::TurnInputState::Cancelled);
     assert!(dropped.3.is_none(), "recovery clears the dead turn claim");
 
-    let pending = crate::TurnInputStore::list_pending_turn_inputs(store.as_ref(), SESSION_ID)
+    let pending = crate::TurnInputStore::list_pending_turn_inputs(inner_store.as_ref(), SESSION_ID)
         .await
         .expect("list inputs eligible for redelivery after recovery");
     assert!(
@@ -128,7 +166,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
             .all(|input| input.input_id != undelivered.input_id),
         "Drop evidence must keep the undelivered input out of every later claim"
     );
-    let record = store
+    let record = inner_store
         .turn_cancel_request(&turn_address)
         .await
         .expect("read durable cancellation record")

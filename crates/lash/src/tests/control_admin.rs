@@ -1078,10 +1078,7 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
 /// storeless exception to durable turn acceptance.
 #[tokio::test]
 async fn a_session_without_a_store_cannot_bypass_turn_acceptance() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = core_without_session_store();
     let error = match core.session("missing-store-acceptance").open().await {
         Ok(_) => panic!("facade session admission requires a store"),
         Err(error) => error,

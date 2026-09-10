@@ -1302,43 +1302,6 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
 
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn rlm_projection_errors_surface_from_protocol_extensions() -> Result<()> {
-    use lash_protocol_rlm::{RlmProjectedBindings, RlmTurnInputExt};
-
-    let core = explicit_ephemeral_facets(rlm_core_builder())
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("rlm").open().await?;
-    session
-        .admin()
-        .protocol()
-        .apply_session_extension(lash_protocol_rlm::rlm_session_projection_extension(
-            RlmProjectedBindings::new()
-                .bind_json("current_query", serde_json::json!("session"))
-                .expect("session bind"),
-        ))
-        .await?;
-
-    let input = TurnInput::text("hello")
-        .rlm_project(
-            RlmProjectedBindings::new()
-                .bind_json("current_query", serde_json::json!("turn"))
-                .expect("turn bind"),
-        )
-        .map_err(|err| EmbedError::Session(SessionError::Protocol(err.to_string())))?;
-    let err = match session.turn(input).run().await {
-        Ok(_) => panic!("duplicate session and turn projection should fail"),
-        Err(err) => err,
-    };
-    assert!(
-        matches!(err, EmbedError::Session(message) if message.to_string().contains("current_query"))
-    );
-    Ok(())
-}
-
-#[cfg(feature = "rlm")]
-#[tokio::test]
 async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy() -> Result<()> {
     // Named-field MessagePack for a v5 RLM envelope. The embedded vars payload
     // is deliberately empty: version rejection must happen before Lashlang

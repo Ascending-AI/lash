@@ -42,8 +42,7 @@ pub use plugin::{
 };
 pub use projection::{
     ProjectionRef, ProjectionRegistry, ProjectionResolveError, ProjectionResolver,
-    RlmProjectedBindings, RlmToolResultProjector, RlmTurnInputExt,
-    rlm_session_projection_extension,
+    RlmProjectedBindings, rlm_session_projection_extension,
 };
 pub use projection::{
     RlmHistoryProjection, RlmSeed, decode_rlm_protocol_event, rlm_history_projection,

@@ -102,7 +102,7 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             expected_reply()
         ),
         RuntimePerfScenario::RlmGlobals => format!(
-            "Turn {} in RLM mode with persisted projected bindings. Inspect the current state and reply with exactly: {}",
+            "Turn {} in RLM mode with fixed session-scoped projected bindings. Inspect the current state and reply with exactly: {}",
             turn_index + 1,
             expected_reply()
         ),

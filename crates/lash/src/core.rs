@@ -142,7 +142,6 @@ impl LashCore {
             parent_session_id: None,
             store: None,
             provider: None,
-            active_plugins: Vec::new(),
             plugin_factories: Vec::new(),
             plugin_options: PluginOptions::default(),
         }
@@ -339,7 +338,6 @@ impl LashCore {
             runtime: handle,
             binding,
             parent_session_id: None,
-            active_plugins: Vec::new(),
             process_phase_probe_slot: self.substrate_slot.phase_probe_slot(),
             turn_cancels: crate::turn::TurnCancelRegistry::default(),
         })
