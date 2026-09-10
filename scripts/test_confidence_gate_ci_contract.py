@@ -2085,6 +2085,41 @@ derive_mutation_jobs() {{
             bumps,
         )
 
+    def test_manual_dispatch_explains_skipped_version_bump_gate(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        for trigger in (
+            "  workflow_dispatch:\n",
+            "  pull_request:\n",
+            "  merge_group:\n",
+            "  push:\n    branches:\n      - main\n",
+        ):
+            self.assertIn(trigger, workflow)
+
+        lint = workflow_job_block(workflow, "lint")
+        bumps = workflow_step_block(lint, "Check versioned surface bumps")
+        self.assertIn("if: github.event_name != 'workflow_dispatch'", bumps)
+        manual = workflow_step_block(lint, "Explain skipped versioned surface bump gate")
+        self.assertIn("if: github.event_name == 'workflow_dispatch'", manual)
+        self.assertIn("bash scripts/ci/report-manual-dispatch-skips.sh", manual)
+
+        script = ROOT / "scripts" / "ci" / "report-manual-dispatch-skips.sh"
+        with tempfile.TemporaryDirectory() as directory:
+            summary = pathlib.Path(directory) / "summary.md"
+            result = subprocess.run(
+                ["bash", str(script)],
+                env=dict(os.environ, GITHUB_STEP_SUMMARY=str(summary)),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertIn("::warning", result.stdout)
+            self.assertIn("Check versioned surface bumps", result.stdout)
+            self.assertIn("green manual run does not prove it passed", result.stdout)
+            summary_text = summary.read_text(encoding="utf-8")
+            self.assertIn("Manual CI run is incomplete", summary_text)
+            self.assertIn("Check versioned surface bumps", summary_text)
+            self.assertIn("green manual run does not prove that gate passed", summary_text)
+
     def test_the_transcript_gate_can_read_a_queued_pull_request(self) -> None:
         gate = (ROOT / "scripts" / "check-transcript-diff.py").read_text(
             encoding="utf-8"
