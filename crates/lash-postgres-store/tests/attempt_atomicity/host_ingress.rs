@@ -1,5 +1,7 @@
 use super::*;
 use lash_core::{ProcessEventLog as _, ProcessRegistrar as _};
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 
 /// The facade-level duplicate law on the real key-addressed journal: the first
 /// submission executes locally, the second returns the byte-equivalent recorded
@@ -17,9 +19,9 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
         .await
         .expect("connect the PostgreSQL host-ingress law");
     let suffix = uuid::Uuid::new_v4().simple().to_string();
-    let session_id = format!("pg-tool-intent-ingress-session-{suffix}");
+    let session_id = SessionId::from(format!("pg-tool-intent-ingress-session-{suffix}"));
     let scope_id = format!("pg-tool-intent-ingress-scope-{suffix}");
-    let process_id = format!("pg-tool-intent-ingress-process-{suffix}");
+    let process_id = ProcessId::from(format!("pg-tool-intent-ingress-process-{suffix}"));
     let event_type = "pg.tool_intent_ingress.realized";
     let registry = Arc::new(storage.process_registry());
     registry

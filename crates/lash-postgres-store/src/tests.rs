@@ -68,7 +68,7 @@ async fn turn_failure_reopen_skips_one_corrupt_evidence_receipt_among_many_recei
         .await
         .expect("bind receipt-filter session");
     let state = lash_core::RuntimeSessionState {
-        session_id: SESSION_ID.to_string(),
+        session_id: SessionId::from(SESSION_ID.to_string()),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -381,7 +381,10 @@ async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidat
         .await
         .expect("seed witness fork lineage");
 
-        let session_ids = vec![ancestor_session, child_session];
+        let session_ids = vec![
+            SessionId::from(ancestor_session),
+            SessionId::from(child_session),
+        ];
         let ordered_candidates: Vec<String> = sqlx::query_scalar(
             "SELECT graph.node_id FROM lash_graph_nodes AS graph
              WHERE graph.session_id = ANY($1) AND graph.tombstoned = FALSE
@@ -400,7 +403,12 @@ async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidat
                )
              ORDER BY graph.session_id, graph.generation DESC",
         )
-        .bind(&session_ids)
+        .bind(
+            &session_ids
+                .iter()
+                .map(SessionId::as_str)
+                .collect::<Vec<_>>(),
+        )
         .fetch_all(storage.pool())
         .await
         .expect("read witness candidate order");
@@ -494,7 +502,7 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
         .await
         .expect("enable pg_stat_statements for selected-drain plan proof");
     let nonce = uuid::Uuid::new_v4().simple().to_string();
-    let session_id = format!("selected-plan-session:{nonce}");
+    let session_id = SessionId::from(format!("selected-plan-session:{nonce}"));
     let batch_prefix = format!("selected-plan-batch:{nonce}:");
     let source_prefix = format!("selected-plan-source:{nonce}:");
     sqlx::query(
@@ -506,7 +514,7 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
          FROM generate_series(1, 10000) AS value",
     )
     .bind(&batch_prefix)
-    .bind(&session_id)
+    .bind(&session_id.as_str())
     .bind(&source_prefix)
     .execute(storage.pool())
     .await
@@ -592,7 +600,7 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
         .await
         .expect("release selected-drain plan lease");
     sqlx::query("DELETE FROM lash_queued_work_batches WHERE session_id = $1")
-        .bind(&session_id)
+        .bind(&session_id.as_str())
         .execute(storage.pool())
         .await
         .expect("remove selected-drain plan fixture");
@@ -609,7 +617,10 @@ async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
         .await
         .expect("connect concurrent first-commit storage");
     let factory = storage.session_store_factory();
-    let session_id = format!("postgres-first-commit-race:{}", uuid::Uuid::new_v4());
+    let session_id = SessionId::from(format!(
+        "postgres-first-commit-race:{}",
+        uuid::Uuid::new_v4()
+    ));
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
@@ -686,7 +697,7 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
         .await
         .expect("connect graph-generation error storage");
     let nonce = uuid::Uuid::new_v4().simple().to_string();
-    let session_id = format!("postgres-generation-collision:{nonce}");
+    let session_id = SessionId::from(format!("postgres-generation-collision:{nonce}"));
     let first_node = format!("generation-node-a:{nonce}");
     let second_node = format!("generation-node-b:{nonce}");
     sqlx::query(
@@ -694,7 +705,7 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
          (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
          VALUES ($1, $2, NULL, 3, $2, '{}')",
     )
-    .bind(&session_id)
+    .bind(&session_id.as_str())
     .bind(&first_node)
     .execute(storage.pool())
     .await
@@ -704,7 +715,7 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
          (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
          VALUES ($1, $2, NULL, 3, $2, '{}')",
     )
-    .bind(&session_id)
+    .bind(&session_id.as_str())
     .bind(&second_node)
     .execute(storage.pool())
     .await
@@ -718,7 +729,7 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
         } if actual_session_id == &session_id
     ));
     sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1")
-        .bind(&session_id)
+        .bind(&session_id.as_str())
         .execute(storage.pool())
         .await
         .expect("clean graph-generation uniqueness fixture");
@@ -734,7 +745,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect claim-completion fence storage");
-    let session_id = format!("postgres-claim-fence:{}", uuid::Uuid::new_v4());
+    let session_id = SessionId::from(format!("postgres-claim-fence:{}", uuid::Uuid::new_v4()));
     let input_id = format!("input:{}", uuid::Uuid::new_v4());
     let stale = lash_core::TurnInputCompletion {
         session_id: session_id.clone(),
@@ -751,7 +762,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
         "INSERT INTO lash_sessions (session_id, head_revision, head_json)
          VALUES ($1, 7, '{}')",
     )
-    .bind(&session_id)
+    .bind(&session_id.as_str())
     .execute(storage.pool())
     .await
     .expect("insert claim-fence session head");
@@ -763,7 +774,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
          VALUES ($1, $2, '{}', $3, '{}', 1, $4, $5, 1, 1)",
     )
     .bind(&input_id)
-    .bind(&session_id)
+    .bind(&session_id.as_str())
     .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
     .bind(stale.claim_id())
     .bind(stale.lease_token())
@@ -788,7 +799,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
              claim_fencing_token = 2, claim_session_lease_generation = 2
          WHERE session_id = $1 AND input_id = $2",
     )
-    .bind(&session_id)
+    .bind(&session_id.as_str())
     .bind(&input_id)
     .execute(&mut *blocked_superseder)
     .await
@@ -816,7 +827,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
         "SELECT 1::BIGINT FROM lash_pending_turn_inputs
          WHERE session_id = $1 AND input_id = $2 AND claim_id = $3 AND claim_token = $4",
     )
-    .bind(&session_id)
+    .bind(&session_id.as_str())
     .bind(&input_id)
     .bind(stale.claim_id())
     .bind(stale.lease_token())
@@ -836,7 +847,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
              claim_fencing_token = 2, claim_session_lease_generation = 2
          WHERE session_id = $1 AND input_id = $2",
     )
-    .bind(&session_id)
+    .bind(&session_id.as_str())
     .bind(&input_id)
     .execute(&mut *superseder)
     .await
@@ -847,7 +858,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
         .expect("commit fresh supersession");
 
     sqlx::query("UPDATE lash_sessions SET head_revision = head_revision + 1 WHERE session_id = $1")
-        .bind(&session_id)
+        .bind(&session_id.as_str())
         .execute(&mut *stale_committer)
         .await
         .expect("tentatively move stale head");
@@ -869,7 +880,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
 
     let head_revision: i64 =
         sqlx::query_scalar("SELECT head_revision FROM lash_sessions WHERE session_id = $1")
-            .bind(&session_id)
+            .bind(&session_id.as_str())
             .fetch_one(storage.pool())
             .await
             .expect("read head after rejected stale commit");
@@ -881,7 +892,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
         "SELECT claim_id, claim_token, claim_session_lease_generation
          FROM lash_pending_turn_inputs WHERE session_id = $1 AND input_id = $2",
     )
-    .bind(&session_id)
+    .bind(&session_id.as_str())
     .bind(&input_id)
     .fetch_one(storage.pool())
     .await
@@ -892,12 +903,12 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
     );
 
     sqlx::query("DELETE FROM lash_pending_turn_inputs WHERE session_id = $1")
-        .bind(&session_id)
+        .bind(&session_id.as_str())
         .execute(storage.pool())
         .await
         .expect("clean claim-fence input");
     sqlx::query("DELETE FROM lash_sessions WHERE session_id = $1")
-        .bind(&session_id)
+        .bind(&session_id.as_str())
         .execute(storage.pool())
         .await
         .expect("clean claim-fence head");
@@ -914,7 +925,7 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
         .await
         .expect("connect delete fence storage");
     let factory = storage.session_store_factory_with_shared_process_registry();
-    let session_id = format!("postgres-delete-fence:{}", uuid::Uuid::new_v4());
+    let session_id = SessionId::from(format!("postgres-delete-fence:{}", uuid::Uuid::new_v4()));
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
@@ -970,7 +981,10 @@ async fn checkpoint_probe_skips_writes_for_deferred_head_when_configured() {
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect checkpoint counter storage");
-    let session_id = format!("postgres-checkpoint-counter:{}", std::process::id());
+    let session_id = SessionId::from(format!(
+        "postgres-checkpoint-counter:{}",
+        std::process::id()
+    ));
     let store = Arc::new(storage.session_store(&session_id));
     lash_conformance::checkpoint_claim_probe_transaction_counts(
         Arc::clone(&store) as Arc<dyn RuntimePersistence>,
@@ -1010,7 +1024,10 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect attachment fence database");
-    let session_id = format!("postgres-attachment-fence-race:{}", std::process::id());
+    let session_id = SessionId::from(format!(
+        "postgres-attachment-fence-race:{}",
+        std::process::id()
+    ));
     let store = std::sync::Arc::new(storage.session_store(&session_id));
     let factory = storage.session_store_factory();
     let attachment_id =
@@ -1137,7 +1154,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     let live_factory = lash_core::runtime::InMemorySessionStoreFactory::new();
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "postgres-wrong-database-live-attachment".to_string(),
+        session_id: SessionId::from("postgres-wrong-database-live-attachment"),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };

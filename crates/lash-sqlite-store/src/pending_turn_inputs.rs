@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 
 pub(crate) fn decode_turn_input_ingress(
     value: String,
@@ -23,7 +24,7 @@ pub(crate) fn decode_turn_input(value: String) -> Result<lash_core::TurnInput, S
 pub(crate) struct PendingTurnInputRow {
     pub(crate) enqueue_seq: u64,
     pub(crate) input_id: String,
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     pub(crate) source_key: Option<String>,
     pub(crate) ingress_json: String,
     pub(crate) state: String,
@@ -42,7 +43,7 @@ pub(crate) fn pending_turn_input_row_from_sql(
     Ok(PendingTurnInputRow {
         enqueue_seq: u64_from_sql("PendingTurnInput", "enqueue_seq", row.get(0)?)?,
         input_id: row.get(1)?,
-        session_id: row.get(2)?,
+        session_id: SessionId::from(row.get::<_, String>(2)?),
         source_key: row.get(3)?,
         ingress_json: row.get(4)?,
         state: row.get(5)?,
@@ -83,7 +84,7 @@ pub(crate) fn pending_turn_input_from_row(
 
 pub(crate) fn load_pending_turn_input_by_id_conn(
     conn: &Connection,
-    session_id: &str,
+    session_id: &SessionId,
     input_id: &str,
 ) -> Result<Option<lash_core::PendingTurnInput>, StoreError> {
     let row = conn
@@ -94,7 +95,7 @@ pub(crate) fn load_pending_turn_input_by_id_conn(
                     claim_token, claim_session_lease_generation
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2",
-            params![session_id, input_id],
+            params![session_id.as_str(), input_id],
             pending_turn_input_row_from_sql,
         )
         .optional()
@@ -104,7 +105,7 @@ pub(crate) fn load_pending_turn_input_by_id_conn(
 
 pub(crate) fn load_pending_turn_input_row_by_target_conn(
     conn: &Connection,
-    session_id: &str,
+    session_id: &SessionId,
     target: &lash_core::PendingTurnInputCancelTarget,
 ) -> Result<Option<PendingTurnInputRow>, StoreError> {
     match target {
@@ -116,7 +117,7 @@ pub(crate) fn load_pending_turn_input_row_by_target_conn(
                         claim_token, claim_session_lease_generation
                  FROM pending_turn_inputs
                  WHERE session_id = ?1 AND input_id = ?2",
-                params![session_id, input_id],
+                params![session_id.as_str(), input_id.as_str()],
                 pending_turn_input_row_from_sql,
             )
             .optional()
@@ -129,7 +130,7 @@ pub(crate) fn load_pending_turn_input_row_by_target_conn(
                         claim_token, claim_session_lease_generation
                  FROM pending_turn_inputs
                  WHERE session_id = ?1 AND source_key = ?2",
-                params![session_id, source_key],
+                params![session_id.as_str(), source_key],
                 pending_turn_input_row_from_sql,
             )
             .optional()
@@ -166,7 +167,7 @@ pub(crate) struct TurnInputClaimLease {
 impl TurnInputClaimLease {
     pub(crate) fn derive(
         head: &PendingTurnInputRow,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         now_epoch_ms: u64,
         session_lease_generation: u64,

@@ -1,5 +1,6 @@
 //! Shared corrupt-durable-graph read conformance.
 
+use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::future::Future;
 use std::sync::Arc;
@@ -12,7 +13,7 @@ pub trait GraphIntegrityInjector: Send + Sync {
 
     async fn load_whole_graph(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<crate::SessionGraph, crate::StoreError>;
 
     async fn cleanup(&self, _target: &GraphIntegrityTarget) {}
@@ -76,7 +77,7 @@ async fn run_case(
     corruption: GraphIntegrityCorruption,
     read: GraphIntegrityRead,
 ) {
-    let session_id = format!("graph-integrity-{case}");
+    let session_id = SessionId::from(format!("graph-integrity-{case}"));
     let mut state = crate::RuntimeSessionState {
         session_id: session_id.clone(),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))

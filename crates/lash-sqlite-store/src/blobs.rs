@@ -10,6 +10,7 @@
 //! durable root.
 
 use super::*;
+use lash_sansio::SessionId;
 
 /// Versioned BLAKE3 content address that keys every row in the `blobs` table.
 fn blob_content_hash(content: &[u8]) -> String {
@@ -311,7 +312,7 @@ impl Store {
 
     pub(crate) fn load_usage_deltas_conn(
         conn: &Connection,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<lash_core::TokenLedgerEntry>, StoreError> {
         let mut stmt = conn
             .prepare(
@@ -320,7 +321,7 @@ impl Store {
             )
             .map_err(sqlite_error)?;
         let rows = stmt
-            .query_map(params![session_id], |row| {
+            .query_map(params![session_id.as_str()], |row| {
                 let usage = lash_core::TokenUsage {
                     input_tokens: row.get(2)?,
                     output_tokens: row.get(3)?,
@@ -410,7 +411,8 @@ impl Store {
         let session_id = self.selected_session_id()?;
         self.conn
             .call(move |conn| {
-                Self::load_usage_deltas_conn(conn, &session_id).map_err(sqlite_conversion_error)
+                Self::load_usage_deltas_conn(conn, &SessionId::from(session_id))
+                    .map_err(sqlite_conversion_error)
             })
             .await
             .map_err(sqlite_error)

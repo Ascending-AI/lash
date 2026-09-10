@@ -3,6 +3,7 @@ use lash_core::{
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
 use lash_postgres_store::PostgresStorage;
+use lash_sansio::SessionId;
 
 use crate::support::{SharedDatabaseLock, database_url};
 
@@ -76,7 +77,7 @@ fn completed_continue_as_effect_fixture() -> (lash_core::RuntimeEffectEnvelope, 
                 output: lash_core::ToolCallOutput::success(serde_json::json!({ "ok": true }))
                     .with_control(lash_core::ToolControl::SwitchAgentFrame {
                         frame_key: lash_core::FrameKey::from_call_site(
-                            "cutover-session",
+                            &SessionId::from("cutover-session"),
                             "cutover-frame",
                             call_id,
                         ),

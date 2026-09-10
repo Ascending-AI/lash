@@ -42,6 +42,7 @@
 //! [`RuntimePersistence`]: lash_core::RuntimePersistence
 //! [`AttachmentManifest`]: lash_core::AttachmentManifest
 
+use lash_sansio::SessionId;
 mod namespace;
 mod process_key;
 
@@ -163,7 +164,7 @@ pub use triggers::SqliteTriggerStore;
 /// tokio-rusqlite handle to one database thread).
 pub struct Store {
     conn: SqliteConnection,
-    session_id: OnceLock<String>,
+    session_id: OnceLock<SessionId>,
     clock: Arc<dyn lash_core::Clock>,
     #[cfg(feature = "lashlang")]
     artifact_cache: Mutex<BTreeMap<lashlang::ModuleRef, Arc<lashlang::ModuleArtifact>>>,
@@ -229,7 +230,7 @@ fn sqlite_error(err: rusqlite::Error) -> StoreError {
 
 fn sqlite_graph_node_insert_error(
     err: rusqlite::Error,
-    session_id: &str,
+    session_id: &SessionId,
     generation: u64,
     node_id: &str,
 ) -> StoreError {
@@ -239,7 +240,7 @@ fn sqlite_graph_node_insert_error(
         let message = message.as_deref().unwrap_or_default();
         if message.contains("graph_nodes.session_id, graph_nodes.generation") {
             return StoreError::GraphGenerationCollision {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 generation,
             };
         }
@@ -367,17 +368,17 @@ fn map_record_decode_error(record_kind: &'static str, error: StoreError) -> Stor
 }
 
 impl Store {
-    fn bind_session(&self, session_id: &str) -> Result<(), StoreError> {
+    fn bind_session(&self, session_id: &SessionId) -> Result<(), StoreError> {
         if let Some(bound_session_id) = self.session_id.get() {
             if bound_session_id != session_id {
                 return Err(StoreError::SessionBindingMismatch {
                     bound_session_id: bound_session_id.clone(),
-                    attempted_session_id: session_id.to_string(),
+                    attempted_session_id: session_id.clone(),
                 });
             }
             return Ok(());
         }
-        let _ = self.session_id.set(session_id.to_string());
+        let _ = self.session_id.set(session_id.clone());
         if self
             .session_id
             .get()
@@ -386,20 +387,24 @@ impl Store {
             Ok(())
         } else {
             Err(StoreError::SessionBindingMismatch {
-                bound_session_id: self.session_id.get().cloned().unwrap_or_default(),
-                attempted_session_id: session_id.to_string(),
+                bound_session_id: self
+                    .session_id
+                    .get()
+                    .cloned()
+                    .unwrap_or_else(|| SessionId::from(String::default())),
+                attempted_session_id: session_id.clone(),
             })
         }
     }
 
-    fn selected_session_id(&self) -> Result<String, StoreError> {
+    fn selected_session_id(&self) -> Result<SessionId, StoreError> {
         self.session_id
             .get()
             .cloned()
             .ok_or(StoreError::SessionNotBound)
     }
 
-    async fn resolve_session_id_for_read(&self) -> Result<Option<String>, StoreError> {
+    async fn resolve_session_id_for_read(&self) -> Result<Option<SessionId>, StoreError> {
         if let Some(session_id) = self.session_id.get() {
             return Ok(Some(session_id.clone()));
         }
@@ -433,7 +438,7 @@ impl Store {
                 session_count: session_ids.len() as u64,
             });
         }
-        self.bind_session(&session_ids[0])?;
+        self.bind_session(&SessionId::from(session_ids[0].clone()))?;
         Ok(self.session_id.get().cloned())
     }
 }
@@ -692,7 +697,7 @@ impl SqliteSessionStoreFactory {
     /// used because another process may still hold a writer.
     pub async fn open_read_only(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Option<lash_core::SessionReadView>, lash_core::StoreError> {
         lash_core::store::validate_session_id(session_id)?;
         let path = self.catalog_path();
@@ -741,7 +746,7 @@ impl SqliteSessionStoreFactory {
                 let deleted = tx
                     .query_row(
                         "SELECT 1 FROM deleted_sessions WHERE session_id = ?1",
-                        params![meta.session_id],
+                        params![meta.session_id.as_str()],
                         |_| Ok(()),
                     )
                     .optional()?
@@ -843,7 +848,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
 
     async fn read_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Option<lash_core::SessionReadView>, lash_core::StoreError> {
         self.open_read_only(session_id).await
     }
@@ -867,7 +872,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
 
     async fn open_existing_store_by_id(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
         lash_core::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
         let path = self.catalog_path();
@@ -926,7 +931,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                       AND pti.state = ?3
                 )",
                 params![
-                    session_id,
+                    session_id.as_str(),
                     now_epoch_ms as i64,
                     lash_core::TurnInputState::DeferredNextTurn.as_str()
                 ],
@@ -938,7 +943,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         .map_err(sqlite_error)
     }
 
-    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         lash_core::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
         let path = self.catalog_path();
         if !path.exists() {
@@ -950,11 +955,11 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         ensure_versioned_schema(&conn, SqliteDatabase::DurableCore)
             .await
             .map_err(|err| err.to_string())?;
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         conn.call(move |conn| {
             conn.query_row(
                 "SELECT 1 FROM deleted_sessions WHERE session_id = ?1",
-                params![session_id],
+                params![session_id.as_str()],
                 |_| Ok(()),
             )
             .optional()
@@ -966,7 +971,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         lash_core::store::validate_session_id(session_id)
             .map_err(lash_core::MaintenanceFailure::failed_before_any_work)?;
@@ -1094,7 +1099,7 @@ fn list_session_summaries(
             )
         };
         Ok(SessionSummary {
-            session_id: row.get(0)?,
+            session_id: SessionId::from(row.get::<_, String>(0)?),
             created_at_ms: u64_from_sql("SessionSummary", "created_at_ms", row.get(18)?)?,
             last_commit_at_ms: row
                 .get::<_, Option<i64>>(19)?
@@ -1228,14 +1233,14 @@ fn warn_process_registry_not_wired(path: &'static str) {
 
 async fn delete_session_from_catalog(
     root: &Path,
-    session_id: &str,
+    session_id: &SessionId,
     policy: SqliteConnectionPolicy,
 ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
     let path = root.join(DURABLE_CORE_DB_FILE);
     if !path.exists() {
         return Ok(lash_core::SessionBlobReclaimReport::default());
     }
-    let session_id = session_id.to_string();
+    let session_id = SessionId::from(session_id.to_string());
     let conn = SqliteConnection::open_with_policy(&path, policy)
         .await
         .map_err(|err| {
@@ -1255,7 +1260,7 @@ async fn delete_session_from_catalog(
                      UNION ALL
                      SELECT 1 FROM session_head WHERE session_id = ?1
                      LIMIT 1",
-                    params![session_id],
+                    params![session_id.as_str()],
                     |_| Ok(()),
                 )
                 .optional()
@@ -1278,7 +1283,7 @@ async fn delete_session_from_catalog(
                      FROM session_meta AS meta
                      LEFT JOIN session_head AS head ON head.session_id = meta.session_id
                      WHERE meta.session_id = ?1",
-                    params![session_id],
+                    params![session_id.as_str()],
                 )
                 .map_err(sqlite_error)?;
                 tx.execute(
@@ -1286,14 +1291,14 @@ async fn delete_session_from_catalog(
                      (session_id, created_at_ms, last_commit_at_ms, head_revision,
                       relation_kind, parent_session_id)
                      VALUES (?1, 0, NULL, 0, 'root', NULL)",
-                    params![session_id],
+                    params![session_id.as_str()],
                 )
                 .map_err(sqlite_error)?;
             }
             let (leaf_node_id, checkpoint_ref) = tx
                 .query_row(
                     "SELECT leaf_node_id, checkpoint_ref FROM session_head WHERE session_id = ?1",
-                    params![session_id],
+                    params![session_id.as_str()],
                     |row| {
                         Ok((
                             row.get::<_, Option<String>>(0)?,
@@ -1349,7 +1354,7 @@ async fn delete_session_from_catalog(
             report.enumerated_blob_count = candidates.len();
             tx.execute(
                 "DELETE FROM session_head WHERE session_id = ?1",
-                params![session_id],
+                params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
             if let Some(leaf_node_id) = leaf_node_id {
@@ -1377,7 +1382,7 @@ async fn delete_session_from_catalog(
                     )
                     .map_err(sqlite_error)?;
                 let rows = stmt
-                    .query_map(params![session_id], |row| row.get::<_, String>(0))
+                    .query_map(params![session_id.as_str()], |row| row.get::<_, String>(0))
                     .map_err(sqlite_error)?;
                 rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
             };
@@ -1396,22 +1401,22 @@ async fn delete_session_from_catalog(
                  WHERE tombstoned = 1
                    AND (session_id = ?1
                         OR session_id IN (SELECT session_id FROM deleted_sessions))",
-                params![session_id],
+                params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
             tx.execute(
                 "DELETE FROM fork_lineage WHERE session_id = ?1",
-                params![session_id],
+                params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
             tx.execute(
                 "DELETE FROM queued_work_batches WHERE session_id = ?1",
-                params![session_id],
+                params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
             tx.execute(
                 "DELETE FROM wake_redelivery_fences WHERE session_id = ?1",
-                params![session_id],
+                params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
             for table in [
@@ -1422,7 +1427,7 @@ async fn delete_session_from_catalog(
             ] {
                 tx.execute(
                     &format!("DELETE FROM {table} WHERE session_id = ?1"),
-                    params![session_id],
+                    params![session_id.as_str()],
                 )
                 .map_err(sqlite_error)?;
             }
@@ -1504,7 +1509,7 @@ async fn delete_session_from_catalog(
                 }
             }
             tracing::debug!(
-                session_id,
+                session_id = %session_id,
                 enumerated_blob_count = report.enumerated_blob_count,
                 retained_blob_count = report.retained_blob_count,
                 deleted_blob_count = report.deleted_blob_count,
@@ -1532,7 +1537,7 @@ async fn delete_session_from_catalog(
 
 async fn delete_wake_allocation_floors_from_process_registry(
     process_registry_path: &Path,
-    target_session_id: &str,
+    target_session_id: &SessionId,
     policy: SqliteConnectionPolicy,
 ) -> Result<(), String> {
     if !process_registry_path.exists() {
@@ -1544,12 +1549,12 @@ async fn delete_wake_allocation_floors_from_process_registry(
     ensure_versioned_schema(&conn, SqliteDatabase::ProcessRegistry)
         .await
         .map_err(|err| err.to_string())?;
-    let target_session_id = target_session_id.to_string();
+    let target_session_id = SessionId::from(target_session_id.to_string());
     conn.write_flow(move |tx| {
         let outcome = tx
             .execute(
                 "DELETE FROM wake_allocation_floors WHERE target_session_id = ?1",
-                params![target_session_id],
+                params![target_session_id.as_str()],
             )
             .map(|_| ())
             .map_err(sqlite_error);

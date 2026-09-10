@@ -5,14 +5,15 @@
 //! transaction bodies. Each function is the whole of one lease transition.
 
 use super::*;
+use lash_sansio::ProcessId;
 
 pub(super) async fn claim_process_lease(
     registry: &SqliteProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
     owner: &LeaseOwnerIdentity,
     lease_ttl_ms: u64,
 ) -> Result<ProcessLeaseClaimOutcome, lash_core::PluginError> {
-    let process_id = process_id.to_string();
+    let process_id = ProcessId::from(process_id.to_string());
     let owner = owner.clone();
     let now = registry.clock.timestamp_ms();
     registry
@@ -34,7 +35,7 @@ pub(super) async fn claim_process_lease(
                             "UPDATE process_leases
                              SET lease_expires_at_ms = ?2
                              WHERE process_id = ?1",
-                            params![process_id, lease.expires_at_epoch_ms as i64],
+                            params![process_id.as_str(), lease.expires_at_epoch_ms as i64],
                         )
                         .map_err(process_sqlite_error)?;
                         return Ok(ProcessLeaseClaimOutcome::Acquired(lease));
@@ -74,12 +75,12 @@ pub(super) async fn claim_process_lease(
 
 pub(super) async fn reclaim_process_lease(
     registry: &SqliteProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
     owner: &LeaseOwnerIdentity,
     _observed_holder: &ProcessLease,
     lease_ttl_ms: u64,
 ) -> Result<ProcessLeaseClaimOutcome, lash_core::PluginError> {
-    let process_id = process_id.to_string();
+    let process_id = ProcessId::from(process_id.to_string());
     let owner = owner.clone();
     let now = registry.clock.timestamp_ms();
     registry
@@ -168,9 +169,9 @@ pub(super) async fn renew_process_lease(
 
 pub(super) async fn get_process_lease(
     registry: &SqliteProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<Option<ProcessLease>, lash_core::PluginError> {
-    let process_id = process_id.to_string();
+    let process_id = ProcessId::from(process_id.to_string());
     registry
         .conn
         .call(move |conn| {
@@ -185,7 +186,7 @@ pub(super) async fn get_process_lease(
 
 pub(super) async fn get_process_leases(
     registry: &SqliteProcessRegistry,
-    process_ids: &[String],
+    process_ids: &[ProcessId],
 ) -> Result<Vec<Option<ProcessLease>>, lash_core::PluginError> {
     if process_ids.is_empty() {
         return Ok(Vec::new());
@@ -207,7 +208,7 @@ pub(super) async fn get_process_leases(
                     .map_err(process_sqlite_error)?;
                 let rows = stmt
                     .query_map(params![process_ids_json], |row| {
-                        let process_id = row.get::<_, String>(0)?;
+                        let process_id = ProcessId::from(row.get::<_, String>(0)?);
                         let lease = registry_transitions::ProcessLeaseRow {
                             owner_id: row.get(1)?,
                             incarnation_id: row.get(6)?,
@@ -249,7 +250,7 @@ pub(super) async fn complete_process_lease(
                      lease_claimed_at_ms = 0,
                      lease_expires_at_ms = 0
                  WHERE process_id = ?1 AND lease_token = ?2",
-                params![process_id, lease_token],
+                params![process_id.as_str(), lease_token],
             )
         })
         .await
@@ -261,7 +262,7 @@ pub(super) async fn complete_process_lease(
 impl lash_core::ProcessLeases for SqliteProcessRegistry {
     async fn claim_process_lease(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         owner: &LeaseOwnerIdentity,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLeaseClaimOutcome, lash_core::PluginError> {
@@ -270,7 +271,7 @@ impl lash_core::ProcessLeases for SqliteProcessRegistry {
 
     async fn reclaim_process_lease(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         owner: &LeaseOwnerIdentity,
         observed_holder: &ProcessLease,
         lease_ttl_ms: u64,
@@ -288,14 +289,14 @@ impl lash_core::ProcessLeases for SqliteProcessRegistry {
 
     async fn get_process_lease(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<ProcessLease>, lash_core::PluginError> {
         leases::get_process_lease(self, process_id).await
     }
 
     async fn get_process_leases(
         &self,
-        process_ids: &[String],
+        process_ids: &[ProcessId],
     ) -> Result<Vec<Option<ProcessLease>>, lash_core::PluginError> {
         leases::get_process_leases(self, process_ids).await
     }

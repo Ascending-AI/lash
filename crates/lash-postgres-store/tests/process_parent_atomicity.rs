@@ -1,3 +1,5 @@
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -321,7 +323,7 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
         let intents = if emit {
             lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
-                    session_id: call.context.session_id().to_string(),
+                    session_id: lash_core::SessionId::from(call.context.session_id()),
                     request: lash_core::ProcessStartRequest::external(
                         "ignored-derived-child-id",
                         lash_core::ProcessOriginator::host_scoped("postgres-process-parent-law"),
@@ -474,7 +476,7 @@ async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
         .await
         .expect("register concurrent parent-end parent");
     let identity = lash_core::derive_tool_intent_identity(
-        "pg-concurrent-scanner-session",
+        &SessionId::from("pg-concurrent-scanner-session"),
         PARENT,
         Some("pg-concurrent-scanner-call"),
         0,
@@ -483,13 +485,13 @@ async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
     let action = lash_core::ToolIntentParentEndAction {
         identity: identity.clone(),
         parent_end: lash_core::ToolIntentParentEnd {
-            process_id: CHILD.to_string(),
+            process_id: ProcessId::from(CHILD.to_string()),
             policy: lash_core::ProcessParentEndPolicy::Cancel,
         },
     };
     registry
         .complete_process_with_parent_end(
-            PARENT,
+            &ProcessId::from(PARENT),
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!({"parent": "done"}),
             )),
@@ -500,11 +502,11 @@ async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
         .expect("commit concurrent parent-end plan");
     assert_eq!(
         registry
-            .get_pending_parent_end_plan(PARENT)
+            .get_pending_parent_end_plan(&ProcessId::from(PARENT))
             .await
             .expect("read concurrent parent-end plan"),
         Some(lash_core::ProcessParentEndPlan {
-            process_id: PARENT.to_string(),
+            process_id: ProcessId::from(PARENT.to_string()),
             actions: vec![action],
         })
     );
@@ -545,7 +547,7 @@ async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
     );
     let literal_outcome = lash_core::ToolIntentParentEndOutcome::Cancelled {
         identity,
-        process_id: CHILD.to_string(),
+        process_id: ProcessId::from(CHILD.to_string()),
     };
     {
         let outcomes = state
@@ -560,13 +562,13 @@ async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
     }
     assert!(
         registry
-            .get_pending_parent_end_plan(PARENT)
+            .get_pending_parent_end_plan(&ProcessId::from(PARENT))
             .await
             .expect("read settled concurrent parent-end plan")
             .is_none()
     );
     let cancellations = registry
-        .events_after(CHILD, 0)
+        .events_after(&ProcessId::from(CHILD), 0)
         .await
         .expect("read concurrent parent-end child events")
         .into_iter()

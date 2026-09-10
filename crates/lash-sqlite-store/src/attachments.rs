@@ -12,6 +12,7 @@
 //! Every DB body is a synchronous rusqlite closure handed to `conn.call`
 //! (reads) or `conn.write` (read-then-write); only the wrapper call is awaited.
 
+use lash_sansio::SessionId;
 /// FIG-653: graph retention is a prune precondition for committed attachment roots.
 /// Owner-level retention deliberately includes suffix attachments: the manifest
 /// has no node edge. Forks and pins keep these rows until their final prefix dies.
@@ -45,7 +46,7 @@ pub(crate) const CURRENT_TRIGGER_MANIFEST_NAMESPACE: &str = "lashlang_trigger_ma
 /// receiver root when only another session has ever put the bytes.
 pub(crate) fn commit_attachment_refs_conn(
     tx: &rusqlite::Connection,
-    session_id: &str,
+    session_id: &SessionId,
     attachment_ids: &[AttachmentId],
     now: i64,
 ) -> Result<(), StoreError> {
@@ -85,7 +86,7 @@ pub(crate) fn commit_attachment_refs_conn(
              VALUES (?2, ?3, ?4, ?1, ?1)
              ON CONFLICT (session_id, attachment_id) DO UPDATE
              SET committed_at_ms = COALESCE(attachment_manifest.committed_at_ms, excluded.committed_at_ms)",
-            params![now, id.as_str(), session_id, format!("lash-attachment://blake3/{id}")],
+            params![now, id.as_str(), session_id.as_str(), format!("lash-attachment://blake3/{id}")],
         ).map_err(sqlite_error)?;
     }
     Ok(())
@@ -589,7 +590,7 @@ impl AttachmentManifest for Store {
     fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError> {
         block_on_store(async {
             let attachment_id = intent.attachment_id.as_str().to_string();
-            let session_id = intent.session_id.as_str().to_string();
+            let session_id = intent.session_id.clone();
             let canonical_uri = intent.canonical_uri.as_str().to_string();
             let intent_at_ms = intent.intent_at_epoch_ms as i64;
             let owner_kind = intent.owner_kind.map(AttachmentOwnerKind::as_str);
@@ -643,7 +644,7 @@ impl AttachmentManifest for Store {
                             owner_id = excluded.owner_id",
                             params![
                                 attachment_id,
-                                session_id,
+                                session_id.as_str(),
                                 canonical_uri,
                                 intent_at_ms,
                                 owner_kind,
@@ -672,7 +673,7 @@ impl AttachmentManifest for Store {
     ) -> Result<lash_core::AttachmentWriteFence, StoreError> {
         block_on_store(async {
             let attachment_id = intent.attachment_id.as_str().to_string();
-            let session_id = intent.session_id.as_str().to_string();
+            let session_id = intent.session_id.clone();
             let canonical_uri = intent.canonical_uri.as_str().to_string();
             let intent_at_ms = intent.intent_at_epoch_ms as i64;
             let owner_kind = intent.owner_kind.map(AttachmentOwnerKind::as_str);
@@ -735,7 +736,7 @@ impl AttachmentManifest for Store {
                             owner_id = excluded.owner_id",
                             params![
                                 attachment_id,
-                                session_id,
+                                session_id.as_str(),
                                 canonical_uri,
                                 intent_at_ms,
                                 owner_kind,
@@ -758,14 +759,14 @@ impl AttachmentManifest for Store {
 
     fn commit_refs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_ids: &[AttachmentId],
     ) -> Result<(), StoreError> {
         if attachment_ids.is_empty() {
             return Ok(());
         }
         block_on_store(async {
-            let session_id = session_id.to_string();
+            let session_id = SessionId::from(session_id.to_string());
             let attachment_ids = attachment_ids.to_vec();
             let now = self.clock.timestamp_ms() as i64;
             self.conn
@@ -801,7 +802,7 @@ impl AttachmentManifest for Store {
                     )?;
                     let rows = stmt.query_map(params![older_than], |row| {
                         let id: String = row.get(0)?;
-                        let session_id: String = row.get(1)?;
+                        let session_id: SessionId = SessionId::from(row.get::<_, String>(1)?);
                         let canonical_uri: String = row.get(2)?;
                         let intent_at_ms: i64 = row.get(3)?;
                         let committed_at_ms: Option<i64> = row.get(4)?;
@@ -926,9 +927,13 @@ impl AttachmentManifest for Store {
         })
     }
 
-    fn forget(&self, session_id: &str, attachment_id: &AttachmentId) -> Result<(), StoreError> {
+    fn forget(
+        &self,
+        session_id: &SessionId,
+        attachment_id: &AttachmentId,
+    ) -> Result<(), StoreError> {
         block_on_store(async {
-            let session_id = session_id.to_string();
+            let session_id = SessionId::from(session_id.to_string());
             let attachment_id = attachment_id.as_str().to_string();
             self.conn
                 .call(move |conn| {
@@ -940,7 +945,7 @@ impl AttachmentManifest for Store {
                                  WHERE node.session_id = attachment_manifest.session_id
                                    AND node.tombstoned = 0
                              ))",
-                        params![session_id, attachment_id],
+                        params![session_id.as_str(), attachment_id.as_str()],
                     )
                 })
                 .await

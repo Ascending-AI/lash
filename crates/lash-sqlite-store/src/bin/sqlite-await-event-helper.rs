@@ -1,5 +1,6 @@
 //! SQLite cold-process recovery helper for durable waits and effect replay.
 
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -50,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("unexpected helper arguments".into());
     }
 
-    let session_id = format!("cold-process-{nonce}-session");
+    let session_id = SessionId::from(format!("cold-process-{nonce}-session"));
     let scope = ExecutionScope::turn(&session_id, format!("cold-process-{nonce}-turn"));
     let wait = match action.as_str() {
         "tool_completion" => {
@@ -127,7 +128,7 @@ async fn run_effect_action(
     nonce: &str,
     marker: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let session_id = format!("cold-process-effect-{nonce}-session");
+    let session_id = SessionId::from(format!("cold-process-effect-{nonce}-session"));
     let turn_id = TurnId::from(format!("cold-process-effect-{nonce}-turn"));
     let scope = ExecutionScope::turn(&session_id, &turn_id);
     let controller = SqliteRuntimeEffectController::open_with_options(

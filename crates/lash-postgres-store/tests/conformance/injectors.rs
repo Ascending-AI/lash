@@ -2,6 +2,7 @@
 //! PostgreSQL state: lineage forcing and fence-integrity injection.
 
 use super::*;
+use lash_sansio::SessionId;
 
 pub(crate) struct PostgresLegacyTriggerMutationReceiptInjector {
     pub(crate) pool: sqlx::PgPool,
@@ -51,7 +52,7 @@ pub(crate) struct PostgresLineageConformanceInjector {
 
 #[async_trait::async_trait]
 impl LineageConformanceInjector for PostgresLineageConformanceInjector {
-    async fn force_lineage(&self, session_id: &str, ancestor_node_id: &str) {
+    async fn force_lineage(&self, session_id: &SessionId, ancestor_node_id: &str) {
         sqlx::query(
             "INSERT INTO lash_fork_lineage
              (session_id, ancestor_session_id, fork_node_id, fork_generation)
@@ -61,7 +62,7 @@ impl LineageConformanceInjector for PostgresLineageConformanceInjector {
                  fork_node_id = EXCLUDED.fork_node_id,
                  fork_generation = EXCLUDED.fork_generation",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(ancestor_node_id)
         .execute(self.storage.pool())
         .await
@@ -80,21 +81,21 @@ impl LineageConformanceInjector for PostgresLineageConformanceInjector {
 
     async fn lineage_ancestors(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Vec<lash_core::store::ForkLineageAncestor> {
         sqlx::query_as::<_, (String, String, i64)>(
             "SELECT ancestor_session_id, fork_node_id, fork_generation
              FROM lash_fork_lineage
              WHERE session_id = $1 ORDER BY ancestor_session_id",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .fetch_all(self.storage.pool())
         .await
         .expect("observe Postgres lineage")
         .into_iter()
         .map(|(ancestor_session_id, fork_node_id, fork_generation)| {
             lash_core::store::ForkLineageAncestor {
-                ancestor_session_id,
+                ancestor_session_id: SessionId::from(ancestor_session_id),
                 fork_node_id,
                 fork_generation: u64::try_from(fork_generation)
                     .expect("non-negative fork generation"),
@@ -103,13 +104,13 @@ impl LineageConformanceInjector for PostgresLineageConformanceInjector {
         .collect()
     }
 
-    async fn edge_path(&self, session_id: &str) -> Vec<GraphFactObservation> {
+    async fn edge_path(&self, session_id: &SessionId) -> Vec<GraphFactObservation> {
         let mut facts = self.all_graph_facts().await;
         let mut current = sqlx::query_scalar::<_, String>(
             "SELECT leaf_node_id FROM lash_sessions
              WHERE session_id = $1 AND leaf_node_id IS NOT NULL",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .fetch_optional(self.storage.pool())
         .await
         .expect("read Postgres lineage head");
@@ -143,7 +144,7 @@ impl LineageConformanceInjector for PostgresLineageConformanceInjector {
         .map(|row| GraphFactObservation {
             node_id: row.get(0),
             parent_node_id: row.get(1),
-            owning_session_id: row.get(2),
+            owning_session_id: SessionId::from(row.get::<String, _>(2)),
             generation: u64::try_from(row.get::<i64, _>(3)).expect("non-negative generation"),
             frame_node_id: row.get(4),
             is_frame: row.get(5),
@@ -174,7 +175,7 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
             FenceIntegrityTarget::SessionHeadRevision { session_id } => {
                 sqlx::query("UPDATE lash_sessions SET head_revision = $1 WHERE session_id = $2")
                     .bind(value)
-                    .bind(session_id)
+                    .bind(session_id.as_str())
                     .execute(self.storage.pool())
                     .await
             }
@@ -184,7 +185,7 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
                  SET lease_fencing_token = $1 WHERE session_id = $2",
                 )
                 .bind(value)
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .execute(self.storage.pool())
                 .await
             }
@@ -245,7 +246,7 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
                     "SELECT head_revision, head_json, leaf_node_id, checkpoint_ref
                      FROM lash_sessions WHERE session_id = $1",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .fetch_one(self.storage.pool())
                 .await
                 .expect("observe Postgres session-head revision");
@@ -266,7 +267,7 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
                             lease_claimed_at_ms, lease_expires_at_ms
                      FROM lash_session_execution_leases WHERE session_id = $1",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .fetch_one(self.storage.pool())
                 .await
                 .expect("observe Postgres session-lease fence");

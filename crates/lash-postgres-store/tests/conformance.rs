@@ -1,3 +1,5 @@
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_cross_owner_attachment_adoption_conformance() {
@@ -278,7 +280,10 @@ async fn wait_for_session_lease_advisory_waiters(pool: &sqlx::PgPool, at_least: 
     .unwrap_or_else(|_| panic!("expected at least {at_least} session-lease advisory-lock waiters"));
 }
 
-fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<TurnId>) -> ExecutionScope {
+fn durable_turn_scope(
+    session_id: impl Into<SessionId>,
+    turn_id: impl Into<TurnId>,
+) -> ExecutionScope {
     let session_id = session_id.into();
     ExecutionScope::turn(&session_id, turn_id)
 }
@@ -322,7 +327,7 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured(
             let storage = Arc::clone(&storage);
             let database_url = database_url.clone();
             let clock = Arc::clone(&clock);
-            let session_id = session_id.to_string();
+            let session_id = SessionId::from(session_id.to_string());
             sync_await(async move {
                 reset(&storage).await;
                 let open_storage = PostgresStorage::connect(&database_url)
@@ -391,7 +396,12 @@ async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
     let store = Arc::new(storage.session_store(session_id));
     let owner = lash_core::LeaseOwnerIdentity::opaque("renewal-owner", "renewal-incarnation");
     let predecessor = store
-        .try_claim_session_execution_lease(session_id, &owner, "renewal-executor", 120_000)
+        .try_claim_session_execution_lease(
+            &SessionId::from(session_id),
+            &owner,
+            "renewal-executor",
+            120_000,
+        )
         .await
         .expect("claim renewal predecessor")
         .acquired()
@@ -414,7 +424,7 @@ async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
     let claim = tokio::spawn(async move {
         claim_store
             .try_claim_session_execution_lease_with_token(
-                session_id,
+                &SessionId::from(session_id),
                 &claim_owner,
                 &claim_executor_id,
                 &lash_core::LeaseClaimNonce::for_testing("postgres-concurrent-renewal-successor"),
@@ -458,7 +468,7 @@ async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
         StoreError::SessionExecutionLeaseRenewalRefused { .. }
     ));
     let durable = store
-        .get_session_execution_lease(session_id)
+        .get_session_execution_lease(&SessionId::from(session_id))
         .await
         .expect("read successor lease")
         .lease
@@ -481,7 +491,7 @@ async fn postgres_runtime_persistence_recovery_laws_when_configured() {
     lash_conformance::runtime_persistence_recovery_laws(
         |session_id| {
             let database_url = database_url.clone();
-            let session_id = session_id.to_string();
+            let session_id = SessionId::from(session_id.to_string());
             let storage = sync_await(async move {
                 PostgresStorage::connect(&database_url)
                     .await
@@ -758,7 +768,7 @@ struct PostgresCorruptRootedManifest {
 
 #[async_trait::async_trait]
 impl lash_conformance::StoreMaintenanceFaultInjector for PostgresCorruptRootedManifest {
-    async fn break_gc_scope(&self, _session_id: &str) {
+    async fn break_gc_scope(&self, _session_id: &SessionId) {
         let corrupted = sqlx::query(
             "UPDATE lash_blobs SET content = '\\xffffffff'::bytea
              WHERE hash IN (SELECT checkpoint_ref FROM lash_sessions
@@ -884,7 +894,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
@@ -893,8 +903,8 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let wake = lash_core::ProcessWakeDelivery {
         version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "wake:source-lock".to_string(),
-        target_session_id: session_id.to_string(),
-        process_id: "wake-source-lock-process".to_string(),
+        target_session_id: SessionId::from(session_id.to_string()),
+        process_id: ProcessId::from("wake-source-lock-process"),
         process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "producer.wake".to_string(),
@@ -918,7 +928,12 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("enqueue original wake");
     let owner = lash_core::LeaseOwnerIdentity::opaque("wake-source-lock", "test");
     let lease = match store
-        .try_claim_session_execution_lease(session_id, &owner, "wake-executor-1", 60_000)
+        .try_claim_session_execution_lease(
+            &SessionId::from(session_id),
+            &owner,
+            "wake-executor-1",
+            60_000,
+        )
         .await
         .expect("claim target session")
     {
@@ -929,7 +944,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     };
     let claim = store
         .claim_ready_queued_work_by_batch_ids(
-            session_id,
+            &SessionId::from(session_id),
             &lease.fence(),
             &owner,
             lash_core::runtime::QueuedWorkClaimBoundary::Idle,
@@ -994,7 +1009,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let completion_store = Arc::clone(&store);
     let completion = tokio::spawn(async move {
         let state = lash_core::RuntimeSessionState {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
             ))
@@ -1022,7 +1037,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("consume wake after source lock release");
     assert!(
         store
-            .list_queued_work(session_id)
+            .list_queued_work(&SessionId::from(session_id))
             .await
             .expect("list queue after forced interleaving")
             .iter()
@@ -1043,7 +1058,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     ));
     assert!(
         store
-            .list_queued_work(session_id)
+            .list_queued_work(&SessionId::from(session_id))
             .await
             .expect("list queue after late redelivery")
             .iter()
@@ -1111,14 +1126,19 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("enqueue second sequence after source lock release");
     let second_owner = lash_core::LeaseOwnerIdentity::opaque("wake-source-lock-second", "test");
     let second_lease = store
-        .try_claim_session_execution_lease(session_id, &second_owner, "wake-executor-2", 60_000)
+        .try_claim_session_execution_lease(
+            &SessionId::from(session_id),
+            &second_owner,
+            "wake-executor-2",
+            60_000,
+        )
         .await
         .expect("claim target for second sequence")
         .acquired()
         .expect("second-sequence target lease");
     let second_claim = store
         .claim_ready_queued_work_by_batch_ids(
-            session_id,
+            &SessionId::from(session_id),
             &second_lease.fence(),
             &second_owner,
             lash_core::runtime::QueuedWorkClaimBoundary::Idle,
@@ -1173,7 +1193,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     .await
     .expect("seed matching sender allocation floor");
     factory
-        .delete_session(session_id)
+        .delete_session(&SessionId::from(session_id))
         .await
         .expect("delete high-water target session");
     let fence_rows: i64 = sqlx::query_scalar(
@@ -1294,7 +1314,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SESSION_ID.to_string(),
+            session_id: SessionId::from(SESSION_ID.to_string()),
             relation: lash_core::SessionRelation::default(),
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
@@ -1304,7 +1324,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .record_intent(lash_core::AttachmentIntent {
             attachment_id: lash_core::AttachmentId::parse("postgres-clock-attachment")
                 .expect("valid attachment id"),
-            session_id: SESSION_ID.to_string(),
+            session_id: SessionId::from(SESSION_ID.to_string()),
             canonical_uri: "lash-attachment://postgres-clock-attachment".to_string(),
             intent_at_epoch_ms: NOW_MS.saturating_sub(1),
             owner_kind: Some(lash_core::AttachmentOwnerKind::Turn),
@@ -1313,13 +1333,18 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .expect("record turn-owned intent");
     let owner = lash_core::LeaseOwnerIdentity::opaque("clock-test", "clock-test-incarnation");
     let lease = store
-        .try_claim_session_execution_lease(SESSION_ID, &owner, "clock-executor", 60_000)
+        .try_claim_session_execution_lease(
+            &SessionId::from(SESSION_ID),
+            &owner,
+            "clock-executor",
+            60_000,
+        )
         .await
         .expect("claim clock test lease")
         .acquired()
         .expect("clock test lease acquired");
     let state = lash_core::RuntimeSessionState {
-        session_id: SESSION_ID.to_string(),
+        session_id: SessionId::from(SESSION_ID.to_string()),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -2237,7 +2262,7 @@ async fn postgres_leased_completion_replay_repairs_projection_when_configured() 
         move |stale| async move {
             let changed =
                 sqlx::query("UPDATE lash_processes SET record_json = $2 WHERE process_id = $1")
-                    .bind(&stale.id)
+                    .bind(&stale.id.as_str())
                     .bind(serde_json::to_string(&stale).expect("encode stale process projection"))
                     .execute(&pool)
                     .await

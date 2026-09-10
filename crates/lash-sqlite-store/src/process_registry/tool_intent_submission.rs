@@ -2,6 +2,7 @@ use lash_core::{
     PluginError, ToolIntentExecutionOutcome, ToolIntentSubmissionAdmission,
     ToolIntentSubmissionRecord,
 };
+use lash_sansio::SessionId;
 use rusqlite::{OptionalExtension, params};
 
 use super::{SqliteProcessRegistry, process_decode_error, process_sqlite_error, tx_outcome};
@@ -23,9 +24,9 @@ pub(super) async fn admit(
                          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                         params![
                             replay_key,
-                            submission.identity.session_id,
-                            submission.identity.execution_scope_id,
-                            submission.identity.tool_call_id,
+                            submission.identity.session_id.as_str(),
+                            submission.identity.execution_scope_id.as_str(),
+                            submission.identity.tool_call_id.as_str(),
                             i64::from(submission.identity.intent_index),
                             submission.kind.as_str(),
                             submission.payload_hash,
@@ -90,10 +91,10 @@ pub(super) async fn complete(
 
 pub(super) async fn pending_parent_end(
     registry: &SqliteProcessRegistry,
-    session_id: &str,
+    session_id: &SessionId,
     execution_scope_id: &str,
 ) -> Result<Vec<ToolIntentSubmissionRecord>, PluginError> {
-    let session_id = session_id.to_string();
+    let session_id = SessionId::from(session_id.to_string());
     let execution_scope_id = execution_scope_id.to_string();
     let rows = registry
         .conn
@@ -103,9 +104,10 @@ pub(super) async fn pending_parent_end(
                  WHERE session_id = ?1 AND execution_scope_id = ?2
                  ORDER BY intent_index",
             )?;
-            let rows = statement.query_map(params![session_id, execution_scope_id], |row| {
-                row.get::<_, String>(0)
-            })?;
+            let rows = statement.query_map(
+                params![session_id.as_str(), execution_scope_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )?;
             rows.collect::<Result<Vec<_>, _>>()
         })
         .await

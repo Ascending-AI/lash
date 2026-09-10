@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::ProcessId;
 
 /// The survey half of the prune: the same predicate the prune's final
 /// transaction re-evaluates, read without deleting.
@@ -7,7 +8,7 @@ pub(super) async fn prunable_terminal_processes(
     cutoff_epoch_ms: u64,
     filter: Option<ProcessListFilter>,
     watermark: lash_core::ProjectionWatermark,
-) -> Result<Vec<String>, lash_core::PluginError> {
+) -> Result<Vec<ProcessId>, lash_core::PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     let max_change_seq = match watermark {
         lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
@@ -135,7 +136,7 @@ impl lash_core::ProcessRetention for SqliteProcessRegistry {
         cutoff_epoch_ms: u64,
         filter: Option<ProcessListFilter>,
         watermark: lash_core::ProjectionWatermark,
-    ) -> Result<Vec<String>, lash_core::PluginError> {
+    ) -> Result<Vec<ProcessId>, lash_core::PluginError> {
         prune_api::prunable_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
     }
 }

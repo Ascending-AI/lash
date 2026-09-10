@@ -71,10 +71,10 @@ async fn turn_failure_reopen_skips_one_corrupt_evidence_receipt_among_many_recei
 
     let store = Store::memory().await.expect("open receipt-filter store");
     store
-        .bind_session(SESSION_ID)
+        .bind_session(&SessionId::from(SESSION_ID))
         .expect("bind receipt-filter store");
     let state = lash_core::RuntimeSessionState {
-        session_id: SESSION_ID.to_string(),
+        session_id: SessionId::from(SESSION_ID.to_string()),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -185,7 +185,9 @@ async fn turn_failure_reopen_skips_one_corrupt_evidence_receipt_among_many_recei
 #[tokio::test]
 async fn absent_rows_remain_honest_successful_outcomes() {
     let store = Store::memory().await.expect("open store");
-    store.bind_session("absent").expect("bind store");
+    store
+        .bind_session(&SessionId::from("absent"))
+        .expect("bind store");
     assert!(
         store
             .load_session_meta()
@@ -268,7 +270,7 @@ async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
     let path = dir.path().join("unknown-attachment-owner.db");
     let store = Store::open(&path).await.expect("open store");
     store
-        .bind_session("unknown-attachment-owner")
+        .bind_session(&SessionId::from("unknown-attachment-owner"))
         .expect("bind store");
     let raw = rusqlite::Connection::open(&path).expect("open raw connection");
     raw.pragma_update(None, "ignore_check_constraints", true)
@@ -302,7 +304,9 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("corrupt.db");
     let store = Store::open(&path).await.expect("open store");
-    store.bind_session("corrupt").expect("bind store");
+    store
+        .bind_session(&SessionId::from("corrupt"))
+        .expect("bind store");
     // SQLite WAL permits this second raw connection to inject corrupt rows
     // while the store's long-lived connection remains open.
     let raw = rusqlite::Connection::open(&path).expect("open raw connection");
@@ -430,7 +434,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
          WHERE session_id = 'corrupt'",
         params![
             encode_json(&SessionHeadPayload {
-                session_id: "corrupt".to_string(),
+                session_id: SessionId::from("corrupt"),
                 ..Default::default()
             })
             .expect("encode session head")
@@ -455,7 +459,7 @@ async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
     let owner = LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
     let lease = store
         .try_claim_session_execution_lease_with_token(
-            session_id,
+            &SessionId::from(session_id),
             &owner,
             "read-failure-executor",
             &lash_core::LeaseClaimNonce::new(),
@@ -482,7 +486,10 @@ async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
         params![batch.batch_id],
     )
     .expect("inject negative fence");
-    assert_corrupt(store.list_queued_work(session_id).await, "QueuedWorkBatch");
+    assert_corrupt(
+        store.list_queued_work(&SessionId::from(session_id)).await,
+        "QueuedWorkBatch",
+    );
 
     raw.execute(
         "UPDATE queued_work_batches SET claim_fencing_token = ?1 WHERE batch_id = ?2",
@@ -490,7 +497,11 @@ async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
     )
     .expect("seed exhausted fence");
     let error = store
-        .claim_leading_ready_session_command(session_id, &lease.authority(), &owner)
+        .claim_leading_ready_session_command(
+            &SessionId::from(session_id),
+            &lease.authority(),
+            &owner,
+        )
         .await
         .expect_err("exhausted SQL fence must refuse");
     assert!(matches!(
@@ -505,7 +516,9 @@ async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
 #[tokio::test]
 async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
     let store = Store::memory().await.expect("open store");
-    store.bind_session("closed").expect("bind store");
+    store
+        .bind_session(&SessionId::from("closed"))
+        .expect("bind store");
     store.conn.close_for_testing().await;
     let blob_ref = BlobRef("closed".to_string());
 
@@ -579,7 +592,7 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
     );
 
     let state = lash_core::RuntimeSessionState {
-        session_id: "readonly-session".to_string(),
+        session_id: SessionId::from("readonly-session"),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -650,7 +663,9 @@ async fn queued_work_hydration_rejects_kind_payload_contradiction() {
     )
     .expect("contradict stored family");
     assert_corrupt(
-        store.list_queued_work("family-corrupt").await,
+        store
+            .list_queued_work(&SessionId::from("family-corrupt"))
+            .await,
         "QueuedWorkBatch",
     );
 }

@@ -1,4 +1,6 @@
 use crate::*;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 
 pub(crate) fn process_status_label(record: &ProcessRecord) -> &'static str {
     record.status.label()
@@ -25,7 +27,7 @@ pub(crate) async fn process_change_horizon_tx(
 
 pub(crate) async fn load_process_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<Option<ProcessRecord>, PluginError> {
     if let Some(reason) = crate::process_key::invalid_process_key_reason(process_id) {
         return Err(PluginError::Session(reason.into()));
@@ -36,7 +38,7 @@ pub(crate) async fn load_process_tx(
              WHERE process_id = $1
              FOR UPDATE",
     )
-    .bind(process_id)
+    .bind(process_id.as_str())
     .fetch_optional(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
@@ -46,14 +48,14 @@ pub(crate) async fn load_process_tx(
 
 pub(crate) async fn load_process(
     pool: &PgPool,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<Option<ProcessRecord>, PluginError> {
     if let Some(reason) = crate::process_key::invalid_process_key_reason(process_id) {
         return Err(PluginError::Session(reason.into()));
     }
     let json: Option<String> =
         sqlx::query_scalar("SELECT record_json FROM lash_processes WHERE process_id = $1")
-            .bind(process_id)
+            .bind(process_id.as_str())
             .fetch_optional(pool)
             .await
             .map_err(plugin_sqlx_error)?;
@@ -63,7 +65,7 @@ pub(crate) async fn load_process(
 
 pub(crate) async fn require_process_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<ProcessRecord, PluginError> {
     if let Some(record) = load_process_tx(tx, process_id).await? {
         return Ok(record);
@@ -73,7 +75,7 @@ pub(crate) async fn require_process_tx(
          FROM lash_process_tombstones WHERE process_id = $1
          ORDER BY incarnation DESC LIMIT 1",
     )
-    .bind(process_id)
+    .bind(process_id.as_str())
     .fetch_optional(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
@@ -107,7 +109,7 @@ pub(crate) async fn require_process_ref_tx(
         "SELECT terminal_label, pruned_at_ms FROM lash_process_tombstones
          WHERE process_id = $1 AND incarnation = $2",
     )
-    .bind(&process_ref.process_id)
+    .bind(process_ref.process_id.as_str())
     .bind(process_ref.incarnation.registration_sequence() as i64)
     .fetch_optional(&mut **tx)
     .await
@@ -124,7 +126,7 @@ pub(crate) async fn require_process_ref_tx(
         "SELECT incarnation FROM lash_process_tombstones
          WHERE process_id = $1 ORDER BY incarnation DESC LIMIT 1",
     )
-    .bind(&process_ref.process_id)
+    .bind(process_ref.process_id.as_str())
     .fetch_optional(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
@@ -156,13 +158,16 @@ pub(crate) fn decode_matching_process(
 
 pub(crate) async fn wake_session_id_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &str,
-) -> Result<Option<String>, PluginError> {
-    sqlx::query_scalar("SELECT wake_session_id FROM lash_processes WHERE process_id = $1")
-        .bind(process_id)
-        .fetch_one(&mut **tx)
-        .await
-        .map_err(plugin_sqlx_error)
+    process_id: &ProcessId,
+) -> Result<Option<SessionId>, PluginError> {
+    sqlx::query_scalar::<_, Option<String>>(
+        "SELECT wake_session_id FROM lash_processes WHERE process_id = $1",
+    )
+    .bind(process_id.as_str())
+    .fetch_one(&mut **tx)
+    .await
+    .map(|session_id| session_id.map(SessionId::from))
+    .map_err(plugin_sqlx_error)
 }
 
 pub(crate) async fn save_process_tx(
@@ -176,7 +181,7 @@ pub(crate) async fn save_process_tx(
              last_event_sequence = $5, record_json = $6
          WHERE process_id = $1",
     )
-    .bind(&record.id)
+    .bind(record.id.as_str())
     .bind(record.updated_at_ms as i64)
     .bind(change_seq as i64)
     .bind(process_status_label(record))
@@ -217,7 +222,7 @@ pub(crate) async fn next_process_change_seq_tx(
 
 pub(crate) async fn load_event_by_key_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &str,
+    process_id: &ProcessId,
     replay_key: &str,
 ) -> Result<Option<ProcessEvent>, PluginError> {
     let row = sqlx::query(
@@ -225,7 +230,7 @@ pub(crate) async fn load_event_by_key_tx(
          FROM lash_process_events
          WHERE process_id = $1 AND idempotency_key = $2",
     )
-    .bind(process_id)
+    .bind(process_id.as_str())
     .bind(replay_key)
     .fetch_optional(&mut **tx)
     .await
@@ -239,15 +244,15 @@ pub(crate) async fn load_event_by_key_tx(
 
 pub(crate) async fn next_process_event_sequence_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &str,
-    target_session_id: Option<&str>,
+    process_id: &ProcessId,
+    target_session_id: Option<&SessionId>,
 ) -> Result<(Option<u64>, u64), PluginError> {
     let last_sequence: Option<i64> = sqlx::query_scalar(
         "SELECT MAX(sequence)
          FROM lash_process_events
          WHERE process_id = $1",
     )
-    .bind(process_id)
+    .bind(process_id.as_str())
     .fetch_one(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
@@ -259,8 +264,8 @@ pub(crate) async fn next_process_event_sequence_tx(
             "SELECT allocation_floor FROM lash_wake_allocation_floors
              WHERE target_session_id = $1 AND process_id = $2",
         )
-        .bind(target_session_id)
-        .bind(process_id)
+        .bind(target_session_id.as_str())
+        .bind(process_id.as_str())
         .fetch_optional(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?
@@ -328,7 +333,7 @@ pub(crate) async fn apply_process_event_append_tx(
         };
     let wake_session_id = wake_session_id_tx(tx, &process_id).await?;
     let (last_sequence, sequence) =
-        next_process_event_sequence_tx(tx, &process_id, wake_session_id.as_deref()).await?;
+        next_process_event_sequence_tx(tx, &process_id, wake_session_id.as_ref()).await?;
     let prepared = lash_core::runtime::prepare_process_event_append(
         record,
         request,
@@ -336,7 +341,7 @@ pub(crate) async fn apply_process_event_append_tx(
         last_sequence,
         replay_lookup,
         occurred_at_ms,
-        wake_session_id.as_deref(),
+        wake_session_id.as_ref(),
     )?;
     match prepared {
         lash_core::facade_support::ProcessEventAppendPlan::Replay {
@@ -379,7 +384,7 @@ pub(crate) async fn apply_process_event_append_tx(
                  )
                  VALUES ($1, $2, $3, $4, $5, $6)",
             )
-            .bind(&process_id)
+            .bind(process_id.as_str())
             .bind(event.process_incarnation.registration_sequence() as i64)
             .bind(sequence as i64)
             .bind(event.event_type.as_str())
@@ -393,7 +398,7 @@ pub(crate) async fn apply_process_event_append_tx(
             crate::process_registry::parent_end::insert(tx, &process_id, parent_end_actions)
                 .await?;
             insert_wake_delivery_tx(tx, wake_delivery.as_ref(), wake_delivery_config).await?;
-            advance_wake_allocation_floor_tx(tx, wake_session_id.as_deref(), &process_id, sequence)
+            advance_wake_allocation_floor_tx(tx, wake_session_id.as_ref(), &process_id, sequence)
                 .await?;
             Ok((
                 ProcessEventAppendReceipt {
@@ -429,8 +434,8 @@ pub(crate) async fn append_process_event_tx(
 
 pub(crate) async fn advance_wake_allocation_floor_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    target_session_id: Option<&str>,
-    process_id: &str,
+    target_session_id: Option<&SessionId>,
+    process_id: &ProcessId,
     sequence: u64,
 ) -> Result<(), PluginError> {
     let Some(target_session_id) = target_session_id else {
@@ -446,8 +451,8 @@ pub(crate) async fn advance_wake_allocation_floor_tx(
                 EXCLUDED.allocation_floor
             )",
     )
-    .bind(target_session_id)
-    .bind(process_id)
+    .bind(target_session_id.as_str())
+    .bind(process_id.as_str())
     .bind(sequence as i64)
     .execute(&mut **tx)
     .await
@@ -473,9 +478,9 @@ pub(crate) async fn insert_wake_delivery_tx(
          ON CONFLICT (delivery_id) DO NOTHING",
     )
     .bind(&delivery.delivery_id)
-    .bind(&delivery.wake.process_id)
+    .bind(delivery.wake.process_id.as_str())
     .bind(delivery.wake.process_incarnation.registration_sequence() as i64)
-    .bind(&delivery.wake.target_session_id)
+    .bind(delivery.wake.target_session_id.as_str())
     .bind(delivery.wake.sequence as i64)
     .bind(delivery.next_attempt_at_ms as i64)
     .bind(delivery.expires_at_ms as i64)
@@ -488,7 +493,7 @@ pub(crate) async fn insert_wake_delivery_tx(
 
 pub(crate) async fn load_process_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<Option<ProcessLease>, PluginError> {
     let row = sqlx::query(
         "SELECT lease_owner_id, lease_token, lease_fencing_token,
@@ -498,7 +503,7 @@ pub(crate) async fn load_process_lease_tx(
          WHERE process_id = $1
          FOR UPDATE",
     )
-    .bind(process_id)
+    .bind(process_id.as_str())
     .fetch_optional(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
@@ -520,7 +525,7 @@ pub(crate) async fn load_process_lease_tx(
 /// lease owned by `owner` at `fencing_token`.
 pub(crate) async fn acquire_process_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &str,
+    process_id: &ProcessId,
     owner: &LeaseOwnerIdentity,
     fencing_token: u64,
     now: u64,
@@ -553,7 +558,7 @@ pub(crate) async fn acquire_process_lease_tx(
             lease_claimed_at_ms = EXCLUDED.lease_claimed_at_ms,
             lease_expires_at_ms = EXCLUDED.lease_expires_at_ms",
     )
-    .bind(&lease.process_id)
+    .bind(lease.process_id.as_str())
     .bind(&lease.owner.owner_id)
     .bind(&lease.owner.incarnation_id)
     .bind(&lease.lease_token)
@@ -568,12 +573,12 @@ pub(crate) async fn acquire_process_lease_tx(
 
 pub(crate) async fn retained_process_lease_fencing_token(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<u64, PluginError> {
     let existing_fence: Option<i64> = sqlx::query_scalar(
         "SELECT lease_fencing_token FROM lash_process_leases WHERE process_id = $1 FOR UPDATE",
     )
-    .bind(process_id)
+    .bind(process_id.as_str())
     .fetch_optional(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
@@ -585,7 +590,7 @@ pub(crate) async fn retained_process_lease_fencing_token(
 
 pub(crate) async fn validate_process_execution_authority_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &str,
+    process_id: &ProcessId,
     record: &ProcessRecord,
     authority: &ProcessExecutionWriteAuthority,
     start: Option<&ProcessStarted>,
@@ -608,7 +613,7 @@ pub(crate) async fn validate_process_execution_authority_tx(
             // another process is refused without reading this process's row.
             if lease.process_id != process_id {
                 return Err(PluginError::ProcessLeaseSuperseded {
-                    process_id: process_id.to_string(),
+                    process_id: ProcessId::from(process_id.to_string()),
                 });
             }
             let current = load_process_lease_tx(tx, process_id).await?;

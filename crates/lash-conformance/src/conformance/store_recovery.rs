@@ -1,6 +1,7 @@
 //! Durable store-recovery laws over fresh persistence handles.
 
 use super::*;
+use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::time::Duration;
 
@@ -72,7 +73,7 @@ fn owner(id: impl Into<String>) -> crate::LeaseOwnerIdentity {
     crate::LeaseOwnerIdentity::opaque(id.clone(), format!("{id}:incarnation"))
 }
 
-fn queued_work(session_id: &str, source: &str) -> crate::QueuedWorkBatchDraft {
+fn queued_work(session_id: &SessionId, source: &str) -> crate::QueuedWorkBatchDraft {
     crate::QueuedWorkBatchDraft::new(
         session_id,
         crate::DeliveryPolicy::EarliestSafeBoundary,
@@ -87,7 +88,7 @@ fn queued_work(session_id: &str, source: &str) -> crate::QueuedWorkBatchDraft {
 
 async fn seed_and_claim(
     store: &Arc<dyn RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
     source: &str,
     lease_ttl_ms: u64,
 ) -> (crate::SessionExecutionLease, crate::QueuedWorkClaim) {
@@ -125,7 +126,7 @@ async fn seed_and_claim(
 
 async fn acquire_successor<F>(
     make: &F,
-    session_id: &str,
+    session_id: &SessionId,
     source: &str,
     lease_timing: &StoreRecoveryLeaseTiming,
 ) -> (Arc<dyn RuntimePersistence>, crate::SessionExecutionLease)
@@ -162,9 +163,9 @@ where
     .expect("expired lease becomes claimable within its recovery TTL")
 }
 
-fn committed_state(session_id: &str, marker: &str) -> crate::RuntimeSessionState {
+fn committed_state(session_id: &SessionId, marker: &str) -> crate::RuntimeSessionState {
     let mut state = crate::RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
@@ -182,7 +183,7 @@ fn claimed_batch_ids(claim: &crate::QueuedWorkClaim) -> Vec<String> {
 
 async fn assert_no_parallel_reclaim(
     store: &Arc<dyn RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
     lease: &crate::SessionExecutionLease,
     claim_owner: &crate::LeaseOwnerIdentity,
     batch_ids: &[String],
@@ -204,7 +205,10 @@ async fn assert_no_parallel_reclaim(
     );
 }
 
-async fn assert_settled_once(make: impl Fn(&str) -> Arc<dyn RuntimePersistence>, session_id: &str) {
+async fn assert_settled_once(
+    make: impl Fn(&str) -> Arc<dyn RuntimePersistence>,
+    session_id: &SessionId,
+) {
     let reader = make(session_id);
     bind_conformance_session(&reader, session_id).await;
     assert!(
@@ -224,7 +228,7 @@ async fn expired_claim_is_recoverable_once<F>(
 ) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
-    let session_id = format!("{prefix}:claim-expiry");
+    let session_id = SessionId::from(format!("{prefix}:claim-expiry"));
     let writer = make(&session_id);
     let (_expired_lease, expired_claim) = seed_and_claim(
         &writer,
@@ -282,7 +286,7 @@ async fn checkpoint_survives_before_claim_settlement<F>(
 ) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
-    let session_id = format!("{prefix}:checkpoint-before-settlement");
+    let session_id = SessionId::from(format!("{prefix}:checkpoint-before-settlement"));
     let writer = make(&session_id);
     let (_expired_lease, expired_claim) = seed_and_claim(
         &writer,
@@ -360,7 +364,7 @@ async fn atomic_commit_settles_claim_once<F>(make: &F, prefix: &str)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
-    let session_id = format!("{prefix}:atomic-settlement");
+    let session_id = SessionId::from(format!("{prefix}:atomic-settlement"));
     let writer = make(&session_id);
     let (lease, claim) = seed_and_claim(
         &writer,
@@ -405,7 +409,7 @@ async fn recorded_commit_replay_is_idempotent<F>(make: &F, prefix: &str)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
-    let session_id = format!("{prefix}:commit-replay");
+    let session_id = SessionId::from(format!("{prefix}:commit-replay"));
     let writer = make(&session_id);
     let (lease, claim) = seed_and_claim(
         &writer,

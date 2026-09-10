@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::postgres_test_support;
+use lash_sansio::SessionId;
 use sqlx::Connection;
 
 /// The DDL artifact is only vendorable if what the crate compiles is what the
@@ -237,7 +238,7 @@ fn fig_1219_six_to_two_field_shrink_is_payload_drift() {
     #[derive(schemars::JsonSchema)]
     #[allow(dead_code)]
     struct Before {
-        session_id: String,
+        session_id: SessionId,
         session_name: String,
         created_at: String,
         model: String,
@@ -248,7 +249,7 @@ fn fig_1219_six_to_two_field_shrink_is_payload_drift() {
     #[derive(schemars::JsonSchema)]
     #[allow(dead_code)]
     struct After {
-        session_id: String,
+        session_id: SessionId,
         relation: lash_core::SessionRelation,
     }
 

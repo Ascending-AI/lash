@@ -5,6 +5,8 @@
 
 use super::*;
 use lash_core::testing::conformance_support::ActiveTurnControl;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
@@ -44,7 +46,7 @@ async fn cold_replayed_parked_owner<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
-    let session_id = format!("{prefix}-parked-session");
+    let session_id = SessionId::from(format!("{prefix}-parked-session"));
     let turn_id = TurnId::from(format!("{prefix}-parked-turn"));
     let scope = durable_turn_scope(&session_id, &turn_id);
     let key = make()
@@ -306,7 +308,7 @@ async fn cold_revocation_survives_reopen<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
-    let session_id = format!("{prefix}-revoked-session");
+    let session_id = SessionId::from(format!("{prefix}-revoked-session"));
     let scope = durable_turn_scope(&session_id, format!("{prefix}-revoked-turn"));
     let key = make()
         .await_event_key(
@@ -348,7 +350,7 @@ async fn cold_scope_retirement_survives_reopen<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
-    let process_id = format!("{prefix}-retired-process");
+    let process_id = ProcessId::from(format!("{prefix}-retired-process"));
     let scope = ExecutionScope::process(process_id.clone());
     let key = make()
         .await_event_key(
@@ -406,7 +408,7 @@ async fn cold_cancel_sweep_excludes_turn_control<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
-    let session_id = format!("{prefix}-sweep-session");
+    let session_id = SessionId::from(format!("{prefix}-sweep-session"));
     let scope = durable_turn_scope(&session_id, format!("{prefix}-sweep-turn"));
     let ordinary = make()
         .await_event_key(

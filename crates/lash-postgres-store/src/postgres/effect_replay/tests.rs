@@ -45,7 +45,7 @@ struct GroupFixture {
     _database_lock: postgres_test_support::SharedDatabaseLock,
     store: PostgresEffectReplayRowStore,
     scope_id: String,
-    session_id: String,
+    session_id: SessionId,
     group_key: String,
 }
 
@@ -57,7 +57,7 @@ impl GroupFixture {
             .await
             .expect("connect effect-group contract storage");
         let unique = uuid::Uuid::new_v4().simple().to_string();
-        let session_id = format!("effect-group-{label}-{unique}");
+        let session_id = SessionId::from(format!("effect-group-{label}-{unique}"));
         let fixture = Self {
             _database_lock: database_lock,
             store: PostgresEffectReplayRowStore {

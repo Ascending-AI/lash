@@ -270,6 +270,7 @@ mod walk {
         store::EXECUTION_STATE_CHECKPOINT_COMPONENT,
     };
     use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _};
+    use lash_sansio::{ProcessId, SessionId};
 
     use super::super::SqliteStorePreflight;
     use crate::{SqliteProcessRegistry, Store};
@@ -291,7 +292,7 @@ mod walk {
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::session(lash_core::SessionScope::new("session")),
         )
-        .with_wake_session_id(Some("wake-session".to_string()))
+        .with_wake_session_id(Some(SessionId::from("wake-session")))
     }
 
     fn handover(segment_ordinal: u64) -> lash_core::PersistedSegmentHandover {
@@ -307,7 +308,7 @@ mod walk {
 
     /// Park one handover under a live process and, when asked, a second under a
     /// process that has already reached a terminal outcome.
-    async fn park_segment(registry: &SqliteProcessRegistry, process_id: &str) {
+    async fn park_segment(registry: &SqliteProcessRegistry, process_id: &ProcessId) {
         use lash_core::ProcessContinuationStore;
         registry
             .register_process(registration(process_id))
@@ -319,7 +320,7 @@ mod walk {
             .expect("park a segment handover");
     }
 
-    async fn complete(registry: &SqliteProcessRegistry, process_id: &str) {
+    async fn complete(registry: &SqliteProcessRegistry, process_id: &ProcessId) {
         registry
             .complete_process(
                 process_id,
@@ -426,9 +427,9 @@ mod walk {
         let registry = SqliteProcessRegistry::open(&path, root.path().join("sessions"))
             .await
             .expect("open registry");
-        park_segment(&registry, "proc-live").await;
-        park_segment(&registry, "proc-done").await;
-        complete(&registry, "proc-done").await;
+        park_segment(&registry, &ProcessId::from("proc-live")).await;
+        park_segment(&registry, &ProcessId::from("proc-done")).await;
+        complete(&registry, &ProcessId::from("proc-done")).await;
         drop(registry);
 
         // The terminal process's handover row is still on disk — the exclusion
@@ -486,8 +487,8 @@ mod walk {
         let registry = SqliteProcessRegistry::open(&path, root.path().join("sessions"))
             .await
             .expect("open registry");
-        park_segment(&registry, "proc-a").await;
-        park_segment(&registry, "proc-b").await;
+        park_segment(&registry, &ProcessId::from("proc-a")).await;
+        park_segment(&registry, &ProcessId::from("proc-b")).await;
         drop(registry);
 
         let preflight =

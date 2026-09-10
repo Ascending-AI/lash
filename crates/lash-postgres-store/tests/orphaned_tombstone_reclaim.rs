@@ -7,6 +7,7 @@
 
 use lash_core::SessionStoreFactory;
 use lash_postgres_store::PostgresStorage;
+use lash_sansio::SessionId;
 
 use crate::support::{SharedDatabaseLock, database_url};
 
@@ -94,20 +95,20 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
 
     async fn commit_single_root_node(
         factory: &impl SessionStoreFactory,
-        session_id: &str,
+        session_id: &SessionId,
         policy: &lash_core::SessionPolicy,
     ) -> String {
         let store = factory
             .create_store(&lash_core::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 relation: lash_core::SessionRelation::Root,
                 policy: policy.clone(),
             })
             .await
             .expect("create store");
         let mut state = lash_core::RuntimeSessionState {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             ..lash_core::RuntimeSessionState::new(policy.clone())
         };
         state.ensure_agent_frame_initialized();
@@ -127,10 +128,11 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     }
 
     // Flow 1: unpin after the owning session's delete.
-    let owner_leaf = commit_single_root_node(&factory, "orphan-owner", &policy).await;
+    let owner_leaf =
+        commit_single_root_node(&factory, &SessionId::from("orphan-owner"), &policy).await;
     factory.pin(&owner_leaf).await.expect("pin owner leaf");
     factory
-        .delete_session("orphan-owner")
+        .delete_session(&SessionId::from("orphan-owner"))
         .await
         .expect("delete owner session");
     factory
@@ -145,11 +147,12 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
 
     // Flow 2: fork ancestry tombstoned only at the child's delete, after its
     // owner was already deleted. The same delete also drains flow 1's orphan.
-    let parent_leaf = commit_single_root_node(&factory, "orphan-fork-parent", &policy).await;
+    let parent_leaf =
+        commit_single_root_node(&factory, &SessionId::from("orphan-fork-parent"), &policy).await;
     factory
         .fork_at(&lash_core::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
-            session_id: "orphan-fork-child".to_string(),
+            session_id: SessionId::from("orphan-fork-child"),
             node_id: parent_leaf.clone(),
             relation: lash_core::SessionRelation::Root,
             policy: policy.clone(),
@@ -160,7 +163,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
         let child = factory
             .open_existing_store(&lash_core::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: "orphan-fork-child".to_string(),
+                session_id: SessionId::from("orphan-fork-child"),
                 relation: lash_core::SessionRelation::Root,
                 policy: policy.clone(),
             })
@@ -200,7 +203,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             .expect("advance forked child");
     }
     factory
-        .delete_session("orphan-fork-parent")
+        .delete_session(&SessionId::from("orphan-fork-parent"))
         .await
         .expect("delete parent session");
     assert!(
@@ -209,7 +212,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     );
 
     factory
-        .delete_session("orphan-fork-child")
+        .delete_session(&SessionId::from("orphan-fork-child"))
         .await
         .expect("delete forked child session");
 

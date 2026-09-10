@@ -12,6 +12,7 @@
 //! Nodes are never observed through `load_session`: that constructs a
 //! `SessionGraph` read model whose id indexes can hide duplicate durable rows.
 
+use lash_sansio::SessionId;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -255,7 +256,7 @@ impl NodeSpec {
         }
     }
 
-    fn materialize(self, session_id: &str) -> SessionNodeRecord {
+    fn materialize(self, session_id: &SessionId) -> SessionNodeRecord {
         let frame_key = differential_frame_key(self.node_id);
         SessionNodeRecord {
             node_id: scoped_node_id(session_id, self.node_id),
@@ -299,7 +300,7 @@ fn is_frame_alias(node_id: &str) -> bool {
     )
 }
 
-fn scoped_node_id(session_id: &str, node_id: &str) -> String {
+fn scoped_node_id(session_id: &SessionId, node_id: &str) -> String {
     if is_frame_alias(node_id) {
         lash_core::facade_support::frame_node_id(
             session_id,
@@ -620,7 +621,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
     ]
 }
 
-fn materialize_graph(session_id: &str, spec: &GraphSpec) -> GraphAppend {
+fn materialize_graph(session_id: &SessionId, spec: &GraphSpec) -> GraphAppend {
     GraphAppend {
         nodes: spec
             .nodes
@@ -638,7 +639,7 @@ fn materialize_graph(session_id: &str, spec: &GraphSpec) -> GraphAppend {
 // params struct here would only move the same fields behind another name.
 #[allow(clippy::too_many_arguments)]
 fn runtime_commit(
-    session_id: &str,
+    session_id: &SessionId,
     expected_head_revision: u64,
     graph: &GraphSpec,
     turn_commit: Option<TurnCommitSpec>,
@@ -648,7 +649,7 @@ fn runtime_commit(
     committed_attachment_ids: Vec<AttachmentId>,
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -868,16 +869,16 @@ enum RawDurableReader {
     InMemory {
         store: Arc<InMemorySessionStore>,
         factory: Arc<InMemorySessionStoreFactory>,
-        session_id: String,
+        session_id: SessionId,
     },
     Sqlite {
         path: PathBuf,
-        session_id: String,
+        session_id: SessionId,
         store: Option<Arc<dyn ConformancePersistence>>,
     },
     Postgres {
         pool: PgPool,
-        session_id: String,
+        session_id: SessionId,
         store: Option<Arc<dyn ConformancePersistence>>,
     },
 }
@@ -955,7 +956,7 @@ fn normalized_node_json(value: serde_json::Value) -> Vec<u8> {
 
 async fn read_sqlite_durable_state(
     path: &Path,
-    session_id: &str,
+    session_id: &SessionId,
     store: &Arc<dyn ConformancePersistence>,
 ) -> RawDurableState {
     let connection = rusqlite::Connection::open(path).expect("open SQLite durable reader");
@@ -974,7 +975,7 @@ async fn read_sqlite_durable_state(
             "SELECT head_revision, leaf_node_id, checkpoint_ref
              FROM session_head
              WHERE session_id = ?1",
-            [session_id],
+            [session_id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()
@@ -1000,7 +1001,7 @@ async fn read_sqlite_durable_state(
             )
             .expect("prepare SQLite durable node read");
         statement
-            .query_map([session_id], |row| {
+            .query_map([session_id.as_str()], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
@@ -1033,7 +1034,7 @@ async fn read_sqlite_durable_state(
             )
             .expect("prepare SQLite turn-commit receipt read");
         statement
-            .query_map([session_id], |row| {
+            .query_map([session_id.as_str()], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -1065,7 +1066,7 @@ async fn read_sqlite_durable_state(
             )
             .expect("prepare SQLite attachment-manifest read");
         statement
-            .query_map([session_id], |row| {
+            .query_map([session_id.as_str()], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -1108,11 +1109,11 @@ async fn read_sqlite_durable_state(
             )
             .expect("prepare SQLite node-anchor read");
         statement
-            .query_map([session_id], |row| {
+            .query_map([session_id.as_str()], |row| {
                 Ok(NodeAnchorObservation {
                     node_id: row.get(0)?,
                     checkpoint_ref: BlobRef(row.get(1)?),
-                    source_session_id: row.get(2)?,
+                    source_session_id: SessionId::from(row.get::<_, String>(2)?),
                 })
             })
             .expect("read SQLite node anchors")
@@ -1131,7 +1132,7 @@ async fn read_sqlite_durable_state(
             )
             .expect("prepare SQLite usage-delta read");
         statement
-            .query_map([session_id], |row| {
+            .query_map([session_id.as_str()], |row| {
                 Ok(UsageDeltaObservation {
                     source: row.get(0)?,
                     model: row.get(1)?,
@@ -1165,7 +1166,7 @@ async fn read_sqlite_durable_state(
             )
             .expect("prepare SQLite session-execution-lease read");
         statement
-            .query_map([session_id], |row| {
+            .query_map([session_id.as_str()], |row| {
                 let owner_id = row.get::<_, Option<String>>(0)?;
                 let incarnation_id = row.get::<_, Option<String>>(1)?;
                 Ok(SessionExecutionLeaseObservation {
@@ -1200,7 +1201,7 @@ async fn read_sqlite_durable_state(
             )
             .expect("prepare SQLite pending-input read");
         statement
-            .query_map([session_id], |row| {
+            .query_map([session_id.as_str()], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, i64>(1)?,
@@ -1252,7 +1253,7 @@ async fn read_sqlite_durable_state(
             )
             .expect("prepare SQLite queued-work batch read");
         statement
-            .query_map([session_id], |row| {
+            .query_map([session_id.as_str()], |row| {
                 Ok((
                     row.get(0)?,
                     row.get(1)?,
@@ -1283,7 +1284,7 @@ async fn read_sqlite_durable_state(
             )
             .expect("prepare SQLite queued-work item read");
         statement
-            .query_map([session_id], |row| {
+            .query_map([session_id.as_str()], |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?))
             })
             .expect("read SQLite queued-work items")
@@ -1336,7 +1337,7 @@ struct NamedHandle {
 
 struct BackendRunner {
     name: &'static str,
-    session_id: String,
+    session_id: SessionId,
     store: Option<Arc<dyn ConformancePersistence>>,
     factory: Option<Arc<dyn ConformanceSessionStoreFactory>>,
     raw_reader: RawDurableReader,
@@ -1539,7 +1540,7 @@ impl BackendRunner {
                 self.factory()
                     .fork_at(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
-                        session_id: format!("{}:fork", self.session_id),
+                        session_id: SessionId::from(format!("{}:fork", self.session_id)),
                         node_id: node_id.clone(),
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
@@ -2057,7 +2058,7 @@ fn normalized_store_error(_backend: &str, error: &StoreError) -> String {
 async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &PostgresStorage) {
     let create_request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: format!("fig-1242-storage-failure:{}", run_nonce()),
+        session_id: SessionId::from(format!("fig-1242-storage-failure:{}", run_nonce())),
         relation: SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
@@ -2201,7 +2202,7 @@ async fn runners_for_case_with_clock(
     run_nonce: &str,
     clock: Arc<dyn Clock>,
 ) -> Vec<BackendRunner> {
-    let session_id = format!("fig-778-{run_nonce}-{}", case.as_str());
+    let session_id = SessionId::from(format!("fig-778-{run_nonce}-{}", case.as_str()));
     let create_request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
@@ -2212,7 +2213,7 @@ async fn runners_for_case_with_clock(
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: SessionRelation::Child {
-            parent_session_id: format!("fig-778-{run_nonce}-parent"),
+            parent_session_id: SessionId::from(format!("fig-778-{run_nonce}-parent")),
             caused_by: None,
         },
     };

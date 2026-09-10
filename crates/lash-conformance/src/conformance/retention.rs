@@ -6,7 +6,7 @@ use pretty_assertions::assert_eq;
 /// Certify the explicit factory retention lever on one fresh backend.
 pub async fn retention_conformance(factory: Arc<dyn crate::SessionStoreFactory>) {
     let request = session_store_request(
-        "retention-terminal",
+        &SessionId::from("retention-terminal"),
         "retention-model",
         crate::SessionRelation::Root,
     );
@@ -66,7 +66,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::SessionStoreFactory>)
 
     // Another live scope is a negative control for the factory-wide sweep.
     let live_request = session_store_request(
-        "retention-live",
+        &SessionId::from("retention-live"),
         "retention-model",
         crate::SessionRelation::Root,
     );

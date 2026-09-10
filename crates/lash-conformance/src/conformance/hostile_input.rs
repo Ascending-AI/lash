@@ -1,5 +1,6 @@
 //! Hostile identifiers must fail before namespace lookup or mutation.
 use super::*;
+use lash_sansio::ProcessId;
 use pretty_assertions::assert_eq;
 
 fn malformed_attachment_ids() -> Vec<String> {
@@ -47,7 +48,11 @@ pub(super) async fn attachment_namespace(store: Arc<dyn AttachmentStore>) {
 pub(super) async fn session_namespace(factory: Arc<dyn crate::SessionStoreFactory>) {
     use super::session_store_factory::session_store_request;
     for raw in ["", "nul\0session"] {
-        let request = session_store_request(raw, "hostile-model", crate::SessionRelation::Root);
+        let request = session_store_request(
+            &SessionId::from(raw),
+            "hostile-model",
+            crate::SessionRelation::Root,
+        );
         assert!(
             matches!(
                 factory.create_store(&request).await,
@@ -57,7 +62,7 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::SessionStoreFactor
         );
         assert!(
             matches!(
-                factory.read_session(raw).await,
+                factory.read_session(&SessionId::from(raw)).await,
                 Err(crate::StoreError::InvalidSessionId { .. })
             ),
             "malformed session id must be rejected before namespace lookup"
@@ -67,11 +72,14 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::SessionStoreFactor
             "malformed session id must not resolve through request lookup"
         );
         assert!(
-            factory.delete_session(raw).await.is_err(),
+            factory.delete_session(&SessionId::from(raw)).await.is_err(),
             "malformed session id must not reach deletion"
         );
         assert!(
-            factory.session_was_deleted(raw).await.is_err(),
+            factory
+                .session_was_deleted(&SessionId::from(raw))
+                .await
+                .is_err(),
             "malformed session id must not reach tombstone lookup"
         );
         assert!(
@@ -82,7 +90,10 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::SessionStoreFactor
             "malformed session id must not reach queued-work lookup"
         );
         assert!(
-            factory.open_existing_store_by_id(raw).await.is_err(),
+            factory
+                .open_existing_store_by_id(&SessionId::from(raw))
+                .await
+                .is_err(),
             "malformed session id must not resolve through id lookup"
         );
     }
@@ -95,7 +106,11 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::SessionStoreFactor
         "/victim",
         "'; DROP TABLE lash_sessions; --",
     ] {
-        let request = session_store_request(raw, "hostile-model", crate::SessionRelation::Root);
+        let request = session_store_request(
+            &SessionId::from(raw),
+            "hostile-model",
+            crate::SessionRelation::Root,
+        );
         factory
             .create_store(&request)
             .await
@@ -107,7 +122,11 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::SessionStoreFactor
         "/victim",
         "'; DROP TABLE lash_sessions; --",
     ] {
-        let request = session_store_request(raw, "hostile-model", crate::SessionRelation::Root);
+        let request = session_store_request(
+            &SessionId::from(raw),
+            "hostile-model",
+            crate::SessionRelation::Root,
+        );
         let store = factory
             .open_existing_store(&request)
             .await
@@ -189,7 +208,7 @@ pub(super) async fn process_namespace(registry: Arc<dyn crate::ConformanceProces
             "malformed process id must be rejected before registration"
         );
         assert!(
-            registry.get_process(raw).await.is_err(),
+            registry.get_process(&ProcessId::from(raw)).await.is_err(),
             "malformed process id must be rejected before lookup"
         );
     }
@@ -209,7 +228,7 @@ pub(super) async fn process_namespace(registry: Arc<dyn crate::ConformanceProces
     for raw in ["canary", "../canary", "'; DROP TABLE lash_processes; --"] {
         assert_eq!(
             registry
-                .get_process(raw)
+                .get_process(&ProcessId::from(raw))
                 .await
                 .expect("read opaque process key")
                 .expect("canary exists")

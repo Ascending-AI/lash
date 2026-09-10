@@ -1,4 +1,5 @@
 use lash_core::facade_support::SessionGraphFacadeOps;
+use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
@@ -8,7 +9,7 @@ use crate::trace::{OracleStatus, OracleVerdict};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RuntimeTurnObservation {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub turn_index: usize,
     pub assistant_message: String,
     pub graph_node_count: usize,
@@ -184,7 +185,7 @@ pub struct RuntimeFinalValueInvariantFacts {
 
 pub fn runtime_turn_contract(
     observation: &RuntimeTurnObservation,
-    expected_session_id: &str,
+    expected_session_id: &SessionId,
     expected_turn_index: usize,
     expected_assistant_message: &str,
     expected_provider_exchange_count: usize,
@@ -613,7 +614,7 @@ mod tests {
 
     fn observation() -> RuntimeTurnObservation {
         RuntimeTurnObservation {
-            session_id: "session-001".to_string(),
+            session_id: SessionId::from("session-001"),
             turn_index: 2,
             assistant_message: "answer".to_string(),
             graph_node_count: 5,
@@ -628,7 +629,13 @@ mod tests {
 
     #[test]
     fn runtime_turn_contract_accepts_realistic_observation() {
-        let verdict = runtime_turn_contract(&observation(), "session-001", 2, "answer", 2);
+        let verdict = runtime_turn_contract(
+            &observation(),
+            &SessionId::from("session-001"),
+            2,
+            "answer",
+            2,
+        );
         assert_eq!(verdict.status, OracleStatus::Passed);
     }
 
@@ -636,7 +643,8 @@ mod tests {
     fn runtime_turn_contract_rejects_graph_regression() {
         let mut observed = observation();
         observed.graph_node_count = 1;
-        let verdict = runtime_turn_contract(&observed, "session-001", 2, "answer", 2);
+        let verdict =
+            runtime_turn_contract(&observed, &SessionId::from("session-001"), 2, "answer", 2);
         assert_eq!(verdict.status, OracleStatus::Failed);
     }
 

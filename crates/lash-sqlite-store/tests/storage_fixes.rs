@@ -10,6 +10,8 @@
 //! * `gc_unreachable` never panics on a corrupt rooted manifest and keeps
 //!   every blob in that conservative case.
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -58,9 +60,13 @@ fn lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
-fn commit_at(session_id: &str, expected_head_revision: u64, writer_id: &str) -> RuntimeCommit {
+fn commit_at(
+    session_id: &SessionId,
+    expected_head_revision: u64,
+    writer_id: &str,
+) -> RuntimeCommit {
     let state = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -101,7 +107,7 @@ fn head_revision_cas_holds_across_two_connections() {
                     let store = Store::open(&path).await.expect("open store");
                     barrier.wait();
                     store
-                        .commit_runtime_state(commit_at("root", 0, writer_id))
+                        .commit_runtime_state(commit_at(&SessionId::from("root"), 0, writer_id))
                         .await
                 })
             })
@@ -155,7 +161,7 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         .expect("store orphan blob");
 
     let mut state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -172,7 +178,7 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
     let owner = lease_owner("gc-test");
     let session_lease = store
         .try_claim_session_execution_lease(
-            "root",
+            &SessionId::from("root"),
             &owner,
             "gc-keeps-live-committed-checkpoint-blobs-executor",
             60_000,
@@ -232,13 +238,13 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
     }
 }
 
-fn exclusive_draft(session_id: &str, text: &str) -> QueuedWorkBatchDraft {
-    let process_id = format!("process:{text}");
+fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
+    let process_id = ProcessId::from(format!("process:{text}"));
     let sequence = 1;
     let wake = ProcessWakeDelivery {
         version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{text}"),
-        target_session_id: session_id.to_string(),
+        target_session_id: SessionId::from(session_id.to_string()),
         process_id: process_id.clone(),
         process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         sequence,
@@ -268,7 +274,7 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
     let store = Store::memory().await.expect("store");
     let session_id = "sqlite-claim-id-dialects";
     let queued = store
-        .enqueue_queued_work(exclusive_draft(session_id, "work"))
+        .enqueue_queued_work(exclusive_draft(&SessionId::from(session_id), "work"))
         .await
         .expect("enqueue queued work");
     let pending = store
@@ -282,7 +288,7 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
     let owner = lease_owner("sqlite-claim-id-owner");
     let lease = store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &owner,
             "sqlite-claims-pin-both-production-claim-id-spellings-executor",
             60_000,
@@ -294,7 +300,7 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
 
     let queued_claim = store
         .claim_ready_queued_work(
-            session_id,
+            &SessionId::from(session_id),
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
@@ -305,7 +311,7 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
         .claim()
         .expect("queued work claim");
     let turn_input_claim = store
-        .claim_next_turn_inputs(session_id, &lease.fence(), &owner, 1)
+        .claim_next_turn_inputs(&SessionId::from(session_id), &lease.fence(), &owner, 1)
         .await
         .expect("claim turn input")
         .expect("turn-input claim");
@@ -328,12 +334,12 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
 async fn second_claim_on_held_batch_is_not_won() {
     let store = Store::memory().await.expect("store");
     store
-        .enqueue_queued_work(exclusive_draft("root", "work"))
+        .enqueue_queued_work(exclusive_draft(&SessionId::from("root"), "work"))
         .await
         .expect("enqueue");
     let session_lease = store
         .try_claim_session_execution_lease(
-            "root",
+            &SessionId::from("root"),
             &lease_owner("session-owner"),
             "second-claim-on-held-batch-is-not-won-executor",
             60_000,
@@ -346,7 +352,7 @@ async fn second_claim_on_held_batch_is_not_won() {
 
     let claim_a = store
         .claim_ready_queued_work(
-            "root",
+            &SessionId::from("root"),
             &session_fence,
             &lease_owner("owner-a"),
             QueuedWorkClaimBoundary::Idle,
@@ -360,7 +366,7 @@ async fn second_claim_on_held_batch_is_not_won() {
 
     let claim_b = store
         .claim_ready_queued_work(
-            "root",
+            &SessionId::from("root"),
             &session_fence,
             &lease_owner("owner-b"),
             QueuedWorkClaimBoundary::Idle,
@@ -378,7 +384,7 @@ async fn second_claim_on_held_batch_is_not_won() {
     // the batch, the batch is hidden from the user-editable pending snapshot.
     assert!(
         store
-            .list_pending_queued_work("root")
+            .list_pending_queued_work(&SessionId::from("root"))
             .await
             .expect("list pending during owner-a's live claim")
             .is_empty(),
@@ -397,7 +403,7 @@ fn concurrent_claims_never_double_own_a_batch() {
     let path = unique_db_path("claim-race");
     block_on(async {
         let seed = Store::open(&path).await.expect("seed store");
-        seed.enqueue_queued_work(exclusive_draft("root", "work"))
+        seed.enqueue_queued_work(exclusive_draft(&SessionId::from("root"), "work"))
             .await
             .expect("enqueue");
     });
@@ -405,7 +411,7 @@ fn concurrent_claims_never_double_own_a_batch() {
         let store = block_on(Store::open(&path)).expect("lease store");
         let owner = lease_owner("session-owner");
         block_on(store.try_claim_session_execution_lease(
-            "root",
+            &SessionId::from("root"),
             &owner,
             "concurrent-claims-never-double-own-a-batch-executor",
             60_000,
@@ -427,7 +433,7 @@ fn concurrent_claims_never_double_own_a_batch() {
                 barrier.wait();
                 store
                     .claim_ready_queued_work(
-                        "root",
+                        &SessionId::from("root"),
                         &session_fence,
                         &lease_owner(owner),
                         QueuedWorkClaimBoundary::Idle,
@@ -467,7 +473,7 @@ fn concurrent_claims_never_double_own_a_batch() {
         // session-lease generation holds it, the batch is hidden from the
         // user-editable pending snapshot.
         let verify = block_on(Store::open(&path)).expect("verify store");
-        let pending = block_on(verify.list_pending_queued_work("root"))
+        let pending = block_on(verify.list_pending_queued_work(&SessionId::from("root")))
             .expect("list pending during the winning claim");
         assert!(
             pending.is_empty(),
@@ -577,7 +583,7 @@ async fn unwired_sqlite_factory_keeps_process_owned_intents_immortal() {
     let factory = SqliteSessionStoreFactory::new(dir.path().join("sessions"));
     let request = lash_core::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "unwired-process-owner".to_string(),
+        session_id: SessionId::from("unwired-process-owner"),
         relation: lash_core::SessionRelation::default(),
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
@@ -613,7 +619,7 @@ async fn sqlite_registry_validation_fails_gc_not_session_open() {
     let factory = SqliteSessionStoreFactory::new_with_process_registry(&sessions, &foreign_path);
     let request = lash_core::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "validation-boundary".to_string(),
+        session_id: SessionId::from("validation-boundary"),
         relation: lash_core::SessionRelation::default(),
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };

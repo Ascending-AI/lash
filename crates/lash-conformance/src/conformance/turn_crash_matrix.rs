@@ -60,6 +60,7 @@
 //!
 //! Integrator class: conformance-suite embedders (ADR 0051 class 4).
 
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
 use std::future::Future;
@@ -105,13 +106,13 @@ const CRASHED_EXECUTOR_OWNER_ID: &str = "lash-core-test-worker";
 
 #[derive(Clone, Debug)]
 struct ReferenceIdentity {
-    session_id: String,
+    session_id: SessionId,
     turn_id: TurnId,
 }
 
 impl ReferenceIdentity {
     fn for_scenario(scenario: &str) -> Self {
-        let session_id = format!("trace-derived-real-turn:{scenario}");
+        let session_id = SessionId::from(format!("trace-derived-real-turn:{scenario}"));
         let turn_id = TurnId::from(format!("{session_id}:turn"));
         Self {
             session_id,
@@ -578,7 +579,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
 
     async fn claim_next_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         fence: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
@@ -595,7 +596,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
 
     async fn defer_orphaned_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         scope: crate::OrphanedTurnInputScope<'_>,
     ) -> Result<crate::TurnCancelInputOutcome, StoreError> {
@@ -614,7 +615,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
 
     async fn try_claim_session_execution_lease_with_token(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         executor_id: &str,
         claim_nonce: &crate::LeaseClaimNonce,
@@ -686,7 +687,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
 
     async fn claim_leading_ready_session_command(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         fence: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
@@ -702,7 +703,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
 
     async fn claim_ready_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         fence: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
@@ -722,7 +723,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
 
     async fn claim_checkpoint_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         fence: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &crate::TurnId,
@@ -745,7 +746,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
 
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         fence: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
@@ -999,14 +1000,14 @@ impl crate::AwaitEventResolver for SeamEffectController {
 
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), crate::RuntimeError> {
         self.inner.revoke_await_events_for_session(session_id).await
     }
 
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), crate::RuntimeError> {
         self.inner.cancel_await_events_for_session(session_id).await
     }
@@ -1125,14 +1126,14 @@ impl crate::AwaitEventResolver for CrashAfterCheckpointExecutionController {
 
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), crate::RuntimeError> {
         self.inner.revoke_await_events_for_session(session_id).await
     }
 
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), crate::RuntimeError> {
         self.inner.cancel_await_events_for_session(session_id).await
     }
@@ -1265,7 +1266,7 @@ fn crashed_turn_timings() -> crate::LeaseTimings {
 /// of those states the next claim already succeeds.
 pub(crate) async fn collapse_crashed_executor_lease(
     store: &dyn RuntimePersistence,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> bool {
     let lease = store
         .get_session_execution_lease(session_id)

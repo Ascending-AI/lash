@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 
 pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, FixedScriptRunnerError>
@@ -145,7 +146,9 @@ pub(super) async fn run_live_turn_facts(
         .model(model)
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let session_id = format!("sim-live-failure-{provider_kind}-{offered_prose_deltas}");
+    let session_id = SessionId::from(format!(
+        "sim-live-failure-{provider_kind}-{offered_prose_deltas}"
+    ));
     let session = core
         .session(session_id.clone())
         .open()

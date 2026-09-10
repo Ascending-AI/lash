@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 
 /// Agreement alone misses a missing-root defect shared by every backend.
 /// Apply the same independent byte-survival and rollback oracle to all three.
@@ -141,10 +142,13 @@ impl BackendRunner {
                     .factory()
                     .fork_at(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
-                        session_id: format!("{}:foreign-lineage", self.session_id),
+                        session_id: SessionId::from(format!("{}:foreign-lineage", self.session_id)),
                         node_id: node_id.clone(),
                         relation: SessionRelation::Fork {
-                            source_session_id: format!("{}:foreign-source", self.session_id),
+                            source_session_id: SessionId::from(format!(
+                                "{}:foreign-source",
+                                self.session_id
+                            )),
                             source_node_id: format!("{}:foreign-node", self.session_id),
                             observer_inheritance: lash_core::ObserverInheritance::None,
                         },
@@ -168,7 +172,8 @@ impl BackendRunner {
                     .current_leaf_node_id
                     .clone()
                     .expect("generated sequence committed a leaf before rewind");
-                let branch_session_id = format!("{}:rewind-branch", self.session_id);
+                let branch_session_id =
+                    SessionId::from(format!("{}:rewind-branch", self.session_id));
                 let branch = self
                     .factory()
                     .fork_at(&ForkSessionRequest {
@@ -205,7 +210,7 @@ impl BackendRunner {
                     .factory()
                     .fork_at(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
-                        session_id: format!("{}:rewind", self.session_id),
+                        session_id: SessionId::from(format!("{}:rewind", self.session_id)),
                         node_id,
                         relation: SessionRelation::Fork {
                             source_session_id: branch_session_id,

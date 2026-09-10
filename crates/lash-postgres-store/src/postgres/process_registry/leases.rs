@@ -1,12 +1,13 @@
 //! The [`lash_core::ProcessLeases`] concern for the Postgres registry.
 
 use super::*;
+use lash_sansio::ProcessId;
 
 #[async_trait::async_trait]
 impl lash_core::ProcessLeases for PostgresProcessRegistry {
     async fn claim_process_lease(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         owner: &LeaseOwnerIdentity,
         lease_ttl_ms: u64,
     ) -> Result<lash_core::ProcessLeaseClaimOutcome, PluginError> {
@@ -28,7 +29,7 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
                      SET lease_expires_at_ms = $2
                      WHERE process_id = $1",
                 )
-                .bind(process_id)
+                .bind(process_id.as_str())
                 .bind(lease.expires_at_epoch_ms as i64)
                 .execute(&mut *tx)
                 .await
@@ -55,7 +56,7 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
 
     async fn reclaim_process_lease(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         owner: &LeaseOwnerIdentity,
         _observed_holder: &ProcessLease,
         lease_ttl_ms: u64,
@@ -111,7 +112,7 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
              SET lease_expires_at_ms = $2
              WHERE process_id = $1 AND lease_token = $3",
         )
-        .bind(&renewed.process_id)
+        .bind(renewed.process_id.as_str())
         .bind(renewed.expires_at_epoch_ms as i64)
         .bind(&renewed.lease_token)
         .execute(&mut *tx)
@@ -123,7 +124,7 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
 
     async fn get_process_lease(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<ProcessLease>, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let lease = load_process_lease_tx(&mut tx, process_id).await?;
@@ -133,7 +134,7 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
 
     async fn get_process_leases(
         &self,
-        process_ids: &[String],
+        process_ids: &[ProcessId],
     ) -> Result<Vec<Option<ProcessLease>>, PluginError> {
         if process_ids.is_empty() {
             return Ok(Vec::new());
@@ -145,13 +146,18 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
              FROM lash_process_leases
              WHERE process_id = ANY($1)",
         )
-        .bind(process_ids)
+        .bind(
+            &process_ids
+                .iter()
+                .map(ProcessId::as_str)
+                .collect::<Vec<_>>(),
+        )
         .fetch_all(&self.pool)
         .await
         .map_err(plugin_sqlx_error)?;
         let mut leases_by_id = std::collections::HashMap::with_capacity(rows.len());
         for row in rows {
-            let process_id: String = row.get(0);
+            let process_id: ProcessId = ProcessId::from(row.get::<String, _>(0));
             let lease = facade_support::registry_transitions::ProcessLeaseRow {
                 owner_id: row.get(1),
                 incarnation_id: row.get(6),
@@ -181,7 +187,7 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
                  lease_expires_at_ms = 0
              WHERE process_id = $1 AND lease_token = $2",
         )
-        .bind(&completion.process_id)
+        .bind(completion.process_id.as_str())
         .bind(&completion.lease_token)
         .execute(&self.pool)
         .await

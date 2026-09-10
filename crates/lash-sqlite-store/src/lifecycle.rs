@@ -14,11 +14,12 @@
 //!   move them in), not borrows of `self`.
 
 use super::*;
+use lash_sansio::SessionId;
 
 impl Store {
     pub(crate) async fn open_bound_with_options_clock_and_process_registry(
         path: &Path,
-        session_id: &str,
+        session_id: &SessionId,
         options: StoreOptions,
         clock: Arc<dyn lash_core::Clock>,
         process_registry_path: Option<&Path>,
@@ -35,7 +36,7 @@ impl Store {
         .await?;
         store
             .session_id
-            .set(session_id.to_string())
+            .set(session_id.clone())
             .expect("new SQLite store binding is unset");
         Ok(store)
     }
@@ -166,12 +167,12 @@ impl Store {
 
     pub(crate) async fn open_bound_readonly(
         path: &Path,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> tokio_rusqlite::Result<Self> {
         let store = Self::open_readonly(path).await?;
         store
             .session_id
-            .set(session_id.to_string())
+            .set(session_id.clone())
             .expect("new read-only SQLite store binding is unset");
         Ok(store)
     }
@@ -258,7 +259,7 @@ impl Store {
         };
         self.conn
             .call(move |conn| {
-                try_load_session_head_meta_from_conn(conn, &session_id)
+                try_load_session_head_meta_from_conn(conn, &SessionId::from(session_id))
                     .map_err(sqlite_conversion_error)
             })
             .await
@@ -295,7 +296,7 @@ impl Store {
         let meta = self
             .conn
             .call(move |conn| {
-                crate::session_meta::load_session_meta(conn, selected.as_deref())
+                crate::session_meta::load_session_meta(conn, selected.as_ref())
                     .map_err(sqlite_conversion_error)
             })
             .await

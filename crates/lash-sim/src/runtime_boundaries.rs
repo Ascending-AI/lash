@@ -1,3 +1,5 @@
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::path::PathBuf;
@@ -136,14 +138,15 @@ impl RuntimeBoundaryHarness {
         session: &str,
     ) -> Result<u64, RuntimeBoundaryError> {
         let probe_scope = format!("{session}::lease-probe");
-        let store = self.store_for_session(&probe_scope).await?;
+        let probe_session = SessionId::from(probe_scope.clone());
+        let store = self.store_for_session(&probe_session).await?;
         let owner = LeaseOwnerIdentity::opaque(
             "lash-sim-lease-probe",
             format!("{probe_scope}:probe-owner"),
         );
         let lease = match store
             .try_claim_session_execution_lease(
-                &probe_scope,
+                &probe_session,
                 &owner,
                 "lease-probe-fencing-token-executor",
                 LEASE_TTL_MS,
@@ -242,7 +245,7 @@ impl RuntimeBoundaryHarness {
         let recorded_intents =
             lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
-                    session_id: event.actor_alias.clone(),
+                    session_id: SessionId::from(event.actor_alias.clone()),
                     request: lash_core::ProcessStartRequest::external(
                         format!("{effect_id}:intent-child"),
                         lash_core::ProcessOriginator::host_scoped("lash-sim-durable-effect"),
@@ -519,7 +522,10 @@ impl RuntimeBoundaryHarness {
             .get("incarnation")
             .and_then(Value::as_u64)
             .unwrap_or(1);
-        let source_key = lash_core::facade_support::process_wake_source_key(&process_id, sequence);
+        let source_key = lash_core::facade_support::process_wake_source_key(
+            &ProcessId::from(process_id.clone()),
+            sequence,
+        );
         let replay_key = event
             .payload
             .get("replay_key")
@@ -528,8 +534,8 @@ impl RuntimeBoundaryHarness {
             .to_string();
         let wake = lash_core::facade_support::process_wake_delivery(
             lash_core::facade_support::ProcessWakeDeliveryRequest {
-                target_session_id: session.clone(),
-                process_id: process_id.clone(),
+                target_session_id: SessionId::from(session.clone()),
+                process_id: ProcessId::from(process_id.clone()),
                 process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(
                     process_incarnation,
                 ),
@@ -538,7 +544,7 @@ impl RuntimeBoundaryHarness {
                 event_invocation: RuntimeInvocation {
                     scope: RuntimeScope::new(session.clone()),
                     subject: RuntimeSubject::ProcessEvent {
-                        process_id: process_id.clone(),
+                        process_id: ProcessId::from(process_id.clone()),
                         sequence,
                         event_type: "process.wake".to_string(),
                     },
@@ -557,14 +563,16 @@ impl RuntimeBoundaryHarness {
             },
         )
         .map_err(|err| RuntimeBoundaryError::new(format!("process wake failed: {err}")))?;
-        let store = self.store_for_session(&session).await?;
+        let store = self
+            .store_for_session(&SessionId::from(session.clone()))
+            .await?;
         let owner = LeaseOwnerIdentity::opaque(
             "lash-sim-process-wake-driver",
             format!("{}:process-wake-driver", session),
         );
         let lease = match store
             .try_claim_session_execution_lease(
-                &session,
+                &SessionId::from(session.clone()),
                 &owner,
                 "deliver-process-wake-executor",
                 LEASE_TTL_MS,
@@ -612,7 +620,7 @@ impl RuntimeBoundaryHarness {
         } else {
             store
                 .claim_ready_queued_work_by_batch_ids(
-                    &session,
+                    &SessionId::from(session.clone()),
                     &lease.fence(),
                     &owner,
                     QueuedWorkClaimBoundary::Idle,
@@ -650,7 +658,7 @@ impl RuntimeBoundaryHarness {
         // was a redelivery of an already-consumed wake) so no lingering queued
         // work leaks to a later claimant.
         let settled = store
-            .cancel_queued_work_batch(&session, &batch.batch_id)
+            .cancel_queued_work_batch(&SessionId::from(session.clone()), &batch.batch_id)
             .await
             .map_err(|err| {
                 RuntimeBoundaryError::new(format!("settle delivered wake batch failed: {err}"))
@@ -697,7 +705,9 @@ impl RuntimeBoundaryHarness {
         event: &BoundaryEvent,
     ) -> Result<Value, RuntimeBoundaryError> {
         let session = boundary_session_alias(event);
-        let store = self.store_for_session(&session).await?;
+        let store = self
+            .store_for_session(&SessionId::from(session.clone()))
+            .await?;
         let stale_owner = LeaseOwnerIdentity::opaque(
             event.actor_alias.clone(),
             format!("{}:incarnation-001", event.actor_alias),
@@ -710,7 +720,7 @@ impl RuntimeBoundaryHarness {
         // and starts a real unit of worker-owned queued work.
         let stale_lease = match store
             .try_claim_session_execution_lease(
-                &session,
+                &SessionId::from(session.clone()),
                 &stale_owner,
                 "run-worker-stale-completion-executor",
                 LEASE_TTL_MS,
@@ -751,7 +761,7 @@ impl RuntimeBoundaryHarness {
         self.clock.advance_by(LEASE_TTL_MS + 1).await;
         let live_lease = match store
             .try_claim_session_execution_lease(
-                &session,
+                &SessionId::from(session.clone()),
                 &live_owner,
                 "run-worker-stale-completion-executor-2",
                 LEASE_TTL_MS,
@@ -942,7 +952,7 @@ impl RuntimeBoundaryHarness {
         .await?;
         record_lifecycle_started(registry.as_ref(), "ob-crashed", &dead_holder).await?;
         match registry
-            .claim_process_lease("ob-crashed", &dead_holder, LEASE_TTL_MS)
+            .claim_process_lease(&ProcessId::from("ob-crashed"), &dead_holder, LEASE_TTL_MS)
             .await
             .map_err(|err| {
                 RuntimeBoundaryError::new(format!("dead holder lease claim failed: {err}"))
@@ -968,7 +978,7 @@ impl RuntimeBoundaryHarness {
         record_lifecycle_started(registry.as_ref(), "ob-abandon-req", &silent_owner).await?;
         registry
             .request_process_abandon(
-                "ob-abandon-req",
+                &ProcessId::from("ob-abandon-req"),
                 lash_core::AbandonRequest {
                     requested_by: "sim-operator".to_string(),
                     requested_at_ms: event.at,
@@ -1065,7 +1075,7 @@ impl RuntimeBoundaryHarness {
             })?;
         let claim = store
             .claim_ready_queued_work_by_batch_ids(
-                session,
+                &SessionId::from(session),
                 &lease.fence(),
                 owner,
                 QueuedWorkClaimBoundary::Idle,
@@ -1105,7 +1115,7 @@ impl RuntimeBoundaryHarness {
         // path and mask a broken generation cutover.
         let resumed = store
             .claim_ready_queued_work_by_batch_ids(
-                session,
+                &SessionId::from(session),
                 &lease.fence(),
                 owner,
                 QueuedWorkClaimBoundary::Idle,
@@ -1144,7 +1154,7 @@ impl RuntimeBoundaryHarness {
             },
         );
         let stale_state = RuntimeSessionState {
-            session_id: session.to_string(),
+            session_id: SessionId::from(session.to_string()),
             session_graph,
             persisted_node_ids,
             head_revision,
@@ -1180,7 +1190,7 @@ impl RuntimeBoundaryHarness {
                 RuntimeBoundaryError::new(format!("abandon resumed worker claim failed: {err}"))
             })?;
         store
-            .cancel_queued_work_batch(session, &work.batch_id)
+            .cancel_queued_work_batch(&SessionId::from(session), &work.batch_id)
             .await
             .map_err(|err| {
                 RuntimeBoundaryError::new(format!("settle resumed worker batch failed: {err}"))
@@ -1207,7 +1217,7 @@ impl RuntimeBoundaryHarness {
         // for one session. The scheduler boundary id is stable across backend
         // replays and unique per occurrence, so it keeps each proof independent
         // without introducing a timing- or delivery-order-derived counter.
-        let process_id = format!("sim-worker-process-{session}-{boundary_id}");
+        let process_id = ProcessId::from(format!("sim-worker-process-{session}-{boundary_id}"));
         registry
             .register_process(ProcessRegistration::new(
                 process_id.clone(),
@@ -1403,11 +1413,11 @@ impl RuntimeBoundaryHarness {
 
     async fn store_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Arc<dyn RuntimePersistence>, RuntimeBoundaryError> {
         let request = SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         };
@@ -1448,7 +1458,7 @@ struct WorkerFailover {
 }
 
 struct WorkerProcessCompletion {
-    process_id: String,
+    process_id: ProcessId,
     stale_fencing_token: u64,
     live_fencing_token: u64,
     stale_rejected: bool,
@@ -1459,7 +1469,7 @@ struct WorkerProcessCompletion {
 
 async fn terminal_writer(
     registry: &dyn ProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<Option<String>, RuntimeBoundaryError> {
     let events = registry
         .events_after(process_id, 0)
@@ -1489,10 +1499,10 @@ fn worker_failover_work(
     session: &str,
     occurred_at_ms: u64,
 ) -> Result<lash_core::ProcessWakeDelivery, RuntimeBoundaryError> {
-    let process_id = format!("sim-worker-{session}");
+    let process_id = ProcessId::from(format!("sim-worker-{session}"));
     lash_core::facade_support::process_wake_delivery(
         lash_core::facade_support::ProcessWakeDeliveryRequest {
-            target_session_id: session.to_string(),
+            target_session_id: SessionId::from(session.to_string()),
             process_id: process_id.clone(),
             process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
             sequence: 1,

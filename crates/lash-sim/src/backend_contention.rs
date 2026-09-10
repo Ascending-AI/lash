@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -41,7 +42,7 @@ pub struct BackendContentionScenario {
     pub backend: String,
     pub status: String,
     pub store_factory: String,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub operations: Vec<BackendContentionOperation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skip_reason: Option<String>,
@@ -116,7 +117,7 @@ pub async fn run_backend_contention_report_against(
             backend: "postgres".to_string(),
             status: "skipped".to_string(),
             store_factory: "lash_postgres_store::PostgresSessionStoreFactory".to_string(),
-            session_id: "not-created".to_string(),
+            session_id: SessionId::from("not-created"),
             operations: Vec::new(),
             skip_reason: Some(
                 "LASH_POSTGRES_DATABASE_URL is not set; broad/full gate Docker bootstrap reruns this lane with Postgres enabled"
@@ -165,7 +166,7 @@ async fn run_factory_contention_scenario(
     store_factory: &str,
     factory: Arc<dyn SessionStoreFactory>,
 ) -> Result<BackendContentionScenario, String> {
-    let session_id = format!("lash-sim-backend-contention-{backend}");
+    let session_id = SessionId::from(format!("lash-sim-backend-contention-{backend}"));
     factory
         .delete_session(&session_id)
         .await
@@ -203,7 +204,7 @@ async fn run_factory_contention_scenario(
 
 async fn create_store(
     factory: Arc<dyn SessionStoreFactory>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<Arc<dyn RuntimePersistence>, String> {
     factory
         .create_store(&store_request(session_id))
@@ -213,7 +214,7 @@ async fn create_store(
 
 async fn open_store(
     factory: Arc<dyn SessionStoreFactory>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<Arc<dyn RuntimePersistence>, String> {
     match factory
         .open_existing_store(&store_request(session_id))
@@ -225,17 +226,17 @@ async fn open_store(
     }
 }
 
-fn store_request(session_id: &str) -> SessionStoreCreateRequest {
+fn store_request(session_id: &SessionId) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
         policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     }
 }
 
 async fn competing_first_claim(
-    session_id: &str,
+    session_id: &SessionId,
     open: Arc<dyn RuntimePersistence>,
     reopened: Arc<dyn RuntimePersistence>,
 ) -> Result<BackendContentionOperation, String> {
@@ -253,7 +254,7 @@ async fn competing_first_claim(
     let left = tokio::spawn(async move {
         left_barrier.wait().await;
         open.try_claim_session_execution_lease(
-            &left_session,
+            &SessionId::from(left_session),
             &left_owner,
             "competing-first-claim-executor",
             LEASE_TTL_MS,
@@ -264,7 +265,7 @@ async fn competing_first_claim(
         right_barrier.wait().await;
         reopened
             .try_claim_session_execution_lease(
-                &right_session,
+                &SessionId::from(right_session),
                 &right_owner,
                 "competing-first-claim-executor-2",
                 LEASE_TTL_MS,
@@ -319,7 +320,7 @@ async fn competing_first_claim(
 }
 
 async fn stale_completion_is_fenced(
-    session_id: &str,
+    session_id: &SessionId,
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<BackendContentionOperation, String> {
     let owner_a = LeaseOwnerIdentity::opaque("stale-release-owner-a", "stale-release-owner-a:001");
@@ -390,7 +391,7 @@ async fn stale_completion_is_fenced(
 }
 
 async fn reopen_handle_preserves_live_lease(
-    session_id: &str,
+    session_id: &SessionId,
     open: Arc<dyn RuntimePersistence>,
     reopened: Arc<dyn RuntimePersistence>,
 ) -> Result<BackendContentionOperation, String> {
@@ -455,7 +456,7 @@ async fn reopen_handle_preserves_live_lease(
 }
 
 async fn stale_owner_ttl_preserves_live_successor(
-    session_id: &str,
+    session_id: &SessionId,
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<BackendContentionOperation, String> {
     let stale_owner = LeaseOwnerIdentity::opaque("stale-worker-owner", "stale-worker-owner:001");
@@ -587,7 +588,7 @@ async fn stale_owner_ttl_preserves_live_successor(
 }
 
 async fn stale_head_transaction_is_rejected(
-    session_id: &str,
+    session_id: &SessionId,
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<BackendContentionOperation, String> {
     let expected_head_revision = store
@@ -596,7 +597,7 @@ async fn stale_head_transaction_is_rejected(
         .map_err(|err| format!("load current session head: {err}"))?
         .map_or(0, |read| read.head_revision);
     let current = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         head_revision: expected_head_revision,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -607,7 +608,7 @@ async fn stale_head_transaction_is_rejected(
         .await
         .map_err(|err| format!("establish current session head: {err}"))?;
     let stale = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         head_revision: expected_head_revision,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -636,11 +637,11 @@ async fn stale_head_transaction_is_rejected(
 }
 
 async fn final_commit_retry_and_conflict_are_fenced(
-    session_id: &str,
+    session_id: &SessionId,
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<BackendContentionOperation, String> {
     let state = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -680,7 +681,7 @@ async fn final_commit_retry_and_conflict_are_fenced(
     }
 
     let changed_state = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         turn_index: 1,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,

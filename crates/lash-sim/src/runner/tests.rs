@@ -1,6 +1,7 @@
 use super::*;
 use lash_llm_transport::{LlmHttpRequest, LlmHttpResponse};
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat};
+use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 
 #[derive(Debug)]
@@ -399,14 +400,14 @@ async fn generated_park_resume_transcript_is_readable_and_logical_size_labeled()
                 )
             })
     );
-    let transcript = trace.render_session_transcript("suspend-tool");
+    let transcript = trace.render_session_transcript(&SessionId::from("suspend-tool"));
     for seed in [2, 3] {
         let workload = generate_workload(seed, "fast", 72).expect("workload");
         let varied = run_generated_workload_for_fixture(workload, "park-resume-transcript")
             .await
             .expect("generated seed variation");
         assert_eq!(
-            varied.render_session_transcript("suspend-tool"),
+            varied.render_session_transcript(&SessionId::from("suspend-tool")),
             transcript,
             "park/resume transcript changed for seed {seed}"
         );

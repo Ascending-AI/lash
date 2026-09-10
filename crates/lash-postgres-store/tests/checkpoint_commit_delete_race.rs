@@ -2,6 +2,7 @@
 //! component deletion. The test observes PostgreSQL's lock wait directly; no
 //! timing sleep decides which transaction won.
 
+use lash_sansio::SessionId;
 use std::time::Duration;
 
 use lash_core::{
@@ -60,12 +61,12 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
     let factory = storage.session_store_factory();
 
     let victim = factory
-        .create_store(&request("commit-delete-victim"))
+        .create_store(&request(&SessionId::from("commit-delete-victim")))
         .await
         .expect("create delete victim");
     let mut victim_state = RuntimeSessionState {
-        session_id: "commit-delete-victim".to_string(),
-        ..RuntimeSessionState::new(request("commit-delete-victim").policy)
+        session_id: SessionId::from("commit-delete-victim"),
+        ..RuntimeSessionState::new(request(&SessionId::from("commit-delete-victim")).policy)
     };
     victim_state.ensure_agent_frame_initialized();
     let mut victim_commit = RuntimeCommit::persisted_state_for_test(&victim_state, &[]);
@@ -80,12 +81,12 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
     let shared = victim_receipt.manifest.components["law/commit-delete-shared"].clone();
 
     let _target = factory
-        .create_store(&request("commit-delete-target"))
+        .create_store(&request(&SessionId::from("commit-delete-target")))
         .await
         .expect("create commit target");
     let mut target_state = RuntimeSessionState {
-        session_id: "commit-delete-target".to_string(),
-        ..RuntimeSessionState::new(request("commit-delete-target").policy)
+        session_id: SessionId::from("commit-delete-target"),
+        ..RuntimeSessionState::new(request(&SessionId::from("commit-delete-target")).policy)
     };
     target_state.ensure_agent_frame_initialized();
     let mut target_commit = RuntimeCommit::persisted_state_for_test(&target_state, &[]);
@@ -253,10 +254,10 @@ async fn reset(storage: &PostgresStorage) {
     .expect("reset process change clock");
 }
 
-fn request(session_id: &str) -> SessionStoreCreateRequest {
+fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     }

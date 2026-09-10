@@ -9,7 +9,7 @@ pub(super) async fn session_store_factory_coalesces_config_command_claims(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "config-command-coalescing",
+        &SessionId::from("config-command-coalescing"),
         "config-command-base-model",
         crate::SessionRelation::Root,
     );
@@ -88,7 +88,7 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "config-command-claim-bound",
+        &SessionId::from("config-command-claim-bound"),
         "config-command-base-model",
         crate::SessionRelation::Root,
     );
@@ -323,7 +323,7 @@ async fn runtime_for_config_settlement(
 #[cfg(test)]
 async fn enqueue_config_settlement_blocker(
     store: &dyn crate::RuntimePersistence,
-    session_id: &str,
+    session_id: &SessionId,
 ) {
     store
         .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
@@ -356,7 +356,7 @@ fn config_settlement_patch(model_id: &str) -> crate::SessionConfigPatch {
 pub(super) async fn session_config_settlement_timeout_is_typed() {
     let clock = Arc::new(ConfigSettlementClock::new(1_800_000_000_000));
     let request = session_store_request(
-        "config-settlement-timeout",
+        &SessionId::from("config-settlement-timeout"),
         "config-settlement-original",
         crate::SessionRelation::Root,
     );
@@ -388,7 +388,7 @@ pub(super) async fn session_config_settlement_timeout_is_typed() {
 pub(super) async fn cancelled_session_config_settlement_is_typed() {
     let clock = Arc::new(ConfigSettlementClock::new(1_800_000_000_000));
     let request = session_store_request(
-        "config-settlement-cancelled",
+        &SessionId::from("config-settlement-cancelled"),
         "config-settlement-original",
         crate::SessionRelation::Root,
     );
@@ -455,7 +455,7 @@ pub(super) async fn cancelled_session_config_settlement_is_typed() {
 pub(super) async fn superseded_config_settlement_adopts_the_newer_head() {
     let clock = Arc::new(ConfigSettlementClock::new(1_800_000_000_000));
     let request = session_store_request(
-        "config-settlement-superseded",
+        &SessionId::from("config-settlement-superseded"),
         "config-settlement-original",
         crate::SessionRelation::Root,
     );

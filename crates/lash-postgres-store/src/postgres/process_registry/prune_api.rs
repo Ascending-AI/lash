@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::ProcessId;
 
 /// The prune eligibility predicate. The prune appends `FOR UPDATE`; the
 /// survey reads it as is.
@@ -34,7 +35,7 @@ async fn select_prunable<'c>(
     cutoff: i64,
     max_change_seq: Option<i64>,
     filter: Option<&lash_core::ProcessListFilter>,
-) -> Result<Vec<String>, PluginError> {
+) -> Result<Vec<ProcessId>, PluginError> {
     let rows = sqlx::query(sql)
         .bind(cutoff)
         .bind(max_change_seq)
@@ -43,7 +44,7 @@ async fn select_prunable<'c>(
         .map_err(plugin_sqlx_error)?;
     let mut prunable = Vec::new();
     for row in rows {
-        let process_id: String = row.get(0);
+        let process_id: ProcessId = ProcessId::from(row.get::<String, _>(0));
         let record_json: String = row.get(1);
         let record: ProcessRecord =
             serde_json::from_str(&record_json).map_err(process_decode_error)?;
@@ -61,7 +62,7 @@ pub(super) async fn prunable_terminal_processes(
     cutoff_epoch_ms: u64,
     filter: Option<lash_core::ProcessListFilter>,
     watermark: lash_core::ProjectionWatermark,
-) -> Result<Vec<String>, PluginError> {
+) -> Result<Vec<ProcessId>, PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     select_prunable(
         &registry.pool,
@@ -104,7 +105,7 @@ pub(super) async fn prune_terminal_processes(
     let process_ids = prunable;
     let session_ids = process_ids
         .iter()
-        .flat_map(|process_id| facade_support::process_runtime_session_ids(process_id))
+        .flat_map(facade_support::process_runtime_session_ids)
         .collect::<Vec<_>>();
     let blob_reclaim = delete_process_sessions_tx(&mut tx, &session_ids)
         .await

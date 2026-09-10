@@ -34,7 +34,7 @@ async fn public_provider_signal_intent_retains_rerunnable_target_geometry_on_pos
                 payload_schema: lash_core::LashSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
-            &[SESSION.to_string()],
+            &[SessionId::from(SESSION.to_string())],
         )
         .await
         .expect("register PostgreSQL Rerunnable signal target");
@@ -99,7 +99,7 @@ async fn public_provider_signal_intent_retains_rerunnable_target_geometry_on_pos
     );
 
     let record = registry
-        .get_process("pg-public-intent-target")
+        .get_process(&ProcessId::from("pg-public-intent-target"))
         .await
         .expect("read Rerunnable target")
         .expect("Rerunnable target exists");
@@ -109,7 +109,7 @@ async fn public_provider_signal_intent_retains_rerunnable_target_geometry_on_pos
         "the focused law installs no worker, so scheduler timing cannot alter the event sequence"
     );
     let events = registry
-        .events_after("pg-public-intent-target", 0)
+        .events_after(&ProcessId::from("pg-public-intent-target"), 0)
         .await
         .expect("read Rerunnable target events");
     assert_eq!(

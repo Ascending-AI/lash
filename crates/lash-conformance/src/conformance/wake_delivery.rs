@@ -1,5 +1,7 @@
 use super::*;
 use crate::testing::TestClock;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 
 #[derive(Default)]
@@ -21,7 +23,7 @@ impl crate::QueuedWorkRunHandle for RecordingWakeTurnHandle {
 }
 
 impl RecordingWakeTurnHandle {
-    async fn wait_for_process_wake(&self, session_id: &str, prior_runs: usize) {
+    async fn wait_for_process_wake(&self, session_id: &SessionId, prior_runs: usize) {
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
                 if self.runs.lock().await.iter().skip(prior_runs).any(|run| {
@@ -91,7 +93,7 @@ pub async fn wake_delivery_ordering_group_conformance(
     assert_process_terminal_wait(
         &registry,
         &process_work,
-        "wake-ordering-terminal",
+        &ProcessId::from("wake-ordering-terminal"),
         terminal_wait_witness,
     )
     .await;
@@ -100,7 +102,7 @@ pub async fn wake_delivery_ordering_group_conformance(
 async fn assert_process_terminal_wait(
     registry: &Arc<dyn crate::ProcessRegistry>,
     process_work: &Arc<dyn crate::ProcessWorkSubstrate>,
-    process_id: &str,
+    process_id: &ProcessId,
     witness: ProcessTerminalWaitWitness,
 ) {
     let registered = registry
@@ -166,8 +168,8 @@ async fn ordering_group_discard_case(
     reason: Option<crate::WakeDiscardReason>,
     blocks: bool,
 ) {
-    let process_id = format!("wake-ordering-group-{case}");
-    let target_session_id = format!("wake-ordering-group-target-{case}");
+    let process_id = ProcessId::from(format!("wake-ordering-group-{case}"));
+    let target_session_id = SessionId::from(format!("wake-ordering-group-target-{case}"));
     registry
         .register_process(
             process_registry::registration(&process_id)
@@ -260,7 +262,7 @@ pub async fn wake_delivery_crash_matrix(
     let target_session_id = "wake-crash-target";
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: target_session_id.to_string(),
+        session_id: SessionId::from(target_session_id.to_string()),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy {
             model: crate::ModelSpec::builder("wake-crash-model")
@@ -268,7 +270,7 @@ pub async fn wake_delivery_crash_matrix(
                 .build()
                 .expect("valid crash-matrix model"),
             provider_id: "conformance-provider".to_string(),
-            session_id: Some(target_session_id.to_string()),
+            session_id: Some(SessionId::from(target_session_id.to_string())),
             autonomous: false,
             turn_budget: crate::TurnBudget::Unbounded,
             no_progress_budget: Default::default(),
@@ -287,13 +289,13 @@ pub async fn wake_delivery_crash_matrix(
         .register_process(
             process_registry::registration(process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
         )
         .await
         .expect("register wake producer");
     let append = registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "resume"}),
@@ -307,7 +309,7 @@ pub async fn wake_delivery_crash_matrix(
     assert_eq!(wake.target_session_id, target_session_id);
     let before = serde_json::to_vec(
         &registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("read producer after append")
             .expect("producer exists"),
@@ -315,7 +317,7 @@ pub async fn wake_delivery_crash_matrix(
     .expect("serialize producer before delivery");
     assert!(
         target
-            .list_queued_work(target_session_id)
+            .list_queued_work(&SessionId::from(target_session_id))
             .await
             .expect("read target queue before recovery")
             .is_empty(),
@@ -334,7 +336,7 @@ pub async fn wake_delivery_crash_matrix(
     assert_eq!(first.enqueued, 1, "unexpected delivery report: {first:?}");
     assert_eq!(first.retryable_failures, 0);
     let queued = target
-        .list_queued_work(target_session_id)
+        .list_queued_work(&SessionId::from(target_session_id))
         .await
         .expect("read target queue");
     let source_key = crate::process_wake_source_key(&wake.process_id, wake.sequence);
@@ -364,10 +366,10 @@ pub async fn wake_delivery_crash_matrix(
     let authority_target = factory
         .create_store(&crate::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: authority_target_session_id.to_string(),
+            session_id: SessionId::from(authority_target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy {
-                session_id: Some(authority_target_session_id.to_string()),
+                session_id: Some(SessionId::from(authority_target_session_id.to_string())),
                 ..request.policy.clone()
             },
         })
@@ -384,18 +386,23 @@ pub async fn wake_delivery_crash_matrix(
                     .with_process_provenance(crate::ProcessProvenance::session(
                         crate::SessionScope::for_agent_frame(
                             "originating-session",
-                            crate::session_graph::frame_node_id("originating-session", frame_id),
+                            crate::session_graph::frame_node_id(
+                                &SessionId::from("originating-session"),
+                                frame_id,
+                            ),
                         ),
                     ))
                     .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                    .with_wake_session_id(Some(authority_target_session_id.to_string())),
+                    .with_wake_session_id(Some(SessionId::from(
+                        authority_target_session_id.to_string(),
+                    ))),
             )
             .await
             .expect("register authority wake producer");
         authority_wakes.push(
             registry
                 .append_event(
-                    process_id,
+                    &ProcessId::from(process_id),
                     crate::ProcessEventAppendRequest::new(
                         "producer.wake",
                         serde_json::json!({"wake_input": "authorized resume"}),
@@ -410,13 +417,19 @@ pub async fn wake_delivery_crash_matrix(
     assert_eq!(
         authority_wakes[0].authority,
         crate::QueuedWorkAuthority::new("originating-session").with_elevation(
-            crate::session_graph::frame_node_id("originating-session", "elevated-agent-frame-a",)
+            crate::session_graph::frame_node_id(
+                &SessionId::from("originating-session"),
+                "elevated-agent-frame-a",
+            )
         )
     );
     assert_eq!(
         authority_wakes[1].authority,
         crate::QueuedWorkAuthority::new("originating-session").with_elevation(
-            crate::session_graph::frame_node_id("originating-session", "elevated-agent-frame-b",)
+            crate::session_graph::frame_node_id(
+                &SessionId::from("originating-session"),
+                "elevated-agent-frame-b",
+            )
         )
     );
     let authority_report = crate::WakeDeliveryDriver::drive_pending_once_with_delivery_policy(
@@ -431,14 +444,17 @@ pub async fn wake_delivery_crash_matrix(
     .expect("deliver authority wake through production driver");
     assert_eq!(authority_report.enqueued, 2);
     let authority_rows = authority_target
-        .list_queued_work(authority_target_session_id)
+        .list_queued_work(&SessionId::from(authority_target_session_id))
         .await
         .expect("list delivered authority wake");
     assert_eq!(authority_rows.len(), 2);
     assert_eq!(
         authority_rows[0].authority,
         crate::QueuedWorkAuthority::new("originating-session").with_elevation(
-            crate::session_graph::frame_node_id("originating-session", "elevated-agent-frame-a",)
+            crate::session_graph::frame_node_id(
+                &SessionId::from("originating-session"),
+                "elevated-agent-frame-a",
+            )
         )
     );
     assert_eq!(
@@ -459,7 +475,7 @@ pub async fn wake_delivery_crash_matrix(
     );
     let authority_lease = authority_target
         .try_claim_session_execution_lease(
-            authority_target_session_id,
+            &SessionId::from(authority_target_session_id),
             &authority_owner,
             "wake-authority-target-executor",
             60_000,
@@ -470,7 +486,7 @@ pub async fn wake_delivery_crash_matrix(
         .expect("authority target lease is free");
     let authority_claim = authority_target
         .claim_ready_queued_work(
-            authority_target_session_id,
+            &SessionId::from(authority_target_session_id),
             &authority_lease.fence(),
             &authority_owner,
             crate::QueuedWorkClaimBoundary::Idle,
@@ -488,8 +504,11 @@ pub async fn wake_delivery_crash_matrix(
     assert_eq!(
         authority_claim.batches[0].authority.elevation.as_deref(),
         Some(
-            crate::session_graph::frame_node_id("originating-session", "elevated-agent-frame-a",)
-                .as_str()
+            crate::session_graph::frame_node_id(
+                &SessionId::from("originating-session"),
+                "elevated-agent-frame-a",
+            )
+            .as_str()
         )
     );
     authority_target
@@ -498,7 +517,7 @@ pub async fn wake_delivery_crash_matrix(
         .expect("release authority target execution lease");
     let after = serde_json::to_vec(
         &registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("read producer after delivery")
             .expect("producer remains"),
@@ -514,7 +533,7 @@ pub async fn wake_delivery_crash_matrix(
         Arc::clone(&registry),
         Arc::clone(&clock),
         Arc::clone(&target),
-        target_session_id,
+        &SessionId::from(target_session_id),
     )
     .await;
     replay_and_same_millisecond_allocation_are_deterministic(
@@ -527,7 +546,7 @@ pub async fn wake_delivery_crash_matrix(
         Arc::clone(&registry),
         Arc::clone(&clock),
         Arc::clone(&target),
-        target_session_id,
+        &SessionId::from(target_session_id),
     )
     .await;
     rewound_fresh_delivery_is_discarded_without_blocking(
@@ -535,7 +554,7 @@ pub async fn wake_delivery_crash_matrix(
         Arc::clone(&registry),
         Arc::clone(&clock),
         Arc::clone(&target),
-        target_session_id,
+        &SessionId::from(target_session_id),
     )
     .await;
     missing_target_is_deferred_and_rearmed(
@@ -550,7 +569,7 @@ pub async fn wake_delivery_crash_matrix(
         .register_process(
             process_registry::registration(coalesced_process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
         )
         .await
         .expect("register coalesced wake producer");
@@ -559,7 +578,7 @@ pub async fn wake_delivery_crash_matrix(
         coalesced_sequences.push(
             registry
                 .append_event(
-                    coalesced_process_id,
+                    &ProcessId::from(coalesced_process_id),
                     crate::ProcessEventAppendRequest::new(
                         "producer.wake",
                         serde_json::json!({"wake_input": wake_input}),
@@ -608,7 +627,7 @@ pub async fn wake_delivery_crash_matrix(
         );
     }
     let coalesced_receiver_rows = target
-        .list_queued_work(target_session_id)
+        .list_queued_work(&SessionId::from(target_session_id))
         .await
         .expect("list coalesced receiver rows")
         .into_iter()
@@ -630,13 +649,13 @@ pub async fn wake_delivery_crash_matrix(
         .register_process(
             process_registry::registration(retarget_process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
         )
         .await
         .expect("register retarget-race producer");
     let retarget_wake = registry
         .append_event(
-            retarget_process_id,
+            &ProcessId::from(retarget_process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "retarget-race"}),
@@ -653,7 +672,10 @@ pub async fn wake_delivery_crash_matrix(
     assert_eq!(claimed.len(), 1);
     assert_eq!(claimed[0].state(), crate::WakeDeliveryState::Enqueuing);
     registry
-        .retarget_subscription(retarget_process_id, Some("wake-new-target"))
+        .retarget_subscription(
+            &ProcessId::from(retarget_process_id),
+            Some("wake-new-target"),
+        )
         .await
         .expect("retarget while delivery is in flight");
     target
@@ -687,7 +709,7 @@ pub async fn wake_delivery_crash_matrix(
         crate::process_wake_source_key(&retarget_wake.process_id, retarget_wake.sequence);
     assert_eq!(
         target
-            .list_queued_work(target_session_id)
+            .list_queued_work(&SessionId::from(target_session_id))
             .await
             .expect("read original target after retarget race")
             .iter()
@@ -702,13 +724,13 @@ pub async fn wake_delivery_crash_matrix(
         .register_process(
             process_registry::registration(crash_process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
         )
         .await
         .expect("register stale-claim producer");
     let crash_wake = registry
         .append_event(
-            crash_process_id,
+            &ProcessId::from(crash_process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "recover-stale-claim"}),
@@ -757,7 +779,10 @@ pub async fn wake_delivery_crash_matrix(
         }
     );
     registry
-        .retarget_subscription(crash_process_id, Some("wake-after-reclaim-target"))
+        .retarget_subscription(
+            &ProcessId::from(crash_process_id),
+            Some("wake-after-reclaim-target"),
+        )
         .await
         .expect("retarget while recovered claim is in flight");
     target
@@ -777,7 +802,7 @@ pub async fn wake_delivery_crash_matrix(
     let crash_source = crate::process_wake_source_key(&crash_wake.process_id, crash_wake.sequence);
     assert_eq!(
         target
-            .list_queued_work(target_session_id)
+            .list_queued_work(&SessionId::from(target_session_id))
             .await
             .expect("read queue after stale-claim recovery")
             .iter()
@@ -792,13 +817,13 @@ pub async fn wake_delivery_crash_matrix(
         .register_process(
             process_registry::registration(settled_crash_process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
         )
         .await
         .expect("register live-row retry producer");
     let settled_crash_wake = registry
         .append_event(
-            settled_crash_process_id,
+            &ProcessId::from(settled_crash_process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "live receiver row before sender mark"}),
@@ -850,13 +875,13 @@ pub async fn wake_delivery_crash_matrix(
         .register_process(
             process_registry::registration(deferred_process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
         )
         .await
         .expect("register deferred-first-attempt producer");
     registry
         .append_event(
-            deferred_process_id,
+            &ProcessId::from(deferred_process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "deferred before receiver call"}),
@@ -899,7 +924,7 @@ pub async fn wake_delivery_crash_matrix(
     assert_eq!(deferred_report.discarded_sequence_rewound, 0);
     assert!(
         target
-            .list_queued_work(target_session_id)
+            .list_queued_work(&SessionId::from(target_session_id))
             .await
             .expect("list receiver rows after deferred fresh retry")
             .iter()
@@ -917,7 +942,7 @@ pub async fn wake_delivery_crash_matrix(
         .register_process(
             process_registry::registration(blocked_process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
         )
         .await
         .expect("register blocked-group producer");
@@ -926,7 +951,7 @@ pub async fn wake_delivery_crash_matrix(
         blocked_wakes.push(
             registry
                 .append_event(
-                    blocked_process_id,
+                    &ProcessId::from(blocked_process_id),
                     crate::ProcessEventAppendRequest::new(
                         "producer.wake",
                         serde_json::json!({"wake_input": wake_input}),
@@ -1009,7 +1034,7 @@ pub async fn wake_delivery_crash_matrix(
     assert_process_terminal_wait(
         &registry,
         &process_work,
-        "wake-crash-terminal",
+        &ProcessId::from("wake-crash-terminal"),
         terminal_wait_witness,
     )
     .await;
@@ -1027,13 +1052,13 @@ async fn missing_target_is_deferred_and_rearmed(
         .register_process(
             process_registry::registration(process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
         )
         .await
         .expect("register missing-target wake sender");
     let wake = registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "retry missing target"}),
@@ -1075,7 +1100,7 @@ async fn missing_target_is_deferred_and_rearmed(
     factory
         .create_store(&crate::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: target_session_id.to_string(),
+            session_id: SessionId::from(target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         })
@@ -1120,7 +1145,7 @@ async fn sender_floor_lifetime(
     let target = factory
         .create_store(&crate::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: target_session_id.to_string(),
+            session_id: SessionId::from(target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         })
@@ -1131,13 +1156,13 @@ async fn sender_floor_lifetime(
         .register_process(
             process_registry::registration(process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
         )
         .await
         .expect("register sender-floor lifetime process");
     let wake = registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "floor lifetime"}),
@@ -1162,19 +1187,30 @@ async fn sender_floor_lifetime(
         "unexpected delivery report: {report:?}"
     );
     let batch = target
-        .list_queued_work(target_session_id)
+        .list_queued_work(&SessionId::from(target_session_id))
         .await
         .expect("list sender-floor lifetime receiver row")
         .into_iter()
         .find(|batch| {
             batch.source_key.as_deref()
-                == Some(crate::process_wake_source_key(process_id, wake.sequence).as_str())
+                == Some(
+                    crate::process_wake_source_key(&ProcessId::from(process_id), wake.sequence)
+                        .as_str(),
+                )
         })
         .expect("sender-floor lifetime wake reached receiver");
-    settle_queued_batch(&target, target_session_id, &batch.batch_id).await;
-    complete_and_prune(&production_registry, process_id).await;
+    settle_queued_batch(
+        &target,
+        &SessionId::from(target_session_id),
+        &batch.batch_id,
+    )
+    .await;
+    complete_and_prune(&production_registry, &ProcessId::from(process_id)).await;
     let retained_floor = registry
-        .wake_allocation_floor_for_testing(target_session_id, process_id)
+        .wake_allocation_floor_for_testing(
+            &SessionId::from(target_session_id),
+            &ProcessId::from(process_id),
+        )
         .await
         .expect("read sender floor after process prune")
         .expect("process prune must retain sender floor");
@@ -1185,23 +1221,29 @@ async fn sender_floor_lifetime(
         .expect("compact process tombstone");
     assert_eq!(
         registry
-            .wake_allocation_floor_for_testing(target_session_id, process_id)
+            .wake_allocation_floor_for_testing(
+                &SessionId::from(target_session_id),
+                &ProcessId::from(process_id)
+            )
             .await
             .expect("read sender floor after tombstone compaction"),
         Some(retained_floor),
         "tombstone compaction must retain sender floor"
     );
     registry
-        .delete_session_process_state(target_session_id)
+        .delete_session_process_state(&SessionId::from(target_session_id))
         .await
         .expect("delete target-owned process state");
     factory
-        .delete_session(target_session_id)
+        .delete_session(&SessionId::from(target_session_id))
         .await
         .expect("delete sender-floor lifetime target");
     assert_eq!(
         registry
-            .wake_allocation_floor_for_testing(target_session_id, process_id)
+            .wake_allocation_floor_for_testing(
+                &SessionId::from(target_session_id),
+                &ProcessId::from(process_id)
+            )
             .await
             .expect("read sender floor after target deletion"),
         None,
@@ -1211,7 +1253,7 @@ async fn sender_floor_lifetime(
 
 async fn settle_queued_batch(
     target: &Arc<dyn crate::RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
     batch_id: &str,
 ) {
     let owner = crate::LeaseOwnerIdentity::opaque(
@@ -1248,7 +1290,7 @@ async fn settle_queued_batch(
         .map_or(0, |read| read.head_revision);
     let (commit, _) = crate::RuntimeCommit::persisted_state_for_test(
         &crate::RuntimeSessionState {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             head_revision,
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
@@ -1271,7 +1313,7 @@ async fn settle_queued_batch(
         .expect("settle target wake batch");
 }
 
-async fn complete_and_prune(registry: &Arc<dyn crate::ProcessRegistry>, process_id: &str) {
+async fn complete_and_prune(registry: &Arc<dyn crate::ProcessRegistry>, process_id: &ProcessId) {
     registry
         .complete_process(
             process_id,
@@ -1298,14 +1340,14 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
     registry: Arc<dyn crate::ProcessRegistry>,
     clock: Arc<TestClock>,
     target: Arc<dyn crate::RuntimePersistence>,
-    target_session_id: &str,
+    target_session_id: &SessionId,
 ) {
     clock.set(1_800_000_010_000);
     let process_id = "wake-floor-prune-reregister";
     let registration = || {
         process_registry::registration(process_id)
             .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-            .with_wake_session_id(Some(target_session_id.to_string()))
+            .with_wake_session_id(Some(SessionId::from(target_session_id.to_string())))
     };
     registry
         .register_process(registration())
@@ -1313,7 +1355,7 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
         .expect("register old sender-floor wake producer");
     let old_wake = registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "old incarnation"}),
@@ -1351,11 +1393,14 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
         .into_iter()
         .find(|batch| {
             batch.source_key.as_deref()
-                == Some(crate::process_wake_source_key(process_id, old_wake.sequence).as_str())
+                == Some(
+                    crate::process_wake_source_key(&ProcessId::from(process_id), old_wake.sequence)
+                        .as_str(),
+                )
         })
         .expect("old sender-floor wake reached receiver");
     settle_queued_batch(&target, target_session_id, &old_batch.batch_id).await;
-    complete_and_prune(&registry, process_id).await;
+    complete_and_prune(&registry, &ProcessId::from(process_id)).await;
     assert!(
         registry
             .list_wake_deliveries(None)
@@ -1372,7 +1417,7 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
         .expect("re-register wake producer under frozen clock");
     let new_wake = registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "new incarnation"}),
@@ -1428,7 +1473,13 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
             .iter()
             .any(|batch| {
                 batch.source_key.as_deref()
-                    == Some(crate::process_wake_source_key(process_id, new_wake.sequence).as_str())
+                    == Some(
+                        crate::process_wake_source_key(
+                            &ProcessId::from(process_id),
+                            new_wake.sequence,
+                        )
+                        .as_str(),
+                    )
             }),
         "new-incarnation wake must survive sender and receiver dedupe doors"
     );
@@ -1451,12 +1502,12 @@ async fn replay_and_same_millisecond_allocation_are_deterministic(
         crate::ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 1}))
             .with_replay_key("wake-floor-replay:stable");
     let first = registry
-        .append_event(process_id, request.clone())
+        .append_event(&ProcessId::from(process_id), request.clone())
         .await
         .expect("append replay-allocation event");
     let same_ms = registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.progress",
                 serde_json::json!({"value": 2}),
@@ -1468,7 +1519,7 @@ async fn replay_and_same_millisecond_allocation_are_deterministic(
     assert_eq!(same_ms.event.sequence, first.event.sequence + 1);
     clock.advance(10_000);
     let replay = registry
-        .append_event(process_id, request)
+        .append_event(&ProcessId::from(process_id), request)
         .await
         .expect("replay event after clock advance");
     assert_eq!(
@@ -1483,7 +1534,7 @@ async fn mixed_era_floor_and_ordering(
     registry: Arc<dyn crate::ProcessRegistry>,
     clock: Arc<TestClock>,
     target: Arc<dyn crate::RuntimePersistence>,
-    target_session_id: &str,
+    target_session_id: &SessionId,
 ) {
     let process_id = "wake-floor-mixed-era";
     let mut dense_batches = Vec::new();
@@ -1491,8 +1542,8 @@ async fn mixed_era_floor_and_ordering(
         let wake = crate::ProcessWakeDelivery {
             version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             wake_id: format!("wake:mixed-era:{sequence}"),
-            target_session_id: target_session_id.to_string(),
-            process_id: process_id.to_string(),
+            target_session_id: SessionId::from(target_session_id.to_string()),
+            process_id: ProcessId::from(process_id.to_string()),
             process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
             sequence,
             event_type: "producer.wake".to_string(),
@@ -1520,8 +1571,8 @@ async fn mixed_era_floor_and_ordering(
             crate::ProcessWakeDelivery {
                 version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
                 wake_id: "wake:mixed-era:3".to_string(),
-                target_session_id: target_session_id.to_string(),
-                process_id: process_id.to_string(),
+                target_session_id: SessionId::from(target_session_id.to_string()),
+                process_id: ProcessId::from(process_id.to_string()),
                 process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
                 sequence: 3,
                 event_type: "producer.wake".to_string(),
@@ -1555,8 +1606,8 @@ async fn mixed_era_floor_and_ordering(
             crate::ProcessWakeDelivery {
                 version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
                 wake_id: "wake:mixed-era:2".to_string(),
-                target_session_id: target_session_id.to_string(),
-                process_id: process_id.to_string(),
+                target_session_id: SessionId::from(target_session_id.to_string()),
+                process_id: ProcessId::from(process_id.to_string()),
                 process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
                 sequence: 2,
                 event_type: "producer.wake".to_string(),
@@ -1584,14 +1635,14 @@ async fn mixed_era_floor_and_ordering(
                     process_registry::plain_event_type("producer.progress"),
                     process_registry::wake_event_type("producer.wake"),
                 ])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
         )
         .await
         .expect("register mixed-era process");
     for value in 1..=3 {
         registry
             .append_event(
-                process_id,
+                &ProcessId::from(process_id),
                 crate::ProcessEventAppendRequest::new(
                     "producer.progress",
                     serde_json::json!({"value": value}),
@@ -1602,7 +1653,7 @@ async fn mixed_era_floor_and_ordering(
     }
     let sender_floor_wake = registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "timestamp era"}),
@@ -1645,14 +1696,14 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
     registry: Arc<dyn crate::ProcessRegistry>,
     clock: Arc<TestClock>,
     target: Arc<dyn crate::RuntimePersistence>,
-    target_session_id: &str,
+    target_session_id: &SessionId,
 ) {
     let process_id = "wake-store-rewind-poison";
     let old = crate::ProcessWakeDelivery {
         version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "wake:store-rewind:10".to_string(),
-        target_session_id: target_session_id.to_string(),
-        process_id: process_id.to_string(),
+        target_session_id: SessionId::from(target_session_id.to_string()),
+        process_id: ProcessId::from(process_id.to_string()),
         process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
         sequence: 10,
         event_type: "producer.wake".to_string(),
@@ -1679,13 +1730,13 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
                     process_registry::plain_event_type("producer.progress"),
                     process_registry::wake_event_type("producer.wake"),
                 ])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
         )
         .await
         .expect("register restored sender process");
     let poison = registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "rewound fresh wake"}),
@@ -1699,7 +1750,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
     for value in 2..=10 {
         registry
             .append_event(
-                process_id,
+                &ProcessId::from(process_id),
                 crate::ProcessEventAppendRequest::new(
                     "producer.progress",
                     serde_json::json!({"value": value}),
@@ -1710,7 +1761,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
     }
     let healthy = registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "healthy wake after rewind"}),
@@ -1764,7 +1815,13 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
             .iter()
             .any(|batch| {
                 batch.source_key.as_deref()
-                    == Some(crate::process_wake_source_key(process_id, healthy.sequence).as_str())
+                    == Some(
+                        crate::process_wake_source_key(
+                            &ProcessId::from(process_id),
+                            healthy.sequence,
+                        )
+                        .as_str(),
+                    )
             })
     );
 }
@@ -1777,7 +1834,7 @@ async fn target_gone_is_a_typed_discard(
     let target_session_id = "wake-target-gone-session";
     let target_request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: target_session_id.to_string(),
+        session_id: SessionId::from(target_session_id.to_string()),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
@@ -1786,7 +1843,7 @@ async fn target_gone_is_a_typed_discard(
         .await
         .expect("create target-gone wake target");
     factory
-        .delete_session(target_session_id)
+        .delete_session(&SessionId::from(target_session_id))
         .await
         .expect("tombstone target-gone wake target");
 
@@ -1795,13 +1852,13 @@ async fn target_gone_is_a_typed_discard(
         .register_process(
             process_registry::registration(process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
         )
         .await
         .expect("register target-gone wake sender");
     let wake = registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "target-gone"}),
@@ -1849,13 +1906,13 @@ async fn expired_is_a_typed_discard(
         .register_process(
             process_registry::registration(process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
         )
         .await
         .expect("register expiring wake sender");
     let wake = registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "expired"}),

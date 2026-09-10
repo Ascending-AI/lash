@@ -32,7 +32,7 @@ fn completed_continue_as_effect_fixture() -> (RuntimeEffectEnvelope, RuntimeEffe
                 output: lash_core::ToolCallOutput::success(serde_json::json!({ "ok": true }))
                     .with_control(lash_core::ToolControl::SwitchAgentFrame {
                         frame_key: lash_core::FrameKey::from_call_site(
-                            "cutover-session",
+                            &SessionId::from("cutover-session"),
                             "cutover-frame",
                             call_id,
                         ),

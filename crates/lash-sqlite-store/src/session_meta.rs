@@ -1,4 +1,6 @@
 use super::*;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
 pub(crate) use lash_core::store_backend_support::SessionMetaWrite;
@@ -10,18 +12,18 @@ pub(crate) fn stored_relation_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<StoredRelation> {
     Ok(StoredRelation {
-        session_id: row.get(0)?,
+        session_id: SessionId::from(row.get::<_, String>(0)?),
         relation_kind: row.get(1)?,
-        parent_session_id: row.get(2)?,
+        parent_session_id: row.get::<_, Option<String>>(2)?.map(SessionId::from),
         cause: CausalColumns {
             kind: row.get(3)?,
-            session_id: row.get(4)?,
+            session_id: row.get::<_, Option<String>>(4)?.map(SessionId::from),
             turn_id: row
                 .get::<_, Option<String>>(5)?
                 .map(lash_core::TurnId::from),
             effect_id: row.get(6)?,
             call_id: row.get(7)?,
-            process_id: row.get(8)?,
+            process_id: row.get::<_, Option<String>>(8)?.map(ProcessId::from),
             process_event_sequence: row.get(9)?,
             occurrence_id: row.get(10)?,
             subscription_id: row.get(11)?,
@@ -29,7 +31,7 @@ pub(crate) fn stored_relation_from_row(
             subscription_revision: row.get(13)?,
             node_id: row.get(14)?,
         },
-        source_session_id: row.get(15)?,
+        source_session_id: row.get::<_, Option<String>>(15)?.map(SessionId::from),
         source_node_id: row.get(16)?,
         observer_inheritance_kind: row.get(17)?,
         pending_observer_intents: Vec::new(),
@@ -128,22 +130,22 @@ pub(crate) fn write_session_meta(
         .execute(
             sql,
             params![
-                stored.session_id,
+                stored.session_id.as_str(),
                 stored.relation_kind,
-                stored.parent_session_id,
+                stored.parent_session_id.as_deref(),
                 stored.cause.kind,
-                stored.cause.session_id,
+                stored.cause.session_id.as_deref(),
                 stored.cause.turn_id.as_ref().map(TurnId::as_str),
                 stored.cause.effect_id,
                 stored.cause.call_id,
-                stored.cause.process_id,
+                stored.cause.process_id.as_deref(),
                 stored.cause.process_event_sequence,
                 stored.cause.occurrence_id,
                 stored.cause.subscription_id,
                 stored.cause.subscription_incarnation,
                 stored.cause.subscription_revision,
                 stored.cause.node_id,
-                stored.source_session_id,
+                stored.source_session_id.as_deref(),
                 stored.source_node_id,
                 stored.observer_inheritance_kind,
                 crate::clamp_epoch_ms(created_at_ms),
@@ -160,7 +162,7 @@ pub(crate) fn write_session_meta(
     ] {
         conn.execute(
             &format!("DELETE FROM {table} WHERE session_id = ?1"),
-            params![stored.session_id],
+            params![stored.session_id.as_str()],
         )
         .map_err(sqlite_error)?;
     }
@@ -170,13 +172,13 @@ pub(crate) fn write_session_meta(
              (session_id, process_index, process_id, process_incarnation, attribution)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
-                stored.session_id,
+                stored.session_id.as_str(),
                 SessionMetaCodec::write_index(
                     SESSION_META_CODEC,
                     process_index,
                     "observer-intent process"
                 )?,
-                intent.process_id,
+                intent.process_id.as_str(),
                 intent.process_incarnation,
                 intent.attribution,
             ],
@@ -194,7 +196,7 @@ pub(crate) fn write_session_meta(
 
 pub(crate) fn load_session_meta(
     conn: &Connection,
-    selected_session_id: Option<&str>,
+    selected_session_id: Option<&SessionId>,
 ) -> Result<Option<SessionMeta>, StoreError> {
     let tx = conn.unchecked_transaction().map_err(sqlite_error)?;
     let session_id = if let Some(session_id) = selected_session_id {
@@ -235,7 +237,7 @@ pub(crate) fn load_session_meta(
         )
         .map_err(sqlite_error)?;
     let observer_rows = stmt
-        .query_map(params![stored.session_id], |row| {
+        .query_map(params![stored.session_id.as_str()], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
@@ -261,7 +263,7 @@ pub(crate) fn load_session_meta(
         }
         stored.pending_observer_intents.push(
             lash_core::store_backend_support::StoredObserverIntent {
-                process_id,
+                process_id: ProcessId::from(process_id),
                 process_incarnation,
                 attribution,
             },
@@ -280,8 +282,8 @@ pub(crate) fn load_session_meta(
 fn write_process_list(
     conn: &Connection,
     table: &str,
-    session_id: &str,
-    process_ids: &[String],
+    session_id: &SessionId,
+    process_ids: &[ProcessId],
 ) -> Result<(), StoreError> {
     for (process_index, process_id) in process_ids.iter().enumerate() {
         conn.execute(
@@ -289,9 +291,9 @@ fn write_process_list(
                 "INSERT INTO {table} (session_id, process_index, process_id) VALUES (?1, ?2, ?3)"
             ),
             params![
-                session_id,
+                session_id.as_str(),
                 SessionMetaCodec::write_index(SESSION_META_CODEC, process_index, "process")?,
-                process_id
+                process_id.as_str()
             ],
         )
         .map_err(sqlite_error)?;
@@ -302,8 +304,8 @@ fn write_process_list(
 fn read_process_list(
     conn: &Connection,
     table: &str,
-    session_id: &str,
-) -> Result<Vec<String>, StoreError> {
+    session_id: &SessionId,
+) -> Result<Vec<ProcessId>, StoreError> {
     let mut stmt = conn
         .prepare(&format!(
             "SELECT process_index, process_id FROM {table}
@@ -311,7 +313,7 @@ fn read_process_list(
         ))
         .map_err(sqlite_error)?;
     let rows = stmt
-        .query_map(params![session_id], |row| {
+        .query_map(params![session_id.as_str()], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })
         .map_err(sqlite_error)?
@@ -327,7 +329,7 @@ fn read_process_list(
                 "process indexes are not contiguous",
             ));
         }
-        process_ids.push(process_id);
+        process_ids.push(ProcessId::from(process_id));
     }
     Ok(process_ids)
 }

@@ -1,10 +1,11 @@
 use super::*;
+use lash_sansio::ProcessId;
 
 #[async_trait::async_trait]
 impl ProcessContinuationStore for PostgresProcessRegistry {
     async fn put_segment_handover(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         handover: PersistedSegmentHandover,
     ) -> Result<(), PluginError> {
         let encoded = serde_json::to_string(&handover).map_err(process_decode_error)?;
@@ -16,7 +17,7 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
              SET handover_json = EXCLUDED.handover_json
              WHERE lash_process_segment_handovers.handover_json = EXCLUDED.handover_json",
         )
-        .bind(process_id)
+        .bind(process_id.as_str())
         .bind(handover.segment_ordinal as i64)
         .bind(encoded)
         .execute(&mut *tx)
@@ -32,7 +33,7 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
             "DELETE FROM lash_process_segment_handovers
              WHERE process_id = $1 AND segment_ordinal < $2 - 1",
         )
-        .bind(process_id)
+        .bind(process_id.as_str())
         .bind(handover.segment_ordinal as i64)
         .execute(&mut *tx)
         .await
@@ -43,14 +44,14 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
 
     async fn get_segment_handover(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         segment_ordinal: u64,
     ) -> Result<Option<PersistedSegmentHandover>, PluginError> {
         let json: Option<String> = sqlx::query_scalar(
             "SELECT handover_json FROM lash_process_segment_handovers
              WHERE process_id = $1 AND segment_ordinal = $2",
         )
-        .bind(process_id)
+        .bind(process_id.as_str())
         .bind(segment_ordinal as i64)
         .fetch_optional(&self.pool)
         .await
@@ -61,13 +62,13 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
 
     async fn latest_segment_handover(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<PersistedSegmentHandover>, PluginError> {
         let json: Option<String> = sqlx::query_scalar(
             "SELECT handover_json FROM lash_process_segment_handovers
              WHERE process_id = $1 ORDER BY segment_ordinal DESC LIMIT 1",
         )
-        .bind(process_id)
+        .bind(process_id.as_str())
         .fetch_optional(&self.pool)
         .await
         .map_err(plugin_sqlx_error)?;
@@ -75,9 +76,9 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
             .transpose()
     }
 
-    async fn delete_segment_handovers(&self, process_id: &str) -> Result<(), PluginError> {
+    async fn delete_segment_handovers(&self, process_id: &ProcessId) -> Result<(), PluginError> {
         sqlx::query("DELETE FROM lash_process_segment_handovers WHERE process_id = $1")
-            .bind(process_id)
+            .bind(process_id.as_str())
             .execute(&self.pool)
             .await
             .map_err(plugin_sqlx_error)?;

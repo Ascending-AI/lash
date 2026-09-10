@@ -1,8 +1,9 @@
 use crate::*;
+use lash_sansio::ProcessId;
 
 pub(super) async fn prune_process_rows_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_ids: &[String],
+    process_ids: &[ProcessId],
     pruned_at_ms: i64,
 ) -> Result<ProcessPruneReport, PluginError> {
     // Candidate process rows remain locked from selection through this
@@ -61,7 +62,12 @@ pub(super) async fn prune_process_rows_tx(
          SELECT (SELECT value FROM event_count),
                 (SELECT count(*) FROM deleted_processes)",
     )
-    .bind(process_ids)
+    .bind(
+        &process_ids
+            .iter()
+            .map(ProcessId::as_str)
+            .collect::<Vec<_>>(),
+    )
     .bind(pruned_at_ms)
     .fetch_one(&mut **tx)
     .await
@@ -99,7 +105,7 @@ mod tests {
         let storage = PostgresStorage::connect(&database_url)
             .await
             .expect("connect prune rollback storage");
-        let process_id = format!("prune-rollback:{}", uuid::Uuid::new_v4());
+        let process_id = ProcessId::from(format!("prune-rollback:{}", uuid::Uuid::new_v4()));
         let ghost_id = format!("prune-rollback-ghost:{}", uuid::Uuid::new_v4());
         let registry = storage.process_registry();
         registry
@@ -138,9 +144,13 @@ mod tests {
         .expect("read process clock before divergent prune");
 
         let mut tx = storage.pool().begin().await.expect("begin divergent prune");
-        let error = prune_process_rows_tx(&mut tx, &[process_id.clone(), ghost_id], 123_456)
-            .await
-            .expect_err("candidate/tombstone divergence must abort the prune transaction");
+        let error = prune_process_rows_tx(
+            &mut tx,
+            &[process_id.clone(), ProcessId::from(ghost_id)],
+            123_456,
+        )
+        .await
+        .expect_err("candidate/tombstone divergence must abort the prune transaction");
         assert!(
             error.to_string().contains("candidate/tombstone divergence"),
             "unexpected divergence error: {error}"
@@ -169,7 +179,7 @@ mod tests {
         let tombstone_count: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM lash_process_tombstones WHERE process_id = $1",
         )
-        .bind(&process_id)
+        .bind(&process_id.as_str())
         .fetch_one(storage.pool())
         .await
         .expect("count tombstones after divergent prune");
@@ -189,7 +199,7 @@ mod tests {
         );
 
         sqlx::query("DELETE FROM lash_processes WHERE process_id = $1")
-            .bind(&process_id)
+            .bind(&process_id.as_str())
             .execute(storage.pool())
             .await
             .expect("clean rollback process");

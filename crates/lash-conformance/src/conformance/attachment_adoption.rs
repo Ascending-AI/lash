@@ -10,7 +10,7 @@ use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
 fn state(id: &str) -> RuntimeSessionState {
-    let req = session_store_request(id, "probe", SessionRelation::Root);
+    let req = session_store_request(&SessionId::from(id), "probe", SessionRelation::Root);
     let mut state = RuntimeSessionState {
         session_id: id.into(),
         ..RuntimeSessionState::new(req.policy)
@@ -35,9 +35,13 @@ fn with_image(state: &mut RuntimeSessionState, reference: &AttachmentRef) {
     });
 }
 async fn create(f: &Arc<dyn SessionStoreFactory>, id: &str) -> Arc<dyn RuntimePersistence> {
-    f.create_store(&session_store_request(id, "probe", SessionRelation::Root))
-        .await
-        .unwrap()
+    f.create_store(&session_store_request(
+        &SessionId::from(id),
+        "probe",
+        SessionRelation::Root,
+    ))
+    .await
+    .unwrap()
 }
 async fn put(
     store: Arc<dyn RuntimePersistence>,
@@ -85,7 +89,7 @@ pub async fn cross_owner_attachment_adoption_conformance(f: Arc<dyn SessionStore
     with_image(&mut live_state, &r);
     let mut c = RuntimeCommit::persisted_state_for_test(&live_state, &[]);
     c.committed_attachment_ids = vec![r.id.clone()];
-    f.delete_session(&owner_id).await.unwrap();
+    f.delete_session(&SessionId::from(owner_id)).await.unwrap();
     let (commit, reclaim) = tokio::join!(
         live.commit_runtime_state(c),
         f.live_attachment_refs(u64::MAX)
@@ -104,7 +108,9 @@ pub async fn cross_owner_attachment_adoption_conformance(f: Arc<dyn SessionStore
         reader.get(&r.id).await.is_ok(),
         "committed live graph references missing bytes; GC removed {removed}"
     );
-    f.delete_session(&receiver_id).await.unwrap();
+    f.delete_session(&SessionId::from(receiver_id))
+        .await
+        .unwrap();
     assert_eq!(
         sweep(&f, &bytes).await,
         1,
@@ -118,7 +124,7 @@ pub async fn cross_owner_attachment_adoption_conformance(f: Arc<dyn SessionStore
 }
 
 async fn adoption_fence_and_rollback(f: Arc<dyn SessionStoreFactory>) {
-    let session_id = format!("fenced-adoption-{}", uuid::Uuid::new_v4());
+    let session_id = SessionId::from(format!("fenced-adoption-{}", uuid::Uuid::new_v4()));
     let bytes: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
     let store = create(&f, &session_id).await;
     let mut st = state(&session_id);

@@ -1,9 +1,10 @@
 use crate::*;
+use lash_sansio::ProcessId;
 
 pub(super) async fn filter_unregistered_process_ids(
     pool: &sqlx::PgPool,
-    process_ids: &[String],
-) -> Result<Vec<String>, PluginError> {
+    process_ids: &[ProcessId],
+) -> Result<Vec<ProcessId>, PluginError> {
     if process_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -20,16 +21,22 @@ pub(super) async fn filter_unregistered_process_ids(
          )
          ORDER BY candidate.ordinal ASC",
     )
-    .bind(process_ids)
+    .bind(
+        &process_ids
+            .iter()
+            .map(ProcessId::as_str)
+            .collect::<Vec<_>>(),
+    )
     .fetch_all(pool)
     .await
+    .map(|ids: Vec<String>| ids.into_iter().map(ProcessId::from).collect())
     .map_err(plugin_sqlx_error)
 }
 
 pub(super) async fn filter_tombstoned_process_ids(
     pool: &sqlx::PgPool,
-    process_ids: &[String],
-) -> Result<Vec<String>, PluginError> {
+    process_ids: &[ProcessId],
+) -> Result<Vec<ProcessId>, PluginError> {
     if process_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -46,8 +53,14 @@ pub(super) async fn filter_tombstoned_process_ids(
          )
          ORDER BY candidate.ordinal ASC",
     )
-    .bind(process_ids)
+    .bind(
+        &process_ids
+            .iter()
+            .map(ProcessId::as_str)
+            .collect::<Vec<_>>(),
+    )
     .fetch_all(pool)
     .await
+    .map(|ids: Vec<String>| ids.into_iter().map(ProcessId::from).collect())
     .map_err(plugin_sqlx_error)
 }

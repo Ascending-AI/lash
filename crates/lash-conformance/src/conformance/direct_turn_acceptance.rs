@@ -11,6 +11,7 @@
 //! `list_pending_turn_inputs`, `list_turn_input_applications`, and
 //! `cancel_pending_turn_input`.
 
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
@@ -56,9 +57,9 @@ async fn acceptance_runtime(
     host.control.effect_host = Arc::clone(effect_host);
     host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
     let mut policy = crate::testing::mock_session_policy();
-    policy.session_id = Some(SESSION_ID.to_string());
+    policy.session_id = Some(SessionId::from(SESSION_ID.to_string()));
     let state = crate::RuntimeSessionState {
-        session_id: SESSION_ID.to_string(),
+        session_id: SessionId::from(SESSION_ID.to_string()),
         policy: policy.clone(),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
@@ -124,7 +125,7 @@ pub async fn direct_turn_accepts_before_driving(
                     // The turn is executing right now, so whatever this reads
                     // was already true before the drive began.
                     let pending = store
-                        .list_pending_turn_inputs(SESSION_ID)
+                        .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
                         .await
                         .expect("read the session's pending inputs mid-drive");
                     *probe.lock().expect("probe lock") = Some(pending.len());
@@ -177,7 +178,7 @@ pub async fn direct_turn_accepts_before_driving(
     assert_eq!(acceptance.ingress, crate::TurnInputIngress::next_turn());
 
     let application = store
-        .list_turn_input_applications(SESSION_ID)
+        .list_turn_input_applications(&SessionId::from(SESSION_ID))
         .await
         .expect("read settled applications")
         .into_iter()
@@ -186,7 +187,7 @@ pub async fn direct_turn_accepts_before_driving(
     assert_eq!(application.turn_id.as_str(), turn_id);
     assert!(
         store
-            .list_pending_turn_inputs(SESSION_ID)
+            .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
             .await
             .expect("read pending inputs")
             .iter()
@@ -255,7 +256,7 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
         .expect_err("the first driver must abort before committing");
     assert_eq!(failure.code, crate::RuntimeErrorCode::PluginPrepareTurn);
     let orphaned = store
-        .list_pending_turn_inputs(SESSION_ID)
+        .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
         .await
         .expect("read pending inputs after the abort");
     let input_id = orphaned
@@ -303,7 +304,7 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
     );
 
     let application = store
-        .list_turn_input_applications(SESSION_ID)
+        .list_turn_input_applications(&SessionId::from(SESSION_ID))
         .await
         .expect("read settled applications after recovery")
         .into_iter()
@@ -316,7 +317,7 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
     );
     assert!(
         store
-            .list_pending_turn_inputs(SESSION_ID)
+            .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
             .await
             .expect("read pending inputs after recovery")
             .iter()
@@ -405,7 +406,7 @@ pub async fn busy_execution_lane_refuses_direct_turn_before_acceptance(
     let successor_lease =
         crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
             store.as_ref(),
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &successor_owner,
             &format!("{prefix}-successor-executor"),
             60_000,
@@ -461,7 +462,7 @@ pub async fn busy_execution_lane_refuses_direct_turn_before_acceptance(
         "lane refusal must precede provider execution"
     );
     let pending = store
-        .list_pending_turn_inputs(SESSION_ID)
+        .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
         .await
         .expect("read pending inputs after lane refusal");
     assert!(
@@ -520,7 +521,7 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let mut state = crate::RuntimeSessionState {
-        session_id: SESSION_ID.to_string(),
+        session_id: SessionId::from(SESSION_ID.to_string()),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let accept = async |text: String| {
@@ -536,7 +537,7 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
         .expect("accept a turn input for the unclaimed-settlement law")
     };
     let unclaimed = |input: &crate::PendingTurnInput| crate::TurnInputCompletion {
-        session_id: SESSION_ID.to_string(),
+        session_id: SessionId::from(SESSION_ID.to_string()),
         claim: None,
         data: crate::TurnInputCompletionData {
             input_ids: vec![input.input_id.clone()],
@@ -553,7 +554,7 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
     .await;
     let lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        SESSION_ID,
+        &SessionId::from(SESSION_ID),
         &crate::testing::runtime_lease_owner(),
         "unclaimed-settlement-law-executor",
         60_000,
@@ -564,7 +565,7 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
     .expect("the session execution lease is free in this law");
     let claim = crate::store::TurnInputStore::claim_next_turn_inputs(
         store.as_ref(),
-        SESSION_ID,
+        &SessionId::from(SESSION_ID),
         &lease.fence(),
         &crate::testing::runtime_lease_owner(),
         10,
@@ -611,7 +612,7 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
     .await;
     crate::store::TurnInputStore::cancel_pending_turn_input(
         store.as_ref(),
-        SESSION_ID,
+        &SessionId::from(SESSION_ID),
         &cancelled.input_id,
     )
     .await
@@ -644,11 +645,14 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
     .await
     .expect("an unclaimed settlement of an open row commits");
     assert!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), SESSION_ID)
-            .await
-            .expect("list pending inputs after the unclaimed settlement")
-            .iter()
-            .all(|pending| pending.input_id != open.input_id),
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from(SESSION_ID)
+        )
+        .await
+        .expect("list pending inputs after the unclaimed settlement")
+        .iter()
+        .all(|pending| pending.input_id != open.input_id),
         "an unclaimed settlement retires the row it named"
     );
 

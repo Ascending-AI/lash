@@ -1,12 +1,13 @@
 use super::process_registry::registration;
 use super::*;
+use lash_sansio::ProcessId;
 use pretty_assertions::assert_eq;
 
 pub(super) async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn ProcessRegistry>) {
     async fn filtered_ids(
         registry: &Arc<dyn ProcessRegistry>,
         filter: ProcessListFilter,
-    ) -> Vec<String> {
+    ) -> Vec<ProcessId> {
         registry
             .list_processes(&filter)
             .await
@@ -38,7 +39,7 @@ pub(super) async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn 
 
     let scope = SessionScope::for_agent_frame(
         "filter-session",
-        crate::session_graph::frame_node_id("filter-session", "filter-frame"),
+        crate::session_graph::frame_node_id(&SessionId::from("filter-session"), "filter-frame"),
     );
     let originator_id = scope.session_id.clone();
     let target = registry
@@ -96,7 +97,7 @@ pub(super) async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn 
             &registry,
             ProcessListFilter {
                 status: ProcessStatusFilter::Any,
-                originator_id: Some(originator_id),
+                originator_id: Some(originator_id.to_string()),
                 ..ProcessListFilter::default()
             }
         )
@@ -239,14 +240,14 @@ pub(super) async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
         registry
             .register_process_with_observers(
                 registration(process_id).with_identity(ProcessIdentity::new(KIND)),
-                &["recent-filter-observer".to_string()],
+                &[SessionId::from("recent-filter-observer".to_string())],
             )
             .await
             .expect("register recent-retired fixture");
     }
     registry
         .complete_process(
-            "recent-filter-old",
+            &ProcessId::from("recent-filter-old"),
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!({"age": "old"}),
             )),
@@ -258,13 +259,13 @@ pub(super) async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
     registry
         .register_process_with_observers(
             registration("recent-filter-fresh").with_identity(ProcessIdentity::new(KIND)),
-            &["recent-filter-observer".to_string()],
+            &[SessionId::from("recent-filter-observer".to_string())],
         )
         .await
         .expect("register fresh terminal process");
     let fresh = registry
         .complete_process(
-            "recent-filter-fresh",
+            &ProcessId::from("recent-filter-fresh"),
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!({"age": "fresh"}),
             )),
@@ -296,7 +297,7 @@ pub(super) async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
             ..Default::default()
         };
         let observed = registry
-            .list_observed_by("recent-filter-observer", &filter)
+            .list_observed_by(&SessionId::from("recent-filter-observer"), &filter)
             .await
             .expect("bounded observer list");
         assert_eq!(
@@ -308,7 +309,7 @@ pub(super) async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
         );
         assert!(
             registry
-                .list_observed_by("unrelated-observer", &filter)
+                .list_observed_by(&SessionId::from("unrelated-observer"), &filter)
                 .await
                 .expect("unrelated observer list")
                 .is_empty()
@@ -316,7 +317,7 @@ pub(super) async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
     }
     let all_observed = registry
         .list_observed_by(
-            "recent-filter-observer",
+            &SessionId::from("recent-filter-observer"),
             &ProcessListFilter {
                 status: ProcessStatusFilter::Any,
                 ..Default::default()
@@ -331,7 +332,7 @@ pub(super) async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
     );
     let filtered = registry
         .list_observed_by(
-            "recent-filter-observer",
+            &SessionId::from("recent-filter-observer"),
             &ProcessListFilter {
                 status: ProcessStatusFilter::Any,
                 identity_kind: Some("unrelated-kind".to_string()),

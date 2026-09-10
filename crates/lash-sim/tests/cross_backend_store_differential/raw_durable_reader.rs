@@ -184,7 +184,7 @@ impl RawDurableReader {
                      FROM lash_sessions
                      WHERE session_id = $1",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .fetch_optional(pool)
                 .await
                 .expect("read Postgres durable head");
@@ -205,7 +205,7 @@ impl RawDurableReader {
                      WHERE session_id = $1 AND tombstoned = FALSE
                      ORDER BY generation ASC",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .fetch_all(pool)
                 .await
                 .expect("read Postgres durable nodes");
@@ -229,7 +229,7 @@ impl RawDurableReader {
                      WHERE session_id = $1
                      ORDER BY turn_id ASC",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .fetch_all(pool)
                 .await
                 .expect("read Postgres turn-commit receipts");
@@ -251,7 +251,7 @@ impl RawDurableReader {
                      WHERE session_id = $1
                      ORDER BY attachment_id ASC",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .fetch_all(pool)
                 .await
                 .expect("read Postgres attachment manifest");
@@ -282,7 +282,7 @@ impl RawDurableReader {
                      WHERE source_session_id = $1
                      ORDER BY node_id ASC",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .fetch_all(pool)
                 .await
                 .expect("read Postgres node anchors");
@@ -292,7 +292,7 @@ impl RawDurableReader {
                         |(node_id, checkpoint_ref, source_session_id)| NodeAnchorObservation {
                             node_id,
                             checkpoint_ref: BlobRef(checkpoint_ref),
-                            source_session_id,
+                            source_session_id: SessionId::from(source_session_id),
                         },
                     )
                     .collect();
@@ -304,7 +304,7 @@ impl RawDurableReader {
                          WHERE session_id = $1
                          ORDER BY seq ASC",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .fetch_all(pool)
                 .await
                 .expect("read Postgres usage deltas");
@@ -338,7 +338,7 @@ impl RawDurableReader {
                      FROM lash_session_execution_leases
                      WHERE session_id = $1",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .fetch_all(pool)
                 .await
                 .expect("read Postgres session-execution lease");
@@ -379,7 +379,7 @@ impl RawDurableReader {
                      WHERE session_id = $1
                      ORDER BY enqueue_seq ASC",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .fetch_all(pool)
                 .await
                 .expect("read Postgres pending turn inputs");
@@ -418,7 +418,7 @@ impl RawDurableReader {
                      WHERE session_id = $1
                      ORDER BY enqueue_seq ASC",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .fetch_all(pool)
                 .await
                 .expect("read Postgres queued-work batches");
@@ -430,7 +430,7 @@ impl RawDurableReader {
                      WHERE batch.session_id = $1
                      ORDER BY batch.enqueue_seq ASC, item.item_index ASC",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .fetch_all(pool)
                 .await
                 .expect("read Postgres queued-work items");

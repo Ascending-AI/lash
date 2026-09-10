@@ -12,13 +12,18 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
     let store = storage.session_store("refusal-probe");
     let owner = LeaseOwnerIdentity::opaque("probe", "probe-incarnation");
     let lease = store
-        .try_claim_session_execution_lease("refusal-probe", &owner, "probe-executor", 60_000)
+        .try_claim_session_execution_lease(
+            &SessionId::from("refusal-probe"),
+            &owner,
+            "probe-executor",
+            60_000,
+        )
         .await
         .unwrap()
         .acquired()
         .unwrap();
     let mut tx = storage.pool().begin().await.unwrap();
-    ensure_session_execution_lease_tx(&mut tx, "refusal-probe", &lease.fence())
+    ensure_session_execution_lease_tx(&mut tx, &SessionId::from("refusal-probe"), &lease.fence())
         .await
         .unwrap();
     let rows = sqlx::query(&postgres_queued_work_claim_candidates_sql(
@@ -39,7 +44,10 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
             "refusal-probe",
             DeliveryPolicy::EarliestSafeBoundary,
             lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                lash_core::facade_support::frame_node_id("refusal-probe", "frame"),
+                lash_core::facade_support::frame_node_id(
+                    &SessionId::from("refusal-probe"),
+                    "frame",
+                ),
                 "new arrival",
                 None,
             ),
@@ -48,7 +56,7 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
         .unwrap();
     let diagnostic = postgres_refusal_for_empty_scan(
         &mut tx,
-        "refusal-probe",
+        &SessionId::from("refusal-probe"),
         lease.fencing_token,
         QueuedWorkClaimBoundary::Idle,
         &lash_core::testing::queued_work_claim_policy(10),
@@ -72,7 +80,7 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
     assert!(
         store
             .claim_ready_queued_work(
-                "refusal-probe",
+                &SessionId::from("refusal-probe"),
                 &lease.fence(),
                 &owner,
                 QueuedWorkClaimBoundary::Idle,

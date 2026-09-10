@@ -1,10 +1,11 @@
 use super::*;
+use lash_sansio::ProcessId;
 
 /// Drive one process into `waiting` and assert the retention contract: live rows
 /// are listed as non-terminal and are never prune candidates.
 async fn assert_waiting_process_is_live_not_prunable(
     registry: &dyn ProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
 ) {
     registry
         .register_process(lash_core::ProcessRegistration::new(
@@ -98,7 +99,7 @@ async fn sqlite_waiting_processes_are_live_not_prunable() {
     )
     .await
     .expect("open waiting retention registry");
-    let process_id = format!("waiting-retention:{}", uuid::Uuid::new_v4());
+    let process_id = ProcessId::from(format!("waiting-retention:{}", uuid::Uuid::new_v4()));
     assert_waiting_process_is_live_not_prunable(&registry, &process_id).await;
 }
 

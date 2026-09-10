@@ -46,6 +46,7 @@
 //! reported as [`ScanCoverage::NotScanned`] rather than an error, so a caller
 //! reads "nobody looked" instead of mistaking silence for "nothing here".
 
+use lash_sansio::{ProcessId, SessionId};
 use std::path::Path;
 
 use lash_core::{
@@ -290,14 +291,14 @@ fn read_parked_segments(
         Ok(DurableItem {
             surface: DurableSurface::ParkedSegment,
             cursor: row.get(0)?,
-            process_id: Some(row.get(1)?),
+            process_id: Some(ProcessId::from(row.get::<_, String>(1)?)),
             // The handover text is handed over as-is. Its shape is a durable
             // format the manifest describes, not something this walk parses.
             payload: DurablePayload::Json(row.get(2)?),
             status: Some(row.get(3)?),
             // Nullable in the schema: a process that has not been bound to a
             // wake session yet still has a parked continuation worth listing.
-            session_id: row.get(4)?,
+            session_id: row.get::<_, Option<String>>(4)?.map(SessionId::from),
             // Carried because a segment handover's stored program identity can
             // only be judged by recomputing it from the inputs the process
             // record holds, and only the registry holds those.
@@ -333,8 +334,8 @@ fn read_pending_wakes(
             // `delivery_id` is already the primary key and already text, so it
             // is its own keyset cursor: nothing to pad, nothing to compose.
             cursor: row.get(0)?,
-            process_id: Some(row.get(1)?),
-            session_id: Some(row.get(2)?),
+            process_id: Some(ProcessId::from(row.get::<_, String>(1)?)),
+            session_id: Some(SessionId::from(row.get::<_, String>(2)?)),
             // The delivery's own state word, reported verbatim so an operator
             // reads the store's vocabulary rather than a translation of it.
             status: Some(row.get(3)?),
@@ -371,7 +372,7 @@ fn read_session_checkpoints(
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
     let mut statement = conn.prepare(SESSION_CHECKPOINTS_SQL)?;
     let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
-        let session_id: String = row.get(0)?;
+        let session_id = SessionId::from(row.get::<_, String>(0)?);
         let checkpoint_ref: String = row.get(1)?;
         let stored: Option<Vec<u8>> = row.get(2)?;
         let payload = match stored {
@@ -385,7 +386,7 @@ fn read_session_checkpoints(
         };
         Ok(DurableItem {
             surface: DurableSurface::SessionCheckpoint,
-            cursor: session_id.clone(),
+            cursor: session_id.clone().to_string(),
             process_id: None,
             session_id: Some(session_id),
             status: None,
@@ -463,7 +464,7 @@ fn read_session_execution_state(
             surface: DurableSurface::SessionExecutionState,
             cursor: session_id.clone(),
             process_id: None,
-            session_id: Some(session_id),
+            session_id: Some(SessionId::from(session_id)),
             status: None,
             owner_record: None,
             payload,

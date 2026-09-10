@@ -1,3 +1,4 @@
+use lash_sansio::ProcessId;
 use std::num::NonZeroUsize;
 
 use lash_core::{PluginError, ProcessParentEndPlan};
@@ -29,7 +30,7 @@ pub(super) async fn list(
         .map(|(process_id, actions_json)| {
             let actions = serde_json::from_str(&actions_json).map_err(process_decode_error)?;
             Ok(ProcessParentEndPlan {
-                process_id,
+                process_id: ProcessId::from(process_id),
                 actions,
             })
         })
@@ -38,16 +39,16 @@ pub(super) async fn list(
 
 pub(super) async fn get(
     registry: &SqliteProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<Option<ProcessParentEndPlan>, PluginError> {
-    let process_id = process_id.to_string();
+    let process_id = ProcessId::from(process_id.to_string());
     let query_process_id = process_id.clone();
     let row = registry
         .conn
         .call(move |conn| {
             conn.query_row(
                 "SELECT actions_json FROM process_parent_end_plans WHERE process_id = ?1",
-                params![query_process_id],
+                params![query_process_id.as_str()],
                 |row| row.get::<_, String>(0),
             )
             .optional()
@@ -66,16 +67,16 @@ pub(super) async fn get(
 
 pub(super) async fn complete(
     registry: &SqliteProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<(), PluginError> {
-    let process_id = process_id.to_string();
+    let process_id = ProcessId::from(process_id.to_string());
     registry
         .conn
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
                 tx.execute(
                     "DELETE FROM process_parent_end_plans WHERE process_id = ?1",
-                    params![process_id],
+                    params![process_id.as_str()],
                 )
                 .map_err(process_sqlite_error)?;
                 Ok(())

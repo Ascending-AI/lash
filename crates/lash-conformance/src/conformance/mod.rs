@@ -22,6 +22,7 @@
 //! entry points can be called from backend-specific `#[tokio::test]` functions.
 
 pub use lash_core::testing::coordinate_tool_provider_with_services;
+use lash_sansio::SessionId;
 
 mod attachment_adoption;
 pub use attachment_adoption::cross_owner_attachment_adoption_conformance;
@@ -206,7 +207,7 @@ mod tests {
 
         async fn load_whole_graph(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
         ) -> Result<crate::SessionGraph, crate::StoreError> {
             self.runtime.load_whole_graph_for_testing()
         }
@@ -239,7 +240,7 @@ mod tests {
     async fn in_memory_leafless_session_ignores_populated_sibling_catalog() {
         let factory = crate::InMemorySessionStoreFactory::new();
         let leafless_request = session_store_request(
-            "leafless-sibling",
+            &SessionId::from("leafless-sibling"),
             "graph-integrity-model",
             crate::SessionRelation::Root,
         );
@@ -268,7 +269,7 @@ mod tests {
             .expect("seed leafless sibling head");
 
         let populated_request = session_store_request(
-            "populated-sibling",
+            &SessionId::from("populated-sibling"),
             "graph-integrity-model",
             crate::SessionRelation::Root,
         );
@@ -731,7 +732,7 @@ mod tests {
     impl SessionExecutionLeaseRenewalZeroRowInjector
         for InMemorySessionExecutionLeaseRenewalZeroRowInjector
     {
-        async fn arm(&self, session_id: &str) {
+        async fn arm(&self, session_id: &SessionId) {
             assert_eq!(session_id, "zero-row-session-lease-renewal");
             self.store
                 .force_next_session_execution_lease_renewal_zero_match();

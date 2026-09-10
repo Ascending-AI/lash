@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 /// FIG-653: graph retention is a prune precondition for committed attachment roots.
 /// Owner-level retention deliberately includes suffix attachments: the manifest
 /// has no node edge. Forks and pins keep these rows until their final prefix dies.
@@ -187,7 +188,7 @@ impl AttachmentManifest for PostgresSessionStore {
                     owner_id = EXCLUDED.owner_id",
             )
             .bind(intent.attachment_id.as_str())
-            .bind(intent.session_id)
+            .bind(intent.session_id.as_str())
             .bind(intent.canonical_uri)
             .bind(intent.intent_at_epoch_ms as i64)
             .bind(intent.owner_kind.map(AttachmentOwnerKind::as_str))
@@ -277,7 +278,7 @@ impl AttachmentManifest for PostgresSessionStore {
                     owner_id = EXCLUDED.owner_id",
             )
             .bind(intent.attachment_id.as_str())
-            .bind(intent.session_id)
+            .bind(intent.session_id.as_str())
             .bind(intent.canonical_uri)
             .bind(intent.intent_at_epoch_ms as i64)
             .bind(intent.owner_kind.map(AttachmentOwnerKind::as_str))
@@ -292,12 +293,12 @@ impl AttachmentManifest for PostgresSessionStore {
 
     fn commit_refs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_ids: &[AttachmentId],
     ) -> Result<(), StoreError> {
         let pool = self.pool.clone();
         let now = self.clock.timestamp_ms();
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let attachment_ids = attachment_ids.to_vec();
         block_on_detached(async move {
             let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
@@ -333,7 +334,7 @@ impl AttachmentManifest for PostgresSessionStore {
                             "attachment_id",
                             row.get(0),
                         )?,
-                        session_id: row.get(1),
+                        session_id: SessionId::from(row.get::<String, _>(1)),
                         canonical_uri: row.get(2),
                         intent_at_epoch_ms: u64_from_sql(
                             "AttachmentManifest",
@@ -365,9 +366,13 @@ impl AttachmentManifest for PostgresSessionStore {
         })
     }
 
-    fn forget(&self, session_id: &str, attachment_id: &AttachmentId) -> Result<(), StoreError> {
+    fn forget(
+        &self,
+        session_id: &SessionId,
+        attachment_id: &AttachmentId,
+    ) -> Result<(), StoreError> {
         let pool = self.pool.clone();
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let attachment_id = attachment_id.to_string();
         block_on_detached(async move {
             sqlx::query(
@@ -379,7 +384,7 @@ impl AttachmentManifest for PostgresSessionStore {
                                    AND node.tombstoned = FALSE
                              ))",
             )
-            .bind(session_id)
+            .bind(session_id.as_str())
             .bind(attachment_id)
             .execute(&pool)
             .await

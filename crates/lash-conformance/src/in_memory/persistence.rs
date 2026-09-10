@@ -1,4 +1,5 @@
 use lash_core::runtime::InMemorySessionStore as RecordingStore;
+use lash_sansio::SessionId;
 use std::sync::Arc;
 async fn recording_store_satisfies_runtime_persistence_conformance(
     law: crate::conformance::RuntimePersistenceLaw,
@@ -8,7 +9,7 @@ async fn recording_store_satisfies_runtime_persistence_conformance(
     crate::conformance::runtime_persistence(
         move |session_id| {
             let store = RecordingStore::with_clock(store_clock.clone());
-            store.bind_session_for_conformance(session_id);
+            store.bind_session_for_conformance(&SessionId::from(session_id));
             std::sync::Arc::new(store) as std::sync::Arc<dyn crate::RuntimePersistence>
         },
         crate::conformance::RuntimePersistenceLeaseTiming::controlled({
@@ -126,7 +127,7 @@ async fn checkpoint_claim_probe_avoids_quiescent_write_transactions() {
     let store = Arc::new(RecordingStore::default());
     crate::conformance::checkpoint_claim_probe_transaction_counts(
         Arc::clone(&store) as Arc<dyn crate::RuntimePersistence>,
-        "root",
+        &SessionId::from("root"),
         || store.checkpoint_claim_counts(),
     )
     .await;

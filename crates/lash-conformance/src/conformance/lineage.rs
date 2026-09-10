@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
@@ -10,7 +11,7 @@ pub use lash_core::testing::lineage::*;
 
 async fn assert_plan_matches_edge_walk(
     injector: &Arc<dyn LineageConformanceInjector>,
-    session_id: &str,
+    session_id: &SessionId,
 ) {
     let mut expected = std::collections::BTreeMap::new();
     for fact in injector.edge_path(session_id).await {
@@ -33,7 +34,7 @@ async fn assert_plan_matches_edge_walk(
 async fn assert_readability_equals_edge_reachability(
     store: &Arc<dyn RuntimePersistence>,
     injector: &Arc<dyn LineageConformanceInjector>,
-    session_id: &str,
+    session_id: &SessionId,
 ) {
     let edge_path = injector.edge_path(session_id).await;
     let edge_ids = edge_path
@@ -66,10 +67,10 @@ async fn assert_readability_equals_edge_reachability(
     }
 }
 
-fn request(session_id: &str) -> SessionStoreCreateRequest {
+fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     }
@@ -77,7 +78,7 @@ fn request(session_id: &str) -> SessionStoreCreateRequest {
 
 async fn seed(
     factory: &Arc<dyn SessionStoreFactory>,
-    session_id: &str,
+    session_id: &SessionId,
     plugins: usize,
 ) -> (Arc<dyn RuntimePersistence>, Vec<String>) {
     let store = factory
@@ -85,7 +86,7 @@ async fn seed(
         .await
         .expect("create lineage conformance store");
     let mut state = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
@@ -116,13 +117,13 @@ async fn seed(
 
 async fn fork(
     factory: &Arc<dyn SessionStoreFactory>,
-    session_id: &str,
+    session_id: &SessionId,
     node_id: &str,
 ) -> Arc<dyn RuntimePersistence> {
     factory
         .fork_at(&ForkSessionRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             node_id: node_id.to_string(),
             relation: SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -166,16 +167,16 @@ async fn append(store: &Arc<dyn RuntimePersistence>, count: usize) -> Vec<String
 pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
     let factory = handles.factory;
     let injector = handles.injector;
-    let (source, mut source_nodes) = seed(&factory, "lineage-a", 1).await;
+    let (source, mut source_nodes) = seed(&factory, &SessionId::from("lineage-a"), 1).await;
     factory
         .pin(&source_nodes[1])
         .await
         .expect("retain the first fork ceiling");
     source_nodes = append(&source, 1).await;
-    let branch = fork(&factory, "lineage-b", &source_nodes[1]).await;
+    let branch = fork(&factory, &SessionId::from("lineage-b"), &source_nodes[1]).await;
     let branch_nodes = append(&branch, 2).await;
     let leaf = branch_nodes.last().expect("branch leaf").clone();
-    let deep = fork(&factory, "lineage-c", &leaf).await;
+    let deep = fork(&factory, &SessionId::from("lineage-c"), &leaf).await;
 
     assert!(
         deep.load_node(&source_nodes[0])
@@ -238,7 +239,8 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
             .is_none()
     );
 
-    let (_unrelated, unrelated_nodes) = seed(&factory, "lineage-unrelated", 0).await;
+    let (_unrelated, unrelated_nodes) =
+        seed(&factory, &SessionId::from("lineage-unrelated"), 0).await;
     assert!(
         deep.load_node(&unrelated_nodes[0])
             .await
@@ -246,7 +248,7 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
             .is_none()
     );
 
-    let zero = fork(&factory, "lineage-zero", &source_nodes[1]).await;
+    let zero = fork(&factory, &SessionId::from("lineage-zero"), &source_nodes[1]).await;
     let zero_leaf = zero
         .load_session()
         .await
@@ -256,10 +258,10 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
         .leaf_node_id
         .clone()
         .expect("zero-node fork leaf");
-    let _collapsed = fork(&factory, "lineage-collapsed", &zero_leaf).await;
+    let _collapsed = fork(&factory, &SessionId::from("lineage-collapsed"), &zero_leaf).await;
     assert_eq!(
         injector
-            .lineage_ancestors("lineage-collapsed")
+            .lineage_ancestors(&SessionId::from("lineage-collapsed"))
             .await
             .into_iter()
             .map(|ancestor| ancestor.ancestor_session_id)
@@ -270,7 +272,7 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
 
     let mut prior_leaf = source_nodes[1].clone();
     for depth in 0..12 {
-        let session_id = format!("lineage-chain-{depth}");
+        let session_id = SessionId::from(format!("lineage-chain-{depth}"));
         let chained = fork(&factory, &session_id, &prior_leaf).await;
         prior_leaf = append(&chained, 1)
             .await
@@ -279,7 +281,7 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
             .clone();
     }
     let terminal = factory
-        .open_existing_store(&request("lineage-chain-11"))
+        .open_existing_store(&request(&SessionId::from("lineage-chain-11")))
         .await
         .expect("open terminal fork chain")
         .expect("terminal fork chain exists");
@@ -292,7 +294,7 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
     );
 
     for session_id in ["lineage-a", "lineage-b", "lineage-c"] {
-        let facts = injector.edge_path(session_id).await;
+        let facts = injector.edge_path(&SessionId::from(session_id)).await;
         for (index, fact) in facts.iter().enumerate() {
             assert_eq!(fact.generation, index as u64);
             assert_eq!(
@@ -311,7 +313,7 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
     }
 
     injector
-        .force_lineage("lineage-c", &unrelated_nodes[0])
+        .force_lineage(&SessionId::from("lineage-c"), &unrelated_nodes[0])
         .await;
     assert!(
         deep.load_node(&unrelated_nodes[0])
@@ -321,9 +323,18 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
         "lineage-readable must imply edge-reachable"
     );
 
-    let (_carrier_root, carrier_root_nodes) =
-        seed(&factory, "lineage-deleted-carrier-root", 0).await;
-    let deleted_owner = fork(&factory, "lineage-deleted-owner", &carrier_root_nodes[0]).await;
+    let (_carrier_root, carrier_root_nodes) = seed(
+        &factory,
+        &SessionId::from("lineage-deleted-carrier-root"),
+        0,
+    )
+    .await;
+    let deleted_owner = fork(
+        &factory,
+        &SessionId::from("lineage-deleted-owner"),
+        &carrier_root_nodes[0],
+    )
+    .await;
     let deleted_owner_nodes = append(&deleted_owner, 1).await;
     let deleted_owner_node = deleted_owner_nodes
         .last()
@@ -333,13 +344,23 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
         .pin(&deleted_owner_node)
         .await
         .expect("pin deleted-owner fork point");
-    let surviving_carrier = fork(&factory, "lineage-surviving-carrier", &deleted_owner_node).await;
+    let surviving_carrier = fork(
+        &factory,
+        &SessionId::from("lineage-surviving-carrier"),
+        &deleted_owner_node,
+    )
+    .await;
     append(&surviving_carrier, 1).await;
     factory
-        .delete_session("lineage-deleted-owner")
+        .delete_session(&SessionId::from("lineage-deleted-owner"))
         .await
         .expect("delete node-owning intermediate session");
-    let recovered = fork(&factory, "lineage-after-owner-delete", &deleted_owner_node).await;
+    let recovered = fork(
+        &factory,
+        &SessionId::from("lineage-after-owner-delete"),
+        &deleted_owner_node,
+    )
+    .await;
     let recovered_graph = recovered
         .load_session()
         .await
@@ -369,10 +390,10 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
 pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
     let factory = handles.factory;
     let injector = handles.injector;
-    let (_root, root_nodes) = seed(&factory, "no-carrier-root", 1).await;
+    let (_root, root_nodes) = seed(&factory, &SessionId::from("no-carrier-root"), 1).await;
     let owner = fork(
         &factory,
-        "no-carrier-owner",
+        &SessionId::from("no-carrier-owner"),
         root_nodes.last().expect("no-carrier root leaf"),
     )
     .await;
@@ -383,11 +404,16 @@ pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
         .await
         .expect("pin no-carrier owner leaf");
     factory
-        .delete_session("no-carrier-owner")
+        .delete_session(&SessionId::from("no-carrier-owner"))
         .await
         .expect("delete no-carrier owner");
 
-    let recovered = fork(&factory, "no-carrier-recovered", &owner_leaf).await;
+    let recovered = fork(
+        &factory,
+        &SessionId::from("no-carrier-recovered"),
+        &owner_leaf,
+    )
+    .await;
     let graph = recovered
         .load_session()
         .await
@@ -407,9 +433,13 @@ pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
         ],
         "a deleted owner needs no live head or descendant lineage carrier"
     );
-    assert_plan_matches_edge_walk(&injector, "no-carrier-recovered").await;
-    assert_readability_equals_edge_reachability(&recovered, &injector, "no-carrier-recovered")
-        .await;
+    assert_plan_matches_edge_walk(&injector, &SessionId::from("no-carrier-recovered")).await;
+    assert_readability_equals_edge_reachability(
+        &recovered,
+        &injector,
+        &SessionId::from("no-carrier-recovered"),
+    )
+    .await;
 }
 
 /// Independently reconstruct the expected per-owner maxima from raw edges and
@@ -417,10 +447,10 @@ pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
 pub async fn fork_plan_matches_edge_walk_law(handles: LineageConformanceHandles) {
     let factory = handles.factory;
     let injector = handles.injector;
-    let (_root, root_nodes) = seed(&factory, "plan-ground-truth-root", 1).await;
+    let (_root, root_nodes) = seed(&factory, &SessionId::from("plan-ground-truth-root"), 1).await;
     let middle = fork(
         &factory,
-        "plan-ground-truth-middle",
+        &SessionId::from("plan-ground-truth-middle"),
         root_nodes.last().expect("ground-truth root leaf"),
     )
     .await;
@@ -429,6 +459,6 @@ pub async fn fork_plan_matches_edge_walk_law(handles: LineageConformanceHandles)
         .last()
         .expect("ground-truth middle leaf")
         .clone();
-    let _deep = fork(&factory, "plan-ground-truth-deep", &leaf).await;
-    assert_plan_matches_edge_walk(&injector, "plan-ground-truth-deep").await;
+    let _deep = fork(&factory, &SessionId::from("plan-ground-truth-deep"), &leaf).await;
+    assert_plan_matches_edge_walk(&injector, &SessionId::from("plan-ground-truth-deep")).await;
 }

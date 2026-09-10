@@ -1,5 +1,6 @@
 //! SQLite's answer to the store maintenance outcome contract (ADR 0067 §4).
 
+use lash_sansio::SessionId;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -16,7 +17,7 @@ struct SqliteCorruptRootedManifest {
 
 #[async_trait::async_trait]
 impl lash_conformance::StoreMaintenanceFaultInjector for SqliteCorruptRootedManifest {
-    async fn break_gc_scope(&self, _session_id: &str) {
+    async fn break_gc_scope(&self, _session_id: &SessionId) {
         let catalog = self
             .catalog
             .lock_recover()

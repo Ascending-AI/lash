@@ -1,5 +1,6 @@
 //! Cross-backend conformance for substrate-scoped process continuations.
 
+use lash_sansio::ProcessId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
@@ -35,23 +36,23 @@ pub async fn process_continuation_store(
     };
 
     store
-        .put_segment_handover(process_id, handover.clone())
+        .put_segment_handover(&ProcessId::from(process_id), handover.clone())
         .await
         .expect("persist handover");
     store
-        .put_segment_handover(process_id, handover.clone())
+        .put_segment_handover(&ProcessId::from(process_id), handover.clone())
         .await
         .expect("identical replay is idempotent");
     assert_eq!(
         store
-            .get_segment_handover(process_id, 1)
+            .get_segment_handover(&ProcessId::from(process_id), 1)
             .await
             .expect("read handover"),
         Some(handover.clone())
     );
     assert_eq!(
         store
-            .latest_segment_handover(process_id)
+            .latest_segment_handover(&ProcessId::from(process_id))
             .await
             .expect("read latest handover"),
         Some(handover.clone())
@@ -61,19 +62,19 @@ pub async fn process_continuation_store(
     conflicting.handover.engine_state.push(4);
     assert!(
         store
-            .put_segment_handover(process_id, conflicting)
+            .put_segment_handover(&ProcessId::from(process_id), conflicting)
             .await
             .is_err(),
         "same ordinal with different bytes must conflict"
     );
 
     store
-        .delete_segment_handovers(process_id)
+        .delete_segment_handovers(&ProcessId::from(process_id))
         .await
         .expect("delete handovers");
     assert!(
         store
-            .latest_segment_handover(process_id)
+            .latest_segment_handover(&ProcessId::from(process_id))
             .await
             .expect("read after delete")
             .is_none()
@@ -100,12 +101,12 @@ pub async fn process_continuation_store(
         },
     };
     store
-        .put_segment_handover(pruned_process_id, pruned_handover)
+        .put_segment_handover(&ProcessId::from(pruned_process_id), pruned_handover)
         .await
         .expect("persist handover until terminal retention pruning");
     let terminal = registry
         .complete_process(
-            pruned_process_id,
+            &ProcessId::from(pruned_process_id),
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -123,7 +124,7 @@ pub async fn process_continuation_store(
         .expect("prune terminal continuation owner");
     assert!(
         store
-            .latest_segment_handover(pruned_process_id)
+            .latest_segment_handover(&ProcessId::from(pruned_process_id))
             .await
             .expect("read handover after terminal prune")
             .is_none(),

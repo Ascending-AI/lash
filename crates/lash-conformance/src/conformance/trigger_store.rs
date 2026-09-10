@@ -2,6 +2,7 @@
 //! subscriptions and atomic occurrence reservation.
 
 use super::*;
+use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 
 pub async fn trigger_store<F>(make: F)
@@ -91,7 +92,7 @@ pub async fn legacy_ownerless_trigger_receipt_is_retained_law(
         .await;
 
     let report = store
-        .reconcile_trigger_retention(&[], &[SESSION_ID.to_string()])
+        .reconcile_trigger_retention(&[], &[SessionId::from(SESSION_ID.to_string())])
         .await
         .expect("reconcile around an ownerless legacy receipt");
     assert_eq!(
@@ -221,7 +222,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     const ACTIVE_KEY: &str = "dead-owner-retention-active-key";
     const REGISTER_OPERATION: &str = "dead-owner-retention-register";
     let draft = sample_draft(
-        SESSION,
+        &SessionId::from(SESSION),
         KEY,
         "dead-owner-retention-source",
         "dead-owner-retention-worker",
@@ -229,7 +230,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     let created = mutate(
         &store,
         REGISTER_OPERATION,
-        register_command(SESSION, draft.clone()),
+        register_command(&SessionId::from(SESSION), draft.clone()),
     )
     .await;
     let ingress = store
@@ -243,13 +244,13 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     let deleted = mutate(
         &store,
         "dead-owner-retention-delete",
-        revision_command(SESSION, KEY, created.revision, "delete"),
+        revision_command(&SessionId::from(SESSION), KEY, created.revision, "delete"),
     )
     .await;
     assert!(deleted.record_snapshot.tombstoned);
 
     let blocked = store
-        .reconcile_trigger_retention(&[], &[SESSION.to_string()])
+        .reconcile_trigger_retention(&[], &[SessionId::from(SESSION.to_string())])
         .await
         .expect("reconcile while dead owner's delivery remains");
     assert_eq!(
@@ -261,7 +262,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
         mutate(
             &store,
             REGISTER_OPERATION,
-            register_command(SESSION, draft.clone()),
+            register_command(&SessionId::from(SESSION), draft.clone()),
         )
         .await,
         created,
@@ -271,7 +272,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
         execute(
             &store,
             "dead-owner-retention-register-probe",
-            register_command(SESSION, draft.clone()),
+            register_command(&SessionId::from(SESSION), draft.clone()),
         )
         .await
         .is_err(),
@@ -281,9 +282,9 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
         &store,
         "dead-owner-retention-active-register",
         register_command(
-            SESSION,
+            &SessionId::from(SESSION),
             sample_draft(
-                SESSION,
+                &SessionId::from(SESSION),
                 ACTIVE_KEY,
                 "dead-owner-retention-active-source",
                 "dead-owner-retention-active-worker",
@@ -300,7 +301,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
                 subscription_id: reservation.subscription.subscription_id.clone(),
                 process_id: reservation.process_id.clone(),
             }],
-            &[SESSION.to_string()],
+            &[SessionId::from(SESSION.to_string())],
         )
         .await
         .expect("reconcile dead owner's final delivery");
@@ -317,7 +318,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     let recreated = mutate(
         &store,
         REGISTER_OPERATION,
-        register_command(SESSION, replacement),
+        register_command(&SessionId::from(SESSION), replacement),
     )
     .await;
     assert_eq!(recreated.revision, 1, "the old receipt was reclaimed");
@@ -326,7 +327,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
 async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::TriggerStore>) {
     let owner_scope = crate::TriggerOwnerScope::host("retention-host").unwrap();
     let mut draft = sample_draft(
-        "unused-host-session",
+        &SessionId::from("unused-host-session"),
         "host-retention-key",
         "host-retention-source",
         "host-retention-worker",
@@ -363,7 +364,10 @@ async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::T
         .expect("ingest host-law zero-match occurrence");
 
     let report = store
-        .reconcile_trigger_retention(&[], &["unrelated-deleted-session".to_string()])
+        .reconcile_trigger_retention(
+            &[],
+            &[SessionId::from("unrelated-deleted-session".to_string())],
+        )
         .await
         .expect("reconcile around host tombstone");
     assert_eq!(report.reclaimed_occurrence_count, 1);
@@ -421,9 +425,9 @@ async fn occurrence_with_live_delivery_survives_reconciliation(
         &store,
         "live-reconciliation-register",
         register_command(
-            "live-reconciliation-session",
+            &SessionId::from("live-reconciliation-session"),
             sample_draft(
-                "live-reconciliation-session",
+                &SessionId::from("live-reconciliation-session"),
                 "live-reconciliation-key",
                 "live-reconciliation-source",
                 "live-reconciliation-worker",
@@ -467,16 +471,16 @@ where
     same_identity_and_receipt_survive_store_reopen(make()).await;
 }
 
-fn owner(session_id: &str) -> crate::TriggerOwnerScope {
+fn owner(session_id: &SessionId) -> crate::TriggerOwnerScope {
     crate::TriggerOwnerScope::session(session_id)
 }
 
-fn actor(session_id: &str) -> crate::ProcessOriginator {
+fn actor(session_id: &SessionId) -> crate::ProcessOriginator {
     crate::ProcessOriginator::session(crate::SessionScope::new(session_id))
 }
 
 fn sample_draft(
-    session_id: &str,
+    session_id: &SessionId,
     subscription_key: &str,
     source_key: &str,
     process_name: &str,
@@ -511,7 +515,7 @@ fn sample_draft(
 }
 
 fn register_command(
-    session_id: &str,
+    session_id: &SessionId,
     draft: crate::TriggerSubscriptionDraft,
 ) -> crate::TriggerCommand {
     crate::TriggerCommand::Register {
@@ -522,7 +526,7 @@ fn register_command(
 }
 
 fn update_command(
-    session_id: &str,
+    session_id: &SessionId,
     key: &str,
     draft: crate::TriggerSubscriptionDraft,
     expected_revision: u64,
@@ -537,7 +541,7 @@ fn update_command(
 }
 
 fn revision_command(
-    session_id: &str,
+    session_id: &SessionId,
     key: &str,
     expected_revision: u64,
     verb: &str,
@@ -614,23 +618,28 @@ fn trigger_source_key_and_subscription_identity_are_stable() {
     let second = crate::default_trigger_source_key("ui.button.pressed", &source);
     assert_eq!(first, second);
     assert_ne!(
-        crate::deterministic_subscription_id(&owner("session-a"), "ab:c"),
-        crate::deterministic_subscription_id(&owner("session-a"), "a:bc")
+        crate::deterministic_subscription_id(&owner(&SessionId::from("session-a")), "ab:c"),
+        crate::deterministic_subscription_id(&owner(&SessionId::from("session-a")), "a:bc")
     );
 }
 
 async fn same_owner_key_definition_is_idempotent(store: Arc<dyn crate::TriggerStore>) {
-    let draft = sample_draft("session-a", "button-blue", "blue", "worker");
+    let draft = sample_draft(
+        &SessionId::from("session-a"),
+        "button-blue",
+        "blue",
+        "worker",
+    );
     let first = mutate(
         &store,
         "register-first",
-        register_command("session-a", draft.clone()),
+        register_command(&SessionId::from("session-a"), draft.clone()),
     )
     .await;
     let second = mutate(
         &store,
         "register-second",
-        register_command("session-a", draft),
+        register_command(&SessionId::from("session-a"), draft),
     )
     .await;
     assert_eq!(first.subscription_id, second.subscription_id);
@@ -647,18 +656,18 @@ async fn same_owner_key_definition_is_idempotent(store: Arc<dyn crate::TriggerSt
 
 async fn changed_register_conflicts_and_update_is_cas(store: Arc<dyn crate::TriggerStore>) {
     let key = "cas-key";
-    let original = sample_draft("session-a", key, "v1", "worker");
+    let original = sample_draft(&SessionId::from("session-a"), key, "v1", "worker");
     let created = mutate(
         &store,
         "cas-register",
-        register_command("session-a", original),
+        register_command(&SessionId::from("session-a"), original),
     )
     .await;
-    let requested = sample_draft("session-a", key, "v2", "worker");
+    let requested = sample_draft(&SessionId::from("session-a"), key, "v2", "worker");
     let conflict = execute(
         &store,
         "cas-register-different",
-        register_command("session-a", requested.clone()),
+        register_command(&SessionId::from("session-a"), requested.clone()),
     )
     .await
     .expect_err("register must not upsert");
@@ -681,11 +690,11 @@ async fn changed_register_conflicts_and_update_is_cas(store: Arc<dyn crate::Trig
 
     let store_a = Arc::clone(&store);
     let store_b = Arc::clone(&store);
-    let left = update_command("session-a", key, requested, 1);
+    let left = update_command(&SessionId::from("session-a"), key, requested, 1);
     let right = update_command(
-        "session-a",
+        &SessionId::from("session-a"),
         key,
-        sample_draft("session-a", key, "v3", "worker"),
+        sample_draft(&SessionId::from("session-a"), key, "v3", "worker"),
         1,
     );
     let (left, right) = tokio::join!(
@@ -701,13 +710,16 @@ async fn committed_mutation_receipt_survives_later_revision(store: Arc<dyn crate
     mutate(
         &store,
         "receipt-register",
-        register_command("session-a", sample_draft("session-a", key, "v1", "worker")),
+        register_command(
+            &SessionId::from("session-a"),
+            sample_draft(&SessionId::from("session-a"), key, "v1", "worker"),
+        ),
     )
     .await;
     let update = update_command(
-        "session-a",
+        &SessionId::from("session-a"),
         key,
-        sample_draft("session-a", key, "v2", "worker"),
+        sample_draft(&SessionId::from("session-a"), key, "v2", "worker"),
         1,
     );
     let committed = mutate(&store, "receipt-update", update.clone()).await;
@@ -715,7 +727,7 @@ async fn committed_mutation_receipt_survives_later_revision(store: Arc<dyn crate
     mutate(
         &store,
         "receipt-disable",
-        revision_command("session-a", key, 2, "disable"),
+        revision_command(&SessionId::from("session-a"), key, 2, "disable"),
     )
     .await;
     let retried = mutate(&store, "receipt-update", update).await;
@@ -736,17 +748,20 @@ async fn conflicting_mutation_receipt_survives_later_revision(store: Arc<dyn cra
     mutate(
         &store,
         "conflict-receipt-register",
-        register_command("session-a", sample_draft("session-a", key, "v1", "worker")),
+        register_command(
+            &SessionId::from("session-a"),
+            sample_draft(&SessionId::from("session-a"), key, "v1", "worker"),
+        ),
     )
     .await;
-    let conflicting = revision_command("session-a", key, 99, "disable");
+    let conflicting = revision_command(&SessionId::from("session-a"), key, 99, "disable");
     let original = execute(&store, "conflict-receipt-disable", conflicting.clone())
         .await
         .expect_err("stale disable conflicts");
     mutate(
         &store,
         "conflict-receipt-valid-disable",
-        revision_command("session-a", key, 1, "disable"),
+        revision_command(&SessionId::from("session-a"), key, 1, "disable"),
     )
     .await;
     let retried = execute(&store, "conflict-receipt-disable", conflicting)
@@ -760,14 +775,17 @@ async fn list_operations_are_not_receipted(store: Arc<dyn crate::TriggerStore>) 
     mutate(
         &store,
         "unreceipted-list-register",
-        register_command("session-a", sample_draft("session-a", key, "v1", "worker")),
+        register_command(
+            &SessionId::from("session-a"),
+            sample_draft(&SessionId::from("session-a"), key, "v1", "worker"),
+        ),
     )
     .await;
     let listed_enabled = execute(
         &store,
         "reused-list-operation-id",
         crate::TriggerCommand::List {
-            owner_scope: owner("session-a"),
+            owner_scope: owner(&SessionId::from("session-a")),
             filter: crate::TriggerSubscriptionFilter {
                 enabled: Some(true),
                 ..Default::default()
@@ -783,14 +801,14 @@ async fn list_operations_are_not_receipted(store: Arc<dyn crate::TriggerStore>) 
     mutate(
         &store,
         "unreceipted-list-disable",
-        revision_command("session-a", key, 1, "disable"),
+        revision_command(&SessionId::from("session-a"), key, 1, "disable"),
     )
     .await;
     let listed_disabled = execute(
         &store,
         "reused-list-operation-id",
         crate::TriggerCommand::List {
-            owner_scope: owner("session-a"),
+            owner_scope: owner(&SessionId::from("session-a")),
             filter: crate::TriggerSubscriptionFilter {
                 enabled: Some(false),
                 ..Default::default()
@@ -807,7 +825,10 @@ async fn list_operations_are_not_receipted(store: Arc<dyn crate::TriggerStore>) 
 
 async fn mutation_receipts_follow_owner_retention(store: Arc<dyn crate::TriggerStore>) {
     let key = "receipt-retention-key";
-    let command = register_command("session-a", sample_draft("session-a", key, "v1", "worker"));
+    let command = register_command(
+        &SessionId::from("session-a"),
+        sample_draft(&SessionId::from("session-a"), key, "v1", "worker"),
+    );
     let created = mutate(&store, "receipt-retention-register", command.clone()).await;
     assert_eq!(created.disposition, crate::TriggerMutationOutcome::Created);
 
@@ -854,15 +875,15 @@ async fn explicit_prune_is_journaled_and_owner_scoped(store: Arc<dyn crate::Trig
             &store,
             &format!("prune-register-{session_id}"),
             register_command(
-                session_id,
-                sample_draft(session_id, "shared-key", "blue", "worker"),
+                &SessionId::from(session_id),
+                sample_draft(&SessionId::from(session_id), "shared-key", "blue", "worker"),
             ),
         )
         .await;
     }
     let command = crate::TriggerCommand::Prune {
-        owner_scope: owner("prune-owner"),
-        actor: actor("prune-owner"),
+        owner_scope: owner(&SessionId::from("prune-owner")),
+        actor: actor(&SessionId::from("prune-owner")),
         subscription_keys: vec!["shared-key".to_string()],
     };
     let first = execute(&store, "explicit-prune", command.clone())
@@ -872,7 +893,10 @@ async fn explicit_prune_is_journaled_and_owner_scoped(store: Arc<dyn crate::Trig
         panic!("prune must return typed receipts");
     };
     assert_eq!(receipts.len(), 1);
-    assert_eq!(receipts[0].owner_scope, owner("prune-owner"));
+    assert_eq!(
+        receipts[0].owner_scope,
+        owner(&SessionId::from("prune-owner"))
+    );
     assert_eq!(
         receipts[0].disposition,
         crate::TriggerMutationOutcome::Deleted
@@ -911,8 +935,8 @@ async fn reservations_execute_the_reserved_revision(store: Arc<dyn crate::Trigge
         &store,
         "snapshot-register",
         register_command(
-            "session-a",
-            sample_draft("session-a", key, source_key, "worker-v1"),
+            &SessionId::from("session-a"),
+            sample_draft(&SessionId::from("session-a"), key, source_key, "worker-v1"),
         ),
     )
     .await;
@@ -927,9 +951,9 @@ async fn reservations_execute_the_reserved_revision(store: Arc<dyn crate::Trigge
         &store,
         "snapshot-update",
         update_command(
-            "session-a",
+            &SessionId::from("session-a"),
             key,
-            sample_draft("session-a", key, source_key, "worker-v2"),
+            sample_draft(&SessionId::from("session-a"), key, source_key, "worker-v2"),
             1,
         ),
     )
@@ -964,11 +988,11 @@ async fn disable_preserves_reserved_work_and_requires_explicit_enable(
 ) {
     let key = "disable-key";
     let source_key = "disable-source";
-    let draft = sample_draft("session-a", key, source_key, "worker");
+    let draft = sample_draft(&SessionId::from("session-a"), key, source_key, "worker");
     mutate(
         &store,
         "disable-register",
-        register_command("session-a", draft.clone()),
+        register_command(&SessionId::from("session-a"), draft.clone()),
     )
     .await;
     let reserved = store
@@ -978,7 +1002,7 @@ async fn disable_preserves_reserved_work_and_requires_explicit_enable(
     let disabled = mutate(
         &store,
         "disable-command",
-        revision_command("session-a", key, 1, "disable"),
+        revision_command(&SessionId::from("session-a"), key, 1, "disable"),
     )
     .await;
     assert_eq!(disabled.revision, 2);
@@ -1001,7 +1025,7 @@ async fn disable_preserves_reserved_work_and_requires_explicit_enable(
     let repeated = mutate(
         &store,
         "disable-reregister",
-        register_command("session-a", draft),
+        register_command(&SessionId::from("session-a"), draft),
     )
     .await;
     assert!(!repeated.enabled);
@@ -1009,7 +1033,7 @@ async fn disable_preserves_reserved_work_and_requires_explicit_enable(
     mutate(
         &store,
         "disable-enable",
-        revision_command("session-a", key, 2, "enable"),
+        revision_command(&SessionId::from("session-a"), key, 2, "enable"),
     )
     .await;
     assert_eq!(
@@ -1038,8 +1062,8 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
         &store,
         "reenable-roundtrip-register",
         register_command(
-            "session-a",
-            sample_draft("session-a", key, source_key, "worker"),
+            &SessionId::from("session-a"),
+            sample_draft(&SessionId::from("session-a"), key, source_key, "worker"),
         ),
     )
     .await;
@@ -1049,7 +1073,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     let disabled = mutate(
         &store,
         "reenable-roundtrip-disable",
-        revision_command("session-a", key, 1, "disable"),
+        revision_command(&SessionId::from("session-a"), key, 1, "disable"),
     )
     .await;
     assert_eq!(disabled.revision, 2);
@@ -1072,7 +1096,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     let stale = execute(
         &store,
         "reenable-roundtrip-stale-enable",
-        revision_command("session-a", key, 1, "enable"),
+        revision_command(&SessionId::from("session-a"), key, 1, "enable"),
     )
     .await
     .expect_err("stale enable conflicts");
@@ -1090,7 +1114,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
         &store,
         "reenable-roundtrip-list",
         crate::TriggerCommand::List {
-            owner_scope: owner("session-a"),
+            owner_scope: owner(&SessionId::from("session-a")),
             filter: crate::TriggerSubscriptionFilter {
                 subscription_key: Some(key.to_string()),
                 ..Default::default()
@@ -1109,7 +1133,12 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     let reenabled = mutate(
         &store,
         "reenable-roundtrip-enable",
-        revision_command("session-a", key, records[0].revision, "enable"),
+        revision_command(
+            &SessionId::from("session-a"),
+            key,
+            records[0].revision,
+            "enable",
+        ),
     )
     .await;
     assert_eq!(
@@ -1148,14 +1177,19 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     let replayed_enable = mutate(
         &store,
         "reenable-roundtrip-enable",
-        revision_command("session-a", key, records[0].revision, "enable"),
+        revision_command(
+            &SessionId::from("session-a"),
+            key,
+            records[0].revision,
+            "enable",
+        ),
     )
     .await;
     assert_eq!(replayed_enable, reenabled);
     let replayed_disable = mutate(
         &store,
         "reenable-roundtrip-disable",
-        revision_command("session-a", key, 1, "disable"),
+        revision_command(&SessionId::from("session-a"), key, 1, "disable"),
     )
     .await;
     assert_eq!(replayed_disable, disabled);
@@ -1174,11 +1208,11 @@ async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
 ) {
     let key = "revive-key";
     let source_key = "revive-source";
-    let draft = sample_draft("session-a", key, source_key, "worker");
+    let draft = sample_draft(&SessionId::from("session-a"), key, source_key, "worker");
     let created = mutate(
         &store,
         "revive-register",
-        register_command("session-a", draft.clone()),
+        register_command(&SessionId::from("session-a"), draft.clone()),
     )
     .await;
     let ingress = store
@@ -1188,7 +1222,7 @@ async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
     let deleted = mutate(
         &store,
         "revive-delete",
-        revision_command("session-a", key, 1, "delete"),
+        revision_command(&SessionId::from("session-a"), key, 1, "delete"),
     )
     .await;
     assert!(deleted.record_snapshot.tombstoned);
@@ -1212,7 +1246,7 @@ async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
         execute(
             &store,
             "revive-register-after-delete",
-            register_command("session-a", draft.clone())
+            register_command(&SessionId::from("session-a"), draft.clone())
         )
         .await
         .is_err()
@@ -1221,8 +1255,8 @@ async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
         &store,
         "revive-command",
         crate::TriggerCommand::Revive {
-            owner_scope: owner("session-a"),
-            actor: actor("session-a"),
+            owner_scope: owner(&SessionId::from("session-a")),
+            actor: actor(&SessionId::from("session-a")),
             subscription_key: key.to_string(),
             draft,
             expected_revision: deleted.revision,
@@ -1237,14 +1271,24 @@ async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
 async fn owner_namespaces_are_exact_and_session_cleanup_is_scoped(
     store: Arc<dyn crate::TriggerStore>,
 ) {
-    let session_draft = sample_draft("root", "shared-key", "session-source", "session-worker");
+    let session_draft = sample_draft(
+        &SessionId::from("root"),
+        "shared-key",
+        "session-source",
+        "session-worker",
+    );
     mutate(
         &store,
         "scope-session-register",
-        register_command("root", session_draft),
+        register_command(&SessionId::from("root"), session_draft),
     )
     .await;
-    let mut host_draft = sample_draft("host", "shared-key", "host-source", "host-worker");
+    let mut host_draft = sample_draft(
+        &SessionId::from("host"),
+        "shared-key",
+        "host-source",
+        "host-worker",
+    );
     host_draft.wake_target = None;
     let host_owner = crate::TriggerOwnerScope::host("binding-a").unwrap();
     let host = mutate(
@@ -1259,13 +1303,13 @@ async fn owner_namespaces_are_exact_and_session_cleanup_is_scoped(
     .await;
     assert_ne!(
         host.subscription_id,
-        crate::deterministic_subscription_id(&owner("root"), "shared-key")
+        crate::deterministic_subscription_id(&owner(&SessionId::from("root")), "shared-key")
     );
     let visible_to_session = execute(
         &store,
         "scope-session-list",
         crate::TriggerCommand::List {
-            owner_scope: owner("root"),
+            owner_scope: owner(&SessionId::from("root")),
             filter: crate::TriggerSubscriptionFilter::default(),
         },
     )
@@ -1275,8 +1319,14 @@ async fn owner_namespaces_are_exact_and_session_cleanup_is_scoped(
         panic!("expected list")
     };
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].owner_scope, owner("root"));
-    assert_eq!(store.delete_session_subscriptions("root").await.unwrap(), 1);
+    assert_eq!(records[0].owner_scope, owner(&SessionId::from("root")));
+    assert_eq!(
+        store
+            .delete_session_subscriptions(&SessionId::from("root"))
+            .await
+            .unwrap(),
+        1
+    );
     let host_rows = store
         .list_subscriptions(crate::TriggerSubscriptionFilter::for_registrant_scope(
             host_owner.namespace(),
@@ -1371,8 +1421,13 @@ async fn occurrence_and_reservations_are_atomic_and_idempotent(
         &store,
         "atomic-register",
         register_command(
-            "session-a",
-            sample_draft("session-a", "atomic-key", "atomic-source", "worker"),
+            &SessionId::from("session-a"),
+            sample_draft(
+                &SessionId::from("session-a"),
+                "atomic-key",
+                "atomic-source",
+                "worker",
+            ),
         ),
     )
     .await;
@@ -1434,9 +1489,9 @@ async fn matched_occurrence_waits_for_terminal_deliveries(store: Arc<dyn crate::
         &store,
         "matched-retention-register",
         register_command(
-            "matched-retention-session",
+            &SessionId::from("matched-retention-session"),
             sample_draft(
-                "matched-retention-session",
+                &SessionId::from("matched-retention-session"),
                 "matched-retention-key",
                 "matched-retention-source",
                 "matched-retention-worker",
@@ -1510,9 +1565,9 @@ async fn cutoff_defers_but_never_initiates_occurrence_reclaim(store: Arc<dyn cra
         &store,
         "cutoff-live-register",
         register_command(
-            "cutoff-live-session",
+            &SessionId::from("cutoff-live-session"),
             sample_draft(
-                "cutoff-live-session",
+                &SessionId::from("cutoff-live-session"),
                 "cutoff-live-key",
                 "cutoff-live-source",
                 "cutoff-live-worker",
@@ -1570,7 +1625,7 @@ async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crat
                 "tick-outcome-session",
             )),
             draft: sample_draft(
-                "tick-outcome-session",
+                &SessionId::from("tick-outcome-session"),
                 "tick-outcome-subscription",
                 "tick-outcome-source",
                 "tick-worker",
@@ -1647,7 +1702,7 @@ async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crat
     );
 
     let retention = store
-        .reconcile_trigger_retention(&[], &["tick-outcome-session".to_string()])
+        .reconcile_trigger_retention(&[], &[SessionId::from("tick-outcome-session".to_string())])
         .await
         .expect("reconcile after the tick-outcome session is gone");
     assert_eq!(
@@ -1698,7 +1753,12 @@ async fn first_ingress_and_replay_share_canonical_subscription_order(
 ) {
     let owner_scope = crate::TriggerOwnerScope::host("fig811").unwrap();
     for key in ["gamma", "alpha"] {
-        let mut draft = sample_draft("fig811", key, "canonical-order-source", key);
+        let mut draft = sample_draft(
+            &SessionId::from("fig811"),
+            key,
+            "canonical-order-source",
+            key,
+        );
         draft.wake_target = None;
         mutate(
             &store,
@@ -1735,8 +1795,13 @@ async fn first_ingress_and_replay_share_canonical_subscription_order(
 }
 
 async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTriggerStore) {
-    let draft = sample_draft("session-a", "reopen-key", "reopen-source", "worker");
-    let command = register_command("session-a", draft.clone());
+    let draft = sample_draft(
+        &SessionId::from("session-a"),
+        "reopen-key",
+        "reopen-source",
+        "worker",
+    );
+    let command = register_command(&SessionId::from("session-a"), draft.clone());
     let first = mutate(&factory.open, "reopen-register", command.clone()).await;
     drop(factory.open);
     let replay = mutate(&factory.reopen, "reopen-register", command).await;
@@ -1744,7 +1809,7 @@ async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTrigg
     let repeated = mutate(
         &factory.reopen,
         "reopen-register-again",
-        register_command("session-a", draft),
+        register_command(&SessionId::from("session-a"), draft),
     )
     .await;
     assert_eq!(repeated.subscription_id, first.subscription_id);
@@ -1762,8 +1827,10 @@ async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTrigg
 
 async fn hostile_trigger_namespaces(store: Arc<dyn crate::TriggerStore>) {
     for raw in ["", " ", "nul\0operation"] {
-        let command =
-            register_command("canary", sample_draft("canary", "key", "source", "process"));
+        let command = register_command(
+            &SessionId::from("canary"),
+            sample_draft(&SessionId::from("canary"), "key", "source", "process"),
+        );
         assert!(
             matches!(
                 store
@@ -1776,7 +1843,10 @@ async fn hostile_trigger_namespaces(store: Arc<dyn crate::TriggerStore>) {
         );
     }
     for raw in ["", "nul\0owner"] {
-        let command = register_command(raw, sample_draft("canary", "key", "source", "process"));
+        let command = register_command(
+            &SessionId::from(raw),
+            sample_draft(&SessionId::from("canary"), "key", "source", "process"),
+        );
         assert!(
             matches!(
                 store

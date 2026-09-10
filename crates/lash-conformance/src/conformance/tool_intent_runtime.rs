@@ -1,11 +1,13 @@
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct SignalIntentProvider {
-    session_id: String,
-    process_id: String,
+    session_id: SessionId,
+    process_id: ProcessId,
     calls: Arc<AtomicUsize>,
 }
 
@@ -59,9 +61,9 @@ pub async fn public_signal_intent_wakes_parked_process(
     registry: Arc<dyn crate::ProcessRegistry>,
     process_work: Arc<dyn crate::ProcessWorkSubstrate>,
 ) {
-    let session_id = format!("{prefix}-session");
+    let session_id = SessionId::from(format!("{prefix}-session"));
     let turn_id = TurnId::from(format!("{prefix}-turn"));
-    let process_id = format!("{prefix}-target");
+    let process_id = ProcessId::from(format!("{prefix}-target"));
     let registered = registry
         .register_process_with_observers(
             crate::ProcessRegistration::new(

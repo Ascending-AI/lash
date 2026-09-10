@@ -82,7 +82,7 @@ pub(crate) async fn list_sessions(
             )?)
         };
         let summary = SessionSummary {
-            session_id: row.get("session_id"),
+            session_id: SessionId::from(row.get::<String, _>("session_id")),
             created_at_ms: u64_from_sql(
                 "SessionSummary",
                 "created_at_ms",

@@ -1,4 +1,6 @@
 use super::*;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 
 thread_local! {
     static CONTRACT_CHECKPOINT_COLLECTOR:
@@ -46,7 +48,7 @@ async fn agent_tuple_json_array_execution() -> Result<Value, FixedScriptRunnerEr
     });
     let result = facade_final_value_execution(
         "lash_runtime agent tuple final value",
-        "sim-agent-tuple-json-array-contract",
+        &SessionId::from("sim-agent-tuple-json-array-contract"),
         "Use tuple values and finish the derived result.",
         r#"<lashlang>
 pair = "left", "right"
@@ -235,7 +237,7 @@ async fn agent_foreground_tool_call_round_trip_execution() -> Result<Value, Fixe
     let expected = json!({ "ok": true });
     let result = facade_final_value_execution_with_tools(
         "lash_runtime agent foreground tool",
-        "sim-agent-foreground-tool-contract",
+        &SessionId::from("sim-agent-foreground-tool-contract"),
         "Call the app lookup tool and finish its value.",
         vec![
             r#"<lashlang>
@@ -274,7 +276,7 @@ async fn agent_started_process_tool_call_graph_execution() -> Result<Value, Fixe
     let expected = json!({ "ok": true });
     let result = facade_agent_process_execution(
         "lash_runtime agent started process tool",
-        "sim-agent-started-process-tool-contract",
+        &SessionId::from("sim-agent-started-process-tool-contract"),
         "Start a process that calls the app lookup tool.",
         vec![
             r#"<lashlang>
@@ -320,7 +322,7 @@ async fn agent_shell_results_are_data_execution() -> Result<Value, FixedScriptRu
     });
     let result = facade_final_value_execution_with_tools(
         "lash_runtime agent shell results data",
-        "sim-agent-shell-results-data-contract",
+        &SessionId::from("sim-agent-shell-results-data-contract"),
         "Run shell commands and report their result metadata.",
         vec![
             r#"<lashlang>
@@ -352,7 +354,7 @@ async fn agent_nested_process_start_await_execution() -> Result<Value, FixedScri
     let expected = json!({ "parent": "done" });
     let result = facade_agent_process_execution(
         "lash_runtime agent nested process",
-        "sim-agent-nested-process-contract",
+        &SessionId::from("sim-agent-nested-process-contract"),
         "Start a parent process that starts and awaits a child process.",
         vec![
             r#"<lashlang>
@@ -391,7 +393,7 @@ async fn agent_shell_output_print_projection_survives_execution()
     });
     let result = facade_final_value_execution_with_tools(
         "lash_runtime agent shell output projection",
-        "sim-agent-shell-output-projection-contract",
+        &SessionId::from("sim-agent-shell-output-projection-contract"),
         "Run a large shell command, inspect it, then report retained metadata.",
         vec![
             r#"<lashlang>
@@ -424,7 +426,7 @@ async fn agent_started_process_subagent_spawn_execution() -> Result<Value, Fixed
     let expected = json!({ "len": 2 });
     let result = facade_agent_process_execution_with_options(
         "lash_runtime agent started process subagent",
-        "sim-agent-started-process-subagent-contract",
+        &SessionId::from("sim-agent-started-process-subagent-contract"),
         "Run a Lashlang process that spawns a subagent and returns its value.",
         vec![
             r#"<lashlang>
@@ -464,7 +466,7 @@ async fn agent_session_turn_process_child_execution() -> Result<Value, FixedScri
     let expected = json!({ "child": "done" });
     let result = facade_final_value_execution(
         "lash_runtime agent session-turn process child",
-        "sim-agent-session-turn-process-child-contract",
+        &SessionId::from("sim-agent-session-turn-process-child-contract"),
         "Start a child process and await its result.",
         r#"<lashlang>
 process child() {
@@ -561,7 +563,7 @@ async fn agent_parallel_spawn_and_join_execution() -> Result<Value, FixedScriptR
     let expected = json!({ "joined": ["left", "right"] });
     let result = facade_final_value_execution(
         "lash_runtime agent parallel process join",
-        "sim-agent-parallel-spawn-join-contract",
+        &SessionId::from("sim-agent-parallel-spawn-join-contract"),
         "Start two processes, await both, and finish their joined result.",
         r#"<lashlang>
 process child(value: str) {
@@ -588,7 +590,7 @@ finish { joined: [left_value, right_value] }
 
 async fn facade_final_value_execution(
     provider_kind: &'static str,
-    session_id: &'static str,
+    session_id: &SessionId,
     prompt: &'static str,
     provider_response: &'static str,
     expected_final_value: &Value,
@@ -606,7 +608,7 @@ async fn facade_final_value_execution(
 
 async fn facade_final_value_execution_with_tools(
     provider_kind: &'static str,
-    session_id: &'static str,
+    session_id: &SessionId,
     prompt: &'static str,
     provider_responses: Vec<&'static str>,
     expected_final_value: &Value,
@@ -625,7 +627,7 @@ async fn facade_final_value_execution_with_tools(
 
 async fn facade_final_value_execution_inner(
     provider_kind: &'static str,
-    session_id: &'static str,
+    session_id: &SessionId,
     prompt: &'static str,
     provider_responses: Vec<&'static str>,
     expected_final_value: Value,
@@ -737,7 +739,7 @@ async fn facade_final_value_execution_inner(
 
 async fn facade_agent_process_execution(
     provider_kind: &'static str,
-    session_id: &'static str,
+    session_id: &SessionId,
     prompt: &'static str,
     provider_responses: Vec<&'static str>,
     expected_final_value: &Value,
@@ -761,7 +763,7 @@ async fn facade_agent_process_execution(
 #[allow(clippy::too_many_arguments)]
 async fn facade_agent_process_execution_with_options(
     provider_kind: &'static str,
-    session_id: &'static str,
+    session_id: &SessionId,
     prompt: &'static str,
     provider_responses: Vec<&'static str>,
     expected_final_value: &Value,
@@ -1119,7 +1121,7 @@ async fn agent_process_execution_result(
 }
 
 struct AgentContractProcessObservation {
-    raw_process_id: String,
+    raw_process_id: ProcessId,
     process_ref: String,
     observed: Value,
 }
@@ -1291,7 +1293,7 @@ fn normalize_contract_process_event_payload(event_type: &str, payload: Value) ->
 
 fn agent_contract_graph_facts(
     graphs: &[lash::tracing::TraceLashlangGraph],
-    root_session_id: &str,
+    root_session_id: &SessionId,
 ) -> Value {
     let mut completed_process_entries = BTreeSet::new();
     let mut completed_labeled_resources = BTreeSet::new();

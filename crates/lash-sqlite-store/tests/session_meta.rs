@@ -1,6 +1,7 @@
 use lash_core::{
     SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, TurnBudget,
 };
+use lash_sansio::SessionId;
 use lash_sqlite_store::{SqliteSessionStoreFactory, Store};
 
 #[tokio::test]
@@ -11,7 +12,7 @@ async fn sqlite_unbound_session_meta_refuses_ambiguous_resolution() {
         factory
             .create_store(&SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 relation: SessionRelation::Root,
                 policy: SessionPolicy::new(TurnBudget::Unbounded),
             })

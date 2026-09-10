@@ -5,6 +5,7 @@
 //! scenarios deliberately use `native-substrate` and `process-admission` in
 //! their ids so durable background work cannot be confused with that ingress.
 
+use lash_sansio::ProcessId;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -131,7 +132,7 @@ fn run_pacing_scenario(seed: u64) -> Vec<DeliveredBoundary> {
 struct HeldSuccessEngine {
     started: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Semaphore>,
-    runs: Arc<std::sync::Mutex<Vec<String>>>,
+    runs: Arc<std::sync::Mutex<Vec<ProcessId>>>,
 }
 
 #[async_trait::async_trait]
@@ -202,10 +203,10 @@ struct ProcessAdmissionScenario {
     process_work: NativeProcessWork,
     engine_started: Arc<tokio::sync::Notify>,
     engine_release: Arc<tokio::sync::Semaphore>,
-    engine_runs: Arc<std::sync::Mutex<Vec<String>>>,
+    engine_runs: Arc<std::sync::Mutex<Vec<ProcessId>>>,
     fault_sink: AdmissionFaultSink,
     peer_lease: ProcessLease,
-    admitted: Vec<String>,
+    admitted: Vec<ProcessId>,
 }
 
 impl ProcessAdmissionScenario {
@@ -270,7 +271,11 @@ impl ProcessAdmissionScenario {
             "native-process-admission-peer:001",
         );
         let peer_lease = match registry
-            .claim_process_lease(LEASED_PROCESS_ID, &peer_owner, PROCESS_LEASE_TTL_MS)
+            .claim_process_lease(
+                &ProcessId::from(LEASED_PROCESS_ID),
+                &peer_owner,
+                PROCESS_LEASE_TTL_MS,
+            )
             .await
             .expect("claim peer-held process lease")
         {
@@ -336,7 +341,7 @@ impl ProcessAdmissionScenario {
         assert!(report.deferred.is_empty());
         assert_eq!(
             report.admitted,
-            vec![HELD_PROCESS_ID.to_string()],
+            vec![ProcessId::from(HELD_PROCESS_ID)],
             "one native execution slot bounds the call's own intake; continuation rows remain in the scheduler-driven worklist"
         );
         self.admitted = report.admitted.clone();
@@ -359,7 +364,11 @@ impl ProcessAdmissionScenario {
         );
         let lease = match self
             .registry
-            .claim_process_lease(TERMINAL_PROCESS_ID, &peer_owner, PROCESS_LEASE_TTL_MS)
+            .claim_process_lease(
+                &ProcessId::from(TERMINAL_PROCESS_ID),
+                &peer_owner,
+                PROCESS_LEASE_TTL_MS,
+            )
             .await
             .expect("claim queued row before native worker reaches it")
         {
@@ -380,7 +389,7 @@ impl ProcessAdmissionScenario {
             .expect("peer terminalizes queued admitted row");
         let terminal = self
             .process_work
-            .await_terminal(TERMINAL_PROCESS_ID)
+            .await_terminal(&ProcessId::from(TERMINAL_PROCESS_ID))
             .await
             .expect("native process awaiter observes the peer terminal");
         json!({
@@ -420,31 +429,31 @@ impl ProcessAdmissionScenario {
     async fn observe(&self) -> Value {
         let held = self
             .registry
-            .get_process(HELD_PROCESS_ID)
+            .get_process(&ProcessId::from(HELD_PROCESS_ID))
             .await
             .expect("read faulted admitted row")
             .expect("faulted admitted row retained");
         let terminal = self
             .registry
-            .get_process(TERMINAL_PROCESS_ID)
+            .get_process(&ProcessId::from(TERMINAL_PROCESS_ID))
             .await
             .expect("read terminal-by-peer row")
             .expect("terminal-by-peer row retained");
         let leased = self
             .registry
-            .get_process(LEASED_PROCESS_ID)
+            .get_process(&ProcessId::from(LEASED_PROCESS_ID))
             .await
             .expect("read peer-leased row")
             .expect("peer-leased row retained");
         let current_peer_lease = self
             .registry
-            .get_process_lease(LEASED_PROCESS_ID)
+            .get_process_lease(&ProcessId::from(LEASED_PROCESS_ID))
             .await
             .expect("read peer-held lease")
             .expect("peer-held lease remains live");
         let engine_runs = self.engine_runs.lock_recover().clone();
 
-        assert_eq!(self.admitted, vec![HELD_PROCESS_ID.to_string()]);
+        assert_eq!(self.admitted, vec![ProcessId::from(HELD_PROCESS_ID)]);
         assert!(!held.status.is_terminal());
         assert_eq!(terminal.status, ProcessStatus::Completed);
         assert!(!leased.status.is_terminal());
@@ -453,7 +462,7 @@ impl ProcessAdmissionScenario {
                 .owner
                 .same_incarnation(&self.peer_lease.owner)
         );
-        assert_eq!(engine_runs, vec![HELD_PROCESS_ID.to_string()]);
+        assert_eq!(engine_runs, vec![ProcessId::from(HELD_PROCESS_ID)]);
 
         json!({
             "admitted_count": self.admitted.len(),

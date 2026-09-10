@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::ProcessId;
 
 pub(super) fn trace_has_queued_cancel_race(lines: &[&TraceEventLine]) -> bool {
     lines
@@ -152,7 +153,8 @@ fn process_wake_source_key(line: &TraceEventLine) -> Option<String> {
         .pointer("/runtime_process_wake/sequence")
         .and_then(Value::as_u64)?;
     Some(lash_core::facade_support::process_wake_source_key(
-        process_id, sequence,
+        &ProcessId::from(process_id),
+        sequence,
     ))
 }
 

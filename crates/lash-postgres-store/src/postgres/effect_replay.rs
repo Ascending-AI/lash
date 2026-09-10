@@ -17,6 +17,7 @@
 //! The driver's own clock is an explicit `SystemClock` because it only sleeps.
 
 use crate::*;
+use lash_sansio::SessionId;
 
 use lash_core::facade_support::effect_replay_driver;
 use lash_core::facade_support::effect_replay_driver::{
@@ -234,8 +235,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         // Only session-free scopes can carry a retirement tombstone, so only
         // they take the scope lock retirement writes it under; a session scope
         // has nothing here to race with.
-        if fence_session_free_scope(&mut tx, request.session_id.as_deref(), &request.scope_id)
-            .await?
+        if fence_session_free_scope(&mut tx, request.session_id.as_ref(), &request.scope_id).await?
         {
             tx.commit().await.map_err(effect_store_error)?;
             return Ok(EffectClaimObservation::ScopeRetired);
@@ -392,8 +392,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         // written under the scope lock (N4); it still holds no child-row lock,
         // so the N2 lock order against `finalize` is unchanged.
         let mut tx = self.pool.begin().await.map_err(effect_store_error)?;
-        if fence_session_free_scope(&mut tx, record.session_id.as_deref(), &record.scope_id).await?
-        {
+        if fence_session_free_scope(&mut tx, record.session_id.as_ref(), &record.scope_id).await? {
             tx.commit().await.map_err(effect_store_error)?;
             return Err(effect_replay_driver::scope_retired(&record.scope_id));
         }
@@ -565,7 +564,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             lash_core::EffectJournalRetirement::Session { session_id } => (
                 "DELETE FROM lash_runtime_effect_replay WHERE session_id = $1",
                 "DELETE FROM lash_runtime_effect_group WHERE session_id = $1",
-                session_id.clone(),
+                session_id.as_str().to_string(),
                 None,
             ),
             lash_core::EffectJournalRetirement::Process { .. }
@@ -920,7 +919,9 @@ fn stored_group_record(row: PgRow) -> Result<EffectGroupRecord, RuntimeEffectCon
     Ok(EffectGroupRecord {
         group_key: row.get("group_key"),
         scope_id: row.get("scope_id"),
-        session_id: row.get("session_id"),
+        session_id: row
+            .get::<Option<String>, _>("session_id")
+            .map(SessionId::from),
         wake: group_column("wake rule", row.get("wake"))?,
         loser_disposition: group_column("loser disposition", row.get("loser_disposition"))?,
         children: usize::try_from(children)
@@ -1000,7 +1001,7 @@ fn missing_group_row(group_key: &str) -> RuntimeEffectControllerError {
 /// their promise atoms take the session lock instead.
 async fn fence_session_free_scope(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: Option<&str>,
+    session_id: Option<&SessionId>,
     scope_id: &str,
 ) -> Result<bool, RuntimeEffectControllerError> {
     if session_id.is_some() {

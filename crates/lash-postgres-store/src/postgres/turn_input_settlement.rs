@@ -20,7 +20,7 @@ pub(crate) async fn ensure_turn_input_completion_tx(
              LIMIT 1
              FOR UPDATE",
         )
-        .bind(&completed.session_id)
+        .bind(completed.session_id.as_str())
         .bind(input_id)
         .fetch_optional(&mut **tx)
         .await

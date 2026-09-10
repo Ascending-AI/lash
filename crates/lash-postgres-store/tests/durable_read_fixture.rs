@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -367,9 +368,11 @@ async fn upgrade_prior_fixture_frame_identity(pool: &sqlx::PgPool) {
     .expect("read prior fixture frame identity");
     let frame_key = lash_core::FrameKey::from_caller_material("initial-frame")
         .expect("non-empty initial frame material");
-    let frame_node_id =
-        lash_core::facade_support::frame_node_id(fixture::SESSION_ID, frame_key.as_str())
-            .into_inner();
+    let frame_node_id = lash_core::facade_support::frame_node_id(
+        &SessionId::from(fixture::SESSION_ID),
+        frame_key.as_str(),
+    )
+    .into_inner();
 
     let graph_rows = sqlx::query(
         "UPDATE lash_graph_nodes
@@ -543,7 +546,7 @@ async fn normalize_server_authoritative_fixture_rows(storage: &PostgresStorage) 
          SET lease_token = $2, lease_claimed_at_ms = $3, lease_expires_at_ms = $4
          WHERE process_id = $1",
     )
-    .bind(&lease.process_id)
+    .bind(&lease.process_id.as_str())
     .bind(&lease.lease_token)
     .bind(lease.claimed_at_epoch_ms as i64)
     .bind(lease.expires_at_epoch_ms as i64)
