@@ -66,9 +66,13 @@ class ConfidenceConclusionTests(unittest.TestCase):
 
 
 class ClassifyTests(unittest.TestCase):
+    # A docs-only verdict is a statement about content as well as paths, so
+    # these fixtures state the diff content they were classified from. An
+    # absent diff carries no content signal and deliberately widens instead.
     def test_docs_only_skips_every_expensive_family(self) -> None:
         plan = ci_plan.classify(
-            [("M", "README.md"), ("A", "docs/runbooks/ci.md"), ("M", "runbooks/operator/README.md")]
+            [("M", "README.md"), ("A", "docs/runbooks/ci.md"), ("M", "runbooks/operator/README.md")],
+            "+A paragraph about the operator runbook.",
         )
         self.assertEqual("true", plan["docs_only"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
@@ -80,13 +84,13 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_docs_addition_and_modification_preserve_docs_only_skip(self) -> None:
-        plan = ci_plan.classify([("A", "docs/new.md"), ("M", "CONTEXT.md")])
+        plan = ci_plan.classify([("A", "docs/new.md"), ("M", "CONTEXT.md")], "+A new sentence.")
         self.assertEqual("true", plan["docs_only"])
         self.assertEqual("docs-only diff", plan["reason"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_docs_markdown_file_stays_docs_only(self) -> None:
-        plan = ci_plan.classify([("M", "docs/adr/0079-x.md")])
+        plan = ci_plan.classify([("M", "docs/adr/0079-x.md")], "+A revised decision.")
         self.assertEqual("true", plan["docs_only"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
 
@@ -319,6 +323,16 @@ def diff_around(*lines: str) -> str:
     )
 
 
+def conclusion_needs_for(plan: dict[str, str], event: str) -> dict[str, dict[str, object]]:
+    """A wholly successful board carrying `plan`'s real outputs."""
+
+    needs = successful_needs()
+    needs["plan"]["outputs"] = dict(plan)
+    for job in ci_plan.TRUNK_ONLY_JOBS:
+        needs[job]["result"] = "skipped" if event in ci_plan.DEFERRED_EVENTS else "success"
+    return needs
+
+
 class IdentityVersionTests(unittest.TestCase):
     """A semantic-hash or bytecode-format bump must buy the full PG matrix."""
 
@@ -365,6 +379,21 @@ class IdentityVersionTests(unittest.TestCase):
             )
         )
         self.assertFalse(ci_plan.detect_identity_version_change(diff))
+
+    def test_a_docs_diff_quoting_a_definition_line_is_not_docs_only(self) -> None:
+        # An ADR code fence naming a constant is enough to set the signal.
+        # postgres-store gates its own `if` on the stores family, so a plan
+        # that widened the matrix while permitting that job to skip would
+        # demand, on a trunk push, a job that never ran.
+        diff = diff_around(identity_definition_line("+", "BYTECODE_FORMAT_VERSION", "13"))
+        plan = ci_plan.classify([("M", "docs/adr/0086-lashlang-identity.md")], diff)
+        self.assertEqual("true", plan["identity_versions"])
+        self.assertEqual("false", plan["docs_only"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+        self.assertEqual("Lashlang identity version moved", plan["reason"])
+        self.assertEqual([], ci_plan.evaluate_conclusion(
+            conclusion_needs_for(plan, "push"), event_name="push", ref="refs/heads/main"
+        ))
 
     def test_absent_diff_content_falls_open_to_the_full_matrix(self) -> None:
         self.assertEqual(

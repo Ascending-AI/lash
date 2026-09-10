@@ -241,8 +241,24 @@ def classify(
     global_invalidator = any(_is_global_invalidator(path) for path in paths)
     has_deletion = any(status == "D" for status, _ in changes)
     docs_deletion = any(status == "D" and _is_docs_path(path) for status, path in changes)
-    docs_only = all(_is_docs_path(path) for path in paths) and not has_deletion
     ambiguous = sorted(path for path in paths if not _is_known_path(path))
+    # No diff content means no exact content signal, so widen rather than
+    # guess: the expensive matrix is the safe side of this call.
+    identity_versions = (
+        True if diff_text is None else detect_identity_version_change(diff_text)
+    )
+    # An identity move is never a docs-only diff, whatever its paths say: an
+    # ADR code fence quoting a definition line is enough to set the signal, and
+    # `postgres-store` gates its own `if` on the stores family. Leaving the two
+    # incoherent would widen the matrix for a job the same plan permits to
+    # skip, and on a trunk push the conclusion would then demand a job that
+    # never ran -- an unfixable red, which is the failure this gate exists to
+    # prevent.
+    docs_only = (
+        all(_is_docs_path(path) for path in paths)
+        and not has_deletion
+        and not identity_versions
+    )
     run_everything = global_invalidator or not docs_only or bool(ambiguous)
 
     outputs = {
@@ -252,11 +268,7 @@ def classify(
         "workflows_only": str(all(path.startswith(".github/workflows/") for path in paths)).lower(),
         "e2e_relevant": str(any(path.startswith(("examples/", "runbooks/")) or "e2e" in PurePosixPath(path).parts for path in paths)).lower(),
         "scripts_gates": str(any(path.startswith("scripts/") or path in {"justfile", "deny.toml"} for path in paths)).lower(),
-        # No diff content means no exact content signal, so widen rather than
-        # guess: the expensive matrix is the safe side of this call.
-        "identity_versions": (
-            "true" if diff_text is None else str(detect_identity_version_change(diff_text)).lower()
-        ),
+        "identity_versions": str(identity_versions).lower(),
         "fail_open": str(bool(ambiguous)).lower(),
         "reason": (
             "docs deletion"
@@ -265,6 +277,8 @@ def classify(
             if ambiguous
             else "global invalidator"
             if global_invalidator
+            else "Lashlang identity version moved"
+            if identity_versions
             else "docs-only diff"
             if docs_only
             else "production-relevant diff"
@@ -353,13 +367,13 @@ def evaluate_conclusion(
             event_name in DEFERRED_EVENTS or identity_versions == "true"
         ):
             if result != "success":
-                reason = (
-                    "the diff moves a Lashlang identity version, so the full "
-                    "PostgreSQL matrix must run on this head"
+                problems.append(
+                    f"{job} ended with {result!r} while the diff moves a Lashlang "
+                    "identity version, whose literal pins run only in this matrix, "
+                    "expected success"
                     if identity_versions == "true"
-                    else f"a {event_name} event"
+                    else f"{job} ended with {result!r} on a {event_name} event, expected success"
                 )
-                problems.append(f"{job} ended with {result!r} and {reason}, expected success")
             continue
         if result in {"failure", "cancelled"}:
             problems.append(f"{job} ended with {result}")
