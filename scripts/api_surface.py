@@ -62,6 +62,7 @@ DEPENDENCY_PACKAGES = {
         "lash_plugin_tool_output_budget",
         True,
     ),
+    "lash_protocol_standard": ("lash-internal-protocol-standard", "lash_protocol_standard", True),
     "lash_protocol_rlm": ("lash-internal-protocol-rlm", "lash_protocol_rlm", True),
     "lash_remote_protocol": ("lash-internal-remote-protocol", "lash_remote_protocol", True),
     "lash_rlm_types": ("lash-internal-rlm-types", "lash_rlm_types", True),

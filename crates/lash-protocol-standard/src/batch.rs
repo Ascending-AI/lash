@@ -7,7 +7,7 @@ pub fn batch_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:batch",
         "batch",
-        "Execute up to 25 independent tool calls concurrently. Calls start in parallel; ordering is not guaranteed. Calls past index 25 are rejected.",
+        "Run 1-25 independent tool calls concurrently. Execution order is not guaranteed; results return in input order, each with a success flag and result or error. Do not nest batch calls.",
         object_schema(
             serde_json::json!({
                 "tool_calls": {
@@ -23,7 +23,7 @@ pub fn batch_tool_definition() -> ToolDefinition {
                         "required": ["tool", "parameters"],
                         "additionalProperties": false
                     },
-                    "description": "Array of 1-25 objects like { tool: \"<tool_name>\", parameters: { <arg>: \"<value>\" } }. Use only for independent calls. Do not include another batch call. More than 25 calls is rejected as a tool error."
+                    "description": "1-25 objects { tool, parameters }; each tool must be exposed and parameters must match its schema."
                 }
             }),
             &["tool_calls"],

@@ -27,7 +27,7 @@ feature	async-iteration	rejected	TS_FOR_OF_UNSUPPORTED	for await (const x of [1]
 feature	Atomics	skip	ticket-ruling:FIG-1413:Atomics	-
 feature	Atomics.pause	skip	ticket-ruling:FIG-1413:Atomics.pause	-
 feature	Atomics.waitAsync	skip	ticket-ruling:FIG-1413:Atomics.waitAsync	-
-feature	await-dictionary	rejected	TS_AWAIT_UNSUPPORTED	async function f() { const r = await { a: 1 }; }
+feature	await-dictionary	rejected	TS_PENDING_TOOL	await { a: 1 };
 feature	BigInt	rejected	TS_BIGINT_UNSUPPORTED	const x = 1n;
 feature	caller	skip	ticket-ruling:FIG-1413:caller	-
 feature	canonical-tz	skip	ticket-ruling:FIG-1413:canonical-tz	-

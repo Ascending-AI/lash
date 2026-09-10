@@ -377,6 +377,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
         instruction_ip: usize,
     ) -> Result<VmOutcome, VmTrap> {
         self.active_execution_elapsed += active_started.elapsed();
+        if matches!(
+            &result,
+            Ok(VmOutcome::Continued | VmOutcome::Finished(_) | VmOutcome::ProcessFinished(_))
+        ) {
+            self.ensure_no_pending_tools().map_err(|error| VmTrap {
+                error,
+                instruction_ip,
+                span: None,
+            })?;
+        }
         if result.is_ok()
             && let Err(error) = self.enforce_execution_bounds()
         {

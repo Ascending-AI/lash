@@ -100,6 +100,24 @@ impl Default for ToolCatalog {
 }
 
 impl ToolCatalog {
+    /// Prompt-only projection. The original catalogue retains execution authority.
+    pub fn inline_tools(&self) -> Self {
+        let tools = self
+            .tools
+            .iter()
+            .filter(|entry| entry.manifest.inline)
+            .map(|entry| entry.manifest.clone())
+            .collect::<Vec<_>>();
+        let contracts = tools
+            .iter()
+            .filter_map(|manifest| {
+                self.resolve_contract(&manifest.name)
+                    .map(|contract| (manifest.name.clone(), contract))
+            })
+            .collect();
+        Self::from_tools(tools, contracts)
+    }
+
     pub fn from_tool_definitions(tools: Vec<ToolDefinition>) -> Self {
         let contracts = tools
             .iter()

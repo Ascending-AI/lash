@@ -189,6 +189,10 @@ pub(crate) struct CompiledResourceOperationListBatch {
 
 #[derive(Clone)]
 pub(crate) enum CompiledAggregateAwaitShape {
+    Comprehension {
+        stack_index: usize,
+        template: Box<CompiledResourceOperationBatch>,
+    },
     BatchLeaf(usize),
     Value(usize),
     Tuple(Box<[CompiledAggregateAwaitShape]>),
@@ -317,6 +321,14 @@ pub(crate) enum Instruction {
         operation: usize,
         argc: usize,
     },
+    PendingTool {
+        operation: usize,
+        argc: usize,
+    },
+    AwaitArray {
+        settle: bool,
+    },
+    AwaitPending,
     ResourceOperationBatch(usize),
     ResourceOperationListBatch(usize),
     StartProcess {
@@ -534,9 +546,11 @@ impl Instruction {
             Instruction::ResourceCall { .. } | Instruction::ResourceCallUnwrap { .. } => {
                 InstructionProfileTag::ResourceCall
             }
-            Instruction::ResourceOperationBatch(_) | Instruction::ResourceOperationListBatch(_) => {
-                InstructionProfileTag::ResourceCall
-            }
+            Instruction::PendingTool { .. }
+            | Instruction::AwaitArray { .. }
+            | Instruction::AwaitPending
+            | Instruction::ResourceOperationBatch(_)
+            | Instruction::ResourceOperationListBatch(_) => InstructionProfileTag::ResourceCall,
             Instruction::StartProcess { .. } => InstructionProfileTag::StartProcess,
             Instruction::AwaitHandle
             | Instruction::AwaitHandleUnwrap

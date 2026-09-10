@@ -86,7 +86,7 @@ struct Driver;
 impl ProtocolDriverPlugin for Driver {
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         let protocol: Arc<dyn ProtocolDriverHandle<HostTurnProtocol>> =
-            Arc::new(lash_protocol_standard::StandardDriver);
+            Arc::new(lash_protocol_standard::StandardDriver::default());
         let turn_limit_final_message: TurnLimitFinalMessage =
             Arc::new(|message_id, _max_turns| lash::messages::Message {
                 id: message_id,

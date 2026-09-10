@@ -778,6 +778,9 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
                 compact_json(&chunk.constants[index])
             )
         }
+        Instruction::PendingTool { operation, argc } => format!("pending_tool {operation} {argc}"),
+        Instruction::AwaitArray { settle } => format!("await_array {settle}"),
+        Instruction::AwaitPending => "await_pending".to_string(),
         Instruction::PushNull => "push_null".to_string(),
         Instruction::PushUndefined => "push_undefined".to_string(),
         Instruction::PushBool(value) => format!("push_bool {value}"),
@@ -1323,3 +1326,6 @@ mod exception_control_flow_cases;
 mod exception_review_cases;
 mod exception_wire_cases;
 mod typescript_exotic_cases;
+
+#[path = "tests/wrapup_await_cases.rs"]
+mod wrapup_await_cases;

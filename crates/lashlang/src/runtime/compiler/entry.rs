@@ -828,6 +828,29 @@ impl Compiler {
         element: ListComprehensionElement<'_>,
         clauses: &[ListComprehensionClause],
     ) {
+        self.compile_list_comprehension_with(
+            &mut |compiler| {
+                match element {
+                    ListComprehensionElement::Value(element) => compiler.compile_expr(element),
+                    ListComprehensionElement::DeferredCall { receiver, args } => {
+                        compiler.compile_expr(receiver);
+                        for arg in args {
+                            compiler.compile_expr(arg);
+                        }
+                        compiler.code.push(Instruction::BuildTuple(args.len() + 1));
+                    }
+                }
+                compiler.emit_isolation();
+            },
+            clauses,
+        );
+    }
+
+    pub(super) fn compile_list_comprehension_with(
+        &mut self,
+        element: &mut dyn FnMut(&mut Self),
+        clauses: &[ListComprehensionClause],
+    ) {
         self.code.push(Instruction::BuildList(0));
         self.compile_list_comprehension_clause(element, clauses, 0);
         self.clear_const_slots();
@@ -835,22 +858,12 @@ impl Compiler {
 
     fn compile_list_comprehension_clause(
         &mut self,
-        element: ListComprehensionElement<'_>,
+        element: &mut dyn FnMut(&mut Self),
         clauses: &[ListComprehensionClause],
         index: usize,
     ) {
         let Some(clause) = clauses.get(index) else {
-            match element {
-                ListComprehensionElement::Value(element) => self.compile_expr(element),
-                ListComprehensionElement::DeferredCall { receiver, args } => {
-                    self.compile_expr(receiver);
-                    for arg in args {
-                        self.compile_expr(arg);
-                    }
-                    self.code.push(Instruction::BuildTuple(args.len() + 1));
-                }
-            }
-            self.emit_isolation();
+            element(self);
             self.code.push(Instruction::ListAppend);
             return;
         };
@@ -873,7 +886,7 @@ impl Compiler {
         &mut self,
         binding: &str,
         iterable: &Expr,
-        element: ListComprehensionElement<'_>,
+        element: &mut dyn FnMut(&mut Self),
         clauses: &[ListComprehensionClause],
         next_clause: usize,
     ) {
@@ -903,7 +916,7 @@ impl Compiler {
 
     fn compile_list_comprehension_for_body(
         &mut self,
-        element: ListComprehensionElement<'_>,
+        element: &mut dyn FnMut(&mut Self),
         clauses: &[ListComprehensionClause],
         next_clause: usize,
         binding: usize,

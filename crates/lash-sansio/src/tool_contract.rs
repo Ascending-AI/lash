@@ -245,6 +245,19 @@ impl std::fmt::Display for ToolId {
     }
 }
 
+/// Host-owned discovery operation used to find tools omitted from the prompt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolDiscovery {
+    pub operation: String,
+}
+
+fn inline_default() -> bool {
+    true
+}
+fn is_inline(value: &bool) -> bool {
+    *value
+}
+
 /// Tool metadata exposed to prompts, catalogs, and UI. Catalog membership —
 /// being present in a [`ToolProvider`]'s manifest list — is the execution gate;
 /// there is no per-manifest tier. The optional compact contract is the
@@ -252,6 +265,9 @@ impl std::fmt::Display for ToolId {
 /// [`ToolContract`].
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ToolManifest {
+    /// Render directly when the host declares a discovery layer.
+    #[serde(default = "inline_default", skip_serializing_if = "is_inline")]
+    pub inline: bool,
     pub id: ToolId,
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -559,6 +575,7 @@ impl ToolDefinition {
         let name = name.into();
         Self {
             manifest: ToolManifest {
+                inline: true,
                 id: id.clone(),
                 name: name.clone(),
                 description: description.into(),
@@ -828,3 +845,29 @@ pub use schema_validation::validate_tool_input;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod inline_tests {
+    use super::*;
+    #[test]
+    fn manifests_without_inline_keep_the_existing_default() {
+        let tool = ToolDefinition::raw(
+            "test",
+            "test",
+            "test",
+            serde_json::json!({}),
+            serde_json::json!({}),
+        );
+        let mut value = serde_json::to_value(tool.manifest()).unwrap();
+        assert!(value.get("inline").is_none());
+        assert!(
+            serde_json::from_value::<ToolManifest>(value.clone())
+                .unwrap()
+                .inline
+        );
+        value["inline"] = false.into();
+        let hidden = serde_json::from_value::<ToolManifest>(value).unwrap();
+        assert!(!hidden.inline);
+        assert_eq!(serde_json::to_value(hidden).unwrap()["inline"], false);
+    }
+}

@@ -511,7 +511,6 @@ mod label_annotation_tests {
         let (section, host_environment) = rendered_surface(base_config());
 
         assert!(section.contains("@label"), "{section}");
-        assert!(section.contains("Execution labels"), "{section}");
         assert!(host_environment.language_features.label_annotations);
         lashlang::LinkedModule::link(labelled_program(), &host_environment)
             .expect("default surface links label annotations");

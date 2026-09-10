@@ -38,7 +38,7 @@ pub(crate) fn rlm_prompt_tool_docs(
     if !features.type_literals {
         vocabulary.type_literal_hint = "";
     }
-    tool_catalog
+    let entries = tool_catalog
         .tools
         .iter()
         .filter(|tool| tool.manifest.activation != ToolActivation::Internal)
@@ -63,30 +63,65 @@ pub(crate) fn rlm_prompt_tool_docs(
             compact.description = vocabulary.render_tool_prose(&compact.description);
             render_doc_field_prose(vocabulary, &mut compact.parameters);
             render_doc_field_prose(vocabulary, &mut compact.return_fields);
-            let markdown = compact.render_markdown();
-            if dialect.renders_tool_catalogue_inline() {
-                let signature = lash_typescript::render_tool_signature(
-                    &call_path,
-                    contract.input_schema.canonical(),
-                    Some(contract.output_schema.canonical()),
-                );
-                let notes = markdown
-                    .lines()
-                    .skip(1)
-                    .map(|line| format!(" * {}", line.replace("*/", "* /")))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                Some(format!("/**\n{notes}\n */\n{signature}"))
-            } else {
-                let (_, notes) = markdown.split_once('\n').unwrap_or((&markdown, ""));
-                Some(format!(
-                    "### `await {}? -> {}`\n{notes}",
-                    compact.signature, compact.returns
-                ))
+            compact.parameters.retain(has_field_description);
+            if !schema_nests(contract.output_schema.canonical(), 0) {
+                compact.return_fields.retain(has_field_description);
             }
+            let markdown = compact.render_markdown();
+            let (_, notes) = markdown.split_once('\n').unwrap_or((&markdown, ""));
+            let signature = if dialect.renders_tool_catalogue_inline() {
+                let input = lash_typescript::render_schema_type(contract.input_schema.canonical());
+                let input = if input == "Record<string, never>" {
+                    "{}"
+                } else {
+                    &input
+                };
+                let output =
+                    lash_typescript::render_schema_type(contract.output_schema.canonical());
+                format!("{call_path}({input}): Promise<{output}>")
+            } else {
+                format!("await {}? -> {}", compact.signature, compact.returns)
+            };
+            Some(format!("`{signature}`\n{notes}"))
         })
-        .collect::<Vec<_>>()
-        .join("\n\n")
+        .collect::<Vec<_>>();
+    entries.join("\n\n")
+}
+
+fn has_field_description(row: &serde_json::Value) -> bool {
+    row.get("description")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|description| !description.trim().is_empty())
+}
+
+fn schema_nests(schema: &serde_json::Value, depth: usize) -> bool {
+    let container = schema.get("properties").is_some() || schema.get("items").is_some();
+    if container && depth >= 1 {
+        return true;
+    }
+    if schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|properties| {
+            properties
+                .values()
+                .any(|field| schema_nests(field, depth + 1))
+        })
+    {
+        return true;
+    }
+    if schema
+        .get("items")
+        .is_some_and(|items| schema_nests(items, depth + 1))
+    {
+        return true;
+    }
+    ["anyOf", "oneOf", "allOf"].iter().any(|key| {
+        schema
+            .get(key)
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|variants| variants.iter().any(|variant| schema_nests(variant, depth)))
+    })
 }
 
 /// Resolve the dialect tokens in one rendered doc row's `description`.
@@ -1103,5 +1138,132 @@ mod tests {
             all[0], all[1],
             "collapsed marker lists make the guard vacuous"
         );
+    }
+}
+
+pub(crate) fn validate_discovery(
+    tools: &[lash_core::ToolManifest],
+    discovery: Option<&lash_core::ToolDiscovery>,
+    dialect: &dyn crate::dialect::RlmDialect,
+) -> Result<(), PluginError> {
+    if let Some(discovery) = discovery
+        && !tools.iter().any(|tool| {
+            tool.inline
+                && tool.activation != ToolActivation::Internal
+                && dialect.tool_call_path(tool).ok().as_deref()
+                    == Some(discovery.operation.as_str())
+        })
+    {
+        return Err(PluginError::InvalidToolDiscovery {
+            operation: discovery.operation.clone(),
+        });
+    }
+    Ok(())
+}
+
+pub(crate) fn with_discovery_sentence(
+    mut execution: String,
+    discovery: Option<&lash_core::ToolDiscovery>,
+    dialect: &dyn crate::dialect::RlmDialect,
+) -> String {
+    if let Some(discovery) = discovery {
+        let suffix = if dialect.language_id() == "lashlang" {
+            "?"
+        } else {
+            ""
+        };
+        let sentence = format!(
+            " Other tools exist; find them with `await {}({{ ... }}){suffix}`.",
+            discovery.operation
+        );
+        let at = execution.find("\n\n").unwrap_or(execution.len());
+        execution.insert_str(at, &sentence);
+    }
+    execution
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+    use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
+    #[test]
+    fn discovery_filters_each_dialect_and_channel_and_requires_an_inline_operation() {
+        let tool = |name: &str, inline| {
+            let mut tool = lash_core::ToolDefinition::raw(
+                name,
+                name,
+                format!("Description for {name}"),
+                serde_json::json!({"type":"object"}),
+                serde_json::json!({"type":"string"}),
+            )
+            .with_tool_binding(ToolBinding::new(["tools"], name));
+            tool.manifest.inline = inline;
+            tool
+        };
+        let catalog = ToolCatalog::from_tool_definitions(vec![
+            tool("search", true),
+            tool("hidden", false),
+            tool("visible", true),
+        ]);
+        let manifests = catalog
+            .tools
+            .iter()
+            .map(|entry| entry.manifest.clone())
+            .collect::<Vec<_>>();
+        let dialects: [Box<dyn crate::dialect::RlmDialect>; 2] = [
+            Box::new(crate::dialect::lashlang_test_dialect()),
+            Box::new(crate::dialect::typescript_test_dialect()),
+        ];
+        for dialect in dialects {
+            for native in [false, true] {
+                for discovery in [
+                    None,
+                    Some(lash_core::ToolDiscovery {
+                        operation: "tools.search".into(),
+                    }),
+                ] {
+                    validate_discovery(&manifests, discovery.as_ref(), dialect.as_ref()).unwrap();
+                    let visible = if discovery.is_some() {
+                        catalog.inline_tools()
+                    } else {
+                        catalog.clone()
+                    };
+                    let execution = if native {
+                        crate::native::prompt::execution_section(
+                            dialect.as_ref(),
+                            Default::default(),
+                            &visible,
+                        )
+                    } else {
+                        dialect
+                            .render_execution_section(Default::default(), &visible)
+                            .unwrap()
+                    };
+                    let text =
+                        with_discovery_sentence(execution, discovery.as_ref(), dialect.as_ref());
+                    let docs = rlm_prompt_tool_docs(&visible, dialect.as_ref(), Default::default());
+                    assert!(docs.contains("Description for search"));
+                    assert!(docs.contains("Description for visible"));
+                    assert_eq!(docs.contains("Description for hidden"), discovery.is_none());
+                    assert_eq!(
+                        text.contains("Other tools exist; find them with `await tools.search"),
+                        discovery.is_some()
+                    );
+                    assert!(!text.contains("Use discovery if available"));
+                }
+            }
+            for operation in ["tools.hidden", "tools.absent"] {
+                assert!(matches!(
+                    validate_discovery(
+                        &manifests,
+                        Some(&lash_core::ToolDiscovery {
+                            operation: operation.into()
+                        }),
+                        dialect.as_ref()
+                    ),
+                    Err(PluginError::InvalidToolDiscovery { .. })
+                ));
+            }
+        }
     }
 }

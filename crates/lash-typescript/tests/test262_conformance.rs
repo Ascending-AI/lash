@@ -110,7 +110,7 @@ fn inventory_census_and_skip_register_are_exhaustive() {
         match fields[2].as_str() {
             "accepted" => assert_eq!(fields[3], "-", "accepted row must have reason `-`"),
             "rejected" => assert!(
-                diagnostic_names.contains(fields[3].as_str()),
+                diagnostic_names.contains(fields[3].as_str()) || fields[3] == "TS_PENDING_TOOL",
                 "rejected census row {}:{} names unknown diagnostic {}",
                 fields[0],
                 fields[1],
@@ -598,6 +598,21 @@ fn rejected_census_rows_name_the_diagnostic_that_fires() {
                 "{kind}:{name} must say why it has no probe"
             );
             exempt += 1;
+            continue;
+        }
+        if expected == "TS_PENDING_TOOL" {
+            let program = lash_typescript::compile(probe).expect("await resolves at runtime");
+            let error = futures::executor::block_on(lashlang::execute(
+                &program,
+                &mut State::new(),
+                &Host::default(),
+            ))
+            .expect_err("await requires a pending handle");
+            assert!(
+                matches!(error, RuntimeError::PendingTool { .. }),
+                "{probe}: {error}"
+            );
+            probed += 1;
             continue;
         }
         let error = lash_typescript::validate(probe)

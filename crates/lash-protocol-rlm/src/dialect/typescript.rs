@@ -185,19 +185,24 @@ impl TypescriptDialect {
         {
             return Ok(String::new());
         }
-        let mut section = String::from("\n\n### Host surface");
+        let mut section = String::from("\n\n### Host Surface");
         if !operations.is_empty() {
             let lines = operations
                 .iter()
                 .map(|operation| {
                     format!(
-                        "declare function {}_{}(input: {}): Promise<{}>; // await {}.{}(input)",
+                        "{}_{}(input: {}): Promise<{}>; // await {}.{}(input)\n{}",
                         operation.alias,
                         operation.operation,
-                        typescript_type(operation.input),
+                        typescript_type(operation.input).replace("Record<string, never>", "{}"),
                         typescript_type(operation.output),
                         operation.alias,
-                        operation.operation
+                        operation.operation,
+                        crate::protocol::prompt::host_operation_description(
+                            &operation.alias,
+                            &operation.operation
+                        )
+                        .unwrap_or("")
                     )
                 })
                 .collect::<Vec<_>>()
@@ -261,28 +266,24 @@ pub(crate) fn typescript_process_prompt(abilities: &lashlang::LashlangAbilities)
     let mut lines = Vec::new();
     if abilities.processes {
         lines.push(r#"interface Process<Input = unknown, Output = unknown> { readonly name: string }
-declare function defineProcess(c: {name: string; run: Function; signals?: Record<string, null>}): Process;
-declare function start(p: Process, args?: Record<string, unknown>): Promise<unknown> & {id: string};
-declare function wake(value: unknown): void;
+defineProcess(c: {name: string; run: Function; signals?: Record<string, null>}): Process;
+start(p: Process, args?: Record<string, unknown>): Promise<unknown> & {id: string};
+wake(value: unknown): void;
 Use top-level const, literal name, async run; start keys match run parameter names. Return succeeds after finally; throw fails."#);
         if abilities.process_signals {
             lines.push(
-                r#"declare function waitSignal(name: string): Promise<unknown>;
-declare function wake(handle: {id: string}, signal: string, payload: unknown): void;
+                r#"waitSignal(name: string): Promise<unknown>;
+wake(handle: {id: string}, signal: string, payload: unknown): void;
 Signals: {go: null}; waitSignal is run-only."#,
             );
         }
         if abilities.triggers {
-            lines.push(r#"declare function registerTrigger(c: {source: unknown; target: Process; inputs: Record<string, unknown>; name?: string}): Promise<unknown>;
+            lines.push(r#"registerTrigger(c: {source: unknown; target: Process; inputs: Record<string, unknown>; name?: string}): Promise<unknown>;
 Literal target; inputs match run parameters."#);
         }
     }
     if abilities.sleep {
-        lines.push(if abilities.processes {
-            "declare function sleep(ms: number): Promise<void>; // cell or run"
-        } else {
-            "declare function sleep(ms: number): Promise<void>; // cell"
-        });
+        lines.push("`await sleep(ms)` pauses the program.");
     }
     let prompt = lines.join("\n");
     if abilities.process_signals {
@@ -389,38 +390,45 @@ impl RlmDialect for TypescriptDialect {
         let tools = if tools.is_empty() {
             String::new()
         } else {
-            format!(
-                "\n\n### Tools\n\nEvery call requires `await` and returns the declared `Promise<T>`:\n\n{tools}"
-            )
+            format!("\n\n### Tools\n\n{tools}")
         };
         let host_surface = self.render_host_surface_section(tool_catalog)?;
+        let allowed_sections = if host_surface.is_empty() {
+            "**Tools**"
+        } else {
+            "**Tools** or **Host Surface**"
+        };
         let response_shape = super::cell_response_shape(self.cell_tags(), self.prompt_vocabulary());
         let environment = self
             .surface
             .host_environment(tool_catalog)
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let durable = typescript_process_prompt(&environment.abilities);
+        let mut process_abilities = environment.abilities;
+        process_abilities.sleep = false;
+        let durable = typescript_process_prompt(&process_abilities);
         let durable = if durable.is_empty() {
             durable
         } else {
-            format!("\n{durable}")
+            format!("\n\n### Processes\n\n{durable}")
+        };
+        let sleep = if environment.abilities.sleep {
+            "\n\n`await sleep(ms)` pauses the program."
+        } else {
+            ""
         };
         let host_api = format!(
-            r#"Top-level bindings persist across cells. `console.log(value)` inspects and continues; `finish(value)` is cell-only and ends the turn with a computed value. Never finish a raw tool dump: inspect it, then finish a concise result.
+            r#"Top-level bindings persist across executions. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result.
 
-Standard `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp`, `URL` are supported.
+`Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes, generators and `Promise.race` are not supported.
 
 ### Host API
 
-`console.log/warn/error/info/debug(...values)` and `print(value)` inspect values; `finish(value)` ends the turn.{durable}
-`Promise.all`/`Promise.allSettled` accept tool promises and resolved values; all leaves settle before `all` reports the first-settled rejection.
-
-A failed tool call rejects with an `Error`: `message` is the host text, `name` is `EffectError` (`RuntimeError` for runtime faults), and `cause` carries `{{ code, details }}`. An `allSettled` rejection uses that same error. Errors in `finish` or tool arguments become `{{ name, message, cause }}`."#
+`console.log(value)` shows output in the next step; `finish(value)` ends the turn. A failed tool call throws an `Error` whose `cause` is `{{ code, details }}`.{sleep}{durable}"#
         );
         let example =
             "### Example cell\n\n<typescript>\nconst total = 1 + 2;\nfinish(total);\n</typescript>";
         Ok(format!(
-            "{response_shape}\n{example}\n\n{host_api}\n\n{tools}{host_surface}"
+            "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under {allowed_sections}.\n\n{response_shape}\n{example}\n\n{host_api}\n\n{tools}{host_surface}"
         ))
     }
 
@@ -430,7 +438,7 @@ A failed tool call rejects with an `Error`: `message` is the host text, `name` i
                 self.finish_required_finalization(schema.is_some())
             }
             lash_rlm_types::RlmTermination::Natural => {
-                "Continue with one paired `<typescript>...</typescript>` block, or finish with prose and no block. A call to `finish(value)` returns a computed final value.".to_string()
+                "Natural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step in a block, and call `finish(value)` inside the program to return a computed value.".to_string()
             }
         }
     }
@@ -590,7 +598,7 @@ mod tests {
             )
             .expect("render execution section");
 
-        assert!(section.contains("### Host surface"), "{section}");
+        assert!(section.contains("### Host Surface"), "{section}");
         assert!(
             section.contains(
                 "cron.Schedule(input: { expr: string; tz?: string }): TriggerSource<cron_Tick>"
@@ -662,20 +670,20 @@ mod tests {
             .render_execution_section(crate::protocol::RlmPromptFeatures::default(), &catalog)
             .expect("render execution section");
         assert!(
-            section.contains(
-                "declare namespace web { function fetch(input: { url: string }): Promise<string>; }"
-            ),
+            section.contains("web.fetch({ url: string }): Promise<string>"),
             "{section}"
         );
         assert!(
             !section.contains("defineProcess"),
             "disabled processes stay hidden"
         );
-        assert!(section.contains("Promise.allSettled"), "{section}");
+        assert!(
+            !section.contains("Promise.allSettled"),
+            "fan-out needs no teaching: {section}"
+        );
         assert!(!section.contains("### v1 guardrails"));
         assert!(!section.contains("### Deterministic standard library"));
         assert!(section.contains("`Date` (UTC)"));
-        insta::assert_snapshot!("typescript_execution_section", section);
     }
 
     #[test]
@@ -1104,66 +1112,31 @@ mod tests {
         }
     }
 
-    /// The declarations inside the rendered `### Tools` block, one per tool.
+    /// Read each method signature from the actual catalogue text.
     fn tool_declarations(section: &str) -> Vec<String> {
-        let tools = section
+        section
             .split_once("### Tools")
-            .expect("a catalog with tools renders a Tools section")
-            .1;
-        tools
+            .expect("Tools section")
+            .1
             .split("\n### ")
             .next()
             .unwrap()
             .lines()
-            .map(str::trim)
-            .filter(|line| line.starts_with("declare "))
+            .filter_map(|line| {
+                line.strip_prefix('`')
+                    .and_then(|line| line.strip_suffix('`'))
+            })
+            .filter(|line| line.contains("): Promise<"))
             .map(str::to_string)
             .collect()
     }
 
-    /// The call path a rendered declaration advertises.
-    ///
-    /// Deliberately parses the rendered text rather than asking the renderer
-    /// what it meant: the sweep's whole claim is that the text a model reads
-    /// names something callable, and a shape this does not recognize is a new
-    /// advertisement form that has to be judged, not skipped.
-    fn advertised_call_path(declaration: &str) -> String {
-        let mut rest = declaration
-            .trim()
-            .strip_prefix("declare ")
-            .unwrap_or_else(|| panic!("unrecognized declaration: {declaration}"));
-        let mut segments = Vec::new();
-        while let Some(tail) = rest.strip_prefix("namespace ") {
-            let (module, tail) = tail
-                .split_once(" {")
-                .unwrap_or_else(|| panic!("unrecognized namespace: {declaration}"));
-            segments.push(module.trim().to_string());
-            rest = tail.trim_start();
-        }
-        if let Some(tail) = rest.strip_prefix("function ") {
-            let (operation, _) = tail
-                .split_once('(')
-                .unwrap_or_else(|| panic!("unrecognized function: {declaration}"));
-            segments.push(operation.trim().to_string());
-        } else if let Some(tail) = rest.strip_prefix("const ") {
-            // `const root: { module: { … { operation(input: …): … } } };` — the
-            // tail is a chain of property levels ending in a callable member.
-            let mut rest = tail;
-            loop {
-                let member = rest
-                    .find([':', '('])
-                    .unwrap_or_else(|| panic!("unrecognized const member: {declaration}"));
-                let (name, tail) = rest.split_at(member);
-                segments.push(name.trim().trim_matches('"').to_string());
-                if tail.starts_with('(') {
-                    break;
-                }
-                rest = tail[1..].trim_start().trim_start_matches('{').trim_start();
-            }
-        } else {
-            panic!("unrecognized declaration shape: {declaration}");
-        }
-        segments.join(".")
+    fn advertised_call_path(signature: &str) -> String {
+        signature
+            .split_once('(')
+            .expect("method signature")
+            .0
+            .to_string()
     }
 
     /// Links and runs the advertised call against a host binding for

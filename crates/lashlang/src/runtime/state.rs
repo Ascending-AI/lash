@@ -284,6 +284,12 @@ pub(super) fn materialize_runtime_globals(
     let mut globals = record_with_capacity(runtime_globals.len());
     for entry in runtime_globals.entries.iter() {
         match heap.export_for_instruction(&entry.value) {
+            // A pending-tool handle is execution-private the same way: it
+            // names a request slot of the VM that minted it. Exported, the
+            // next execution would read it as a live handle (and, before the
+            // execution nonce, its index aliased that execution's first
+            // call), so a binding holding one at any depth stays behind.
+            Ok(value) if super::value_contains_tool_handle(&value) => {}
             Ok(value) => {
                 globals.insert_symbolized(entry.symbol, entry.name.clone(), value);
             }

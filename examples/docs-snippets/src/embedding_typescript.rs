@@ -28,19 +28,14 @@ fn typescript_linking_and_schema_signatures_use_shared_lash_types() {
     assert_eq!(compiled.compile_stats().type_literals_dynamic, 0);
 
     let output_schema = serde_json::json!({"type": "array", "items": {"type": "string"}});
-    let signature = lash_typescript::render_tool_signature(
-        "search",
-        &serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {"query": {"type": "string"}},
-            "required": ["query"]
-        }),
-        Some(&output_schema),
-    );
+    let input_type = lash_typescript::render_schema_type(&serde_json::json!({
+        "type": "object", "additionalProperties": false,
+        "properties": {"query": {"type": "string"}}, "required": ["query"]
+    }));
+    assert_eq!(input_type, "{ query: string }");
     assert_eq!(
-        signature,
-        "declare function search(input: { query: string }): Promise<Array<string>>;"
+        lash_typescript::render_schema_type(&output_schema),
+        "Array<string>"
     );
 }
 

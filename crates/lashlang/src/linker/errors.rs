@@ -52,6 +52,10 @@ pub enum LinkError {
         actual: String,
         span: Option<Span>,
     },
+    #[error(
+        "`await` of a settled {actual}: only tool calls, handles, or lists/records/comprehensions of them can be awaited - write `await m.op({{ id: x }})?`, `await [m.a({{}})?, m.b({{}})?]`, or `await [m.op({{ id: x }})? for x in xs]`"
+    )]
+    AwaitedSettledExpression { actual: String, span: Option<Span> },
     #[error("expected {expected}, got incompatible literal {actual}")]
     IncompatibleExpectedLiteral {
         expected: String,
@@ -247,6 +251,7 @@ impl LinkError {
             | Self::UnknownType { span, .. }
             | Self::IncompatibleConstructorInput { span, .. }
             | Self::IncompatibleOperationInput { span, .. }
+            | Self::AwaitedSettledExpression { span, .. }
             | Self::IncompatibleExpectedLiteral { span, .. }
             | Self::IncompatibleProcessReturn { span, .. }
             | Self::IncompatibleFunctionReturn { span, .. }

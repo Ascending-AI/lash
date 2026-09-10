@@ -105,6 +105,9 @@ pub(crate) use access::{
     read_javascript_index_direct_with_key, resolve_existing_list_assignment_index, resolve_index,
     unwrap_tool_result,
 };
+pub(crate) use access::{
+    is_runtime_process_handle, is_tool_handle_record, value_contains_tool_handle,
+};
 #[allow(unused_imports)]
 pub(crate) use format::*;
 #[allow(unused_imports)]

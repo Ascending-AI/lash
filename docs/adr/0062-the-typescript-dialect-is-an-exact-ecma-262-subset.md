@@ -92,7 +92,7 @@ captured object reference are supported.
 
 **Cells are scripts.** A foreground cell is ordinary top-level TypeScript, and
 may use top-level `await` for tools, process handles, `sleep`, `Promise.all`
-and `Promise.allSettled`. Tool calls require `await` and use explicit
+and `Promise.allSettled`. Tool calls must be awaited directly or consumed as pending handles before the execution ends ([ADR 0087](0087-typescript-runtime-promise-arrays.md)); the pending-tool runtime error (`TS_PENDING_TOOL`) is `Catchable`, so a `try/catch` in the cell observes it. Tool calls use explicit
 `typescript.tool` module paths; their rendered signatures return `Promise<T>`,
 and unknown module paths enter the executor's deferred tool-resolution path.
 
@@ -194,10 +194,13 @@ instead.
 
 ### Promise aggregates settle on journaled order
 
-`Promise.all` and `Promise.allSettled` accept array literals of top-level tool
-promises and already-resolved values, and reuse the shared batch machinery.
-Nested aggregates, non-array iterables, and process or timer promises inside an
-aggregate reject by name.
+As revised by [ADR 0087](0087-typescript-runtime-promise-arrays.md),
+`Promise.all` and `Promise.allSettled` evaluate arbitrary array-valued
+expressions at runtime. Tool-handle elements are awaited and settled values
+pass through; mixed arrays and arrays stored in bindings are accepted. Direct
+async maps retain the existing callback driver. Non-array values fail with a
+typed runtime error. Process and timer promises retain their separate-await
+requirement; mixed process/tool settlement ordering is not implemented.
 
 `Promise.all` rejects with the reason of the leaf that settled **first**, as
 ECMA specifies, and `allSettled` keeps results in input order. Settlement order

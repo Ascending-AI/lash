@@ -129,28 +129,7 @@ impl RlmDialect for LashlangDialect {
                 self.finish_required_finalization(schema.is_some())
             }
             lash_rlm_types::RlmTermination::Natural => {
-                r#"This turn uses natural termination. Each assistant response must choose exactly one of these shapes:
-
-1. Continue working: include a paired `<lashlang>...</lashlang>` block. Brief prose may appear before the block; that prose is commentary/status for the action that follows. A block without `finish` is progress and continues the loop.
-2. Finish with prose: write prose with no `<lashlang>` block. A prose-only response immediately ends the turn as the final answer. Use this only when the task is complete and no work remains.
-3. Finish with a computed/raw value: call `finish <value>` inside a paired `<lashlang>...</lashlang>` block. This ends the turn with that value.
-
-Every message before the final answer must contain a paired `<lashlang>...</lashlang>` block. Any message may also contain prose; when prose accompanies a Lashlang block, it is commentary/status for the action that follows. Unaccompanied prose is final-answer-only. If any work remains, do not write prose-only. Never say you will continue, inspect, patch, wait, monitor, validate, or retry unless the same response also contains the `<lashlang>` block that does it.
-
-Example multi-step natural turn:
-
-I’ll inspect the current value first.
-<lashlang>
-preview = slice(to_string(value), 0, 400)
-print(preview)
-</lashlang>
-
-<lashlang>
-result = format("Checked: {}", preview)
-print(result)
-</lashlang>
-
-Done. I inspected the value and summarized the result."#.to_string()
+r#"Natural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step in a block, and call `finish <value>` inside the program to return a computed value."#.to_string()
             }
         }
     }

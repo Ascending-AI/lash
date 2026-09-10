@@ -185,6 +185,9 @@ pub enum RuntimeError {
         "TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED: array property `{key}` is not representable in the v1 heap"
     )]
     TypeScriptArrayNonIndexPropertyUnsupported { key: String },
+    /// A TypeScript pending tool promise violated its lifetime contract.
+    #[error("TS_PENDING_TOOL: {problem}")]
+    PendingTool { problem: String },
     /// A builtin received the wrong number of arguments.
     #[error("`{name}` takes {expected} arg(s), got {actual}")]
     InvalidArgumentCount {
@@ -516,6 +519,7 @@ impl RuntimeError {
             Self::CannotAssignThroughIndex { .. } => ErrorTaxonomy::Catchable,
             Self::InvalidListAssignmentIndex => ErrorTaxonomy::Catchable,
             Self::TypeScriptArrayNonIndexPropertyUnsupported { .. } => ErrorTaxonomy::Catchable,
+            Self::PendingTool { .. } => ErrorTaxonomy::Catchable,
             Self::InvalidArgumentCount { .. } => ErrorTaxonomy::Catchable,
             Self::EmptyUnsupported => ErrorTaxonomy::Catchable,
             Self::KeysUnsupported => ErrorTaxonomy::Catchable,
@@ -646,6 +650,7 @@ impl RuntimeError {
             Self::TypeScriptArrayNonIndexPropertyUnsupported { .. } => {
                 "TypeScriptArrayNonIndexPropertyUnsupported"
             }
+            Self::PendingTool { .. } => "PendingTool",
             Self::InvalidArgumentCount { .. } => "InvalidArgumentCount",
             Self::EmptyUnsupported => "EmptyUnsupported",
             Self::KeysUnsupported => "KeysUnsupported",
@@ -846,6 +851,9 @@ mod tests {
             },
             RuntimeError::InvalidListAssignmentIndex,
             RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { key: "-1".into() },
+            RuntimeError::PendingTool {
+                problem: "test".into(),
+            },
             RuntimeError::InvalidArgumentCount {
                 name: "call".into(),
                 expected: "one or two".into(),
@@ -1174,6 +1182,7 @@ mod tests {
                 RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { .. } => {
                     "TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED: array property `-1` is not representable in the v1 heap"
                 }
+                RuntimeError::PendingTool { .. } => "TS_PENDING_TOOL: test",
                 RuntimeError::InvalidArgumentCount { .. } => {
                     "`call` takes one or two arg(s), got 3"
                 }
@@ -1363,7 +1372,7 @@ mod tests {
     /// Every guest-facing code, in declaration order. The list is the pin's
     /// completeness half: `expected_code` forces each variant to declare one,
     /// this forces each declared one to be exercised.
-    const RUNTIME_ERROR_CODES: [&str; 117] = [
+    const RUNTIME_ERROR_CODES: [&str; 118] = [
         "FrameDepthExceeded",
         "FunctionIndexOverflow",
         "NonFunctionCall",
@@ -1403,6 +1412,7 @@ mod tests {
         "CannotAssignThroughIndex",
         "InvalidListAssignmentIndex",
         "TypeScriptArrayNonIndexPropertyUnsupported",
+        "PendingTool",
         "InvalidArgumentCount",
         "EmptyUnsupported",
         "KeysUnsupported",
@@ -1534,6 +1544,7 @@ mod tests {
             RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { .. } => {
                 "TypeScriptArrayNonIndexPropertyUnsupported"
             }
+            RuntimeError::PendingTool { .. } => "PendingTool",
             RuntimeError::InvalidArgumentCount { .. } => "InvalidArgumentCount",
             RuntimeError::EmptyUnsupported => "EmptyUnsupported",
             RuntimeError::KeysUnsupported => "KeysUnsupported",

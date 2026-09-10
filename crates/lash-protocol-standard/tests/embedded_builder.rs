@@ -63,7 +63,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         )
         .with_store(store.clone() as Arc<dyn RuntimePersistence>)
         .with_plugin_factories(vec![Arc::new(
-            lash_protocol_standard::StandardProtocolPluginFactory,
+            lash_protocol_standard::StandardProtocolPluginFactory::new(),
         )])
         .build(),
     )
@@ -112,7 +112,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
         .with_store(store as Arc<dyn RuntimePersistence>)
         .with_session_id("beta")
         .with_plugin_factories(vec![Arc::new(
-            lash_protocol_standard::StandardProtocolPluginFactory,
+            lash_protocol_standard::StandardProtocolPluginFactory::new(),
         )])
         .build(),
     )

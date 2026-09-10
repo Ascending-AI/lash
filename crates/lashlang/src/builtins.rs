@@ -220,6 +220,18 @@ pub(crate) const TYPESCRIPT_BUILTINS: &[Builtin] = &[
         arity: Arity::Exact(2),
     },
     Builtin {
+        name: "__typescript_pending_tool",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "__typescript_await_array",
+        arity: Arity::Exact(2),
+    },
+    Builtin {
+        name: "__typescript_await_pending",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
         name: "__typescript_async_map",
         arity: Arity::Exact(2),
     },

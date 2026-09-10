@@ -25,6 +25,8 @@ pub(super) fn register_rlm_protocol_plugin(
     // dialect: model-facing tool prose is authored once and served to every
     // dialect, so the neutrality guard has to know all of their words.
     let catalog_dialects = dialect_registry.clone();
+    let discovery = config.discovery.clone();
+    let discovery_dialect = Arc::clone(&dialect);
     let runtime_state = Arc::new(
         RlmRuntimeState::new(dialect_registry, Arc::clone(&dialect))
             .map_err(|err| PluginError::Session(err.to_string()))?,
@@ -51,6 +53,11 @@ pub(super) fn register_rlm_protocol_plugin(
             vocabulary: dialect.prompt_vocabulary(),
         }))?;
     reg.tool_catalog().contribute(Arc::new(move |ctx| {
+        crate::tool_catalog::validate_discovery(
+            &ctx.tools,
+            discovery.as_ref(),
+            discovery_dialect.as_ref(),
+        )?;
         crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialects)
     }));
     reg.tool_calls().before(Arc::new(|ctx| {

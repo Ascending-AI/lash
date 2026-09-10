@@ -63,6 +63,40 @@ pub fn is_process_handle(record: &Record) -> bool {
     record.get("__handle__").is_some() || record.get("handle").is_some()
 }
 
+/// Returns whether a record is a TypeScript pending-tool handle, whichever
+/// execution minted it. The handle-kind marker is the one field every tool
+/// handle carries; the execution nonce that makes it *this* execution's handle
+/// is checked by the VM.
+pub(crate) fn is_tool_handle_record(record: &Record) -> bool {
+    matches!(record.get("__handle__"), Some(Value::String(kind)) if kind.as_str() == "tool")
+}
+
+/// Returns whether a record is a process handle the host awaits, as opposed to
+/// a pending-tool handle the VM settles itself. Both carry `__handle__`, so the
+/// process-await path must exclude tool handles explicitly.
+pub(crate) fn is_runtime_process_handle(value: &Value) -> bool {
+    matches!(value, Value::Record(record) if is_process_handle(record) && !is_tool_handle_record(record))
+}
+
+/// Whether a materialized value carries a pending-tool handle at any depth.
+///
+/// Used where a handle must not travel: into a tool argument (the host would
+/// receive the marker record and perform the call), or out through the
+/// session globals (a later execution would present a stale handle as live).
+pub(crate) fn value_contains_tool_handle(value: &Value) -> bool {
+    match value {
+        Value::Record(record) => {
+            is_tool_handle_record(record)
+                || record
+                    .entries
+                    .iter()
+                    .any(|entry| value_contains_tool_handle(&entry.value))
+        }
+        Value::List(items) | Value::Tuple(items) => items.iter().any(value_contains_tool_handle),
+        _ => false,
+    }
+}
+
 pub(crate) fn read_field_direct(value: Value, field: &Name) -> Result<Value, RuntimeError> {
     match value {
         Value::Record(record) => Ok(record

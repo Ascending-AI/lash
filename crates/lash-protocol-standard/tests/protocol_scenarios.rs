@@ -516,7 +516,7 @@ impl StandardProtocolRun {
 
 fn standard_config() -> TurnMachineConfig {
     let protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> =
-        Arc::new(StandardDriver);
+        Arc::new(StandardDriver::default());
     TurnMachineConfig {
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
@@ -852,7 +852,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         .build();
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(StandardIntentProvider);
     let mut factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![Arc::new(
-        lash_protocol_standard::StandardProtocolPluginFactory,
+        lash_protocol_standard::StandardProtocolPluginFactory::new(),
     )];
     factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
         "standard-intent-tools",

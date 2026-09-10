@@ -28,9 +28,11 @@ impl ExecutionHost for AsyncHost {
                 let record = handle
                     .as_record()
                     .ok_or_else(|| ExecutionHostError::new("expected handle record"))?;
-                Ok(AbilityResult::Value(
-                    record.get("value").cloned().unwrap_or(Value::Null),
-                ))
+                let value = record.get("value").cloned().unwrap_or(Value::Null);
+                if value == Value::String("fail".into()) {
+                    return Err(ExecutionHostError::new("process failed"));
+                }
+                Ok(AbilityResult::Value(value))
             }
             AbilityOp::Cancel(_) => Ok(AbilityResult::Value(Value::Null)),
             AbilityOp::Print(_) => Ok(AbilityResult::Unit),
@@ -819,6 +821,79 @@ async fn result_unwrap_extracts_awaited_handles_and_joined_results() {
         value,
         Value::List(vec![Value::String("left".into()), Value::String("right".into()),].into())
     );
+}
+
+/// A process handle written next to module operations in one `await [...]`
+/// is awaited after the tool batch, in written order (ADR 0087): the leaf
+/// yields the same result record a direct `await handle` does, never the raw
+/// handle record.
+#[tokio::test(flavor = "current_thread")]
+async fn aggregate_await_settles_process_handles_after_module_operations() {
+    let program = crate::parse(
+        r#"
+        process echo(value: str) { finish value }
+        h = start echo(value: "left")
+        results = await [h, tools.echo({ value: "right" })]
+        finish [(results[0])?, (results[1])?]
+        "#,
+    )
+    .expect("program should parse");
+    let mut state = State::new();
+    let outcome = execute_program(&program, &mut state, &AsyncHost)
+        .await
+        .expect("program should run");
+    assert_eq!(
+        outcome,
+        ExecutionOutcome::Finished(Value::List(
+            vec![Value::String("left".into()), Value::String("right".into())].into()
+        ))
+    );
+
+    // A failing process settles as a result record; the leaf's `?` reports it.
+    let program = crate::parse(
+        r#"
+        process echo(value: str) { finish value }
+        h = start echo(value: "fail")
+        results = await [tools.echo({ value: "ok" }), h]
+        finish (results[1])?
+        "#,
+    )
+    .expect("program should parse");
+    let mut state = State::new();
+    let error = execute_program(&program, &mut state, &AsyncHost)
+        .await
+        .expect_err("the failing process leaf must be reported");
+    assert!(error.to_string().contains("process failed"), "{error}");
+}
+
+/// A module-operation rejection wins over a failing process wherever the two
+/// are written: the tool batch settles first and its rejection ends the await
+/// before any process handle is touched.
+#[tokio::test(flavor = "current_thread")]
+async fn aggregate_await_reports_module_rejections_before_process_failures() {
+    for source in [
+        r#"
+        process echo(value: str) { finish value }
+        h = start echo(value: "fail")
+        results = await [tools.err({})?, h]
+        finish results
+        "#,
+        r#"
+        process echo(value: str) { finish value }
+        h = start echo(value: "fail")
+        results = await [h, tools.err({})?]
+        finish results
+        "#,
+    ] {
+        let program = crate::parse(source).expect("program should parse");
+        let mut state = State::new();
+        let error = execute_program(&program, &mut state, &AsyncHost)
+            .await
+            .expect_err("the unwrapped module leaf rejects the aggregate");
+        let rendered = error.to_string();
+        assert!(rendered.contains("boom"), "{rendered}");
+        assert!(!rendered.contains("process failed"), "{rendered}");
+    }
 }
 
 // ------------------------------------------------------------------

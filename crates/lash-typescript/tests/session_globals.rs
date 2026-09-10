@@ -53,50 +53,21 @@ fn a_restored_process_handle_is_awaitable_from_a_later_cell() {
         .expect("a restored live process handle must remain awaitable");
 
     let ordinary_environment = environment(["handle"]);
-    let error = lash_typescript::link("finish(await handle);", &ordinary_environment)
-        .expect_err("an ordinary ambient value must not become awaitable");
-    assert!(
-        error.to_string().contains("TS_AWAIT_UNSUPPORTED"),
-        "{error}"
-    );
+    lash_typescript::link("finish(await handle);", &ordinary_environment)
+        .expect("the VM checks whether an ambient value is a pending handle");
 }
 
 #[test]
-fn a_restored_process_handle_never_passes_through_promise_all() {
+fn a_restored_process_handle_links_inside_promise_aggregates() {
+    // A restored process handle may sit in the same aggregate as tool calls:
+    // the VM settles the tool batch first and then awaits each process handle
+    // in array order (ADR 0087), so neither aggregate form is refused at link.
     let process_environment = environment(["handle"]).with_process_handles(["handle"]);
-    let error = lash_typescript::link("finish(await Promise.all([handle]));", &process_environment)
-        .expect_err(
-            "Promise.all over a restored process handle must refuse instead of returning it",
-        );
-    assert!(
-        error.to_string().contains("TS_AWAIT_UNSUPPORTED"),
-        "{error}"
-    );
-}
-
-#[test]
-fn a_restored_process_handle_aggregate_refusal_is_honest() {
-    let process_environment = environment(["handle"]).with_process_handles(["handle"]);
-
     for method in ["all", "allSettled"] {
         let source = format!("finish(await Promise.{method}([handle]));");
-        let error = match lash_typescript::link(&source, &process_environment) {
-            Ok(_) => panic!("Promise.{method} must refuse restored process handles"),
-            Err(error) => error,
-        };
-        let rendered = error.to_string();
-        assert!(
-            rendered.contains("process") && rendered.contains("on its own line"),
-            "the refusal must explain the supported direct-await rule: {rendered}"
-        );
-        assert!(
-            !rendered.contains("already settled"),
-            "a live process handle is not already settled: {rendered}"
-        );
-        assert!(
-            !rendered.contains("await supports tools, process handles"),
-            "the refusal must not contradict itself: {rendered}"
-        );
+        lash_typescript::link(&source, &process_environment).unwrap_or_else(|error| {
+            panic!("Promise.{method} over a process handle must link: {error}")
+        });
     }
 }
 

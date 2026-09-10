@@ -46,21 +46,7 @@ use serde_json::Value;
 #[cfg(test)]
 use lash_core::{ToolCall, ToolContract, ToolManifest, ToolProvider};
 
-const STANDARD_EXECUTION_SECTION: &str = r#"Use direct tool calls.
-
-- Use `batch` (up to 25 calls) for two or more independent tool calls. Serialize calls when later arguments depend on earlier results.
-- For direct conversational requests that need no tools, respond in prose only.
-
-Example — two independent tool calls in one `batch` call:
-
-```json
-{
-  "tool_calls": [
-    { "tool": "<first_tool>", "parameters": { "arg": "value" } },
-    { "tool": "<second_tool>", "parameters": { "arg": "value" } }
-  ]
-}
-```"#;
+const STANDARD_EXECUTION_SECTION: &str = "Call tools directly with their declared JSON arguments. Use `batch` for two or more independent calls (up to 25); make dependent calls after their inputs return. Check each batch result’s success flag before using its value. Answer in prose only when no tool is needed.";
 
 const BATCH_MAX_TOOL_CALLS: usize = 25;
 const STANDARD_PROTOCOL_PLUGIN_ID: &str = "standard_protocol";
@@ -68,11 +54,23 @@ const STANDARD_PROTOCOL_PLUGIN_ID: &str = "standard_protocol";
 /// Plugin factory that installs the standard-protocol driver,
 /// session plugin, and native tool catalog.
 #[derive(Default)]
-pub struct StandardProtocolPluginFactory;
+pub struct StandardProtocolPluginFactory {
+    config: StandardProtocolConfig,
+}
+
+/// Host construction-time standard-mode presentation settings.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StandardProtocolConfig {
+    pub discovery: Option<lash_core::ToolDiscovery>,
+}
 
 impl StandardProtocolPluginFactory {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    pub fn with_config(config: StandardProtocolConfig) -> Self {
+        Self { config }
     }
 }
 
@@ -82,11 +80,15 @@ impl PluginFactory for StandardProtocolPluginFactory {
     }
 
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(StandardProtocolPlugin))
+        Ok(Arc::new(StandardProtocolPlugin {
+            config: self.config.clone(),
+        }))
     }
 }
 
-struct StandardProtocolPlugin;
+struct StandardProtocolPlugin {
+    config: StandardProtocolConfig,
+}
 
 impl SessionPlugin for StandardProtocolPlugin {
     fn id(&self) -> &'static str {
@@ -96,11 +98,36 @@ impl SessionPlugin for StandardProtocolPlugin {
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         reg.protocol().session(Arc::new(StandardProtocolSession))?;
         reg.protocol()
-            .protocol_driver(Arc::new(StandardProtocolDriver))?;
+            .protocol_driver(Arc::new(StandardProtocolDriver {
+                config: self.config.clone(),
+            }))?;
         reg.tools()
             .orchestrating(standard_batch_orchestrating_tool())?;
+        let discovery = self.config.discovery.clone();
+        reg.tool_catalog().contribute(Arc::new(move |ctx| {
+            validate_discovery(&ctx.tools, discovery.as_ref())?;
+            Ok(Default::default())
+        }));
         Ok(())
     }
+}
+
+fn validate_discovery(
+    tools: &[lash_core::ToolManifest],
+    discovery: Option<&lash_core::ToolDiscovery>,
+) -> Result<(), PluginError> {
+    if let Some(discovery) = discovery
+        && !tools.iter().any(|tool| {
+            tool.inline
+                && tool.activation != lash_core::ToolActivation::Internal
+                && tool.name == discovery.operation
+        })
+    {
+        return Err(PluginError::InvalidToolDiscovery {
+            operation: discovery.operation.clone(),
+        });
+    }
+    Ok(())
 }
 
 struct StandardProtocolSession;
@@ -115,7 +142,9 @@ impl ProtocolSessionPlugin for StandardProtocolSession {
     }
 }
 
-struct StandardProtocolDriver;
+struct StandardProtocolDriver {
+    config: StandardProtocolConfig,
+}
 
 impl ProtocolDriverPlugin for StandardProtocolDriver {
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
@@ -123,11 +152,17 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
         let tool_names_fingerprint = input.tool_catalog.tool_names_fingerprint();
         TurnDriverPreamble {
             config: TurnDriverConfig::chat(
-                Arc::new(StandardDriver),
+                Arc::new(StandardDriver {
+                    discovery: self.config.discovery.is_some(),
+                }),
                 true,
                 Arc::new(turn_limit_exhausted_message),
             ),
-            tool_specs: input.tool_catalog.model_tool_specs(),
+            tool_specs: if self.config.discovery.is_some() {
+                input.tool_catalog.inline_tools().model_tool_specs()
+            } else {
+                input.tool_catalog.model_tool_specs()
+            },
             tool_names,
             tool_names_fingerprint,
             execution_prompt: Arc::from(STANDARD_EXECUTION_SECTION),
@@ -345,7 +380,10 @@ fn parse_batch_specs(args: &Value) -> Result<Vec<BatchCallSpec>, ToolOutcome> {
 /// `DriverAction::StartTools`, and splices reasoning parts into the
 /// assistant message so provider replay metadata preserves
 /// chain-of-thought ordering.
-pub struct StandardDriver;
+#[derive(Default)]
+pub struct StandardDriver {
+    discovery: bool,
+}
 
 #[derive(Clone, Debug)]
 struct StandardToolCall {
@@ -495,7 +533,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_>,
-        _waiting: WaitingLlmState<lash_core::HostTurnProtocol>,
+        waiting: WaitingLlmState<lash_core::HostTurnProtocol>,
         llm_response: LlmResponse,
         text_streamed: bool,
     ) -> Vec<DriverAction> {
@@ -575,6 +613,60 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             )]));
         }
 
+        let (calls, refused): (Vec<_>, Vec<_>) = calls.into_iter().partition(|call| {
+            !self.discovery
+                || waiting
+                    .request
+                    .tools
+                    .iter()
+                    .any(|tool| tool.name == call.tool_name)
+        });
+        if !refused.is_empty() {
+            let completed = refused.into_iter().map(|call| {
+                let output = lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
+                    lash_core::ToolFailureClass::Unavailable,
+                    "unknown_tool",
+                    format!("Tool `{}` was not listed in this request; use a listed discovery operation or batch.", call.tool_name),
+                ));
+                let model_return = lash_core::facade_support::ModelToolReturn {
+                    attachment_notices: Vec::new(),
+                    call_id: call.call_id.clone(),
+                    tool_name: call.tool_name.clone(),
+                    parts: vec![lash_core::facade_support::ModelToolReturnPart::Text {
+                        text: serde_json::to_string(&output).expect("typed refusal serializes"),
+                    }],
+                };
+                CompletedToolCall {
+                    call_id: call.call_id,
+                    tool_name: call.tool_name,
+                    args: call.args,
+                    output,
+                    model_return,
+                    duration_ms: 0,
+                    intent_outcomes: Vec::new(),
+                    replay: call.replay,
+                }
+            }).collect::<Vec<_>>();
+            if calls.is_empty() {
+                actions.extend(self.handle_tool_results(ctx, completed));
+                return actions;
+            }
+            let mut parts = Vec::new();
+            for outcome in completed {
+                append_model_return_parts(&mut parts, outcome.model_return);
+            }
+            let message_id =
+                standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), "refused_tools");
+            reassign_part_ids(&message_id, &mut parts);
+            actions.push(DriverAction::AppendEvents(vec![conversation_event(
+                Message {
+                    id: message_id,
+                    role: MessageRole::User,
+                    parts: shared_parts(parts),
+                    origin: None,
+                },
+            )]));
+        }
         actions.push(DriverAction::StartTools { calls });
         actions
     }
@@ -748,8 +840,8 @@ mod tests {
                 "standard prompt should not mention removed tool `{removed_tool}`"
             );
         }
-        assert!(STANDARD_EXECUTION_SECTION.contains("<first_tool>"));
-        assert!(STANDARD_EXECUTION_SECTION.contains("<second_tool>"));
+        assert!(STANDARD_EXECUTION_SECTION.contains("declared JSON arguments"));
+        assert!(STANDARD_EXECUTION_SECTION.contains("Check each batch result’s success flag"));
     }
 
     #[test]
@@ -1449,3 +1541,6 @@ mod tests {
         assert!(parts[2].content.ends_with("\"after\"]"));
     }
 }
+
+#[cfg(test)]
+mod discovery_tests;

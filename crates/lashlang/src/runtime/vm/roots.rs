@@ -133,6 +133,7 @@ pub(super) trait VmRootView {
     fn slots(&self) -> &[Option<Value>];
     fn globals(&self) -> &Record;
     fn operand_stack(&self) -> &[Value];
+    fn pending_tools(&self) -> &[Option<Value>];
     fn last_value(&self) -> Option<&Value>;
     fn iterators(&self) -> &[Self::Iterator];
     fn frames(&self) -> &[Self::Frame];
@@ -154,6 +155,10 @@ impl<H> VmRootView for Vm<'_, H> {
 
     fn globals(&self) -> &Record {
         &self.slots.extras
+    }
+
+    fn pending_tools(&self) -> &[Option<Value>] {
+        &self.pending_tools
     }
 
     fn operand_stack(&self) -> &[Value] {
@@ -192,6 +197,10 @@ impl VmRootView for VmContinuation {
 
     fn globals(&self) -> &Record {
         &self.globals
+    }
+
+    fn pending_tools(&self) -> &[Option<Value>] {
+        &self.pending_tools
     }
 
     fn operand_stack(&self) -> &[Value] {
@@ -248,6 +257,9 @@ impl<'a> VmRootVisitor<'a> for PersistedRoots<'a> {
 }
 
 pub(super) fn visit_vm_roots<'a, V: VmRootView>(view: &'a V, visitor: &mut impl VmRootVisitor<'a>) {
+    for value in view.pending_tools().iter().flatten() {
+        visitor.transient(value);
+    }
     if view.has_active_function() {
         if let Some(root_frame) = view.frames().iter().find(|frame| frame.caller_is_root()) {
             for (index, value) in root_frame.slots().iter().enumerate() {

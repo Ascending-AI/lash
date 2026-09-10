@@ -28,6 +28,7 @@ pub(super) struct RlmHistoryRenderInput<'a> {
 
 #[derive(Clone, Copy)]
 pub(super) struct CurrentIterationMessageInput<'a> {
+    pub(super) history_type: &'static str,
     pub(super) images: bool,
     pub(super) history_len: usize,
     pub(super) history_has_structure: bool,
@@ -77,6 +78,11 @@ pub(super) fn build_rlm_history_messages_from_turn(
     append_current_iteration_message(
         &mut messages,
         CurrentIterationMessageInput {
+            history_type: if input.dialect.language_id() == "typescript" {
+                "HistoryItem[]"
+            } else {
+                "list[HistoryItem]"
+            },
             images: input.images,
             history_len,
             history_has_structure,
@@ -346,7 +352,8 @@ fn append_current_iteration_message(
     current_prompt.push_str("\n\n\n=== BOUND VARIABLES ===\n\n");
     let _ = write!(
         current_prompt,
-        "- `history`: `list[HistoryItem]`, read-only, {} {}",
+        "- `history`: `{}`, read-only, {} {}",
+        input.history_type,
         input.history_len,
         if input.history_len == 1 {
             "entry"
@@ -591,4 +598,48 @@ fn append_decode_failure(messages: &mut Vec<LlmMessage>, error: super::transport
             binding.name, binding.reason
         ),
     ));
+}
+
+#[cfg(test)]
+mod finalization_contract {
+    use super::*;
+    #[test]
+    fn every_native_round_has_one_finalization_policy() {
+        for typescript in [false, true] {
+            let surface = lash_lashlang_runtime::LashlangSurface::default();
+            let dialect: Box<dyn RlmDialect> = if typescript {
+                Box::new(crate::dialect::typescript::TypescriptDialect::prompt_only(
+                    surface,
+                ))
+            } else {
+                Box::new(crate::dialect::lashlang::LashlangDialect::prompt_only(
+                    surface,
+                ))
+            };
+            for protocol_iteration in [1, 2, 8] {
+                let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
+                    images: false,
+                    dialect: dialect.as_ref(),
+                    events: &[],
+                    turn_messages: &Default::default(),
+                    turn_causes: &[],
+                    max_output_chars: 1000,
+                    protocol_iteration,
+                    finalization: "finish-policy",
+                    required_output: None,
+                    final_answer_format: None,
+                    budget_suffix: None,
+                    bound_variables: "",
+                });
+                let text = format!("{messages:?}");
+                assert_eq!(text.matches("=== FINALIZATION ===").count(), 1);
+                assert_eq!(text.matches("finish-policy").count(), 1);
+                assert!(text.contains(if typescript {
+                    "HistoryItem[]"
+                } else {
+                    "list[HistoryItem]"
+                }));
+            }
+        }
+    }
 }

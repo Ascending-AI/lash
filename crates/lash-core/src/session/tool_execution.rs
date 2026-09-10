@@ -365,6 +365,7 @@ fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
                 execution_binding,
             } = grant;
             let crate::ToolManifest {
+                inline: _,
                 id,
                 name: _,
                 description: _,

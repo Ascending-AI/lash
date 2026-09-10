@@ -135,7 +135,7 @@ impl SharedWorld {
 
     pub(crate) fn standard_provider(&self) -> Arc<dyn ToolProvider> {
         let mut tools = definitions(self.snapshot().catalog);
-        tools.push(ToolDefinition::raw("tool:toolbench_submit", "submit", "Submit exactly the value the task asks for and end the task.", json!({"type":"object", "properties":{"value":{"type":["number","string","boolean","null","array","object"]}}, "required":["value"], "additionalProperties":false}), json!({})));
+        tools.push(ToolDefinition::raw("tool:toolbench_submit", "submit", "Submit exactly the value the task asks for and end the task. Call exactly once, on its own, after all other work has succeeded.", json!({"type":"object", "properties":{"value":{"type":["number","string","boolean","null","array","object"]}}, "required":["value"], "additionalProperties":false}), json!({})));
         Arc::new(StaticToolProvider::new(tools, self.clone()))
     }
 

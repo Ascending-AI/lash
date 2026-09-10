@@ -403,7 +403,7 @@ fn process_handle_exposes_id_member_for_subsequent_operations() {
 }
 
 #[test]
-fn promise_aggregates_reuse_await_shape_and_tools_require_await() {
+fn promise_aggregates_lower_to_runtime_arrays_and_tool_handles() {
     let program = lash_typescript::parse(
         "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
     )
@@ -416,9 +416,9 @@ fn promise_aggregates_reuse_await_shape_and_tools_require_await() {
     .expect("Promise.allSettled should lower");
     assert!(contains_aggregate_await(&settled.main, false));
 
-    let error = lash_typescript::parse("web.fetch({ url: 'a' });")
-        .expect_err("a deferred tool call without await must reject");
-    assert_eq!(error.code, lash_typescript::DiagnosticCode::AwaitRequired);
+    let program = lash_typescript::parse("web.fetch({ url: 'a' });")
+        .expect("unawaited tool calls lower to pending handles; the VM enforces lifetime");
+    assert!(find_receiver_call(&program.main).is_some());
 }
 
 struct ToolCallRecordingHost {
@@ -727,7 +727,7 @@ fn sibling_receiver_branches_pin_regexp_and_unsupported_checks() {
 
     // Branch :775 — Unbound ECMA globals and unsupported methods on bound
     // receivers refuse with TS_METHOD_UNSUPPORTED, while unawaited tool
-    // operations refuse with TS_AWAIT_REQUIRED.
+    // operations create pending handles and require runtime consumption.
     let ecma_err = lash_typescript::compile("finish(Error.isError(new Error('x')));")
         .expect_err("ECMA static namespace method must refuse");
     assert_eq!(
@@ -742,26 +742,25 @@ fn sibling_receiver_branches_pin_regexp_and_unsupported_checks() {
         lash_typescript::DiagnosticCode::MethodUnsupported
     );
 
-    let unawaited_web = lash_typescript::parse("web.search({ query: 'x' });")
-        .expect_err("unawaited web.search must require await");
-    assert_eq!(
-        unawaited_web.code,
-        lash_typescript::DiagnosticCode::AwaitRequired
-    );
-
-    let unawaited_tools = lash_typescript::parse("tools.search({ query: 'x' });")
-        .expect_err("unawaited tools.search must require await");
-    assert_eq!(
-        unawaited_tools.code,
-        lash_typescript::DiagnosticCode::AwaitRequired
-    );
-
-    let unawaited_inbox = lash_typescript::parse("inbox.alpha.delete({ id: '1' });")
-        .expect_err("unawaited inbox.alpha.delete must require await");
-    assert_eq!(
-        unawaited_inbox.code,
-        lash_typescript::DiagnosticCode::AwaitRequired
-    );
+    // Expression-position tool calls create pending handles; abandonment is
+    // diagnosed at runtime, including through reserved-word property paths.
+    for source in [
+        "web.search({ query: 'x' });",
+        "tools.search({ query: 'x' });",
+        "inbox.alpha.delete({ id: '1' });",
+    ] {
+        let program = lash_typescript::compile(source).expect("pending tool compiles");
+        let error = futures::executor::block_on(lashlang::execute(
+            &program,
+            &mut State::new(),
+            &AggregateHost,
+        ))
+        .expect_err("unawaited handle");
+        assert!(
+            matches!(error, lashlang::RuntimeError::PendingTool { .. }),
+            "{source}: {error}"
+        );
+    }
 }
 
 struct AggregateHost;
@@ -1233,6 +1232,19 @@ impl ExecutionHost for ProcessDurabilityHost {
             }
             AbilityOp::Sleep(_) => Ok(AbilityResult::Value(Value::Null)),
             AbilityOp::ProcessEvent(event) => Ok(AbilityResult::Value(event.value)),
+            AbilityOp::StartProcess(start) => Ok(AbilityResult::Value(lashlang::from_json(
+                serde_json::json!({ "__handle__": "process", "id": start.process_name }),
+            ))),
+            AbilityOp::Await(handle) => {
+                let id = handle
+                    .as_record()
+                    .and_then(|record| record.get("id"))
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                Ok(AbilityResult::Value(Value::String(
+                    format!("{id} awaited").into(),
+                )))
+            }
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
             _ => Err(ExecutionHostError::new(
                 "unexpected durable-process ability",
@@ -1418,17 +1430,10 @@ fn contains_start(expr: &Expr) -> bool {
 }
 
 fn contains_aggregate_await(expr: &Expr, unwrap: bool) -> bool {
-    match expr {
-        Expr::Await(value) if matches!(value.as_ref(), Expr::List(_)) => {
-            value
-                .children()
-                .any(|child| matches!(child, Expr::ResultUnwrap(_)))
-                == unwrap
-        }
-        _ => expr
+    matches!(expr, Expr::BuiltinCall { name, args } if name.as_str() == "__typescript_await_array" && matches!(args.last(), Some(Expr::Bool(settle)) if *settle != unwrap))
+        || expr
             .children()
-            .any(|child| contains_aggregate_await(child, unwrap)),
-    }
+            .any(|child| contains_aggregate_await(child, unwrap))
 }
 
 /// The decisive case from the FIG-1305 report.
@@ -1656,7 +1661,7 @@ fn settlement_order_does_not_reach_the_continuation_format() {
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
-        "lashlang-vm-abi-v6",
+        "lashlang-vm-abi-v7",
         "the compiled-batch selection rule moved the VM ABI"
     );
 }
@@ -2214,4 +2219,272 @@ fn typescript_host_catalog_composition_refuses_duplicate_operations() {
             ..
         }) if module == "tools" && operation == "lookup"
     ));
+}
+
+#[test]
+fn runtime_array_rejections_use_recorded_settlement_order() {
+    let environment = two_leaf_web_environment();
+    for array in [
+        "['a', 'b'].map(url => web.fetch({url}))",
+        "[web.fetch({url:'a'}), 42, web.fetch({url:'b'})]",
+    ] {
+        let source = format!("const pending = {array}; finish(await Promise.all(pending));");
+        let linked = lash_typescript::link(&source, &environment).expect("runtime array links");
+        let error = futures::executor::block_on(lashlang::execute(
+            &lash_typescript::compile_linked(&linked),
+            &mut State::new(),
+            &FirstSettledRejectionHost,
+        ))
+        .expect_err("both leaves reject");
+        assert!(error.to_string().contains("early-B"), "{source}: {error}");
+    }
+}
+
+#[test]
+fn pending_tool_handles_survive_durable_process_park() {
+    // The aggregate mixes a pending tool handle, a plain value and a child
+    // process handle; the park lands between minting them and settling them,
+    // so every kind of leaf crosses the continuation (ADR 0087).
+    for mode in ["all", "allSettled"] {
+        let source = format!(
+            r#"const child = defineProcess({{
+            name: "child", signals: {{}}, run: async () => "child"
+        }});
+        const worker = defineProcess({{
+            name: "worker", signals: {{}}, run: async () => {{
+                const pending = [web.fetch({{value: "kept"}}), 42, start(child, {{}})];
+                await sleep(5);
+                return await Promise.{mode}(pending);
+            }}
+        }});"#
+        );
+        let expected = if mode == "all" {
+            serde_json::json!(["kept", 42, "child awaited"])
+        } else {
+            serde_json::json!([
+                {"status":"fulfilled","value":"kept"},
+                {"status":"fulfilled","value":42},
+                {"status":"fulfilled","value":"child awaited"}
+            ])
+        };
+        assert_eq!(
+            suspend_and_resume_process(&source, serde_json::json!({})),
+            ExecutionOutcome::Finished(lashlang::from_json(expected)),
+            "{mode}"
+        );
+    }
+}
+
+/// Tools settle as one batch, then process handles settle in array order:
+/// a tool rejection wins over a process failure wherever it is written, and a
+/// process failure surfaces only once every tool leaf succeeded.
+struct MixedAggregateHost;
+
+impl MixedAggregateHost {
+    fn settle(operation: &lashlang::ResourceOperation) -> ResourceOperationResult {
+        let args = operation.args.first().and_then(Value::as_record);
+        match args.and_then(|record| record.get("fail")) {
+            Some(Value::Bool(true)) => {
+                ResourceOperationResult::Error(ExecutionHostError::new("tool failed"))
+            }
+            _ => ResourceOperationResult::Value(
+                args.and_then(|record| record.get("value"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            ),
+        }
+    }
+}
+
+impl ExecutionHost for MixedAggregateHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
+                ResourceOperationBatchResult::settled_in_input_order(
+                    batch.operations.iter().map(Self::settle).collect(),
+                ),
+            )),
+            AbilityOp::StartProcess(start) => Ok(AbilityResult::Value(lashlang::from_json(
+                serde_json::json!({
+                    "__handle__": "process",
+                    "id": start.args.get("input").cloned().unwrap_or(Value::Null),
+                }),
+            ))),
+            AbilityOp::Await(handle) => {
+                let id = handle
+                    .as_record()
+                    .and_then(|record| record.get("id"))
+                    .map(Value::to_string)
+                    .unwrap_or_default();
+                if id.starts_with("fail") {
+                    Err(ExecutionHostError::new(format!("process {id} failed")))
+                } else {
+                    Ok(AbilityResult::Value(Value::String(
+                        format!("process {id} done").into(),
+                    )))
+                }
+            }
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new(
+                "unexpected mixed-aggregate ability",
+            )),
+        }
+    }
+}
+
+fn run_mixed_aggregate(body: &str) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
+    let source = format!(
+        r#"const worker = defineProcess({{
+            name: "worker", signals: {{}}, run: async (input: unknown) => input
+        }});
+        {body}"#
+    );
+    let mut environment = two_leaf_web_environment();
+    environment.abilities = lashlang::LashlangAbilities::default().with_processes();
+    let linked = lash_typescript::link(&source, &environment).expect("mixed aggregate should link");
+    futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &MixedAggregateHost,
+    ))
+}
+
+#[test]
+fn mixed_aggregate_tool_rejection_wins_over_process_failure_in_either_order() {
+    for body in [
+        "const h = start(worker, { input: 'fail-p' }); finish(await Promise.all([web.fetch({ fail: true }), h]));",
+        "const h = start(worker, { input: 'fail-p' }); finish(await Promise.all([h, web.fetch({ fail: true })]));",
+    ] {
+        let error = run_mixed_aggregate(body).expect_err(body);
+        let rendered = error.to_string();
+        assert!(rendered.contains("tool failed"), "{body}: {rendered}");
+        assert!(
+            !rendered.contains("process fail-p failed"),
+            "{body}: {rendered}"
+        );
+    }
+}
+
+#[test]
+fn mixed_aggregate_surfaces_the_first_failing_process_when_tools_succeed() {
+    let body = "const a = start(worker, { input: 'fail-a' }); const b = start(worker, { input: 'fail-b' }); \
+                finish(await Promise.all([b, web.fetch({ value: 1 }), a]));";
+    let error = run_mixed_aggregate(body).expect_err("a failing process rejects Promise.all");
+    let rendered = error.to_string();
+    assert!(rendered.contains("process fail-b failed"), "{rendered}");
+    assert!(!rendered.contains("fail-a"), "{rendered}");
+
+    let body = "const ok = start(worker, { input: 'p' }); finish(await Promise.all([web.fetch({ value: 1 }), ok, 3]));";
+    assert_eq!(
+        run_mixed_aggregate(body).expect("a fulfilled mixed aggregate finishes"),
+        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!([
+            1,
+            "process p done",
+            3
+        ])))
+    );
+}
+
+#[test]
+fn promise_all_keeps_nested_process_handles_shallow() {
+    let body = "const h = start(worker, { input: 'p' }); \
+                finish(await Promise.all([[h], web.fetch({ value: 1 })]));";
+    assert_eq!(
+        run_mixed_aggregate(body).expect("nested process handle remains an ordinary value"),
+        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!([
+            [{"__handle__": "process", "id": "p"}],
+            1
+        ])))
+    );
+}
+
+#[test]
+fn mixed_all_settled_reports_every_outcome_in_array_order() {
+    let body = "const ok = start(worker, { input: 'p' }); const bad = start(worker, { input: 'fail-q' }); \
+                finish(await Promise.allSettled([web.fetch({ fail: true }), ok, bad, web.fetch({ value: 2 })]));";
+    let outcome = run_mixed_aggregate(body).expect("allSettled never rejects");
+    let ExecutionOutcome::Finished(Value::List(results)) = outcome else {
+        panic!("expected a settled array, got {outcome:?}");
+    };
+    let statuses = results
+        .iter()
+        .map(|result| {
+            result
+                .as_record()
+                .and_then(|record| record.get("status"))
+                .map(Value::to_string)
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(statuses, ["rejected", "fulfilled", "rejected", "fulfilled"]);
+    let reason = results[2]
+        .as_record()
+        .and_then(|record| record.get("reason"))
+        .map(Value::to_string)
+        .unwrap_or_default();
+    assert!(reason.contains("process fail-q failed"), "{reason}");
+    assert_eq!(
+        results[1]
+            .as_record()
+            .and_then(|record| record.get("value")),
+        Some(&Value::String("process p done".into()))
+    );
+    assert_eq!(
+        results[3]
+            .as_record()
+            .and_then(|record| record.get("value")),
+        Some(&Value::Number(2.0))
+    );
+}
+
+/// A tool handle is an execution-scoped identity: a settled handle a cell left
+/// in a root binding is not exported to the session, and a handle record that
+/// does arrive from an earlier execution is refused rather than aliased onto
+/// the current execution's first request.
+#[test]
+fn tool_handles_do_not_cross_cells() {
+    let environment = two_leaf_web_environment();
+    let mut state = State::new();
+    let linked = lash_typescript::link(
+        "const kept = 5; const p = web.fetch({ value: 1 }); await p; finish(kept);",
+        &environment,
+    )
+    .expect("first cell should link");
+    futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut state,
+        &MixedAggregateHost,
+    ))
+    .expect("first cell should finish");
+    assert_eq!(state.globals().get("kept"), Some(&Value::Number(5.0)));
+    assert!(
+        state.globals().get("p").is_none(),
+        "a tool handle must not be exported as a session global: {:?}",
+        state.globals().get("p")
+    );
+
+    let stale = lashlang::from_json(serde_json::json!({
+        "p": { "__handle__": "tool", "id": 0, "execution": "0000000000000000" }
+    }));
+    let mut state = State::from_snapshot(lashlang::Snapshot::new(
+        stale.as_record().expect("globals record").clone(),
+    ));
+    let linked = lash_typescript::link(
+        "const q = web.fetch({ value: 2 }); finish(await p);",
+        &environment.with_globals(["p"]),
+    )
+    .expect("second cell should link");
+    let error = futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut state,
+        &MixedAggregateHost,
+    ))
+    .expect_err("a stale handle must not alias the new request");
+    let lashlang::RuntimeError::PendingTool { problem } = &error else {
+        panic!("expected the typed pending-tool refusal: {error}");
+    };
+    assert!(
+        problem.contains("not minted by this execution"),
+        "{problem}"
+    );
 }

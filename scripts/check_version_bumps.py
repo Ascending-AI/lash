@@ -114,6 +114,7 @@ REGISTRATION_BASELINES = {
 # and burns the answer here. Entries stay after the change lands as
 # dead-but-honest history.
 IDENTIFIER_RENAME_BASELINES = {
+
     # FIG-1102: the workbench include! splice became real modules, so every
     # item in state.rs gained pub(crate) and one line was rewrapped. Serde
     # attributes, field and variant names, and constant values are unchanged;
@@ -198,7 +199,12 @@ IDENTIFIER_RENAME_BASELINES = {
     ),
     # FIG-1980: tool_execution_grant_json_layout_is_stable witnesses that the
     # serde surface is unchanged, so TOOL_BATCH_FAMILY_VERSION remains 1.
-    'crates/lash-core/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION': 'sha256:a8285c2863162c569cafbb16c7fe31c203cba082a809439f21349b8c659de53c',
+    # FIG-2774: the sole tool_execution.rs change ignores the new presentation
+    # field (`inline`, prompt-only: it decides catalogue rendering and never
+    # reaches the wire) in an exhaustive manifest destructure. No preimage
+    # field, tag, serialization call or byte expression changes; batch
+    # identity stays v1.
+    'crates/lash-core/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION': 'sha256:3f7b64de0d53961e1c8e33f8ca5f4284c2aca7a3cf364a29b49f5cb299b5767d',
     # FIG-2234 fix 4: the generated schema.sql header comment was aligned to
     # component version 64 (bumped in lib.rs by the BLAKE3 cutover without
     # regenerating the artifact header). Comment-only; the executed DDL is

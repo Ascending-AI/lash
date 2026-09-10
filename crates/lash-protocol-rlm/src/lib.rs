@@ -56,3 +56,6 @@ pub use protocol::{
     rlm_execution_section_for_host_environment,
 };
 pub use rlm_support::format_budget_suffix;
+
+#[cfg(test)]
+mod prompt_contract_tests;

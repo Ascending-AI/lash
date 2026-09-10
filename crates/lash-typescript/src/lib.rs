@@ -55,8 +55,8 @@ pub use diagnostics::{
     CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan, format_diagnostic,
 };
 pub use signatures::{
-    ensure_tool_call_path_addressable, render_stdlib_contract, render_tool_signature,
-    reserved_words, stdlib_name_count,
+    ensure_tool_call_path_addressable, render_schema_type, render_stdlib_contract, reserved_words,
+    stdlib_name_count,
 };
 
 /// Parses and lowers a TypeScript dialect program into the VM's shared AST.

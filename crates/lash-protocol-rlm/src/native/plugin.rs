@@ -22,6 +22,8 @@ pub(super) fn register_native_plugin(
     // dialect: model-facing tool prose is authored once and served to every
     // dialect, so the neutrality guard has to know all of their words.
     let catalog_dialects = dialect_registry.clone();
+    let discovery = config.discovery.clone();
+    let discovery_dialect = Arc::clone(&dialect);
     let runtime_state = Arc::new(
         RlmRuntimeState::new(dialect_registry, Arc::clone(&dialect))
             .map_err(|err| PluginError::Session(err.to_string()))?,
@@ -47,6 +49,11 @@ pub(super) fn register_native_plugin(
             vocabulary: dialect.prompt_vocabulary(),
         }))?;
     reg.tool_catalog().contribute(Arc::new(move |ctx| {
+        crate::tool_catalog::validate_discovery(
+            &ctx.tools,
+            discovery.as_ref(),
+            discovery_dialect.as_ref(),
+        )?;
         crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialects)
     }));
     reg.tool_calls().before(Arc::new(|ctx| {
@@ -171,6 +178,7 @@ impl lash_core::plugin::ProtocolDriverPlugin for NativeProtocolDriver {
         super::projector::build_rlm_preamble_with_dialect(
             input,
             crate::driver::RlmPreambleConfig {
+                discovery: self.config.discovery.clone(),
                 max_output_chars: self.config.max_output_chars,
                 max_budget_tokens: self.config.continue_as_soft_warn_tokens,
                 last_prompt_usage: Arc::clone(&self.last_prompt_usage),

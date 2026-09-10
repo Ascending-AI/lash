@@ -100,13 +100,11 @@ pub(crate) struct CellTags {
 }
 
 /// Shared cell transport teaching; native transport replaces this whole section.
-pub(crate) fn cell_response_shape(tags: CellTags, vocabulary: DialectPromptVocabulary) -> String {
+pub(crate) fn cell_response_shape(tags: CellTags, _vocabulary: DialectPromptVocabulary) -> String {
     format!(
-        "### Response shape\n\nExecutable code must be inside paired `{open}` and `{close}` tags. Tag lines must be standalone after trimming; `{close}` terminates the cell even inside a multiline string. Markdown fences never execute. Put the {language} block after optional commentary. Top-level `{finish}` ends the turn with a value; **FINALIZATION** defines prose-only versus finish rules.\n",
+        "### Response shape\n\nPut one program after any commentary, between standalone `{open}` and `{close}` lines. Markdown fences do not execute. A standalone `{close}` line ends the program even inside a multiline string; keep that line out of string contents.\n",
         open = tags.open,
-        close = tags.close,
-        language = vocabulary.language_name,
-        finish = vocabulary.finish_statement,
+        close = tags.close
     )
 }
 
@@ -224,9 +222,10 @@ impl DialectSession {
         services: LashlangDialectServices,
     ) -> Self {
         debug_assert_eq!(engine_id, dialect.language_id());
+        let state = RlmExecutionState::for_engine(engine_id);
         Self {
             dialect,
-            state: RlmExecutionState::for_engine(engine_id),
+            state,
             surface,
             services,
             bound_variable_render_cache: Arc::new(std::sync::Mutex::new(
@@ -507,20 +506,16 @@ pub(crate) trait RlmDialect: Send + Sync {
     fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> String;
 
     fn finish_required_finalization(&self, requires_schema: bool) -> String {
-        let tags = self.cell_tags();
-        let finish = self.prompt_vocabulary().finish_statement;
+        let vocabulary = self.prompt_vocabulary();
         let mut text = format!(
-            "This turn uses finish-required termination. Prose-only does not end the turn. Every non-terminal response must contain a paired `{open}...{close}` block that performs the next step; prose before the block is commentary/status only. Never say you will continue, inspect, patch, wait, monitor, validate, or retry unless the same response also contains the block that does it. The terminal response must be a paired `{open}...{close}` block that calls `{finish}`.",
-            open = tags.open,
-            close = tags.close,
+            "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside a paired `{open}...{close}` block. Do not call `{finish}` until the answer is in hand; the final response's block calls `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the block that performs it.",
+            open = self.cell_tags().open,
+            close = self.cell_tags().close,
+            finish = vocabulary.finish_statement,
+            finish_null = vocabulary.finish_null_statement,
         );
         if requires_schema {
             text.push_str(" The value must match the REQUIRED OUTPUT contract.");
-        } else {
-            text.push_str(&format!(
-                " Use `{}` only when null is intentional.",
-                self.prompt_vocabulary().finish_null_statement
-            ));
         }
         text
     }

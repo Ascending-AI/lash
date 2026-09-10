@@ -31,6 +31,9 @@ impl<'de> Deserialize<'de> for VmContinuation {
             active_function: Option<u32>,
             #[serde(deserialize_with = "continuation_serde::deserialize_values")]
             operand_stack: Vec<Value>,
+            #[serde(deserialize_with = "continuation_serde::deserialize_slots")]
+            pending_tools: Vec<Option<Value>>,
+            execution_nonce: u64,
             #[serde(deserialize_with = "continuation_serde::deserialize_optional_value")]
             last_value: Option<Value>,
             #[serde(deserialize_with = "continuation_serde::deserialize_slots")]
@@ -59,6 +62,8 @@ impl<'de> Deserialize<'de> for VmContinuation {
             instruction_pointer: wire.instruction_pointer,
             active_function: wire.active_function,
             operand_stack: wire.operand_stack,
+            pending_tools: wire.pending_tools,
+            execution_nonce: wire.execution_nonce,
             last_value: wire.last_value,
             slots: wire.slots,
             projected_slots: wire.projected_slots,

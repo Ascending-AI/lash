@@ -21,7 +21,7 @@ pub mod turn_driver;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Identity version mixed into every Lashlang and TypeScript module-artifact hash.
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v4";
+pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v5";
 
 pub use attachment::{
     AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef, AttachmentTypeMetadata,
@@ -81,8 +81,8 @@ pub use tool_catalog::{
 pub use tool_contract::validate_tool_input;
 pub use tool_contract::{
     CompactToolContract, LashSchema, ModelTool, ToolActivation, ToolArgumentProjectionPolicy,
-    ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutputContract, ToolRetryPolicy,
-    schema_for,
+    ToolContract, ToolDefinition, ToolDiscovery, ToolId, ToolManifest, ToolOutputContract,
+    ToolRetryPolicy, schema_for,
 };
 pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason,
