@@ -891,7 +891,7 @@ mod preflight;
 mod process_helpers;
 #[path = "postgres/process_registry.rs"]
 mod process_registry;
-#[path = "postgres/runtime_persistence.rs"]
+#[path = "postgres/runtime_persistence/mod.rs"]
 mod runtime_persistence;
 #[path = "postgres/schema.rs"]
 mod schema;

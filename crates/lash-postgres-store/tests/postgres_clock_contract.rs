@@ -21,7 +21,16 @@ use sqlx::Connection as _;
 use crate::support::{SharedDatabaseLock, database_url};
 
 const CLOCK_SKEW_MS: u64 = 10 * 365 * 24 * 60 * 60 * 1_000;
-const RUNTIME_PERSISTENCE_SOURCE: &str = include_str!("../src/postgres/runtime_persistence.rs");
+const RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE: &str = concat!(
+    include_str!("../src/postgres/runtime_persistence/queued_work.rs"),
+    "\nimpl TurnInputStore for PostgresSessionStore"
+);
+const RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE: &str =
+    include_str!("../src/postgres/runtime_persistence/claim_support.rs");
+const RUNTIME_PERSISTENCE_TURN_INPUT_SOURCE: &str =
+    include_str!("../src/postgres/runtime_persistence/turn_input.rs");
+const RUNTIME_PERSISTENCE_SESSION_COMMIT_SOURCE: &str =
+    include_str!("../src/postgres/runtime_persistence/session_commit.rs");
 const PROCESS_REGISTRY_SOURCE: &str = include_str!("../src/postgres/process_registry.rs");
 const PROCESS_REGISTRY_LEASES_SOURCE: &str =
     include_str!("../src/postgres/process_registry/leases.rs");
@@ -99,12 +108,12 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
     // recognizes that an in-process test cannot skew `SystemTime::now()`.
     let lease_sensitive_regions = [
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,
             "async fn claim_leading_ready_session_command(",
             "async fn claim_ready_queued_work(",
         ),
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,
             "async fn claim_ready_queued_work(",
             "async fn abandon_queued_work_claim(",
         ),
@@ -114,12 +123,12 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         // — outside every region above. Without this entry the only claim path
         // that could read a host clock unnoticed is the one doing the work.
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
             "async fn claim_queued_work_rows_postgres(",
             "async fn claim_ready_queued_work_postgres_tx(",
         ),
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
             "async fn claim_ready_queued_work_postgres_tx(",
             "async fn defer_orphaned_active_turn_inputs_tx(",
         ),
@@ -128,14 +137,14 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         // injected clock parameter. The region runs through the empty-scan
         // refusal helper so that clock-deciding neighbour is fenced too.
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
             "async fn checkpoint_work_pending_postgres(",
             "async fn claim_ready_queued_work_postgres_tx(",
         ),
         // The orphaned-input repair runs inside the caller's transaction and
         // must remain inside the same server-clock contract as its claim path.
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
             "async fn defer_orphaned_active_turn_inputs_tx(",
             "async fn claim_pending_turn_inputs_postgres_tx(",
         ),
@@ -144,42 +153,42 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         // this helper is far below the impl block and reads `now` and
         // CAS-stamps claims directly — fence the body as well.
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
             "async fn claim_pending_turn_inputs_postgres_tx(",
             "async fn claim_pending_turn_inputs_postgres(",
         ),
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,
             "async fn cancel_queued_work_batch(",
             "async fn list_queued_work(",
         ),
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,
             "async fn pending_session_work_ordering(",
             "async fn list_pending_queued_work(",
         ),
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,
             "async fn list_pending_queued_work(",
             "impl TurnInputStore for PostgresSessionStore",
         ),
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_TURN_INPUT_SOURCE,
             "async fn list_pending_turn_inputs(",
             "async fn cancel_pending_turn_inputs(",
         ),
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_TURN_INPUT_SOURCE,
             "async fn cancel_pending_turn_inputs(",
             "async fn cancel_pending_turn_input_suffix(",
         ),
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_TURN_INPUT_SOURCE,
             "async fn cancel_pending_turn_input_suffix(",
             "async fn claim_active_turn_inputs(",
         ),
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
             "async fn claim_pending_turn_inputs_postgres(",
             "pub(crate) async fn read_session_execution_lease_unlocked(",
         ),
@@ -206,7 +215,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "async fn get_process_lease(",
         ),
         (
-            RUNTIME_PERSISTENCE_SOURCE,
+            RUNTIME_PERSISTENCE_SESSION_COMMIT_SOURCE,
             "async fn commit_runtime_state(",
             "async fn save_session_meta(",
         ),

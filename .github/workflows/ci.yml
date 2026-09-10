@@ -378,6 +378,7 @@ jobs:
           python3 scripts/test_gate_scope.py
           python3 scripts/test_release_version.py
           python3 scripts/test_publish_workspace.py
+          python3 scripts/test_production_file_size.py
           python3 scripts/test_confidence_gate_ci_contract.py
           python3 scripts/test_slack_clone_full_host_e2e_contract.py
           python3 scripts/test_slack_clone_live_model_e2e_contract.py
