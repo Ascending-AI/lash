@@ -4,6 +4,7 @@
 //! same substrate. The suite deliberately never shares an `Arc` between roles.
 
 use super::*;
+use crate::SessionStoreFactory;
 use lash_core::testing::conformance_support::ActiveTurnControl;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -13,6 +14,23 @@ use pretty_assertions::assert_eq;
 /// Number of named Layer-A vector groups executed by
 /// [`effect_host_await_events_cold_instance`].
 pub const COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT: usize = 9;
+
+async fn in_memory_catalog(session_ids: &[&str]) -> Arc<dyn crate::SessionStoreFactory> {
+    let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
+    for session_id in session_ids {
+        let request = super::session_store_request(
+            session_id,
+            "conformance-turn-control",
+            crate::SessionRelation::Root,
+        );
+        let store = factory
+            .create_store(&request)
+            .await
+            .expect("create explicit conformance session store");
+        super::bind_conformance_session(&store, session_id).await;
+    }
+    factory
+}
 
 /// Run the durable multi-host AwaitEvent suite.
 ///
@@ -199,7 +217,8 @@ where
     let active = ActiveTurnControl::new(owner_host.as_ref(), address.clone())
         .await
         .expect("owner creates cancellation gate");
-    let cancel_driver = crate::TurnWorkDriver::new(make());
+    let store_factory = in_memory_catalog(&[address.session_id.as_str()]).await;
+    let cancel_driver = crate::TurnWorkDriver::for_catalog(make(), Arc::clone(&store_factory));
     let (settled, cancelled) = tokio::join!(
         active.settle_before_commit(owner_host.as_ref(), false, None),
         cancel_driver.request_cancel(
@@ -499,7 +518,8 @@ where
         )
         .await
         .expect("publish before attach");
-    let attached_after = crate::TurnWorkDriver::new(make())
+    let store_factory = in_memory_catalog(&[after.session_id.as_str()]).await;
+    let attached_after = crate::TurnWorkDriver::for_catalog(make(), Arc::clone(&store_factory))
         .await_terminal(&after)
         .await
         .expect("attach after publish");
@@ -520,8 +540,10 @@ where
     };
     let attach_address = before.clone();
     let attach_host = make();
+    let store_factory = in_memory_catalog(&[before.session_id.as_str()]).await;
+    let attacher_factory = Arc::clone(&store_factory);
     let attacher = crate::task::spawn(async move {
-        crate::TurnWorkDriver::new(attach_host)
+        crate::TurnWorkDriver::for_catalog(attach_host, attacher_factory)
             .await_terminal(&attach_address)
             .await
     });
