@@ -690,7 +690,8 @@ CREATE TABLE lash_durable_read_fixture.lash_usage_deltas (
     output_tokens bigint NOT NULL,
     cache_read_input_tokens bigint NOT NULL,
     cache_write_input_tokens bigint NOT NULL,
-    reasoning_output_tokens bigint NOT NULL
+    reasoning_output_tokens bigint NOT NULL,
+    usage_disposition_json text NOT NULL
 );
 
 
@@ -958,7 +959,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 81);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 82);
 
 
 --
