@@ -50,7 +50,7 @@ pub(crate) use crate::core::{LashCore, build_plugin_host};
 #[cfg(test)]
 pub(crate) use crate::error::SelectedQueuedWorkDrainRefusalCause;
 pub(crate) use crate::error::{EmbedError, Result};
-pub(crate) use crate::plugin_binding::{ActivePluginBinding, PluginBinding};
+pub(crate) use crate::plugin_binding::PluginBinding;
 pub(crate) use crate::prompt_layer::PromptLayerSink;
 pub(crate) use crate::session::{LashSession, ParkedSession, SessionBuilder};
 pub(crate) use crate::turn::{QueuedTurnBuilder, TurnBuilder};

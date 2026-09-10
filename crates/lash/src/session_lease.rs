@@ -154,7 +154,9 @@ impl LashCore {
     ) -> Result<Option<crate::session_lease::SessionLeaseDiagnostics>> {
         let session_id = SessionId::from(session_id.as_ref());
         let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::MissingSessionStoreFactory);
+            return Err(EmbedError::SessionCatalogUnavailable {
+                operation: "session_lease_diagnostics",
+            });
         };
         let request = lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),

@@ -25,7 +25,27 @@ where
     Arc<C>: RestateControllerContext<'static>,
     C: Send + Sync + 'static,
 {
-    TurnWorkDriver::new(Arc::new(RestateRuntimeEffectController::new(context)))
+    TurnWorkDriver::for_session(
+        Arc::new(RestateRuntimeEffectController::new(context)),
+        SESSION,
+        Arc::new(lash_core::facade_support::InMemorySessionStore::default()),
+    )
+}
+
+fn driver_for_session<C>(
+    context: Arc<C>,
+    session_id: impl Into<String>,
+    store: Arc<dyn lash_core::RuntimePersistence>,
+) -> TurnWorkDriver
+where
+    Arc<C>: RestateControllerContext<'static>,
+    C: Send + Sync + 'static,
+{
+    TurnWorkDriver::for_session(
+        Arc::new(RestateRuntimeEffectController::new(context)),
+        session_id,
+        store,
+    )
 }
 
 /// Waits (wall-clock bounded) until the gate holds a registration. The process
@@ -439,6 +459,7 @@ async fn after_step_during_a_parked_retry_sleep_finishes_the_iteration_and_stops
             .await
             .expect("open sqlite store"),
     );
+    let driver_store = Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>;
     let mut runtime = replay_test_runtime_with_plugins_and_registry(
         &SessionId::from(session_id),
         policy,
@@ -471,7 +492,7 @@ async fn after_step_during_a_parked_retry_sleep_finishes_the_iteration_and_stops
     context.await_sleep_started().await;
     assert_eq!(tool.attempts.load(Ordering::SeqCst), 1);
 
-    let receipt = driver_for(Arc::clone(&context))
+    let receipt = driver_for_session(Arc::clone(&context), session_id, driver_store)
         .request_cancel(
             TurnCancelRequest::new(TurnAddress::new(session_id, turn_id), "stop-in-retry", None)
                 .mode(TurnCancelMode::AfterStep),

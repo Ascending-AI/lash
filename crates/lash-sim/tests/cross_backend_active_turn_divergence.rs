@@ -527,7 +527,7 @@ async fn drive_first_party_cancel_before_start(
         } => lash::TurnAddress::new(session_id, turn_id),
         scope => panic!("expected durable turn scope, got {scope:?}"),
     };
-    let driver = core.turn_work_driver();
+    let driver = core.turn_work_driver().expect("core has a session catalog");
     let first = driver
         .request_cancel(lash::TurnCancelRequest::new(
             address.clone(),
@@ -626,7 +626,9 @@ async fn sqlite_reopen_preserves_cancelled_turn_commit_and_allows_next_turn() {
         .open()
         .await
         .expect("open first SQLite session");
-    let first_driver = first_core.turn_work_driver();
+    let first_driver = first_core
+        .turn_work_driver()
+        .expect("first core has a session catalog");
     let outcome = first_driver
         .request_cancel(lash::TurnCancelRequest::new(
             match first_session.turn_scope(turn_id) {

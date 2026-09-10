@@ -1,12 +1,12 @@
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
-use lash_sansio::sync::MutexExt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use crate::session_binding::BoundSession;
 use crate::support::{
-    ActivePluginBinding, Arc, CancellationToken, EffectHost, EmbedError, LashCore, LashRuntime,
-    PluginBinding, PluginFactory, PluginOperations, PluginOptions, ProcessHandleView, PromptLayer,
+    Arc, CancellationToken, EffectHost, EmbedError, LashCore, LashRuntime, PluginBinding,
+    PluginFactory, PluginOperations, PluginOptions, ProcessHandleView, PromptLayer,
     PromptLayerSink, ProviderHandle, QueuedTurnBuilder, Result, RuntimeErrorCode, RuntimeHandle,
     RuntimeObservation, RuntimePersistence, RuntimeSessionState, SessionAdmin, SessionCursor,
     SessionError, SessionObservation, SessionObservationSubscription, SessionPolicy,
@@ -31,10 +31,9 @@ use lash_remote_protocol::{
 
 /// Builder for one host-named session.
 ///
-/// Persistent stores enforce single-use ids durably. A store-less `LashCore`
-/// has no tombstone authority, so it requires a distinct id for every session
-/// opened during that process and rejects reuse with
-/// [`EmbedError::EphemeralSessionIdReused`].
+/// Every successful facade session is bound to an explicit store. Use
+/// [`SessionBuilder::store`] for a pre-opened store or configure the core's
+/// store provider; an absent source is refused before execution.
 pub struct SessionBuilder {
     pub(crate) core: LashCore,
     pub(crate) session_id: SessionId,
@@ -42,13 +41,17 @@ pub struct SessionBuilder {
     pub(crate) parent_session_id: Option<SessionId>,
     pub(crate) store: Option<Arc<dyn RuntimePersistence>>,
     pub(crate) provider: Option<ProviderHandle>,
-    pub(crate) active_plugins: Vec<ActivePluginBinding>,
     pub(crate) plugin_factories: Vec<Arc<dyn PluginFactory>>,
     /// Plugin-keyed, serializable open-time options. They ride the protocol
     /// materialization seam (the same `PluginOptions` bag a child
     /// `SessionCreateRequest` carries) so every plugin gets open-time options
     /// through one hook.
     pub(crate) plugin_options: PluginOptions,
+}
+
+struct ResolvedSessionStore {
+    store: Arc<dyn RuntimePersistence>,
+    catalog: Option<Arc<dyn lash_core::SessionStoreFactory>>,
 }
 
 fn empty_runtime_session_state(
@@ -103,9 +106,9 @@ impl SessionBuilder {
     /// Use a specific persistence store for this root session.
     ///
     /// This is the right API for a host-owned, pre-opened session database.
-    /// Managed child sessions never reuse this store; configure
-    /// `LashCoreBuilder::child_store_factory` when child sessions should also
-    /// persist.
+    /// Sessions created from this running session never reuse the exact store;
+    /// configure `LashCoreBuilder::session_creation_store_factory` when this
+    /// session can create more sessions.
     pub fn store(mut self, store: Arc<dyn RuntimePersistence>) -> Self {
         self.store = Some(store);
         self
@@ -113,10 +116,6 @@ impl SessionBuilder {
 
     /// Configures the plugin and returns the updated builder.
     pub fn plugin<P: PluginBinding>(mut self, config: P::SessionConfig) -> Self {
-        self.active_plugins.push(ActivePluginBinding {
-            id: P::ID,
-            requires_turn_input: P::requires_turn_input(&config),
-        });
         self.plugin_factories.push(P::factory(&config));
         self
     }
@@ -124,13 +123,13 @@ impl SessionBuilder {
     /// Opens the configured session and returns its active handle.
     pub async fn open(self) -> Result<LashSession> {
         let policy = self.session_policy();
-        let store = self.create_store(&policy).await?;
-        self.reconcile_process_observer_intents(store.as_deref())
+        let resolved = self.create_store(&policy).await?;
+        self.reconcile_process_observer_intents(Some(resolved.store.as_ref()))
             .await?;
         let (state, reopened_persisted_config) = self
-            .load_or_default_state(&policy, store.as_deref())
+            .load_or_default_state(&policy, Some(resolved.store.as_ref()))
             .await?;
-        Box::pin(self.open_resolved(state, store, reopened_persisted_config)).await
+        Box::pin(self.open_resolved(state, resolved, reopened_persisted_config)).await
     }
 
     async fn reconcile_process_observer_intents(
@@ -156,8 +155,8 @@ impl SessionBuilder {
     /// durable history.
     pub async fn open_with_state(self, mut state: RuntimeSessionState) -> Result<LashSession> {
         let policy = self.session_policy();
-        let store = self.create_store(&policy).await?;
-        self.reconcile_process_observer_intents(store.as_deref())
+        let resolved = self.create_store(&policy).await?;
+        self.reconcile_process_observer_intents(Some(resolved.store.as_ref()))
             .await?;
         if state.session_id != self.session_id {
             return Err(EmbedError::StoreSessionMismatch {
@@ -178,7 +177,7 @@ impl SessionBuilder {
             self.spec.generation.as_ref(),
             Some(&supplied_generation),
         );
-        Box::pin(self.open_resolved(state, store, None)).await
+        Box::pin(self.open_resolved(state, resolved, None)).await
     }
 
     fn session_policy(&self) -> SessionPolicy {
@@ -250,11 +249,10 @@ impl SessionBuilder {
     async fn open_resolved(
         self,
         state: RuntimeSessionState,
-        store: Option<Arc<dyn RuntimePersistence>>,
+        resolved: ResolvedSessionStore,
         reopened_persisted_config: Option<lash_core::PersistedSessionConfig>,
     ) -> Result<LashSession> {
         let policy = state.effective_policy().clone();
-        let storeless = store.is_none();
         let session_id = state.session_id.clone();
         let mut env = self.core.env.clone();
         if let Some(provider) = self.provider.clone().or_else(|| self.core.provider.clone()) {
@@ -272,14 +270,21 @@ impl SessionBuilder {
             self.core.process_lifecycle_available,
         )?;
         env.plugin_host = Some(Arc::new(plugin_host));
-        let effect_host = Arc::clone(&env.core.control.effect_host);
         let ports = self.core.substrate_slot.ports().await;
         env = env.with_work_ports(ports.process.clone(), ports.queued_port());
+        let binding = Arc::new(BoundSession::new(
+            session_id,
+            Arc::clone(&resolved.store),
+            &env,
+            ports.process.clone(),
+            ports.queued_port(),
+            resolved.catalog,
+        ));
         let mut runtime = LashRuntime::from_environment_with_plugin_options(
             &env,
             policy,
             state,
-            store,
+            Some(binding.store()),
             self.plugin_options.clone(),
             self.core.session_execution_owner.clone(),
         )
@@ -300,38 +305,23 @@ impl SessionBuilder {
             lash_core::facade_support::settle_reopen_seeded_config(&mut runtime, persisted_config)
                 .await?;
         }
-        let process_work = env.process_work();
-        if let Some(process_work) = process_work.as_ref() {
-            drive_process_on_open(ports.drive_process_on_open, process_work.as_ref()).await?;
+        if let Some(process) = binding.process() {
+            drive_process_on_open(ports.drive_process_on_open, process.port().as_ref()).await?;
         }
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,
             Arc::clone(&self.core.live_replay_store),
         );
-        if storeless
-            && !self
-                .core
-                .ephemeral_session_ids
-                .lock_recover()
-                .insert(session_id.clone())
-        {
-            return Err(EmbedError::EphemeralSessionIdReused { session_id });
-        }
         Ok(LashSession {
             runtime: handle,
-            effect_host,
+            binding,
             parent_session_id: self.parent_session_id,
-            active_plugins: self.active_plugins,
-            process_work,
             process_phase_probe_slot: self.core.substrate_slot.phase_probe_slot(),
             turn_cancels: crate::turn::TurnCancelRegistry::default(),
         })
     }
 
-    async fn create_store(
-        &self,
-        policy: &SessionPolicy,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>> {
+    async fn create_store(&self, policy: &SessionPolicy) -> Result<ResolvedSessionStore> {
         let request = SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: self.session_id.clone(),
@@ -350,17 +340,22 @@ impl SessionBuilder {
                 .admit_and_bind_session(&lash_core::SessionBinding::from_create_request(&request))
                 .await
                 .map_err(EmbedError::Store)?;
-            return Ok(Some(Arc::clone(store)));
+            return Ok(ResolvedSessionStore {
+                store: Arc::clone(store),
+                catalog: None,
+            });
         }
         let Some(factory) = self.core.store_factory.as_ref() else {
-            lash_core::store::validate_session_id(&self.session_id).map_err(EmbedError::Store)?;
-            return Ok(None);
+            return Err(EmbedError::MissingSessionStore);
         };
-        factory
+        let store = factory
             .create_store(&request)
             .await
-            .map(Some)
-            .map_err(EmbedError::Store)
+            .map_err(EmbedError::Store)?;
+        Ok(ResolvedSessionStore {
+            store,
+            catalog: Some(Arc::clone(factory)),
+        })
     }
 }
 
@@ -501,10 +496,8 @@ impl PromptLayerSink for SessionBuilder {
 /// Provides the primary app-facing handle for an active Lash session.
 pub struct LashSession {
     pub(crate) runtime: RuntimeHandle,
-    pub(crate) effect_host: Arc<dyn EffectHost>,
+    pub(crate) binding: Arc<BoundSession>,
     pub(crate) parent_session_id: Option<SessionId>,
-    pub(crate) active_plugins: Vec<ActivePluginBinding>,
-    pub(crate) process_work: Option<Arc<dyn lash_core::ProcessWorkSubstrate>>,
     pub(crate) process_phase_probe_slot: Option<lash_core::runtime::RuntimeTurnPhaseProbeSlot>,
     pub(crate) turn_cancels: crate::turn::TurnCancelRegistry,
 }
@@ -523,6 +516,7 @@ pub struct LashSession {
 /// environment plumbing to hosts.
 pub struct ParkedSession {
     pub(crate) inner: lash_core::facade_support::ParkedSession,
+    pub(crate) binding: Arc<BoundSession>,
 }
 
 impl ParkedSession {
@@ -534,14 +528,24 @@ impl ParkedSession {
 }
 
 impl LashSession {
+    /// Return administration bound to this session's owning catalog.
+    ///
+    /// A root opened with an explicit store has no implied catalog authority;
+    /// callers must obtain administration from the owner that selected it.
+    pub fn session_administration(&self) -> Result<lash_core::SessionAdministration> {
+        self.binding
+            .administration()
+            .ok_or(EmbedError::SessionCatalogUnavailable {
+                operation: "session_administration",
+            })
+    }
+
     /// Durably close this session, then release its in-memory runtime.
     ///
     /// `close` is the honest teardown verb: a persistent session flushes its
     /// dirty state (via a fresh-lease commit) so the store reflects the final
     /// transcript, its in-memory plugin session is unregistered, and the live
-    /// runtime is dropped. A store-less (ephemeral) session has nothing to
-    /// persist, so closing it is exactly the plugin-session unregister plus
-    /// dropping the runtime.
+    /// runtime is dropped.
     ///
     /// This consumes the session and requires exclusive ownership: any cloned
     /// [`LashSession`] handle or in-flight turn keeps a live reference to the
@@ -552,18 +556,11 @@ impl LashSession {
     /// To keep a handle for later resumption instead of discarding the session,
     /// use [`park`](Self::park).
     pub async fn close(self) -> Result<()> {
-        // Persistence is decided before we consume `self`; the observation's
-        // queue store is the facade's canonical "is this session persistent"
-        // signal (the same source `park`'s commit uses).
-        let persistent = self.runtime.observe().queue_store.is_some();
         let runtime = self.into_owned_runtime()?;
         runtime.unregister_plugin_session()?;
-        if persistent {
-            // Reuse the core parking primitive to flush + release the lease,
-            // discarding the returned handle: close does not resume.
-            runtime.park().await?;
-        }
-        // Ephemeral sessions: `runtime` drops here, releasing in-memory state.
+        // Reuse the core parking primitive to flush + release the lease,
+        // discarding the returned handle: close does not resume.
+        runtime.park().await?;
         Ok(())
     }
 
@@ -579,9 +576,6 @@ impl LashSession {
     /// state.
     ///
     /// Contract:
-    /// - **Persistent runtime required.** Parking flushes to the store, so a
-    ///   store-less session cannot be parked and returns an error. Use
-    ///   [`close`](Self::close) to tear down an ephemeral session.
     /// - **Exclusive ownership required.** `park` consumes the session and drops
     ///   the in-memory runtime, so it needs the sole live reference. A cloned
     ///   [`LashSession`] or an in-flight turn holds another reference and makes
@@ -592,12 +586,16 @@ impl LashSession {
     ///   exclusive-ownership guard is what makes mid-turn parking an explicit
     ///   error rather than a silent partial flush.
     pub async fn park(self) -> Result<ParkedSession> {
+        let binding = Arc::clone(&self.binding);
         let runtime = self.into_owned_runtime()?;
         // We now own the runtime exclusively; release the in-memory plugin
         // session registration before flushing and dropping it.
         runtime.unregister_plugin_session()?;
         let parked = runtime.park().await?;
-        Ok(ParkedSession { inner: parked })
+        Ok(ParkedSession {
+            inner: parked,
+            binding,
+        })
     }
 
     /// Consume the session and take sole ownership of the underlying runtime.
@@ -625,7 +623,8 @@ impl LashSession {
 
     /// Build the execution scope for a turn in this opened session.
     ///
-    /// Durable and store-less sessions use the same host-provided session id.
+    /// The scope uses the exact store-backed session identity owned by this
+    /// facade handle's Session Binding.
     pub fn turn_scope(&self, turn_id: impl Into<TurnId>) -> lash_core::ExecutionScope {
         lash_core::facade_support::RuntimeSessionStateFacadeOps::turn_scope(
             &self.runtime.observe().persisted_state,
@@ -661,15 +660,14 @@ impl LashSession {
 
     /// Returns the effect host used by this runtime.
     pub fn effect_host(&self) -> Arc<dyn EffectHost> {
-        Arc::clone(&self.effect_host)
+        self.binding.effect_host()
     }
 
     /// Creates a turn builder for the supplied input.
     pub fn turn(&self, input: TurnInput) -> TurnBuilder {
         TurnBuilder {
             runtime: self.runtime.clone(),
-            effect_host: Arc::clone(&self.effect_host),
-            active_plugins: self.active_plugins.clone(),
+            effect_host: self.binding.effect_host(),
             input,
             cancel: CancellationToken::new(),
             cancel_origin_hint: lash_core::TurnCancelOriginHint::default(),
@@ -684,7 +682,7 @@ impl LashSession {
     pub fn queued_turn(&self) -> QueuedTurnBuilder {
         QueuedTurnBuilder {
             runtime: self.runtime.clone(),
-            effect_host: Arc::clone(&self.effect_host),
+            effect_host: self.binding.effect_host(),
             cancel: CancellationToken::new(),
             cancel_origin_hint: lash_core::TurnCancelOriginHint::default(),
             cancels: self.turn_cancels.clone(),
@@ -781,10 +779,14 @@ impl LashSession {
         .undelivered(undelivered)
         .mode(mode);
         request.reason = reason;
-        lash_core::facade_support::TurnWorkDriver::new(self.effect_host())
-            .request_cancel(request)
-            .await
-            .map_err(EmbedError::Runtime)
+        lash_core::facade_support::TurnWorkDriver::for_session(
+            self.binding.effect_host(),
+            self.binding.session_id(),
+            self.binding.store(),
+        )
+        .request_cancel(request)
+        .await
+        .map_err(EmbedError::Runtime)
     }
 
     /// Cancel every turn currently executing through this opened session
@@ -835,7 +837,10 @@ impl LashSession {
     pub fn admin(&self) -> SessionAdmin {
         SessionAdmin {
             runtime: self.runtime.clone(),
-            process_work: self.process_work.clone(),
+            process_work: self
+                .binding
+                .process()
+                .map(|process| Arc::clone(process.port())),
         }
     }
 
@@ -874,12 +879,7 @@ impl LashSession {
     /// [`pending_turn_inputs`](Self::pending_turn_inputs).
     pub async fn queued_work(&self) -> Result<Vec<QueuedWorkBatch>> {
         let observation = self.runtime.observe();
-        let store = observation.queue_store.as_ref().ok_or_else(|| {
-            EmbedError::Runtime(lash_core::RuntimeError::new(
-                lash_core::RuntimeErrorCode::StoreCommitFailed,
-                "queued work inspection requires a persistent runtime store",
-            ))
-        })?;
+        let store = self.binding.store();
         store
             .list_pending_queued_work(&SessionId::from(observation.session_id()))
             .await
@@ -894,12 +894,7 @@ impl LashSession {
     /// Returns the turn inputs currently awaiting consumption.
     pub async fn pending_turn_inputs(&self) -> Result<Vec<PendingTurnInput>> {
         let observation = self.runtime.observe();
-        let store = observation.queue_store.as_ref().ok_or_else(|| {
-            EmbedError::Runtime(lash_core::RuntimeError::new(
-                lash_core::RuntimeErrorCode::StoreCommitFailed,
-                "pending turn input inspection requires a persistent runtime store",
-            ))
-        })?;
+        let store = self.binding.store();
         store
             .list_pending_turn_inputs(&SessionId::from(observation.session_id()))
             .await
@@ -917,12 +912,7 @@ impl LashSession {
     /// cursor fell outside the bounded replay window.
     pub async fn turn_input_applications(&self) -> Result<Vec<lash_core::TurnInputApplication>> {
         let observation = self.runtime.observe();
-        let store = observation.queue_store.as_ref().ok_or_else(|| {
-            EmbedError::Runtime(lash_core::RuntimeError::new(
-                lash_core::RuntimeErrorCode::StoreCommitFailed,
-                "turn input application reconciliation requires a persistent runtime store",
-            ))
-        })?;
+        let store = self.binding.store();
         store
             .list_turn_input_applications(&SessionId::from(observation.session_id()))
             .await
@@ -1042,7 +1032,8 @@ impl LashSession {
     /// performs.
     pub async fn revoke_durable_waits(&self) -> Result<()> {
         let session_id = SessionId::from(self.session_id());
-        self.effect_host
+        self.binding
+            .effect_host()
             .cancel_await_events_for_session(&session_id)
             .await
             .map_err(EmbedError::Runtime)
@@ -1061,12 +1052,7 @@ impl LashSession {
     /// unavailable. A batch id the store has never seen resolves immediately.
     pub async fn await_queued_work_batch(&self, batch_id: &str) -> Result<()> {
         let observation = self.runtime.observe();
-        let store = observation.queue_store.clone().ok_or_else(|| {
-            EmbedError::Runtime(lash_core::RuntimeError::new(
-                lash_core::RuntimeErrorCode::StoreCommitFailed,
-                "queued work inspection requires a persistent runtime store",
-            ))
-        })?;
+        let store = self.binding.store();
         let session_id = SessionId::from(observation.session_id());
         drop(observation);
         let mut delay = std::time::Duration::from_millis(25);

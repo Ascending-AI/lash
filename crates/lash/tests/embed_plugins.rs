@@ -11,8 +11,7 @@ use lash::provider::LlmResponse;
 use lash::tools::{
     ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider,
 };
-use lash::{EmbedError, LashCore, PluginBinding};
-use serde::{Deserialize, Serialize};
+use lash::{LashCore, PluginBinding};
 use serde_json::json;
 
 fn assistant_prose(result: &lash::turn::TurnOutput) -> String {
@@ -28,29 +27,19 @@ struct TestPlugin;
 
 #[derive(Clone)]
 struct TestPluginConfig {
-    required: bool,
+    label: String,
     prompt_seen: Arc<Mutex<Vec<String>>>,
     tool_seen: Arc<Mutex<Vec<String>>>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct TestTurnInput {
-    label: String,
 }
 
 impl PluginBinding for TestPlugin {
     const ID: &'static str = "test_typed";
     type SessionConfig = TestPluginConfig;
-    type Input = TestTurnInput;
 
     fn factory(config: &Self::SessionConfig) -> Arc<dyn PluginFactory> {
         Arc::new(TestPluginFactory {
             config: config.clone(),
         })
-    }
-
-    fn requires_turn_input(config: &Self::SessionConfig) -> bool {
-        config.required
     }
 }
 
@@ -81,25 +70,24 @@ impl SessionPlugin for TestSessionPlugin {
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         let prompt_seen = Arc::clone(&self.config.prompt_seen);
-        reg.prompt().contribute(Arc::new(move |ctx| {
+        let label = self.config.label.clone();
+        reg.prompt().contribute(Arc::new(move |_ctx| {
             let prompt_seen = Arc::clone(&prompt_seen);
+            let label = label.clone();
             Box::pin(async move {
-                if let Some(input) = ctx
-                    .turn_context
-                    .plugin_input::<TestTurnInput>(TestPlugin::ID)
-                {
-                    prompt_seen.lock_recover().push(input.label.clone());
-                }
+                prompt_seen.lock_recover().push(label);
                 Ok(Vec::new())
             })
         }));
         reg.tools().provider(Arc::new(TestTools {
+            label: self.config.label.clone(),
             seen: Arc::clone(&self.config.tool_seen),
         }))
     }
 }
 
 struct TestTools {
+    label: String,
     seen: Arc<Mutex<Vec<String>>>,
 }
 
@@ -123,11 +111,7 @@ impl ToolProvider for TestTools {
                 call.pending,
             ));
         }
-        let Some(input) = call.context.plugin_input::<TestTurnInput>(TestPlugin::ID) else {
-            return Err(ToolOutcome::err_fmt("missing typed input"));
-        };
-        let prepared_payload = serde_json::to_value(input)
-            .map_err(|err| ToolOutcome::err_fmt(format!("failed to prepare typed input: {err}")))?;
+        let prepared_payload = json!({ "label": self.label });
         Ok(lash::tools::PreparedToolCall::from_parts(
             call.pending.call_id,
             call.tool_id,
@@ -140,14 +124,19 @@ impl ToolProvider for TestTools {
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         assert_eq!(call.name, "typed_probe");
-        let input = match call.context.decode_prepared_payload::<TestTurnInput>() {
+        let input = match call.context.decode_prepared_payload::<serde_json::Value>() {
             Ok(input) => input,
             Err(err) => {
                 return ToolOutcome::err_fmt(format!("missing prepared typed input: {err}"));
             }
         };
-        self.seen.lock_recover().push(input.label.clone());
-        ToolOutcome::ok(json!({ "label": input.label }))
+        let label = input
+            .get("label")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        self.seen.lock_recover().push(label.clone());
+        ToolOutcome::ok(json!({ "label": label }))
     }
 }
 
@@ -203,9 +192,6 @@ fn core_with_responses(responses: Vec<LlmResponse>) -> LashCore {
         })
         .build()
         .into_handle();
-    // These plugin/typed-input tests never start a process, so they wire no
-    // process registry (and thus no store factory) and run non-persistent turns
-    // — which the live `TurnContext` plugin input path requires.
     LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(provider)
@@ -222,6 +208,9 @@ fn core_with_responses(responses: Vec<LlmResponse>) -> LashCore {
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "embed-plugins-test-worker",
             "embed-plugins-test-boot",
@@ -230,39 +219,11 @@ fn core_with_responses(responses: Vec<LlmResponse>) -> LashCore {
 }
 
 #[tokio::test]
-async fn required_turn_input_missing_is_validated_before_execution() {
-    let config = TestPluginConfig {
-        required: true,
-        prompt_seen: Arc::new(Mutex::new(Vec::new())),
-        tool_seen: Arc::new(Mutex::new(Vec::new())),
-    };
-    let core = core_with_responses(vec![response_text("should not run")]);
-    let session = core
-        .session("required-missing")
-        .plugin::<TestPlugin>(config)
-        .open()
-        .await
-        .expect("session");
-
-    let err = session
-        .turn(TurnInput::text("hello"))
-        .run()
-        .await
-        .expect_err("missing required context");
-    assert!(matches!(
-        err,
-        EmbedError::MissingPluginTurnInput {
-            plugin_id: TestPlugin::ID
-        }
-    ));
-}
-
-#[tokio::test]
-async fn prompt_hook_and_tool_provider_read_typed_turn_input() {
+async fn prompt_hook_and_tool_provider_read_typed_session_config() {
     let prompt_seen = Arc::new(Mutex::new(Vec::new()));
     let tool_seen = Arc::new(Mutex::new(Vec::new()));
     let config = TestPluginConfig {
-        required: true,
+        label: "page-a".to_string(),
         prompt_seen: Arc::clone(&prompt_seen),
         tool_seen: Arc::clone(&tool_seen),
     };
@@ -276,9 +237,6 @@ async fn prompt_hook_and_tool_provider_read_typed_turn_input() {
 
     let result = session
         .turn(TurnInput::text("probe"))
-        .with_plugin_input::<TestPlugin>(TestTurnInput {
-            label: "page-a".to_string(),
-        })
         .run()
         .await
         .expect("turn");
@@ -286,29 +244,6 @@ async fn prompt_hook_and_tool_provider_read_typed_turn_input() {
     assert_eq!(assistant_prose(&result), "done");
     assert_eq!(prompt_seen.lock_recover().as_slice(), ["page-a", "page-a"]);
     assert_eq!(tool_seen.lock_recover().as_slice(), ["page-a"]);
-}
-
-#[tokio::test]
-async fn optional_turn_input_can_be_absent() {
-    let config = TestPluginConfig {
-        required: false,
-        prompt_seen: Arc::new(Mutex::new(Vec::new())),
-        tool_seen: Arc::new(Mutex::new(Vec::new())),
-    };
-    let core = core_with_responses(vec![response_text("ok")]);
-    let session = core
-        .session("optional-absent")
-        .plugin::<TestPlugin>(config)
-        .open()
-        .await
-        .expect("session");
-
-    let result = session
-        .turn(TurnInput::text("hello"))
-        .run()
-        .await
-        .expect("turn");
-    assert_eq!(assistant_prose(&result), "ok");
 }
 
 #[tokio::test]

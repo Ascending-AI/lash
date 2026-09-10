@@ -370,29 +370,63 @@ pub trait TurnAttach: Send + Sync {
 #[derive(Clone)]
 pub struct TurnWorkDriver {
     effect_host: Arc<dyn EffectHost>,
-    attach: Option<Arc<dyn TurnAttach>>,
-    store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
+    store: TurnWorkStore,
+    #[cfg(any(test, feature = "testing"))]
+    test_attach: Option<Arc<dyn TurnAttach>>,
+}
+
+#[derive(Clone)]
+enum TurnWorkStore {
+    Session {
+        session_id: String,
+        store: Arc<dyn crate::RuntimePersistence>,
+    },
+    Catalog(Arc<dyn crate::SessionStoreFactory>),
 }
 
 impl TurnWorkDriver {
-    pub fn new(effect_host: Arc<dyn EffectHost>) -> Self {
+    /// Bind control to one already-opened session store.
+    ///
+    /// The address is checked against `session_id` before the store or effect
+    /// host is touched. Facades with an opened session should use this form so
+    /// a root catalog override cannot redirect cancellation storage.
+    pub fn for_session(
+        effect_host: Arc<dyn EffectHost>,
+        session_id: impl Into<String>,
+        store: Arc<dyn crate::RuntimePersistence>,
+    ) -> Self {
         Self {
             effect_host,
-            attach: None,
-            store_factory: None,
+            store: TurnWorkStore::Session {
+                session_id: session_id.into(),
+                store,
+            },
+            #[cfg(any(test, feature = "testing"))]
+            test_attach: None,
         }
     }
 
-    pub fn with_attach(mut self, attach: Arc<dyn TurnAttach>) -> Self {
-        self.attach = Some(attach);
-        self
-    }
-
-    pub fn with_session_store_factory(
-        mut self,
+    /// Bind control to a deployment catalog for arbitrary-session addressing.
+    ///
+    /// Each request resolves its store from this same catalog. This is the
+    /// remote/admin form; an already-opened session uses [`Self::for_session`].
+    pub fn for_catalog(
+        effect_host: Arc<dyn EffectHost>,
         store_factory: Arc<dyn crate::SessionStoreFactory>,
     ) -> Self {
-        self.store_factory = Some(store_factory);
+        Self {
+            effect_host,
+            store: TurnWorkStore::Catalog(store_factory),
+            #[cfg(any(test, feature = "testing"))]
+            test_attach: None,
+        }
+    }
+
+    /// Override terminal attachment in test builds.
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn with_test_attach(mut self, attach: Arc<dyn TurnAttach>) -> Self {
+        self.test_attach = Some(attach);
         self
     }
 
@@ -405,6 +439,7 @@ impl TurnWorkDriver {
         request: TurnCancelRequest,
     ) -> Result<TurnCancelReceipt, RuntimeError> {
         request.validate()?;
+        self.validate_address(&request.address)?;
         let key = match cancel_gate_key(self.effect_host.as_ref(), &request.address).await {
             Ok(key) => key,
             Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
@@ -415,31 +450,14 @@ impl TurnWorkDriver {
             }
             Err(err) => return Err(err),
         };
-        let record = if let Some(factory) = self.store_factory.as_ref() {
-            let store = factory
-                .open_existing_store_by_id(&request.address.session_id)
-                .await
-                .map_err(|err| RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err))?
-                .ok_or_else(|| {
-                    RuntimeError::new(
-                        crate::RuntimeErrorCode::InvalidTurnCancelRequest,
-                        format!("session `{}` does not exist", request.address.session_id),
-                    )
-                })?;
-            Some(
-                store
-                    .record_turn_cancel_request(request.clone())
-                    .await
-                    .map_err(|err| {
-                        RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
-                    })?,
-            )
-        } else {
-            None
-        };
-        let evidence = record
-            .as_ref()
-            .map_or_else(|| request.evidence(), |record| record.request.evidence());
+        let store = self.store_for(&request.address).await?;
+        let record = store
+            .record_turn_cancel_request(request.clone())
+            .await
+            .map_err(|err| {
+                RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+            })?;
+        let evidence = record.request.evidence();
         let resolution = gate_resolution(TurnGateTerminal::CancelRequested(evidence.clone()))?;
         let outcome = match self
             .effect_host
@@ -460,21 +478,51 @@ impl TurnWorkDriver {
             },
             ResolveOutcome::UnknownOrRevoked => Ok(TurnCancelOutcome::UnknownOrRevoked),
         }?;
-        let record = if let (Some(factory), Some(_)) = (self.store_factory.as_ref(), record) {
-            factory
-                .open_existing_store_by_id(&request.address.session_id)
+        let record = store
+            .turn_cancel_request(&request.address)
+            .await
+            .map_err(|err| {
+                RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+            })?;
+        Ok(TurnCancelReceipt { outcome, record })
+    }
+
+    async fn store_for(
+        &self,
+        address: &TurnAddress,
+    ) -> Result<Arc<dyn crate::RuntimePersistence>, RuntimeError> {
+        self.validate_address(address)?;
+        match &self.store {
+            TurnWorkStore::Session { session_id, store } => {
+                debug_assert_eq!(session_id, &address.session_id);
+                Ok(Arc::clone(store))
+            }
+            TurnWorkStore::Catalog(factory) => factory
+                .open_existing_store_by_id(&address.session_id)
                 .await
                 .map_err(|err| RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err))?
-                .expect("cancellation store existed")
-                .turn_cancel_request(&request.address)
-                .await
-                .map_err(|err| {
-                    RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
-                })?
-        } else {
-            None
-        };
-        Ok(TurnCancelReceipt { outcome, record })
+                .ok_or_else(|| {
+                    RuntimeError::new(
+                        crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                        format!("session `{}` does not exist", address.session_id),
+                    )
+                }),
+        }
+    }
+
+    fn validate_address(&self, address: &TurnAddress) -> Result<(), RuntimeError> {
+        if let TurnWorkStore::Session { session_id, .. } = &self.store
+            && session_id != &address.session_id
+        {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                format!(
+                    "turn work driver is bound to session `{session_id}` and cannot address `{}`",
+                    address.session_id
+                ),
+            ));
+        }
+        Ok(())
     }
 
     /// Upgrade an address whose first-writer gate holds a weaker request.
@@ -516,7 +564,12 @@ impl TurnWorkDriver {
         address: &TurnAddress,
     ) -> Result<TurnTerminal, RuntimeError> {
         address.validate()?;
-        if let Some(attach) = self.attach.as_ref() {
+        self.validate_address(address)?;
+        #[cfg(any(test, feature = "testing"))]
+        if let Some(attach) = self.test_attach.as_ref() {
+            return attach.await_terminal(address).await;
+        }
+        if let Some(attach) = self.effect_host.turn_attach() {
             return attach.await_terminal(address).await;
         }
         let key = terminal_key(self.effect_host.as_ref(), address).await?;
@@ -960,641 +1013,5 @@ impl ActiveTurnControl {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{NativeEffectHost, TurnFinish, TurnStop};
-
-    fn address(label: &str) -> TurnAddress {
-        TurnAddress::new(
-            format!("turn-control-{label}-{}", uuid::Uuid::new_v4()),
-            "turn-a",
-        )
-    }
-
-    fn request(address: TurnAddress, request_id: &str) -> TurnCancelRequest {
-        TurnCancelRequest::new(address, request_id, Some("user".to_string()))
-            .with_reason("stop button")
-    }
-
-    #[test]
-    fn legacy_cancel_request_without_disposition_defaults_to_defer() {
-        let decoded: TurnCancelRequest = serde_json::from_value(serde_json::json!({
-            "address": { "session_id": "legacy-session", "turn_id": "legacy-turn" },
-            "request_id": "legacy-request"
-        }))
-        .expect("decode a pre-disposition cancel request");
-        assert_eq!(decoded.undelivered, TurnCancelDisposition::Defer);
-        assert!(
-            serde_json::to_value(decoded)
-                .expect("encode defaulted request")
-                .get("undelivered")
-                .is_none(),
-            "the legacy Defer default stays sparse on the durable row"
-        );
-    }
-
-    #[tokio::test]
-    async fn cancel_before_start_duplicate_and_terminal_attach() {
-        let host = Arc::new(NativeEffectHost::default());
-        let driver = TurnWorkDriver::new(host.clone());
-        let address = address("before-start");
-
-        let first = driver
-            .request_cancel(request(address.clone(), "request-1"))
-            .await
-            .expect("request cancellation");
-        let evidence = match first.outcome {
-            TurnCancelOutcome::Requested(evidence) => evidence,
-            other => panic!("expected requested, got {other:?}"),
-        };
-        assert_eq!(evidence.request_id, "request-1");
-
-        let duplicate = driver
-            .request_cancel(request(address.clone(), "request-2"))
-            .await
-            .expect("duplicate cancellation");
-        assert!(matches!(
-            duplicate.outcome,
-            TurnCancelOutcome::AlreadyRequested(TurnCancellationEvidence { ref request_id, .. })
-                if request_id == "request-1"
-        ));
-
-        let active = ActiveTurnControl::new(host.as_ref(), address.clone())
-            .await
-            .expect("active control");
-        let observed = active
-            .settle_before_commit(host.as_ref(), false, None)
-            .await
-            .expect("settle")
-            .expect("cancellation won");
-        assert_eq!(observed, evidence);
-        let terminal = TurnTerminal::Committed {
-            outcome: TurnOutcome::Stopped(TurnStop::Cancelled { evidence: observed }),
-            session_revision: Some(7),
-        };
-        active
-            .publish_terminal(host.as_ref(), &terminal)
-            .await
-            .expect("publish terminal");
-        let attached = driver
-            .await_terminal(&address)
-            .await
-            .expect("attach terminal");
-        assert!(matches!(
-            attached,
-            TurnTerminal::Committed {
-                outcome: TurnOutcome::Stopped(TurnStop::Cancelled { .. }),
-                session_revision: Some(7),
-            }
-        ));
-    }
-
-    #[tokio::test]
-    async fn settle_seals_the_assembled_evidence_instead_of_minting_a_second_id() {
-        // A provider abort classified as cancelled arrives with evidence the
-        // sans-IO machine already put on the streamed outcome. Sealing that
-        // value is what keeps one cancellation to one request id: minting
-        // `internal:{turn_id}` here would hand the host a second identity for
-        // the same fact.
-        let host = Arc::new(NativeEffectHost::default());
-        let driver = TurnWorkDriver::new(host.clone());
-        let address = address("assembled");
-        let active = ActiveTurnControl::new(host.as_ref(), address.clone())
-            .await
-            .expect("active control");
-        let assembled = TurnCancellationEvidence::internal("provider-cancelled:3");
-
-        let settled = active
-            .settle_before_commit(host.as_ref(), true, Some(assembled.clone()))
-            .await
-            .expect("settle")
-            .expect("a locally cancelled turn settles cancelled");
-        assert_eq!(settled, assembled);
-        assert_ne!(settled, active.internal_evidence());
-
-        // The durable gate carries the same identity, so a later requester and
-        // a replayed owner both read the value the turn streamed.
-        let late = driver
-            .request_cancel(request(address, "late-request"))
-            .await
-            .expect("late cancellation");
-        assert!(matches!(
-            late.outcome,
-            TurnCancelOutcome::AlreadyRequested(ref evidence) if *evidence == assembled
-        ));
-    }
-
-    #[tokio::test]
-    async fn concurrent_completion_seal_vs_cancel_is_first_writer_wins() {
-        let host = Arc::new(NativeEffectHost::default());
-        let driver = TurnWorkDriver::new(host.clone());
-        let address = address("race");
-        let active = ActiveTurnControl::new(host.as_ref(), address.clone())
-            .await
-            .expect("active control");
-
-        let (seal, cancel) = tokio::join!(
-            active.settle_before_commit(host.as_ref(), false, None),
-            driver.request_cancel(request(address, "race-request")),
-        );
-        match (seal.expect("seal"), cancel.expect("cancel").outcome) {
-            (None, TurnCancelOutcome::CompletionWonRace) => {}
-            (Some(evidence), TurnCancelOutcome::Requested(requested)) => {
-                assert_eq!(evidence, requested);
-            }
-            other => panic!("inconsistent gate race result: {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn recovered_owner_observes_pending_cancel_after_control_recreation() {
-        let host = Arc::new(NativeEffectHost::default());
-        let driver = TurnWorkDriver::new(host.clone());
-        let address = address("replay");
-        let requested = driver
-            .request_cancel(request(address.clone(), "request-before-replay"))
-            .await
-            .expect("request cancellation");
-        let expected = match requested.outcome {
-            TurnCancelOutcome::Requested(evidence) => evidence,
-            other => panic!("expected requested, got {other:?}"),
-        };
-
-        let scoped = host
-            .scoped(address.execution_scope())
-            .expect("scope recovered turn controller");
-        let recovered = ActiveTurnControl::new(host.as_ref(), address)
-            .await
-            .expect("recreate active control under the recovered owner");
-        let observed = recovered
-            .observe_pending_cancel(scoped.controller(), TurnCancelPeekIdentity::StartGate)
-            .await
-            .expect("read recovered turn start gate")
-            .expect("pending cancellation is visible before recovered effects");
-        assert_eq!(observed, expected);
-        let settled = recovered
-            .settle_before_commit(host.as_ref(), false, None)
-            .await
-            .expect("settle recovered turn")
-            .expect("pending cancellation survives owner loss");
-        assert_eq!(settled, expected);
-    }
-
-    #[tokio::test]
-    async fn turn_control_is_exact_scope_and_excluded_from_wait_cancel_sweep() {
-        let host = Arc::new(NativeEffectHost::default());
-        let driver = TurnWorkDriver::new(host.clone());
-        let address_a = address("scope");
-        let address_b = TurnAddress::new(&address_a.session_id, "turn-b");
-        let address_future = TurnAddress::new(&address_a.session_id, "turn-future");
-
-        driver
-            .request_cancel(request(address_a.clone(), "request-a"))
-            .await
-            .expect("cancel a");
-
-        let tool_key = host
-            .await_event_key(
-                &ExecutionScope::turn(&address_a.session_id, "tool-turn"),
-                AwaitEventWaitIdentity::tool_completion("tool-call"),
-            )
-            .await
-            .expect("tool key");
-        let tool_host = host.clone();
-        let tool_wait = crate::task::spawn(async move {
-            tool_host
-                .await_await_event(&tool_key, CancellationToken::new(), None)
-                .await
-        });
-        tokio::task::yield_now().await;
-        host.cancel_await_events_for_session(&address_a.session_id)
-            .await
-            .expect("cancel durable waits");
-        assert!(matches!(
-            tool_wait
-                .await
-                .expect("tool wait task")
-                .expect("tool resolution"),
-            Resolution::Cancelled
-        ));
-
-        assert!(matches!(
-            driver
-                .request_cancel(request(address_a.clone(), "request-a-duplicate"))
-                .await
-                .expect("duplicate a")
-                .outcome,
-            TurnCancelOutcome::AlreadyRequested(_)
-        ));
-        assert!(matches!(
-            driver
-                .request_cancel(request(address_b, "request-b"))
-                .await
-                .expect("cancel b")
-                .outcome,
-            TurnCancelOutcome::Requested(_)
-        ));
-        assert!(matches!(
-            driver
-                .request_cancel(request(address_future, "request-future"))
-                .await
-                .expect("cancel future")
-                .outcome,
-            TurnCancelOutcome::Requested(_)
-        ));
-    }
-
-    #[tokio::test]
-    async fn session_deletion_revokes_control_promises() {
-        let host = Arc::new(NativeEffectHost::default());
-        let driver = TurnWorkDriver::new(host.clone());
-        let address = address("revoke");
-        host.revoke_await_events_for_session(&address.session_id)
-            .await
-            .expect("revoke session");
-        assert!(matches!(
-            driver
-                .request_cancel(request(address, "request-after-delete"))
-                .await
-                .expect("revoked outcome")
-                .outcome,
-            TurnCancelOutcome::UnknownOrRevoked
-        ));
-    }
-
-    #[tokio::test]
-    async fn terminal_attachment_timeout_does_not_poison_later_publication() {
-        let host = Arc::new(NativeEffectHost::default());
-        let driver = TurnWorkDriver::new(host.clone());
-        let address = address("terminal-timeout");
-        let error = driver
-            .await_terminal_with_timeout(&address, Duration::from_millis(1))
-            .await
-            .expect_err("unpublished terminal must time out");
-        assert_eq!(error.code.as_str(), "turn_terminal_await_timeout");
-
-        let active = ActiveTurnControl::new(host.as_ref(), address.clone())
-            .await
-            .expect("active control after timed-out attach");
-        active
-            .settle_before_commit(host.as_ref(), false, None)
-            .await
-            .expect("seal after timed-out attach");
-        active
-            .publish_terminal(
-                host.as_ref(),
-                &TurnTerminal::Committed {
-                    outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
-                        text: "done".to_string(),
-                    }),
-                    session_revision: None,
-                },
-            )
-            .await
-            .expect("publish after timed-out attach");
-        assert!(matches!(
-            driver.await_terminal(&address).await.expect("late attach"),
-            TurnTerminal::Committed {
-                outcome: TurnOutcome::Finished(_),
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn local_cancel_origin_hint_preserves_first_origin() {
-        let hint = TurnCancelOriginHint::default();
-        assert!(!hint.was_set());
-        hint.set(Some("shutdown".to_string()));
-        hint.set(Some("user".to_string()));
-
-        assert!(hint.was_set());
-        assert_eq!(hint.get().as_deref(), Some("shutdown"));
-    }
-
-    #[test]
-    fn local_cancel_origin_hint_preserves_explicit_absence() {
-        let hint = TurnCancelOriginHint::default();
-        assert!(!hint.was_set());
-        hint.set(None);
-        hint.set(Some("user".to_string()));
-
-        assert!(hint.was_set());
-        assert_eq!(hint.get(), None);
-    }
-
-    #[test]
-    fn installed_originless_token_does_not_block_a_later_registry_origin() {
-        let hint = TurnCancelOriginHint::default();
-        hint.configure_local_token(None);
-
-        assert!(!hint.was_set());
-
-        hint.set(Some("user".to_string()));
-        assert_eq!(hint.get().as_deref(), Some("user"));
-    }
-
-    #[test]
-    fn observed_registry_origin_wins_over_configured_token_origin() {
-        let hint = TurnCancelOriginHint::default();
-        hint.configure_local_token(Some("shutdown".to_string()));
-        assert_eq!(hint.get().as_deref(), Some("shutdown"));
-
-        hint.set(Some("user".to_string()));
-        assert_eq!(hint.get().as_deref(), Some("user"));
-    }
-
-    #[test]
-    fn terminal_success_has_no_cancellation_evidence() {
-        let terminal = TurnTerminal::Committed {
-            outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
-                text: "done".to_string(),
-            }),
-            session_revision: None,
-        };
-        let encoded = terminal_resolution(&terminal).expect("encode terminal");
-        assert!(matches!(encoded, Resolution::Ok(_)));
-    }
-
-    #[test]
-    fn legacy_cancel_request_without_mode_decodes_as_immediate() {
-        let decoded: TurnCancelRequest = serde_json::from_value(serde_json::json!({
-            "address": { "session_id": "legacy-session", "turn_id": "legacy-turn" },
-            "request_id": "legacy-request",
-            "origin": "user",
-            "reason": "stop button",
-            "undelivered": "drop"
-        }))
-        .expect("decode a pre-mode cancel request");
-        assert_eq!(decoded.mode, TurnCancelMode::Immediate);
-        assert_eq!(decoded.undelivered, TurnCancelDisposition::Drop);
-        let encoded = serde_json::to_value(&decoded).expect("encode defaulted request");
-        assert!(
-            encoded.get("mode").is_none(),
-            "the Immediate default stays sparse on the durable row: {encoded}"
-        );
-    }
-
-    #[test]
-    fn legacy_cancellation_evidence_without_mode_decodes_as_immediate() {
-        let decoded: TurnCancellationEvidence = serde_json::from_value(serde_json::json!({
-            "request_id": "legacy-request",
-            "origin": "user"
-        }))
-        .expect("decode pre-mode evidence");
-        assert_eq!(decoded.mode, TurnCancelMode::Immediate);
-        assert_eq!(decoded.honoured_after_step, None);
-        let encoded = serde_json::to_value(&decoded).expect("encode evidence");
-        assert!(encoded.get("mode").is_none());
-        assert!(encoded.get("honoured_after_step").is_none());
-    }
-
-    #[test]
-    fn after_step_request_and_evidence_round_trip_the_mode() {
-        let request = request(address("mode"), "request-1").mode(TurnCancelMode::AfterStep);
-        let encoded = serde_json::to_value(&request).expect("encode request");
-        assert_eq!(encoded["mode"], serde_json::json!("after_step"));
-        let decoded: TurnCancelRequest =
-            serde_json::from_value(encoded).expect("decode after-step request");
-        assert_eq!(decoded, request);
-        let evidence = TurnCancellationEvidence {
-            honoured_after_step: Some(3),
-            ..decoded.evidence()
-        };
-        assert_eq!(evidence.mode, TurnCancelMode::AfterStep);
-        let encoded = serde_json::to_value(&evidence).expect("encode evidence");
-        assert_eq!(encoded["mode"], serde_json::json!("after_step"));
-        assert_eq!(encoded["honoured_after_step"], serde_json::json!(3));
-        let decoded: TurnCancellationEvidence =
-            serde_json::from_value(encoded).expect("decode evidence");
-        assert_eq!(decoded, evidence);
-    }
-
-    #[test]
-    fn cancel_mode_ordering_only_lets_immediate_escalate_after_step() {
-        assert!(TurnCancelMode::Immediate.is_stronger_than(TurnCancelMode::AfterStep));
-        assert!(!TurnCancelMode::AfterStep.is_stronger_than(TurnCancelMode::Immediate));
-        assert!(!TurnCancelMode::Immediate.is_stronger_than(TurnCancelMode::Immediate));
-        assert!(!TurnCancelMode::AfterStep.is_stronger_than(TurnCancelMode::AfterStep));
-        assert!(TurnCancelMode::default().is_immediate());
-    }
-
-    #[test]
-    fn peek_identities_are_replay_deterministic_and_name_their_escalation() {
-        let after_step = TurnCancelPeekIdentity::AfterStep {
-            protocol_iteration: 4,
-        };
-        assert_eq!(after_step.causal_identity(), "turn_cancel.after_step.4");
-        assert_eq!(
-            after_step.escalation_causal_identity(),
-            "turn_cancel.escalation.after_step.4"
-        );
-        assert_eq!(after_step.honours_after_step(), Some(Some(4)));
-        assert_eq!(
-            TurnCancelPeekIdentity::StartGate.honours_after_step(),
-            Some(None)
-        );
-        assert_eq!(
-            TurnCancelPeekIdentity::PostAbortGate.honours_after_step(),
-            Some(None)
-        );
-        assert_eq!(
-            TurnCancelPeekIdentity::AfterLlm {
-                protocol_iteration: 0
-            }
-            .honours_after_step(),
-            None
-        );
-        assert_eq!(
-            TurnCancelPeekIdentity::AfterLlm {
-                protocol_iteration: 0
-            }
-            .escalation_causal_identity(),
-            "turn_cancel.escalation.after_llm.0"
-        );
-    }
-
-    #[tokio::test]
-    async fn after_step_request_is_deferred_until_immediate_escalates_it() {
-        let host = Arc::new(NativeEffectHost::default());
-        let driver = TurnWorkDriver::new(host.clone());
-        let address = address("escalate");
-        let active = ActiveTurnControl::new(host.as_ref(), address.clone())
-            .await
-            .expect("active control");
-
-        let stop = driver
-            .request_cancel(request(address.clone(), "stop-1").mode(TurnCancelMode::AfterStep))
-            .await
-            .expect("after-step request");
-        let stop_evidence = match stop.outcome {
-            TurnCancelOutcome::Requested(evidence) => evidence,
-            other => panic!("expected requested, got {other:?}"),
-        };
-        assert_eq!(stop_evidence.mode, TurnCancelMode::AfterStep);
-
-        // Mid-model-call observation (AfterLlm never honours after-step): the
-        // request is remembered as deferred, never as effective evidence.
-        let observed = active
-            .observe_pending_cancel(
-                host.as_ref(),
-                TurnCancelPeekIdentity::AfterLlm {
-                    protocol_iteration: 0,
-                },
-            )
-            .await
-            .expect("peek after llm");
-        assert_eq!(observed, None);
-        assert_eq!(active.evidence(), None);
-        assert_eq!(active.deferred_evidence(), Some(stop_evidence.clone()));
-
-        let again = driver
-            .request_cancel(request(address.clone(), "stop-2").mode(TurnCancelMode::AfterStep))
-            .await
-            .expect("second after-step request");
-        assert!(matches!(
-            again.outcome,
-            TurnCancelOutcome::AlreadyRequested(ref evidence) if evidence.request_id == "stop-1"
-        ));
-
-        let abort = driver
-            .request_cancel(request(address.clone(), "abort-1"))
-            .await
-            .expect("escalation");
-        let abort_evidence = match abort.outcome {
-            TurnCancelOutcome::Escalated(evidence) => evidence,
-            other => panic!("expected escalated, got {other:?}"),
-        };
-        assert_eq!(abort_evidence.request_id, "abort-1");
-        assert_eq!(abort_evidence.mode, TurnCancelMode::Immediate);
-
-        let repeat = driver
-            .request_cancel(request(address.clone(), "abort-2"))
-            .await
-            .expect("repeated escalation");
-        assert!(matches!(
-            repeat.outcome,
-            TurnCancelOutcome::AlreadyRequested(ref evidence) if evidence.request_id == "abort-1"
-        ));
-
-        let observed = active
-            .observe_pending_cancel(
-                host.as_ref(),
-                TurnCancelPeekIdentity::AfterLlm {
-                    protocol_iteration: 1,
-                },
-            )
-            .await
-            .expect("peek after escalation");
-        assert_eq!(observed, Some(abort_evidence.clone()));
-        assert_eq!(active.evidence(), Some(abort_evidence.clone()));
-
-        let settled = active
-            .settle_before_commit(host.as_ref(), true, None)
-            .await
-            .expect("settle");
-        assert_eq!(settled, Some(abort_evidence));
-    }
-
-    #[tokio::test]
-    async fn after_step_request_is_honoured_at_the_step_boundary_with_its_iteration() {
-        let host = Arc::new(NativeEffectHost::default());
-        let driver = TurnWorkDriver::new(host.clone());
-        let address = address("boundary");
-        let active = ActiveTurnControl::new(host.as_ref(), address.clone())
-            .await
-            .expect("active control");
-        driver
-            .request_cancel(request(address.clone(), "stop-1").mode(TurnCancelMode::AfterStep))
-            .await
-            .expect("after-step request");
-        assert_eq!(
-            active
-                .observe_pending_cancel(
-                    host.as_ref(),
-                    TurnCancelPeekIdentity::AfterLlm {
-                        protocol_iteration: 2,
-                    },
-                )
-                .await
-                .expect("peek after llm"),
-            None
-        );
-        let honoured = active
-            .observe_pending_cancel(
-                host.as_ref(),
-                TurnCancelPeekIdentity::AfterStep {
-                    protocol_iteration: 2,
-                },
-            )
-            .await
-            .expect("peek at boundary")
-            .expect("after-step lands at the boundary");
-        assert_eq!(honoured.request_id, "stop-1");
-        assert_eq!(honoured.mode, TurnCancelMode::AfterStep);
-        assert_eq!(honoured.honoured_after_step, Some(2));
-        assert_eq!(active.evidence(), Some(honoured.clone()));
-        let settled = active
-            .settle_before_commit(host.as_ref(), false, None)
-            .await
-            .expect("settle");
-        assert_eq!(settled, Some(honoured));
-        // Once the gate holds after-step evidence, a later Immediate request
-        // still escalates the record; the owner is what decides whether it
-        // is already past its boundary.
-        let late = driver
-            .request_cancel(request(address.clone(), "abort-late"))
-            .await
-            .expect("late escalation");
-        assert!(matches!(late.outcome, TurnCancelOutcome::Escalated(_)));
-    }
-
-    #[tokio::test]
-    async fn local_after_step_stop_resolves_the_own_gate_and_lands_at_commit() {
-        let host = Arc::new(NativeEffectHost::default());
-        let address = address("local-after-step");
-        let hint = TurnCancelOriginHint::default();
-        let active = ActiveTurnControl::new(host.as_ref(), address.clone())
-            .await
-            .expect("active control")
-            .with_local_cancel_origin(hint.clone());
-        hint.request_after_step(Some("shutdown".to_string()));
-        assert!(hint.after_step_requested());
-        active
-            .resolve_local_after_step(host.as_ref())
-            .await
-            .expect("resolve own gate");
-        let honoured = active
-            .observe_pending_cancel(
-                host.as_ref(),
-                TurnCancelPeekIdentity::AfterStep {
-                    protocol_iteration: 0,
-                },
-            )
-            .await
-            .expect("peek at boundary")
-            .expect("local after-step lands at the boundary");
-        assert_eq!(honoured.mode, TurnCancelMode::AfterStep);
-        assert_eq!(honoured.origin.as_deref(), Some("shutdown"));
-        assert_eq!(honoured.honoured_after_step, Some(0));
-        assert_eq!(honoured.request_id, format!("internal:{}", address.turn_id));
-
-        // Without a boundary the flag still settles the final commit as an
-        // after-step stop.
-        let commit_only = ActiveTurnControl::new(host.as_ref(), self::address("local-commit"))
-            .await
-            .expect("active control")
-            .with_local_cancel_origin({
-                let hint = TurnCancelOriginHint::default();
-                hint.request_after_step(None);
-                hint
-            });
-        let settled = commit_only
-            .settle_before_commit(host.as_ref(), false, None)
-            .await
-            .expect("settle")
-            .expect("after-step flag settles as cancelled");
-        assert_eq!(settled.mode, TurnCancelMode::AfterStep);
-        assert_eq!(settled.honoured_after_step, None);
-    }
-}
+#[path = "turn_control/tests.rs"]
+mod tests;

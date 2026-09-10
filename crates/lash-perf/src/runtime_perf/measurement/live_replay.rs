@@ -402,8 +402,6 @@ pub(super) async fn run_once_trace_jsonl(
 
     let mut turns = Vec::with_capacity(chat_turns);
     for turn_index in 0..chat_turns {
-        prepare_turn(&mut runtime, scenario, turn_index).await?;
-
         let phase_probe = Arc::new(RuntimePerfPhaseProbe::default());
         runtime.set_turn_phase_probe(phase_probe.clone()).await;
 

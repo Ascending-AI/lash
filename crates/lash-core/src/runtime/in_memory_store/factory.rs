@@ -77,6 +77,16 @@ impl InMemorySessionStoreFactory {
             .lock_recover()
             .contains_key(blob_ref)
     }
+
+    /// Seeds a content-addressed checkpoint component for a resident-state test.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn seed_checkpoint_blob_for_testing(&self, body: Vec<u8>) -> crate::BlobRef {
+        let blob_ref = crate::BlobRef::for_content(&body);
+        self.checkpoint_component_blobs
+            .lock_recover()
+            .insert(blob_ref.clone(), body);
+        blob_ref
+    }
 }
 
 fn retained_fork_config(

@@ -23,10 +23,6 @@ pub(crate) struct RlmProtocolSession {
 }
 
 impl RlmProtocolSession {
-    pub(crate) fn dialect_prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
-        self.runtime_state.dialect_prompt_vocabulary()
-    }
-
     pub(crate) fn new(
         config: RlmProtocolPluginConfig,
         runtime_state: Arc<RlmRuntimeState>,

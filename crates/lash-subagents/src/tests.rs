@@ -21,7 +21,6 @@ use lash_lashlang_runtime::{
     LashlangLanguageFeatures, LashlangProcessEngine, LashlangSurface, LashlangSurfaceContribution,
     TraceLashlangGraphStore,
 };
-use lash_protocol_rlm::RlmTurnInputExt;
 use serde_json::json;
 
 const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
@@ -849,57 +848,6 @@ finish result
     assert!(
         prompt.contains("Subagent capability: default. Depth: 1/5."),
         "child prompt did not render subagent authority:\n{prompt}"
-    );
-}
-
-#[tokio::test]
-async fn rlm_spawn_seed_derived_from_projected_binding_is_visible_to_child_prompt() {
-    let input = TurnInput::text("spawn a child with a chunk from projected input")
-            .rlm_project(
-                lash_protocol_rlm::RlmProjectedBindings::new()
-                    .bind_json(
-                        "input",
-                        json!({
-                            "context": "Header\nDate: Jan 01, 2026 || Instance: A\nDate: Jan 02, 2026 || Instance: B\n",
-                        }),
-                    )
-                    .expect("bind input"),
-            )
-            .expect("project input");
-    let (outcome, prompt) = run_seed_probe(
-        r#"<lashlang>
-ctx = to_string(input.context)
-lines = split(ctx, "\n")
-data = []
-for line in lines {
-  if starts_with(line, "Date: ") {
-    data = push(data, line)
-  }
-}
-chunk = slice(data, 0, 2)
-result = await agents.spawn({
-  capability: "default",
-  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
-  seed: { chunk: chunk },
-  output: Type { len: int }
-})?
-finish result
-</lashlang>"#,
-        input,
-    )
-    .await;
-
-    assert_eq!(
-        outcome,
-        lash_core::facade_support::TurnOutcome::Finished(
-            lash_core::facade_support::TurnFinish::FinalValue {
-                value: json!({ "len": 2 })
-            }
-        )
-    );
-    assert!(
-        prompt_advertises_bound_variable(&prompt, "chunk"),
-        "child prompt did not advertise projected-derived seeded `chunk` variable:\n{prompt}"
     );
 }
 

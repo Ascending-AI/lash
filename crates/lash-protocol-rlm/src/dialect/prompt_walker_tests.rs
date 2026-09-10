@@ -284,35 +284,19 @@ fn assembled_prompt_fragments_with_projection(
             .to_string(),
     ));
 
-    // Read-only variables, both routes.
-    //
-    // The fragment is assembled twice from one object: the protocol's own
-    // prompt hook renders it with the session's vocabulary, and `lash-core`
-    // renders the same handle's `ProtocolTurnExtension::prompt_contributions`
-    // into the same prompt with no dedup. A walker that only exercised the
-    // first route would keep passing while the second handed a TypeScript
-    // session "Access them directly in `<lashlang>` blocks" — which is the
-    // sentence ADR 0063's Context quotes as the defect it exists to remove.
+    // Read-only variables use the protocol session's vocabulary. Per-turn live
+    // extension handles are not part of the durable facade contract.
     let projected = crate::projection::RlmProjectedBindings::new()
         .bind_json("current_file", projected_value)
         .expect("seed one projected binding");
     fragments.push((
-        "read-only variables (protocol hook)",
+        "read-only variables",
         crate::projection::RlmProjectionExtension::prompt_contributions_for(&projected, vocabulary)
             .into_iter()
             .map(|contribution| contribution.content.to_string())
             .collect::<Vec<_>>()
             .join("\n"),
     ));
-    fragments.push(("read-only variables (turn extension handle)", {
-        use lash_core::ProtocolTurnExtension as _;
-        crate::projection::RlmProjectionExtension::new(projected.clone())
-            .prompt_contributions()
-            .into_iter()
-            .map(|contribution| contribution.content.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }));
 
     // The budget escalation tails, at each of the three thresholds.
     for used in [600usize, 950, 1_200] {

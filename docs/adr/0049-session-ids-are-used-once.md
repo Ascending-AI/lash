@@ -53,14 +53,14 @@ the handle binding and permanent deletion fence atomically. The runtime reads
 the materialized identity back before committing, so a loose third-party store
 cannot silently alias another session.
 
-Store-less sessions use their host-provided session id anywhere stable
-derivation is required. They therefore require a distinct id for every session
-within one process; `LashCore` rejects store-less id reuse for its process
-lifetime. A durable effect host shared beyond that process requires the host to
-provide uniqueness across that wider domain. Ordinary history nodes derive
-from session id, operation id, and ordinal. Frame nodes derive from session id
-and frame key. Effect-journal identities and turn addresses likewise use the
-session id without a second discriminator.
+Facade storeless execution was superseded by
+[ADR 0088](0088-facade-sessions-bind-storage-and-lifecycle-owners.md): every
+facade session now binds an explicit durable or in-memory store before
+admission. Runtime-internal reconstruction paths remain governed by their own
+substrate contracts. Ordinary history nodes derive from session id, operation
+id, and ordinal. Frame nodes derive from session id and frame key.
+Effect-journal identities and turn addresses likewise use the session id
+without a second discriminator.
 
 SQLite schema 20, SQLite effect schema 6, and PostgreSQL schema 28 are
 reject-and-recreate boundaries. No old shape is migrated or dual-read.

@@ -100,7 +100,7 @@ pub enum EmbedError {
     /// Returned when the host did not choose how queued work is executed.
     MissingQueuedWorkSource,
     #[error(
-        "native queued work requires a LashCore store factory; call .store_factory(...) or choose .with_queued_work(...) or .without_queued_work()"
+        "native queued work requires a session-creation store factory; call .store_factory(...) or .session_creation_store_factory(...), or choose .with_queued_work(...) or .without_queued_work()"
     )]
     /// Returned when native queued work cannot rebuild session runtimes.
     NativeQueuedWorkRequiresStoreFactory,
@@ -127,13 +127,10 @@ pub enum EmbedError {
     /// Wraps the store failure.
     Store(#[from] lash_core::StoreError),
     #[error(
-        "store-less session id `{session_id}` was already used by this LashCore; store-less sessions require distinct ids per process"
+        "session store is required; pass an explicit store with SessionBuilder::store(...) or configure LashCoreBuilder::store_factory(...)"
     )]
-    /// A store-less session identifier was reused by this core.
-    EphemeralSessionIdReused {
-        /// Store-less session identifier that was reused.
-        session_id: SessionId,
-    },
+    /// Returned before execution when a facade session has no store source.
+    MissingSessionStore,
     #[error("store is bound to session `{loaded}` but builder requested `{requested}`")]
     /// A loaded store belongs to a different session than requested.
     StoreSessionMismatch {
@@ -142,11 +139,11 @@ pub enum EmbedError {
         /// Session identifier requested by the builder.
         requested: SessionId,
     },
-    #[error("durable process worker requires a LashCore store factory")]
+    #[error("durable process worker requires a session-creation store factory")]
     /// Returned when a durable process worker has no store factory.
     MissingProcessWorkerStoreFactory,
     #[error(
-        "a process registry is configured for the default native process work runner but no session store factory is wired; the runner rebuilds a session runtime per process and cannot do so without one. Wire .store_factory(...) - InMemorySessionStoreFactory::new() for ephemeral process execution, or a durable factory - or use .process_work(...) for an externally driven durable runner."
+        "a process registry is configured for the default native process work runner but no session-creation store factory is wired; the runner rebuilds a session runtime per process and cannot do so without one. Wire .store_factory(...) or .session_creation_store_factory(...) with InMemorySessionStoreFactory::new() for ephemeral process execution, or a durable factory, or use .process_work(...) for an externally driven durable runner."
     )]
     /// Returned when the native process runner cannot rebuild sessions without a store factory.
     ProcessRegistryRequiresStoreFactory,
@@ -166,9 +163,12 @@ pub enum EmbedError {
     #[error("invalid native substrate configuration: {0}")]
     /// Wraps a native scheduler pacing validation failure.
     NativeSubstrateConfig(#[from] lash_core::NativeSubstrateConfigError),
-    #[error("this operation requires a LashCore store factory")]
-    /// Returned when an operation requiring durable session state has no store factory.
-    MissingSessionStoreFactory,
+    #[error("session catalog does not support `{operation}` in this LashCore")]
+    /// Returned when an administrative/catalog operation has no selected catalog.
+    SessionCatalogUnavailable {
+        /// The unavailable catalog operation.
+        operation: &'static str,
+    },
     #[error("failed to delete process state for session `{session_id}`: {message}")]
     /// Process-state deletion failed for the identified session.
     SessionDeleteProcess {
@@ -176,12 +176,6 @@ pub enum EmbedError {
         session_id: SessionId,
         /// Process-state deletion failure detail suitable for diagnostics.
         message: String,
-    },
-    #[error("missing required turn input for plugin `{plugin_id}`")]
-    /// A plugin did not receive its required turn input.
-    MissingPluginTurnInput {
-        /// Identifier of the plugin whose required turn input is absent.
-        plugin_id: &'static str,
     },
     #[error(
         "session is still in use: park()/close() consume the session and require exclusive ownership; drop any cloned handles and finish or cancel in-flight turns first"
@@ -304,8 +298,8 @@ impl EmbedError {
             | Self::MissingProcessRegistry
             | Self::ProcessExecutionConcurrency(_)
             | Self::QueuedWorkExecutionConcurrency(_)
-            | Self::MissingSessionStoreFactory
-            | Self::MissingPluginTurnInput { .. }
+            | Self::MissingSessionStore
+            | Self::SessionCatalogUnavailable { .. }
             | Self::StaticTurnStreamRequiresStaticEffectHost => true,
             Self::Store(
                 lash_core::StoreError::SessionDeleted { .. }

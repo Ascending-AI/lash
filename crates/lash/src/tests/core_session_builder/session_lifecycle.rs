@@ -1,25 +1,6 @@
 use super::*;
-
-#[tokio::test]
-async fn store_less_session_ids_are_single_use_per_core_process() {
-    let core = standard_core();
-    let first = core
-        .session("store-less-single-use")
-        .open()
-        .await
-        .expect("first store-less session");
-    drop(first);
-
-    let error = match core.session("store-less-single-use").open().await {
-        Ok(_) => panic!("store-less session id reuse must fail"),
-        Err(error) => error,
-    };
-    assert!(matches!(
-        error,
-        EmbedError::EphemeralSessionIdReused { session_id }
-            if session_id == "store-less-single-use"
-    ));
-}
+#[path = "session_lifecycle/session_binding.rs"]
+mod session_binding;
 
 fn persisted_tool_state_at_generation(
     state: lash_core::ToolState,
@@ -1321,43 +1302,6 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
 
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn rlm_projection_errors_surface_from_protocol_extensions() -> Result<()> {
-    use lash_protocol_rlm::{RlmProjectedBindings, RlmTurnInputExt};
-
-    let core = explicit_ephemeral_facets(rlm_core_builder())
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("rlm").open().await?;
-    session
-        .admin()
-        .protocol()
-        .apply_session_extension(lash_protocol_rlm::rlm_session_projection_extension(
-            RlmProjectedBindings::new()
-                .bind_json("current_query", serde_json::json!("session"))
-                .expect("session bind"),
-        ))
-        .await?;
-
-    let input = TurnInput::text("hello")
-        .rlm_project(
-            RlmProjectedBindings::new()
-                .bind_json("current_query", serde_json::json!("turn"))
-                .expect("turn bind"),
-        )
-        .map_err(|err| EmbedError::Session(SessionError::Protocol(err.to_string())))?;
-    let err = match session.turn(input).run().await {
-        Ok(_) => panic!("duplicate session and turn projection should fail"),
-        Err(err) => err,
-    };
-    assert!(
-        matches!(err, EmbedError::Session(message) if message.to_string().contains("current_query"))
-    );
-    Ok(())
-}
-
-#[cfg(feature = "rlm")]
-#[tokio::test]
 async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy() -> Result<()> {
     // Named-field MessagePack for a v5 RLM envelope. The embedded vars payload
     // is deliberately empty: version rejection must happen before Lashlang
@@ -1559,11 +1503,7 @@ async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone
     session.turn(TurnInput::text("hello")).run().await?;
     let parked = session.park().await?;
 
-    core.delete_session(
-        "deleted-while-parked",
-        session_delete_scope(&core, &SessionId::from("deleted-while-parked")).await,
-    )
-    .await?;
+    delete_bound_session(&core, "deleted-while-parked").await?;
     assert!(
         core.session_was_deleted("deleted-while-parked").await?,
         "the delete must leave a durable tombstone for the parked id"
@@ -1876,12 +1816,7 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
     assert!(!core.session_was_deleted("delete-session").await?);
     drop(session);
 
-    let report = core
-        .delete_session(
-            "delete-session",
-            session_delete_scope(&core, &SessionId::from("delete-session")).await,
-        )
-        .await?;
+    let report = delete_bound_session(&core, "delete-session").await?;
     // The tombstone the factory now keeps is the answer a resume needs; a
     // reopened-but-empty session is not on its own evidence that the id is dead.
     assert!(core.session_was_deleted("delete-session").await?);
@@ -1905,11 +1840,7 @@ async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Res
         .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("retire-delete-session").open().await?);
 
-    let execution_scope = core.session_delete_scope("retire-delete-session").await?;
-    let scoped = effect_host
-        .scoped_static(execution_scope)?
-        .expect("recording host static scope");
-    core.delete_session("retire-delete-session", scoped).await?;
+    delete_bound_session(&core, "retire-delete-session").await?;
 
     assert_eq!(
         effect_host.retirements(),
@@ -2332,7 +2263,7 @@ async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history
 }
 
 #[tokio::test]
-async fn core_store_factory_is_used_for_managed_child_sessions() -> Result<()> {
+async fn core_store_factory_is_used_for_sessions_created_from_a_running_session() -> Result<()> {
     let factory = Arc::new(RecordingStoreFactory::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
@@ -2374,7 +2305,7 @@ async fn core_store_factory_is_used_for_managed_child_sessions() -> Result<()> {
 }
 
 #[tokio::test]
-async fn reused_root_store_factory_reports_child_store_guidance() -> Result<()> {
+async fn reused_exact_store_factory_reports_session_creation_guidance() -> Result<()> {
     let reused_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(BoundSessionStore {
         session_id: SessionId::from("root-store"),
     });
@@ -2411,53 +2342,9 @@ async fn reused_root_store_factory_reports_child_store_guidance() -> Result<()> 
         .expect_err("reused root store should not open a child session");
     let message = err.to_string();
 
-    assert!(message.contains("configured child session store is already bound"));
+    assert!(message.contains("configured session-creation store is already bound"));
     assert!(message.contains("SessionBuilder::store"));
-    assert!(message.contains("LashCoreBuilder::child_store_factory"));
-    Ok(())
-}
-
-#[tokio::test]
-async fn explicit_root_store_keeps_configured_child_store_factory() -> Result<()> {
-    let factory = Arc::new(RecordingStoreFactory::default());
-    let explicit_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(factory.clone())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("explicit-root-store")
-        .store(explicit_store)
-        .open()
-        .await?;
-
-    session
-        .admin()
-        .children()
-        .create_session(SessionCreateRequest {
-            session_id: Some(SessionId::from("explicit-root-child")),
-            relation: lash_core::SessionRelation::Child {
-                parent_session_id: SessionId::from("explicit-root-store"),
-                caused_by: None,
-            },
-            start: lash_core::SessionStartPoint::Empty,
-            policy: None,
-            plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
-            initial_nodes: Vec::new(),
-            observed_processes: Vec::new(),
-            tool_access: lash_core::SessionToolAccess::default(),
-            subagent: None,
-            context_overlay: lash_core::SessionContextOverlay::default(),
-            plugin_options: lash_core::PluginOptions::default(),
-            usage_source: None,
-        })
-        .await?;
-
-    assert_eq!(
-        factory.session_ids(),
-        vec![SessionId::from("explicit-root-child")]
-    );
+    assert!(message.contains("LashCoreBuilder::session_creation_store_factory"));
     Ok(())
 }
 

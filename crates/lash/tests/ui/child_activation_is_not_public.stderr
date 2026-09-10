@@ -1,0 +1,15 @@
+error[E0599]: no method named `activate_managed_session` found for struct `ChildSessionAdmin` in the current scope
+ --> tests/ui/child_activation_is_not_public.rs:5:10
+  |
+2 |       let _ = session
+  |  _____________-
+3 | |         .admin()
+4 | |         .children()
+5 | |         .activate_managed_session("another-session");
+  | |_________-^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+help: there is a method `create_session` with a similar name
+  |
+5 -         .activate_managed_session("another-session");
+5 +         .create_session("another-session");
+  |

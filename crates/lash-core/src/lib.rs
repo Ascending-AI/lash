@@ -503,6 +503,7 @@ pub mod facade_support {
     #[doc(hidden)]
     pub use crate::runtime::release_process_execution_permit_while;
     pub use crate::runtime::trigger_delivery_reconcile_scope;
+    pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
     /// Whether this build records the runtime-tuning OpenTelemetry metrics.
     #[doc(hidden)]
     pub const RUNTIME_TUNING_METRICS_ENABLED: bool = cfg!(feature = "otel-trace");
@@ -1165,15 +1166,15 @@ pub use runtime::{
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
     RuntimeError, RuntimeErrorCause, RuntimeErrorCode, RuntimeInvocation, RuntimeReplay,
     RuntimeReplayAttribution, RuntimeScope, RuntimeSessionState, ScopeBoundController,
-    ScopedEffectController, SegmentHandover, SegmentProgress, SessionCursor, SessionCursorError,
-    SessionDrainOutcome, SessionId, SessionListFilter, SessionObservationEvent,
-    SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
-    SessionRelationKind, SessionRevision, SessionScope, SessionStoreCreateRequest,
-    SessionStoreFactory, SessionSummary, SessionWorkTarget, StoreEffectGroupDrain,
-    TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch, ToolIntentOutcomeSink,
-    ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity, TurnActivityId,
-    TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelMode,
-    TurnCancelOriginHint, TurnCancelRequestRecord, TurnContext, TurnControlBinding,
+    ScopedEffectController, SegmentHandover, SegmentProgress, SessionAdministration, SessionCursor,
+    SessionCursorError, SessionDeleteContext, SessionDeleteExecution, SessionDrainOutcome,
+    SessionId, SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
+    SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
+    SessionScope, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
+    SessionWorkTarget, StoreEffectGroupDrain, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch,
+    ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity,
+    TurnActivityId, TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome,
+    TurnCancelMode, TurnCancelOriginHint, TurnCancelRequestRecord, TurnContext, TurnControlBinding,
     TurnControlParticipation, TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput,
     TurnFailureSettlement, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
     TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,

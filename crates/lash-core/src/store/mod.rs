@@ -1018,11 +1018,10 @@ pub trait TurnInputStore: Send + Sync {
     /// its undelivered-input disposition first-writer-wins.
     async fn record_turn_cancel_request(
         &self,
-        request: crate::TurnCancelRequest,
+        _request: crate::TurnCancelRequest,
     ) -> Result<crate::TurnCancelRequestRecord, StoreError> {
-        Ok(crate::TurnCancelRequestRecord {
-            request,
-            outcome: None,
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "record_turn_cancel_request",
         })
     }
 
@@ -1032,7 +1031,9 @@ pub trait TurnInputStore: Send + Sync {
         &self,
         _address: &crate::TurnAddress,
     ) -> Result<Option<crate::TurnCancelRequestRecord>, StoreError> {
-        Ok(None)
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "turn_cancel_request",
+        })
     }
 
     /// Persist model-visible user input into the pending turn-input lifecycle.

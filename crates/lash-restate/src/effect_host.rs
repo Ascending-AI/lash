@@ -46,18 +46,25 @@ use crate::ingress::{RestateConnection, RestateIngressClient};
 #[derive(Clone)]
 pub struct RestateEffectHost {
     controller: Arc<RestateEffectHostController>,
+    turn_attach: Arc<crate::turn::RestateTurnAttach>,
 }
 
 impl RestateEffectHost {
     pub fn new(connection: impl Into<RestateConnection>) -> Self {
+        let connection = connection.into();
         Self {
             controller: Arc::new(RestateEffectHostController {
                 await_event_ingress: RestateAwaitEventIngress {
-                    ingress: RestateIngressClient::new(connection),
+                    ingress: RestateIngressClient::new(connection.clone()),
                 },
                 registrations: std::sync::Mutex::new(None),
             }),
+            turn_attach: Arc::new(crate::turn::RestateTurnAttach::new(connection)),
         }
+    }
+
+    pub(crate) fn turn_attach_handle(&self) -> Arc<crate::turn::RestateTurnAttach> {
+        Arc::clone(&self.turn_attach)
     }
 }
 
@@ -162,6 +169,10 @@ impl AwaitEventResolver for RestateEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for RestateEffectHost {
+    fn turn_attach(&self) -> Option<Arc<dyn lash_core::facade_support::TurnAttach>> {
+        Some(self.turn_attach.clone())
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }

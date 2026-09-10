@@ -2348,38 +2348,13 @@ fn runtime_operation_scope(
         .expect("effect host supplies an owned runtime operation scope")
 }
 
-async fn session_delete_scope(
+async fn delete_bound_session(
     core: &LashCore,
-    session_id: &SessionId,
-) -> lash_core::ScopedEffectController<'static> {
-    native_scope(
-        core.session_delete_scope(session_id)
-            .await
-            .expect("session delete execution scope"),
-    )
-}
-
-fn explicit_ephemeral_facets(
-    builder: crate::core::LashCoreBuilder,
-) -> crate::core::LashCoreBuilder {
-    explicit_ephemeral_facets_with_budget(builder, crate::CommitBudget::bounded(1024 * 1024, 512))
-}
-
-fn explicit_ephemeral_facets_with_budget(
-    builder: crate::core::LashCoreBuilder,
-    commit_budget: crate::CommitBudget,
-) -> crate::core::LashCoreBuilder {
-    builder
-        .commit_budget(commit_budget)
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .effect_host(Arc::new(
-            crate::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
-        .attachment_store(Arc::new(crate::persistence::InMemoryAttachmentStore::new()))
-        .process_env_store(Arc::new(
-            crate::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .without_queued_work()
+    session_id: impl AsRef<str>,
+) -> Result<crate::SessionDeleteReport> {
+    let administration = core.session_administration().await?;
+    let context = administration.delete_context(session_id.as_ref())?;
+    LashCore::delete_session(context).await
 }
 
 fn text_message(role: lash_core::MessageRole, text: &str) -> lash_core::Message {
@@ -2400,7 +2375,9 @@ mod control_admin;
 mod core_session_builder;
 mod harness;
 use harness::{
-    mock_model_spec, model_spec, run_async_test_on_stack_budget, run_async_test_on_stack_size,
+    core_without_session_store, explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget,
+    explicit_ephemeral_facets_without_session_store, mock_model_spec, model_spec,
+    run_async_test_on_stack_budget, run_async_test_on_stack_size,
 };
 mod agent_scenarios;
 #[cfg(feature = "rlm")]

@@ -50,7 +50,10 @@ async fn turn_control_local_gate_is_owned_and_awaited_by_sqlite_host() {
     assert!(matches!(binding, TurnControlBinding::HostOwned { .. }));
 
     // An external request must resolve the gate the Local turn actually watches.
-    let receipt = TurnWorkDriver::new(host.clone())
+    let store: Arc<dyn lash_core::RuntimePersistence> =
+        Arc::new(lash_core::runtime::InMemorySessionStore::new());
+    lash_core::testing::store_fixtures::bind_conformance_session(&store, &address.session_id).await;
+    let receipt = TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store)
         .request_cancel(TurnCancelRequest::new(address, "external-cancel", None))
         .await
         .unwrap();

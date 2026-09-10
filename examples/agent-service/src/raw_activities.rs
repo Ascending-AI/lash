@@ -365,7 +365,9 @@ finish "done through raw activities"
                 "agent-service-raw-activity-test-boot",
             ))
             .expect("core");
-        let turn_work_driver = core.turn_work_driver();
+        let turn_work_driver = core
+            .turn_work_driver()
+            .expect("test core has a session catalog");
         #[cfg(not(feature = "restate"))]
         let state = AppStateData::new(
             core,

@@ -22,6 +22,9 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        ))
         .provider(provider_handle)
         .model(model)
         .build(crate::sim_process_owner())

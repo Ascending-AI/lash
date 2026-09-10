@@ -59,7 +59,8 @@ fn expiring_terminal_driver(
     let driver = state
         .core
         .turn_work_driver()
-        .with_attach(Arc::new(ExpiringTerminalAttach {
+        .expect("workbench core has a session catalog")
+        .with_test_attach(Arc::new(ExpiringTerminalAttach {
             started,
             release: tokio::sync::Mutex::new(release),
         }));
@@ -852,14 +853,14 @@ fn concurrent_stops_publish_one_done_and_trace_winning_request() {
         let mut events = state
             .event_tx
             .subscribe(&SessionId::from(session_id.clone()));
-        let driver =
-            state
-                .core
-                .turn_work_driver()
-                .with_attach(Arc::new(ConcurrentCancelTerminal {
-                    state: state.clone(),
-                    attached: tokio::sync::Barrier::new(2),
-                }));
+        let driver = state
+            .core
+            .turn_work_driver()
+            .expect("workbench core has a session catalog")
+            .with_test_attach(Arc::new(ConcurrentCancelTerminal {
+                state: state.clone(),
+                attached: tokio::sync::Barrier::new(2),
+            }));
         let cancel = || {
             cancel_turn_with_driver(
                 state.clone(),
@@ -988,6 +989,7 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     let seeded = state
         .core
         .turn_work_driver()
+        .expect("workbench core has a session catalog")
         .request_cancel(
             lash::TurnCancelRequest::new(
                 session.turn_address("stop-mode-turn"),
@@ -1059,6 +1061,7 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     let seeded = state
         .core
         .turn_work_driver()
+        .expect("workbench core has a session catalog")
         .request_cancel(
             lash::TurnCancelRequest::new(
                 session.turn_address("escalate-turn"),

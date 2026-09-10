@@ -194,24 +194,16 @@ pub(crate) async fn retire_session(
 
 async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Result<(), AppError> {
     restate::cancel_cron_jobs_for_session(state, session_id, "reset").await?;
+    let driver = state.core.turn_work_driver().map_err(AppError::internal)?;
     let cancellations = state
-        .cancel_turns_for_session_with_driver(
-            session_id,
-            &state.core.turn_work_driver(),
-            WorkbenchTurnCancelMode::Abort,
-        )
+        .cancel_turns_for_session_with_driver(session_id, &driver, WorkbenchTurnCancelMode::Abort)
         .await?;
     state.trace_for_session(
         session_id,
         "api.session.delete.turns_cancelled",
         json!({ "session_id": session_id, "cancellations": cancellations }),
     );
-    let execution_scope = state
-        .core
-        .session_delete_scope(session_id)
-        .await
-        // Audited: first-party existence probes return absence or untyped factory/backend errors, never SessionDeleted.
-        .map_err(AppError::internal)?;
+    let execution_scope = lash::runtime::ExecutionScope::session_delete(session_id);
     restate::call_session_delete(
         state,
         restate::WorkbenchSessionDeleteWorkflowRequest {

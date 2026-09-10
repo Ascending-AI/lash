@@ -27,7 +27,6 @@ pub(crate) struct DemoPluginConfig {
 impl PluginBinding for DemoPlugin {
     const ID: &'static str = "demo_tic_tac_toe";
     type SessionConfig = DemoPluginConfig;
-    type Input = ();
 
     fn factory(config: &Self::SessionConfig) -> Arc<dyn PluginFactory> {
         Arc::new(DemoPluginFactory {

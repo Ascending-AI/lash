@@ -32,6 +32,7 @@ pub mod sync {
     pub use lash_core::sync::*;
 }
 mod session;
+mod session_binding;
 mod session_lease;
 mod support;
 #[cfg(test)]
@@ -88,6 +89,7 @@ pub use lash_core::{
     facade_support::TurnWorkDriver, facade_support::WorkerSlotKind,
     facade_support::WorkerSlotPermit, facade_support::WorkerSlotSupplier,
 };
+pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
 /// embedders cancel turns without depending on `tokio-util` themselves.

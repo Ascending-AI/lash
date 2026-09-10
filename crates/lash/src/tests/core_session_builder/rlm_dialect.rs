@@ -343,22 +343,12 @@ async fn unknown_rlm_dialect_fails_during_session_creation() -> Result<()> {
 /// The read-only-variables block reaches a served prompt **once**, spelled in
 /// the session's own dialect.
 ///
-/// `TurnInput::rlm_project` attaches the same bindings on two seams: the
-/// protocol's plugin input, whose prompt hook renders the block with the
-/// session's vocabulary, and a `ProtocolTurnExtension` handle carried for
-/// validation. `lash-core` used to render that handle's own
-/// `prompt_contributions()` into the same prompt, and `PromptLayer` does not
-/// dedup — so the block landed twice, and the second copy was always Lashlang,
-/// because the handle is built by a host before any session has resolved a
-/// dialect. A TypeScript session read "Access them directly in `<lashlang>`
-/// blocks" underneath a correct copy of the same block.
-///
-/// Both halves are asserted because they fail independently: the count, and the
-/// spelling, in both dialects.
+/// Session-scoped projected bindings are rendered once in the vocabulary of
+/// the session that owns them.
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn projected_bindings_reach_a_served_prompt_once_in_the_sessions_dialect() -> Result<()> {
-    use lash_protocol_rlm::{RlmProjectedBindings, RlmTurnInputExt};
+    use lash_protocol_rlm::RlmProjectedBindings;
 
     for (dialect, own_tag, foreign_tag) in [
         (
@@ -405,14 +395,19 @@ async fn projected_bindings_reach_a_served_prompt_once_in_the_sessions_dialect()
         .open()
         .await?;
 
-        let input = TurnInput::text("read the projected binding")
-            .rlm_project(
+        session
+            .admin()
+            .protocol()
+            .apply_session_extension(lash_protocol_rlm::rlm_session_projection_extension(
                 RlmProjectedBindings::new()
                     .bind_json("current_file", serde_json::json!("src/lib.rs"))
                     .expect("bind"),
-            )
-            .map_err(|err| EmbedError::Session(SessionError::Protocol(err.to_string())))?;
-        session.turn(input).run().await?;
+            ))
+            .await?;
+        session
+            .turn(TurnInput::text("read the projected binding"))
+            .run()
+            .await?;
 
         let prompts = served.lock_recover().clone();
         let prompt = prompts
@@ -513,11 +508,10 @@ async fn a_guarded_write_lands_on_an_unrecorded_fact_and_leaves_the_rest_alone()
     Ok(())
 }
 
-/// A staged RLM fact changes resident authority without advancing the durable
-/// revision, so it can never be published as `Committed`.
+/// A guarded RLM fact write publishes the durable revision it committed.
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn staged_rlm_fact_set_emits_resident_changed_at_the_same_revision() -> Result<()> {
+async fn guarded_rlm_fact_set_emits_its_committed_revision() -> Result<()> {
     use crate::rlm::RlmSessionExt as _;
 
     let core = explicit_ephemeral_facets(rlm_core_builder())
@@ -538,26 +532,19 @@ async fn staged_rlm_fact_set_emits_resident_changed_at_the_same_revision() -> Re
                 .termination(crate::rlm::RlmTermination::FinishRequired { schema: None }),
         )
         .await
-        .expect("set staged RLM fact");
+        .expect("commit RLM fact");
 
     let lash_core::facade_support::SessionResume::Replayed { events } =
         session.observe().resume_from_cursor(&before.cursor)?
     else {
-        panic!("staged fact publication must remain replayable");
+        panic!("committed fact publication must remain replayable");
     };
+    assert_eq!(events.len(), 1);
     assert!(matches!(
-        events.as_slice(),
-        [event]
-            if event.revision() == lash_core::SessionRevision::new(0)
-                && matches!(
-                    event.payload,
-                    lash_core::SessionObservationEventPayload::ResidentChanged { .. }
-                )
-    ));
-    assert!(events.iter().all(|event| !matches!(
-        event.payload,
+        events[0].payload,
         lash_core::SessionObservationEventPayload::Committed { .. }
-    )));
+    ));
+    assert_eq!(events[0].revision(), lash_core::SessionRevision::new(2));
     Ok(())
 }
 

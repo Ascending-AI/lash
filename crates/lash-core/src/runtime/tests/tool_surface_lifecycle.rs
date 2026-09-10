@@ -117,6 +117,7 @@ fn runtime_environment(plugin_host: Arc<crate::PluginHost>) -> crate::RuntimeEnv
     )
     .with_plugin_host(plugin_host)
     .with_runtime_host_config(test_host_config().core)
+    .with_session_store_factory(Arc::new(crate::InMemorySessionStoreFactory::new()))
     .build()
 }
 

@@ -83,6 +83,7 @@ mod effect_group;
 mod effect_host;
 mod ingress;
 mod process;
+mod session_administration;
 mod turn;
 
 pub use restate_sdk;
@@ -127,6 +128,7 @@ pub use process::{
     RestateProcessIngressRunner, RestateProcessRunner, RestateProcessWorkflowInput,
     RestateProcessWorkflowOutput, ServeLashProcessWorkflow,
 };
+pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use turn::{RestateTurnAttach, RestateTurnDeployment};
 
 // Adapter-internal wire and seam types. They are `pub` so the Restate SDK's

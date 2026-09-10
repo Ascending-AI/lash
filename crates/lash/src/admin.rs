@@ -850,16 +850,6 @@ impl SessionAdmin {
             .map_err(Into::into)
     }
 
-    async fn activate_managed_session(&self, session_id: &SessionId) -> Result<()> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .activate_managed_session(session_id)
-                .await
-                .map_err(Into::into)
-        })
-        .await
-    }
-
     async fn inject_turn_input(
         &self,
         turn_id: &TurnId,
@@ -1574,11 +1564,6 @@ impl ChildSessionAdmin {
     /// Closes the identified child session.
     pub async fn close_session(&self, session_id: &SessionId) -> Result<()> {
         self.control.close_child_session(session_id).await
-    }
-
-    /// Activates an existing managed child session.
-    pub async fn activate_managed_session(&self, session_id: &SessionId) -> Result<()> {
-        self.control.activate_managed_session(session_id).await
     }
 }
 

@@ -54,6 +54,9 @@ fn websocket_core(provider: ProviderHandle) -> LashCore {
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "codex-websocket-runtime-test",
             "codex-websocket-runtime-test-boot",
@@ -181,6 +184,9 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
         ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "codex-websocket-runtime-tool-test",

@@ -18,7 +18,6 @@ use lash::{
 };
 use lash_core::SessionHistoryRecord;
 use lash_llm_tools::LlmToolsPluginFactory;
-use lash_protocol_rlm::RlmTurnInputExt;
 use lash_provider_openai::OpenAiCompatibleProvider;
 use lash_rlm_types::{RlmProtocolEvent, RlmTrajectoryEntry};
 use lash_standard_plugins::{StandardToolStackOptions, standard_tool_stack};
@@ -367,7 +366,7 @@ impl BenchmarkRuntime {
             .provider_control
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("cancel round-trip provider control missing"))?;
-        let driver = self.core().turn_work_driver();
+        let driver = self.core().turn_work_driver()?;
         let address = self
             .session
             .as_ref()
@@ -870,12 +869,11 @@ pub(crate) async fn build_runtime_with_store(
                 builder = builder
                     .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default()));
             }
-            if !matches!(scenario, RuntimePerfScenario::RlmGlobals) {
-                builder = builder
-                    .store_factory(Arc::new(RuntimePerfStoreFactory::new(Arc::clone(&store))));
-            } else {
-                // The globals benchmark runs storeless; native queued work
-                // requires a store factory, so the choice is made explicit.
+            builder =
+                builder.store_factory(Arc::new(RuntimePerfStoreFactory::new(Arc::clone(&store))));
+            if matches!(scenario, RuntimePerfScenario::RlmGlobals) {
+                // This benchmark has no queued-work lane, but its facade
+                // session still uses the retained in-memory store above.
                 builder = builder.without_queued_work();
             }
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
@@ -914,12 +912,11 @@ pub(crate) async fn build_runtime_with_store(
                 builder = builder
                     .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default()));
             }
-            if !matches!(scenario, RuntimePerfScenario::RlmGlobals) {
-                builder = builder
-                    .store_factory(Arc::new(RuntimePerfStoreFactory::new(Arc::clone(&store))));
-            } else {
-                // The globals benchmark runs storeless; native queued work
-                // requires a store factory, so the choice is made explicit.
+            builder =
+                builder.store_factory(Arc::new(RuntimePerfStoreFactory::new(Arc::clone(&store))));
+            if matches!(scenario, RuntimePerfScenario::RlmGlobals) {
+                // This benchmark has no queued-work lane, but its facade
+                // session still uses the retained in-memory store above.
                 builder = builder.without_queued_work();
             }
             BenchmarkCore::Rlm(builder.build(runtime_perf_owner())?)
@@ -1534,38 +1531,30 @@ pub(crate) async fn seed_runtime_state(
         .map_err(|err| anyhow::anyhow!("seed historical messages: {err}"))?;
 
     if matches!(scenario, RuntimePerfScenario::RlmGlobals) {
-        seed_rlm_live_globals(runtime).await?;
+        install_rlm_session_projection(runtime).await?;
     }
 
     Ok(())
 }
 
-async fn seed_rlm_live_globals(runtime: &mut BenchmarkRuntime) -> anyhow::Result<()> {
+async fn install_rlm_session_projection(runtime: &mut BenchmarkRuntime) -> anyhow::Result<()> {
+    runtime
+        .session
+        .as_ref()
+        .expect("benchmark session")
+        .admin()
+        .protocol()
+        .apply_session_extension(lash_protocol_rlm::rlm_session_projection_extension(
+            rlm_perf_projected_bindings(RuntimePerfScenario::RlmGlobals, 0)?,
+        ))
+        .await?;
     let turn_input =
-        lash::TurnInput::text("Seed current working variables, then finish the benchmark marker.")
-            .rlm_project(rlm_perf_projected_bindings(
-                RuntimePerfScenario::RlmGlobals,
-                0,
-            )?)?;
+        lash::TurnInput::text("Seed current working variables, then finish the benchmark marker.");
     let turn = runtime
         .run_turn(turn_input, CancellationToken::new())
         .await?;
     validate_runtime_perf_turn(RuntimePerfScenario::RlmGlobals, 0, &turn)?;
     runtime.await_background_work().await?;
-    Ok(())
-}
-
-pub(crate) async fn prepare_turn(
-    runtime: &mut BenchmarkRuntime,
-    scenario: RuntimePerfScenario,
-    turn_index: usize,
-) -> anyhow::Result<()> {
-    if !matches!(scenario, RuntimePerfScenario::RlmGlobals) {
-        return Ok(());
-    }
-
-    let _ = runtime;
-    let _ = turn_index;
     Ok(())
 }
 
@@ -1598,3 +1587,6 @@ pub(crate) fn rlm_perf_projected_bindings(
             }),
         )?)
 }
+
+#[cfg(test)]
+mod tests;

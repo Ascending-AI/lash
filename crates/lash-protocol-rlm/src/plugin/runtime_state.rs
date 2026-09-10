@@ -92,10 +92,6 @@ impl RlmRuntimeState {
         )
     }
 
-    pub(crate) fn dialect_prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
-        self.dialect.prompt_vocabulary()
-    }
-
     pub(crate) fn shared_bound_variables_prompt(&self) -> SharedBoundVariablesPrompt {
         Arc::clone(&self.bound_variables_prompt)
     }

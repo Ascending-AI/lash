@@ -249,7 +249,17 @@ async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
     let executor = Arc::new(SettlementExecutor::new(false));
     let controller = RecordingEffectController::default().with_local_code_execution();
     let host = host_with_effect_recorder(controller.clone());
-    let turn_driver = crate::TurnWorkDriver::new(Arc::clone(&host.core.control.effect_host));
+    let driver_store: Arc<dyn crate::RuntimePersistence> = Arc::new(RecordingStore::default());
+    crate::testing::store_fixtures::bind_conformance_session(
+        &driver_store,
+        &crate::SessionId::from("root"),
+    )
+    .await;
+    let turn_driver = crate::TurnWorkDriver::for_session(
+        Arc::clone(&host.core.control.effect_host),
+        "root",
+        driver_store,
+    );
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         vec![protocol_factory(Arc::clone(&executor))],
         Arc::new(EmptyTools),
@@ -306,7 +316,17 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
         .with_local_code_execution()
         .with_failing_exec_handoff_once();
     let host = host_with_effect_recorder(controller.clone());
-    let turn_driver = crate::TurnWorkDriver::new(Arc::clone(&host.core.control.effect_host));
+    let driver_store: Arc<dyn crate::RuntimePersistence> = Arc::new(RecordingStore::default());
+    crate::testing::store_fixtures::bind_conformance_session(
+        &driver_store,
+        &crate::SessionId::from("root"),
+    )
+    .await;
+    let turn_driver = crate::TurnWorkDriver::for_session(
+        Arc::clone(&host.core.control.effect_host),
+        "root",
+        driver_store,
+    );
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         vec![protocol_factory(Arc::clone(&executor))],
         Arc::new(EmptyTools),

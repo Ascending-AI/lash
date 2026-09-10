@@ -33,9 +33,8 @@ use self::host_bridge::{
 };
 pub(crate) use crate::dialect::{RlmSourceContext, SourceDialect};
 use crate::projection::{
-    ProjectionResolver, RLM_TURN_INPUT_PLUGIN_ID, RlmProjectedBindings, RlmProjectionExtension,
-    flow_to_json_value, json_to_flow_value, projected_bindings, prune_projected_binding_names,
-    rehydrate_projected_globals,
+    ProjectionResolver, RlmProjectedBindings, flow_to_json_value, json_to_flow_value,
+    projected_bindings, prune_projected_binding_names, rehydrate_projected_globals,
 };
 
 #[cfg(any(test, feature = "testing"))]
@@ -317,14 +316,6 @@ async fn execute_code_inner(
         .collect::<BTreeSet<_>>();
     live_global_names.insert("history".to_string());
     live_global_names.extend(session_projected_bindings.names());
-    if let Some(extension) = ctx
-        .turn_context()
-        .plugin_input::<crate::projection::RlmProjectionExtension>(
-            crate::projection::RLM_TURN_INPUT_PLUGIN_ID,
-        )
-    {
-        live_global_names.extend(extension.bindings.names());
-    }
     host_environment = host_environment.with_globals(live_global_names);
     host_environment =
         host_environment.with_process_handles(process_handle_names(state.rlm.globals()));
@@ -519,7 +510,6 @@ async fn execute_code_inner(
     let projected_names = projected.names().collect::<Vec<_>>();
     state.mark_globals_removed(projected_names.iter().map(String::as_str));
     prune_projected_binding_names(&mut state.rlm, projected_names.iter().map(String::as_str));
-    let tool_result_projectors = tool_result_projectors(&ctx);
     let deferred_execution_grants = deferred_execution_grants(&state.deferred_resolutions);
     let lashlang_execution_trace = foreground_lashlang_execution_trace(
         &ctx,
@@ -549,7 +539,6 @@ async fn execute_code_inner(
     let host = HostBridge::new(HostBridgeConfig {
         ctx: ctx.clone(),
         print_projector,
-        tool_result_projectors,
         lashlang_execution_trace: lashlang_execution_trace.clone(),
         host_environment,
         deferred_execution_grants,
@@ -880,13 +869,6 @@ fn format_rlm_link_diagnostic(code: &str, err: &lashlang::LinkError) -> String {
         rlm_diagnostic.push('`');
     }
     rlm_diagnostic
-}
-
-fn tool_result_projectors(ctx: &RuntimeExecutionContext<'_>) -> Vec<crate::RlmToolResultProjector> {
-    ctx.turn_context()
-        .plugin_input::<RlmProjectionExtension>(RLM_TURN_INPUT_PLUGIN_ID)
-        .map(|extension| extension.tool_result_projectors.clone())
-        .unwrap_or_default()
 }
 
 fn emit_step_trace(

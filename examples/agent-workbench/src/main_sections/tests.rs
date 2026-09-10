@@ -851,6 +851,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
     state
         .core
         .turn_work_driver()
+        .expect("workbench core has a session catalog")
         .request_cancel(lash::TurnCancelRequest::new(
             session.turn_address("turn-cancel"),
             "original-stop",
@@ -899,6 +900,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
     let duplicate = state
         .core
         .turn_work_driver()
+        .expect("workbench core has a session catalog")
         .request_cancel(lash::TurnCancelRequest::new(
             session.turn_address("turn-cancel"),
             "duplicate",

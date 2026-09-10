@@ -678,31 +678,16 @@ pub(super) async fn an_exhausted_queue_reports_an_empty_claim_refusal() -> Resul
     Ok(())
 }
 
-/// A session with no durable store has no queue at all. Reporting that as a
-/// busy lane would invite a host to retry forever.
+/// Facade admission refuses a session with no explicitly selected store before
+/// a queue or turn can be addressed.
 #[tokio::test]
-pub(super) async fn a_storeless_session_reports_no_durable_queue() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(
-            crate::testing::TestProvider::builder()
-                .kind("storeless-drain-reason")
-                .complete(|_| async { Ok(text_response("echo")) })
-                .build()
-                .into_handle(),
-        )
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("storeless-drain-reason").open().await?;
-
-    let drain = session.queued_turn().run().await?;
-
-    assert!(
-        matches!(
-            drain,
-            crate::QueuedTurnDrain::Empty(crate::EmptyQueuedDrainReason::NoDurableQueue)
-        ),
-        "a storeless session must report no durable queue, got {drain:?}"
-    );
+pub(super) async fn a_session_without_a_store_never_exposes_a_queue() -> Result<()> {
+    let core = core_without_session_store();
+    let error = match core.session("missing-store-drain-reason").open().await {
+        Ok(_) => panic!("facade session admission requires a store"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, EmbedError::MissingSessionStore));
     Ok(())
 }
 

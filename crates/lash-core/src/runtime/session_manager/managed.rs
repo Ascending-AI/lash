@@ -11,54 +11,49 @@ impl ManagedSessionCapability {
         plan: SessionCreatePlan,
         mut materialized: MaterializedSession,
     ) -> Result<SessionHandle, crate::PluginError> {
-        if let Some(store) = &materialized.store_binding {
-            let mut persisted_state = materialized
-                .runtime
-                .export_persisted_state()
-                .await
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-            let operation = super::super::state::boundary_operation(
-                &persisted_state.session_id,
-                &plan.session_id,
-                "create-session",
-            );
-            let (mut commit, persisted_node_ids) =
-                crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
-                    &mut persisted_state,
-                    &[],
-                    operation,
-                    materialized.runtime.host.core.durability.commit_budget,
-                )
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-            // Stamp last: the semantic-boundary identity hashes the commit's
-            // canonical request content, so every content edit must precede it.
-            commit
-                .stamp_semantic_boundary()
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-            // Lane-less by construction: the child is being created before it
-            // owns an execution lane. A parent guard, if present, names a
-            // different session and cannot authorize this child commit.
-            let result = commit_runtime_state_with_fresh_session_execution_lease(
-                Arc::clone(store),
-                commit,
-                &materialized.runtime.runtime_lease_owner,
-                &materialized.runtime.runtime_lease_executor_id,
-                materialized.runtime.host.core.control.lease_timings,
-                Arc::clone(&materialized.runtime.host.core.clock),
-            )
+        let mut persisted_state = materialized
+            .runtime
+            .export_persisted_state()
             .await
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-            persisted_state.apply_persisted_commit_result(result);
-            persisted_state.mark_node_ids_persisted(persisted_node_ids);
-            materialized.runtime.state = persisted_state;
-            materialized.runtime.materialized_protocol_config_dirty = false;
-        }
-        let observer_intent_source = match materialized.store_binding.as_deref() {
-            Some(store) => crate::runtime::SessionObserverIntentSource::Persisted(store),
-            None => crate::runtime::SessionObserverIntentSource::Unstored(
-                plan.pending_observer_intents.clone(),
-            ),
-        };
+        let operation = super::super::state::boundary_operation(
+            &persisted_state.session_id,
+            &plan.session_id,
+            "create-session",
+        );
+        let (mut commit, persisted_node_ids) =
+            crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
+                &mut persisted_state,
+                &[],
+                operation,
+                materialized.runtime.host.core.durability.commit_budget,
+            )
+            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        // Stamp last: the semantic-boundary identity hashes the commit's
+        // canonical request content, so every content edit must precede it.
+        commit
+            .stamp_semantic_boundary()
+            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        // Lane-less by construction: the session is being created before it
+        // owns an execution lane. A guard for another session cannot authorize
+        // this commit.
+        let result = commit_runtime_state_with_fresh_session_execution_lease(
+            Arc::clone(&materialized.store_binding),
+            commit,
+            &materialized.runtime.runtime_lease_owner,
+            &materialized.runtime.runtime_lease_executor_id,
+            materialized.runtime.host.core.control.lease_timings,
+            Arc::clone(&materialized.runtime.host.core.clock),
+        )
+        .await
+        .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        persisted_state.apply_persisted_commit_result(result);
+        persisted_state.mark_node_ids_persisted(persisted_node_ids);
+        materialized.runtime.state = persisted_state;
+        materialized.runtime.materialized_protocol_config_dirty = false;
+        let observer_intent_source = crate::runtime::SessionObserverIntentSource::Persisted(
+            materialized.store_binding.as_ref(),
+        );
         let observed_processes = crate::runtime::reconcile_session_process_observer_intents(
             current.host.process_registry().map(Arc::as_ref),
             &plan.session_id,
